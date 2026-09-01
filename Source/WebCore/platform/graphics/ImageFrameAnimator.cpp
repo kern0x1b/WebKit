@@ -64,8 +64,10 @@ ImageFrameAnimator::~ImageFrameAnimator()
 void ImageFrameAnimator::destroyDecodedData(bool destroyAll)
 {
     // Animated images over a certain size are considered large enough that we'll
-    // only hang on to one frame at a time.
-    static constexpr unsigned LargeAnimationCutoff = 30 * 1024 * 1024;
+    // only hang on to one frame at a time. Below the cutoff every frame an
+    // animation has ever shown stays decoded, so on a 512MB device the cutoff is
+    // set at two screenfuls: the frame being shown and the one being decoded.
+    static constexpr unsigned LargeAnimationCutoff = 2 * 640 * 960 * 4;
 
     Ref source = m_source.get();
     if (source->decodedSize() < LargeAnimationCutoff)

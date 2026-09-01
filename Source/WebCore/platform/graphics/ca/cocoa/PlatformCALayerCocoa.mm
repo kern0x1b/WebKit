@@ -845,8 +845,12 @@ void PlatformCALayerCocoa::setContents(CFTypeRef value)
 
 void PlatformCALayerCocoa::setDelegatedContents(const PlatformCALayerInProcessDelegatedContents& contents)
 {
+#if HAVE(IOSURFACE)
     if (!contents.finishedFence || protect(contents.finishedFence)->waitFor(delegatedContentsFinishedTimeout))
         setContents(contents.surface.asLayerContents());
+#else
+    UNUSED_PARAM(contents);
+#endif
 }
 
 void PlatformCALayerCocoa::setContentsRect(const FloatRect& value)
@@ -999,7 +1003,9 @@ void PlatformCALayerCocoa::setCornerRadius(float value)
 {
     BEGIN_BLOCK_OBJC_EXCEPTIONS
     [m_layer setCornerRadius:value];
-    if (value)
+    // Corner curves arrived in iOS 13; on an older CALayer the selector is
+    // absent and every rounded corner would raise and discard an exception.
+    if (value && [m_layer respondsToSelector:@selector(setCornerCurve:)])
         [m_layer setCornerCurve:kCACornerCurveCircular];
     END_BLOCK_OBJC_EXCEPTIONS
 }
@@ -1201,7 +1207,9 @@ void PlatformCALayerCocoa::updateContentsFormat()
             ALLOW_DEPRECATED_DECLARATIONS_BEGIN
             [m_layer setWantsExtendedDynamicRangeContent:true];
             ALLOW_DEPRECATED_DECLARATIONS_END
+#if !defined(WEBKIT_IOS6)
             [m_layer setToneMapMode:CAToneMapModeIfSupported];
+#endif
         }
 #endif
         END_BLOCK_OBJC_EXCEPTIONS

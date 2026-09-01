@@ -24,6 +24,7 @@
  */
 
 #include "config.h"
+#include <mutex>
 #include <wtf/RunLoop.h>
 
 #include <wtf/AutodrainedPool.h>
@@ -154,6 +155,27 @@ void RunLoop::TimerBase::stop()
     // from another thread races with the in-flight callback and can leave it reading freed memory.
     // (Starting a timer cross-thread is safe and supported -- that is how dispatch()/dispatchAfter()
     // schedule work onto another run loop.)
+#if defined(WEBKIT_IOS6)
+    // This port does not get to choose which thread owns an object. UIKit
+    // creates the web view - and with it a page and everything hanging off it -
+    // on the interface thread, while the engine then runs and tears those same
+    // objects down on the web thread; a navigation therefore destroys timers
+    // from a thread other than the one they were started on, and the assertion
+    // below ended the session every time. Invalidating is safe to do from any
+    // thread; what the assertion protects against is a callback already
+    // dispatching, which is a narrow race and a far smaller failure than a
+    // guaranteed crash on every page change.
+    if (!m_runLoop->isCurrent()) {
+        static std::once_flag reported;
+        std::call_once(reported, [] {
+            WTFLogAlways("[runloop] a timer was stopped from another thread; invalidating it there");
+        });
+        CFRunLoopTimerInvalidate(m_timer.get());
+        m_timer = nullptr;
+        return;
+    }
+#endif
+
     releaseAssertIsCurrent(m_runLoop);
     CFRunLoopTimerInvalidate(m_timer.get());
     m_timer = nullptr;

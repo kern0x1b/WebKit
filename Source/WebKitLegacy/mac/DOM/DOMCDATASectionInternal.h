@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMCDATASectionInternal_h
+#define WebKitLegacyDOM_DOMCDATASectionInternal_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -30,3 +33,5 @@ class CDATASection;
 }
 
 DOMCDATASection *kit(WebCore::CDATASection*);
+
+#endif // WebKitLegacyDOM_DOMCDATASectionInternal_h

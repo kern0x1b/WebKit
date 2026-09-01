@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMHTMLAnchorElement_h
+#define WebKitLegacyDOM_DOMHTMLAnchorElement_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -51,3 +54,5 @@ WEBKIT_CLASS_DEPRECATED_MAC(10_4, 10_14)
 @property (readonly, copy) NSString *search WEBKIT_AVAILABLE_MAC(10_5);
 @property (readonly, copy) NSString *hashName WEBKIT_AVAILABLE_MAC(10_5);
 @end
+
+#endif // WebKitLegacyDOM_DOMHTMLAnchorElement_h

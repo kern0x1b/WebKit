@@ -180,7 +180,7 @@ class EmptyChromeClient : public ChromeClient {
     void postAccessibilityFrameLoadingEventNotification(AccessibilityObject*, AXLoadingEvent) final { }
 #endif
 
-#if ENABLE(IOS_TOUCH_EVENTS)
+#if ENABLE(IOS_TOUCH_EVENTS) || ENABLE(TOUCH_EVENTS)
     void didPreventDefaultForEvent() final { }
 #endif
 

@@ -28,6 +28,8 @@
  */
 
 #import "WebHTMLView.h"
+#include <dlfcn.h>
+#import <objc/runtime.h>
 
 #import "DOMCSSStyleDeclarationInternal.h"
 #import "DOMDocumentFragmentInternal.h"
@@ -147,11 +149,21 @@
 #import <pal/spi/cf/CFUtilitiesSPI.h>
 #import <pal/spi/cocoa/NSAttributedStringSPI.h>
 #import <pal/spi/cocoa/NSURLFileTypeMappingsSPI.h>
+#if PLATFORM(MAC)  // ios6: mac SPI
 #import <pal/spi/mac/NSMenuSPI.h>
+#endif
+#if PLATFORM(MAC)  // ios6: mac SPI
 #import <pal/spi/mac/NSScrollerImpSPI.h>
+#endif
+#if PLATFORM(MAC)  // ios6: mac SPI
 #import <pal/spi/mac/NSSpellCheckerSPI.h>
+#endif
+#if PLATFORM(MAC)  // ios6: mac SPI
 #import <pal/spi/mac/NSViewSPI.h>
+#endif
+#if PLATFORM(MAC)  // ios6: mac SPI
 #import <pal/spi/mac/NSWindowSPI.h>
+#endif
 #import <wtf/BlockObjCExceptions.h>
 #import <wtf/MainThread.h>
 #import <wtf/MathExtras.h>
@@ -170,8 +182,12 @@
 #import "WebNSPasteboardExtras.h"
 #import <AppKit/NSAccessibility.h>
 #import <WebCore/PlatformEventFactoryMac.h>
+#if PLATFORM(MAC)  // ios6: mac SPI
 #import <pal/spi/mac/NSMenuSPI.h>
+#endif
+#if PLATFORM(MAC)  // ios6: mac SPI
 #import <pal/spi/mac/NSTextInputContextSPI.h>
+#endif
 #endif
 
 #if PLATFORM(IOS_FAMILY)
@@ -1595,6 +1611,19 @@ static NSControlStateValue NODELETE kit(TriState state)
     // So check if the data source is nil before calling [self _isTopHTMLView], this can be removed
     // once the FIXME in _isTopHTMLView is fixed.
     if (_private->dataSource && [self _isTopHTMLView]) {
+        // Laid out here, on whichever thread is drawing, and left that way.
+        //
+        // Two attempts to move this off the main thread are recorded because both
+        // looked right and both were worse. A full recursive layout of a feed
+        // stalls the main thread over four hundred milliseconds at load
+        // (RenderBox::computeLogicalHeight under
+        // RenderBlockFlow::layoutBlockChildren), and skipping it took the load's
+        // worst frame rate from 20 to 52 - but collapsed scrolling from 60 to 10,
+        // because the tile then draws from a stale layout, the engine invalidates
+        // it, and the frame is spent twice. Skipping it only while the application
+        // reports no scroll in progress failed the same way: during a flick the
+        // flag is clear between frames, so the layout is skipped anyway and
+        // scrolling fell to 8. The load stall is the cheaper of the two.
         [self _web_updateLayoutAndStyleIfNeededRecursive];
         [[self _webView] _flushCompositingChanges];
     }
@@ -6064,19 +6093,19 @@ ALLOW_DEPRECATED_DECLARATIONS_END
         switch ([s characterAtIndex:0]) {
         case NSBackspaceCharacter:
         case NSDeleteCharacter:
-            [[webView _UIKitDelegateForwarder] deleteFromInputWithFlags:event.keyboardFlags];
+            [webView _sendDeleteFromInputWithFlags:event.keyboardFlags];
             return YES;
         case NSEnterCharacter:
         case NSCarriageReturnCharacter:
             if (isCharEvent) {
                 // Map \r from HW keyboard to \n to match the behavior of the soft keyboard.
-                [[webView _UIKitDelegateForwarder] addInputString:@"\n" withFlags:0];
+                [webView _sendInputString:@"\n" withFlags:0 fromVariantKey:NO];
                 return YES;
             }
             break;
         default:
             if (isCharEvent) {
-                [[webView _UIKitDelegateForwarder] addInputString:event.characters withFlags:event.keyboardFlags];
+                [webView _sendInputString:event.characters withFlags:event.keyboardFlags fromVariantKey:[event isPopupVariant]];
                 return YES;
             }
         }

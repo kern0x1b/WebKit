@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMMediaListInternal_h
+#define WebKitLegacyDOM_DOMMediaListInternal_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -31,3 +34,5 @@ class MediaList;
 }
 
 DOMMediaList *kit(WebCore::MediaList*);
+
+#endif // WebKitLegacyDOM_DOMMediaListInternal_h

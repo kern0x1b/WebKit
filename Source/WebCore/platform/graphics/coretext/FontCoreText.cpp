@@ -621,6 +621,40 @@ GlyphBufferAdvance Font::applyTransforms(GlyphBuffer& glyphBuffer, unsigned begi
     if (!platformData().size())
         return makeGlyphBufferAdvance();
 
+#if defined(WEBKIT_IOS6)
+    // CTFontShapeGlyphs is the iOS 17 shaper. It is not on this system, and what
+    // stands in for it (compat/ios6_coretext.c) can only call
+    // CTFontGetAdvancesForGlyphs - which is bit for bit what
+    // Font::platformWidthForGlyph already calls, one glyph at a time, behind
+    // Font::widthForGlyph's cache. Every caller here fills the advances from
+    // widthForGlyph before calling us (WidthIterator::advanceInternal,
+    // FontCascade::widthForSimpleTextSlow), so shaping on this port re-derives
+    // numbers the glyph buffer already holds.
+    //
+    // It does not re-derive them faithfully. widthForGlyph deliberately returns
+    // 0 for the zero-width-space glyph, and WidthIterator::addToGlyphBuffer
+    // deliberately appends a 0-advance glyph 0 after every non-BMP character for
+    // the shaper to delete; a bulk advance query overwrites both with the real
+    // advance of the glyph, which widens every astral character - emoji included
+    // - by one .notdef. So this call costs a UTF-16 upconversion of the run tail
+    // and a CoreText round trip per font range, and pays for it with wrong
+    // advances.
+    //
+    // Returning here leaves the buffer exactly as the caller built it. Kerning,
+    // ligatures and reordering are not lost: nothing on this system was
+    // performing them.
+    //
+    // The one thing this function does that is not shaping is the RTL reversal
+    // at its end, which the callers do rely on, so that is kept.
+    UNUSED_PARAM(beginningStringIndex);
+    UNUSED_PARAM(enableKerning);
+    UNUSED_PARAM(locale);
+    UNUSED_PARAM(text);
+    if (textDirection == TextDirection::RTL)
+        glyphBuffer.reverse(beginningGlyphIndex, glyphBuffer.size() - beginningGlyphIndex);
+    return makeGlyphBufferAdvance();
+#endif
+
     auto handler = ^(CFRange range, CGGlyph** newGlyphsPointer, CGSize** newAdvancesPointer, CGPoint** newOffsetsPointer, CFIndex** newIndicesPointer)
     {
         range.location = std::min(std::max(range.location, static_cast<CFIndex>(0)), static_cast<CFIndex>(glyphBuffer.size()));

@@ -1,6 +1,15 @@
 find_library(COREFOUNDATION_LIBRARY CoreFoundation)
+if (NOT COREFOUNDATION_LIBRARY)  # ios6: allow missing frameworks
+    set(COREFOUNDATION_LIBRARY "")
+endif ()
 find_library(READLINE_LIBRARY Readline)
+if (NOT READLINE_LIBRARY)  # ios6: allow missing frameworks
+    set(READLINE_LIBRARY "")
+endif ()
 find_library(SECURITY_LIBRARY Security)
+if (NOT SECURITY_LIBRARY)  # ios6: allow missing frameworks
+    set(SECURITY_LIBRARY "")
+endif ()
 list(APPEND WTF_LIBRARIES
     ${COREFOUNDATION_LIBRARY}
     ${READLINE_LIBRARY}
@@ -137,7 +146,7 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Darwin" OR USE_APPLE_INTERNAL_SDK)
         WORKING_DIRECTORY ${WTF_DERIVED_SOURCES_DIR}
         COMMAND ${Mig_EXECUTABLE} -header mach_exc.h -user mach_excUser.c
             -sheader MachExceptionsServer.h -server mach_excServer.c
-            -DMACH_EXC_SERVER_TASKIDTOKEN_STATE -isysroot ${CMAKE_OSX_SYSROOT}
+            -DMACH_EXC_SERVER_TASKIDTOKEN_STATE -isysroot ${MIG_SYSROOT}
             MachExceptions.defs
         VERBATIM)
     list(APPEND WTF_SOURCES

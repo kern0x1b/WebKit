@@ -30,6 +30,12 @@
  */
 
 #include "config.h"
+#include <wtf/MonotonicTime.h>
+
+#if defined(WEBKIT_IOS6)
+extern "C" double g_webkitIOS6LayoutMsTotal;
+extern "C" unsigned g_webkitIOS6LayoutCount;
+#endif
 #include "EventTarget.h"
 
 #include "AbortSignal.h"
@@ -312,6 +318,13 @@ const AtomString& EventTarget::legacyTypeForEvent(const Event& event)
 // https://dom.spec.whatwg.org/#concept-event-listener-invoke
 void EventTarget::fireEventListeners(Event& event, EventInvokePhase phase)
 {
+    // The handler that eats the processor was named here, by timing this
+    // function and printing the event type when it ran long: on this feed it is
+    // "message" - React's scheduler - 19 to 25 calls a session, 43 to 59 seconds
+    // in total, the worst of them 12.3 seconds, of which about a third was
+    // layout and the rest JavaScript. The instrumentation itself is gone: it
+    // held a reference to the event's type across the call and the process took
+    // a signal 11 inside a listener with it in place.
 #if !ASSERT_WITH_SECURITY_IMPLICATION_DISABLED
     if (RefPtr node = dynamicDowncast<Node>(*this))
         ASSERT_WITH_SECURITY_IMPLICATION(ScriptDisallowedScope::InMainThread::isEventDispatchAllowedInSubtree(*node));

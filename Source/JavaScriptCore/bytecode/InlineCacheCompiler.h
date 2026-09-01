@@ -31,6 +31,8 @@
 #include "InlineCacheHandler.h"
 #include "JITStubRoutine.h"
 #include "JSFunctionInlines.h"
+#include "CCallHelpers.h"  // ios6/armv7: emitDataICCheckStructure/Uid below name
+                           // CCallHelpers::Jump and ::JumpList, needing the definition.
 #include "MacroAssembler.h"
 #include "PropertyInlineCacheClearingWatchpoint.h"
 #include "ScratchRegisterAllocator.h"

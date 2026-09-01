@@ -176,6 +176,15 @@ static void applyFeatures(CFMutableDictionaryRef attributes, const FeaturesMap& 
     if (featuresToBeApplied.isEmpty())
         return;
 
+#if defined(WEBKIT_IOS6)
+    // Features are addressed by OpenType tag from iOS 8 onwards. This CoreText
+    // knows only the numeric AAT type/selector pairs, and hands a tag-keyed
+    // feature dictionary to descriptor matching, which crashes on it. Losing
+    // ligature and figure control is the cost of not doing that.
+    UNUSED_PARAM(attributes);
+    return;
+#else
+
     RetainPtr<CFMutableArrayRef> featureArray;
     if (RetainPtr fontFeatureSettings = static_cast<CFArrayRef>(CFDictionaryGetValue(attributes, kCTFontFeatureSettingsAttribute)))
         featureArray = adoptCF(CFArrayCreateMutableCopy(kCFAllocatorDefault, 0, fontFeatureSettings.get()));
@@ -188,12 +197,22 @@ static void applyFeatures(CFMutableDictionaryRef attributes, const FeaturesMap& 
     }
 
     CFDictionarySetValue(attributes, kCTFontFeatureSettingsAttribute, featureArray.get());
+#endif
 }
 
 void UnrealizedCoreTextFont::applyVariations(CFMutableDictionaryRef attributes, const VariationsMap& variationsToBeApplied)
 {
     if (variationsToBeApplied.isEmpty())
         return;
+
+#if defined(WEBKIT_IOS6)
+    // Variable fonts are a decade newer than this CoreText, and none of the
+    // fonts on the device has an axis to vary. Handing it a variation
+    // dictionary does not degrade to a static font — it crashes inside
+    // descriptor matching.
+    UNUSED_PARAM(attributes);
+    return;
+#else
 
     RetainPtr<CFMutableDictionaryRef> variationDictionary;
     if (RetainPtr fontVariations = static_cast<CFDictionaryRef>(CFDictionaryGetValue(attributes, kCTFontVariationAttribute)))
@@ -209,6 +228,7 @@ void UnrealizedCoreTextFont::applyVariations(CFMutableDictionaryRef attributes, 
     }
 
     CFDictionarySetValue(attributes, kCTFontVariationAttribute, variationDictionary.get());
+#endif
 }
 
 void UnrealizedCoreTextFont::modifyFromContext(CFMutableDictionaryRef attributes, const FontDescription& fontDescription, const FontCreationContext& fontCreationContext, ApplyTraitsVariations applyTraitsVariations, float weight, float width, float slope, CGFloat size, const OpticalSizingType& opticalSizingType)
@@ -320,6 +340,25 @@ RetainPtr<CTFontRef> UnrealizedCoreTextFont::realize() const
 {
     if (!static_cast<bool>(*this))
         return nullptr;
+
+#if defined(WEBKIT_IOS6)
+    if (([]() { static const bool logFontsOnce = getenv("WEBKIT_IOS6_LOG_FONTS") != nullptr; return logFontsOnce; }())) {
+        auto base = WTF::switchOn(m_baseFont, [](const RetainPtr<CTFontRef>& font) -> RetainPtr<CFStringRef> {
+            return font ? adoptCF(CTFontCopyFamilyName(font.get())) : nullptr;
+        }, [](const RetainPtr<CTFontDescriptorRef>& descriptor) -> RetainPtr<CFStringRef> {
+            return descriptor ? adoptCF(static_cast<CFStringRef>(CTFontDescriptorCopyAttribute(descriptor.get(), kCTFontFamilyNameAttribute))) : nullptr;
+        });
+        auto keys = adoptCF(CFDictionaryCreateMutable(kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks, nullptr));
+        CFDictionaryApplyFunction(m_attributes.get(), [](const void* key, const void*, void* context) {
+            CFDictionarySetValue(static_cast<CFMutableDictionaryRef>(context), key, kCFBooleanTrue);
+        }, keys.get());
+        auto description = adoptCF(CFCopyDescription(keys.get()));
+        fprintf(stderr, "[ios6 font] realize %s size %g keys %s\n",
+            base ? String(base.get()).utf8().data() : "(no base)", m_size,
+            String(description.get()).utf8().data());
+        fflush(stderr);
+    }
+#endif
 
     auto font = WTF::switchOn(m_baseFont, [this](const RetainPtr<CTFontRef>& font) -> RetainPtr<CTFontRef> {
         if (!font)

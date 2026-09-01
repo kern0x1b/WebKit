@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMExtensions_h
+#define WebKitLegacyDOM_DOMExtensions_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  * Copyright (C) 2006 Samuel Weinig <sam.weinig@gmail.com>
@@ -108,3 +111,5 @@ typedef struct _WKQuad {
 @end
 
 #endif
+
+#endif // WebKitLegacyDOM_DOMExtensions_h

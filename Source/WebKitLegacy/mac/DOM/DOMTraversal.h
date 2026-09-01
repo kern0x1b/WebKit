@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMTraversal_h
+#define WebKitLegacyDOM_DOMTraversal_h
+
 /*
  * Copyright (C) 2004, 2005, 2006 Apple Inc. All rights reserved.
  * Copyright (C) 2006 Samuel Weinig <sam.weinig@gmail.com>
@@ -31,3 +34,5 @@
 #import <WebKitLegacy/DOMNodeFilter.h>
 #import <WebKitLegacy/DOMNodeIterator.h>
 #import <WebKitLegacy/DOMTreeWalker.h>
+
+#endif // WebKitLegacyDOM_DOMTraversal_h

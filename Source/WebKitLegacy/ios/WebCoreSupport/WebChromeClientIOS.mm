@@ -24,6 +24,9 @@
  */
 
 #import "WebChromeClientIOS.h"
+#import <WebCore/UserGestureIndicator.h>
+#import <WebCore/HTMLSelectElement.h>
+#import <WebCore/HTMLTextFormControlElement.h>
 
 #if PLATFORM(IOS_FAMILY)
 
@@ -165,7 +168,7 @@ void WebChromeClientIOS::showShareSheet(ShareDataWithParsedURL&&, CompletionHand
 {
 }
 
-#if ENABLE(IOS_TOUCH_EVENTS)
+#if ENABLE(IOS_TOUCH_EVENTS) || ENABLE(TOUCH_EVENTS)
 
 void WebChromeClientIOS::didPreventDefaultForEvent()
 {
@@ -198,6 +201,16 @@ static inline NSString *nameForViewportFitValue(ViewportFit value)
     return WebViewportFitAutoValue;
 }
 
+// UIKit lays the page out from these numbers, and the sentinel this WebKit uses
+// for device-width is not one it understands - left as it is the page is laid
+// out at the desktop default and then scaled down to fit.
+static inline float resolvedViewportLength(float length, float deviceLength)
+{
+    if (length == WebCore::ViewportArguments::ValueDeviceWidth || length == WebCore::ViewportArguments::ValueDeviceHeight)
+        return deviceLength;
+    return length;
+}
+
 static inline NSDictionary *dictionaryForViewportArguments(const WebCore::ViewportArguments& arguments)
 {
     return @{ WebViewportInitialScaleKey: @(arguments.zoom),
@@ -206,8 +219,8 @@ static inline NSDictionary *dictionaryForViewportArguments(const WebCore::Viewpo
               WebViewportUserScalableKey: @(arguments.userZoom),
               WebViewportShrinkToFitKey: @(0),
               WebViewportFitKey: nameForViewportFitValue(arguments.viewportFit),
-              WebViewportWidthKey: @(arguments.width),
-              WebViewportHeightKey: @(arguments.height) };
+              WebViewportWidthKey: @(resolvedViewportLength(arguments.width, WebCore::screenSize().width())),
+              WebViewportHeightKey: @(resolvedViewportLength(arguments.height, WebCore::screenSize().height())) };
 }
 
 FloatSize WebChromeClientIOS::screenSize() const
@@ -217,9 +230,10 @@ FloatSize WebChromeClientIOS::screenSize() const
 
 FloatSize WebChromeClientIOS::availableScreenSize() const
 {
-    // WebKit1 code should query the WAKWindow for the available screen size.
-    ASSERT_NOT_REACHED();
-    return FloatSize();
+    // Upstream asserts here because its WebKit1 callers read the WAKWindow
+    // directly. Driven by UIKit the viewport machinery does ask the chrome
+    // client, and a zero size makes device-width resolve to the desktop default.
+    return FloatSize(WebCore::availableScreenSize());
 }
 
 FloatSize WebChromeClientIOS::overrideScreenSize() const
@@ -279,10 +293,29 @@ void WebChromeClientIOS::restoreFormNotifications()
         m_formNotificationSuppressions = 0;
 }
 
-void WebChromeClientIOS::elementDidFocus(WebCore::Element& element, const WebCore::FocusOptions&)
+void WebChromeClientIOS::elementDidFocus(WebCore::Element& element, const WebCore::FocusOptions& options)
 {
-    if (m_formNotificationSuppressions <= 0)
-        [[webView() _UIKitDelegateForwarder] webView:webView() elementDidFocusNode:kit(&element)];
+    if (m_formNotificationSuppressions > 0)
+        return;
+
+    // UIKit answers this by bringing the focused element into view, and a feed
+    // that focuses something as it re-renders therefore throws the reader back
+    // to the top of the document mid-scroll. Measured on the device: the offset
+    // went from 870 to 0 twenty milliseconds after this message, with
+    // -shouldScrollToPoint:forFrame: in between.
+    //
+    // Only somewhere text can be typed is worth bringing into view. A feed
+    // moves focus between its own containers as it re-renders - and the gesture
+    // flag is still set while that happens, so it cannot be used to tell them
+    // apart - while the keyboard, which is what this message exists for, only
+    // ever concerns a form control or an editable box.
+    bool canBeTypedInto = is<WebCore::HTMLTextFormControlElement>(element)
+        || is<WebCore::HTMLSelectElement>(element)
+        || element.hasEditableStyle();
+    if (!canBeTypedInto)
+        return;
+
+    [[webView() _UIKitDelegateForwarder] webView:webView() elementDidFocusNode:kit(&element)];
 }
 
 void WebChromeClientIOS::elementDidBlur(WebCore::Element& element)

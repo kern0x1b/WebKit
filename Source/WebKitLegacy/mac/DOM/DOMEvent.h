@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMEvent_h
+#define WebKitLegacyDOM_DOMEvent_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -56,3 +59,5 @@ WEBKIT_CLASS_DEPRECATED_MAC(10_4, 10_14)
 @interface DOMEvent (DOMEventDeprecated)
 - (void)initEvent:(NSString *)eventTypeArg :(BOOL)canBubbleArg :(BOOL)cancelableArg WEBKIT_DEPRECATED_MAC(10_4, 10_5);
 @end
+
+#endif // WebKitLegacyDOM_DOMEvent_h

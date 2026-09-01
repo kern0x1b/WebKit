@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMHTMLIFrameElement_h
+#define WebKitLegacyDOM_DOMHTMLIFrameElement_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -44,3 +47,5 @@ WEBKIT_CLASS_DEPRECATED_MAC(10_4, 10_14)
 @property (readonly, strong) DOMDocument *contentDocument;
 @property (readonly, strong) DOMAbstractView *contentWindow WEBKIT_AVAILABLE_MAC(10_6);
 @end
+
+#endif // WebKitLegacyDOM_DOMHTMLIFrameElement_h

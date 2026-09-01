@@ -243,6 +243,20 @@ RefPtr<const DisplayList::DisplayList> FontCascade::displayListForGlyphBuffer(Gr
 
 #if USE(SKIA)
     const auto drawGlyphsMode = context.hasPlatformContext() ? DisplayList::Recorder::DrawGlyphsMode::TextBlob : DisplayList::Recorder::DrawGlyphsMode::Normal;
+#elif defined(WEBKIT_IOS6)
+    // Glyphs are recorded as they come, not taken apart first.
+    //
+    // Deconstructing them builds a scratch CGContext through
+    // DrawGlyphsRecorder::createInternalContext, which uses the context-delegate
+    // interface. This system's CoreGraphics is from 2012 and aborts the process
+    // there - reached on claude.ai, whose bot check draws text into an offscreen
+    // canvas: fillText, drawTextUnchecked, displayListForGlyphBuffer,
+    // createInternalContext, CGContextDelegateSetCallback, abort.
+    //
+    // The mode only decides whether a glyph run is split so a later replay can
+    // re-derive fonts from the context. Recording the run whole draws the same
+    // text.
+    constexpr auto drawGlyphsMode = DisplayList::Recorder::DrawGlyphsMode::Normal;
 #else
     constexpr auto drawGlyphsMode = DisplayList::Recorder::DrawGlyphsMode::Deconstruct;
 #endif

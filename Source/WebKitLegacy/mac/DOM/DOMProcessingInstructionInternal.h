@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMProcessingInstructionInternal_h
+#define WebKitLegacyDOM_DOMProcessingInstructionInternal_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -31,3 +34,5 @@ class ProcessingInstruction;
 
 WebCore::ProcessingInstruction* core(DOMProcessingInstruction *);
 DOMProcessingInstruction *kit(WebCore::ProcessingInstruction*);
+
+#endif // WebKitLegacyDOM_DOMProcessingInstructionInternal_h

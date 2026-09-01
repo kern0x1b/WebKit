@@ -233,7 +233,10 @@ FontPlatformData* FontCache::cachedFontPlatformData(const FontDescription& fontD
     return it->value.get();
 }
 
-#if PLATFORM(IOS_FAMILY)
+#if defined(WEBKIT_IOS6)
+const unsigned cMaxInactiveFontData = 40;
+const unsigned cTargetInactiveFontData = 24;
+#elif PLATFORM(IOS_FAMILY)
 const unsigned cMaxInactiveFontData = 120;
 const unsigned cTargetInactiveFontData = 100;
 #else
@@ -241,8 +244,13 @@ const unsigned cMaxInactiveFontData = 225;
 const unsigned cTargetInactiveFontData = 200;
 #endif
 
+#if defined(WEBKIT_IOS6)
+const unsigned cMaxUnderMemoryPressureInactiveFontData = 16;
+const unsigned cTargetUnderMemoryPressureInactiveFontData = 8;
+#else
 const unsigned cMaxUnderMemoryPressureInactiveFontData = 50;
 const unsigned cTargetUnderMemoryPressureInactiveFontData = 30;
+#endif
 
 RefPtr<Font> FontCache::fontForFamily(const FontDescription& fontDescription, const String& family, const FontCreationContext& fontCreationContext, OptionSet<FontLookupOptions> options)
 {

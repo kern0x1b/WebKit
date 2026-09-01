@@ -252,6 +252,9 @@ bool DocumentScope::invalidateForContainerDependencies(LayoutDependencyUpdateCon
     if (!m_document->renderView())
         return false;
 
+    if (m_document->renderView()->containerQueryBoxes().isEmptyIgnoringNullReferences() && m_queryContainerDimensionsOnLastUpdate.isEmptyIgnoringNullReferences())
+        return false;
+
     auto previousQueryContainerDimensions = WTF::move(m_queryContainerDimensionsOnLastUpdate);
     m_queryContainerDimensionsOnLastUpdate.clear();
 
@@ -295,6 +298,9 @@ bool DocumentScope::invalidateForContainerDependencies(LayoutDependencyUpdateCon
 bool DocumentScope::invalidateForAnchorDependencies(LayoutDependencyUpdateContext& context)
 {
     if (!m_document->renderView())
+        return false;
+
+    if (m_document->renderView()->anchors().isEmptyIgnoringNullReferences() && m_anchorPositionsOnLastUpdate.isEmptyIgnoringNullReferences())
         return false;
 
     auto previousAnchorPositions = WTF::move(m_anchorPositionsOnLastUpdate);

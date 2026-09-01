@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMNodeIteratorInternal_h
+#define WebKitLegacyDOM_DOMNodeIteratorInternal_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -31,3 +34,5 @@ class NodeIterator;
 }
 
 DOMNodeIterator *kit(WebCore::NodeIterator*);
+
+#endif // WebKitLegacyDOM_DOMNodeIteratorInternal_h

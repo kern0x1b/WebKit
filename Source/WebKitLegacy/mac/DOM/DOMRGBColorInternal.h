@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMRGBColorInternal_h
+#define WebKitLegacyDOM_DOMRGBColorInternal_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -30,3 +33,5 @@ class DeprecatedCSSOMRGBColor;
 }
 
 DOMRGBColor *kit(WebCore::DeprecatedCSSOMRGBColor*);
+
+#endif // WebKitLegacyDOM_DOMRGBColorInternal_h

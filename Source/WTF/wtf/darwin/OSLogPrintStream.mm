@@ -46,8 +46,9 @@ OSLogPrintStream::~OSLogPrintStream()
 
 std::unique_ptr<OSLogPrintStream> OSLogPrintStream::open(const char* subsystem, const char* category, os_log_type_t logType)
 {
-    os_log_t log = os_log_create(subsystem, category);
-    return makeUnique<OSLogPrintStream>(log, logType);
+    UNUSED_PARAM(subsystem);
+    UNUSED_PARAM(category);
+    return makeUnique<OSLogPrintStream>(nullptr, logType);
 }
 
 void OSLogPrintStream::vprintf(const char* format, va_list argList)
@@ -75,7 +76,7 @@ ALLOW_NONLITERAL_FORMAT_END
         if (buffer[offset] == '\n') {
             // Set the new line to a null character so os_log stops copying there.
             buffer[offset] = '\0';
-            os_log_with_type(m_log, m_logType, "%{public}s", buffer.data());
+            fprintf(stderr, "%s\n", buffer.data());
             skip(buffer, offset + 1);
             newOffset -= offset + 1;
             offset = 0;

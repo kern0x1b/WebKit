@@ -43,6 +43,10 @@ class TextStream;
 
 namespace WebCore {
 
+#if defined(WEBKIT_IOS6)
+WEBCORE_EXPORT void recordNeedsLayoutCaller(void*);
+#endif
+
 class AffineTransform;
 class Color;
 class ControlPart;

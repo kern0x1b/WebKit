@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMXPathNSResolver_h
+#define WebKitLegacyDOM_DOMXPathNSResolver_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -32,3 +35,5 @@ WEBKIT_CLASS_DEPRECATED_MAC(10_5, 10_14)
 @protocol DOMXPathNSResolver <NSObject>
 - (NSString *)lookupNamespaceURI:(NSString *)prefix;
 @end
+
+#endif // WebKitLegacyDOM_DOMXPathNSResolver_h

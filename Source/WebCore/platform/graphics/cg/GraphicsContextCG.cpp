@@ -252,9 +252,12 @@ const DestinationColorSpace& GraphicsContextCG::colorSpace() const
 
     // FIXME: Need to handle kCGContextTypePDF.
     auto contextType = CGContextGetType(context);
+#if HAVE(IOSURFACE)
     if (contextType == kCGContextTypeIOSurface)
         colorSpace = CGIOSurfaceContextGetColorSpace(context);
-    else if (contextType == kCGContextTypeBitmap)
+    else
+#endif
+    if (contextType == kCGContextTypeBitmap)
         colorSpace = CGBitmapContextGetColorSpace(context);
     else
         colorSpace = CGContextGetColorSpace(context);
@@ -899,6 +902,17 @@ void GraphicsContextCG::fillRect(const FloatRect& rect, Gradient& gradient, cons
 void GraphicsContextCG::fillRect(const FloatRect& rect, const Color& color)
 {
     CGContextRef context = platformContext();
+#if defined(WEBKIT_IOS6)
+    if (([]() { static const bool logPaintOnce = getenv("WEBKIT_IOS6_LOG_PAINT") != nullptr; return logPaintOnce; }())) {
+        static unsigned logged;
+        if (logged++ < 25) {
+            auto [r, g, b, a] = color.toColorTypeLossy<SRGBA<uint8_t>>().resolved();
+            fprintf(stderr, "[ios6 fill] %g,%g %gx%g rgba %d,%d,%d,%d\n",
+                rect.x(), rect.y(), rect.width(), rect.height(), r, g, b, a);
+            fflush(stderr);
+        }
+    }
+#endif
     Color oldFillColor = fillColor();
 
     if (oldFillColor != color)
@@ -1131,13 +1145,24 @@ void GraphicsContextCG::setCGDropShadow(const std::optional<GraphicsDropShadow>&
 
     CGContextSetAlpha(context, shadow->opacity);
 
+#if defined(WEBKIT_IOS6)
+    // The shadow API that predates CGStyle draws the same shadow, without the
+    // style object this CoreGraphics cannot accept.
+    CGContextSetShadowWithColor(context, offset, blurRadius,
+        cachedCGColorInDestinationStandardRange(shadow->color, colorSpace()).get());
+#else
     auto style = adoptCF(CGStyleCreateShadow2(offset, blurRadius, cachedCGColorInDestinationStandardRange(shadow->color, colorSpace()).get()));
     CGContextSetStyle(context, style.get());
+#endif
 }
 
 void GraphicsContextCG::clearCGDropShadow()
 {
+#if defined(WEBKIT_IOS6)
+    CGContextSetShadowWithColor(platformContext(), CGSizeZero, 0, nullptr);
+#else
     CGContextSetStyle(platformContext(), nullptr);
+#endif
 }
 
 #if HAVE(CGSTYLE_COLORMATRIX_BLUR)
@@ -1172,7 +1197,11 @@ void GraphicsContextCG::setCGStyle(const std::optional<GraphicsStyle>& style, bo
     auto context = platformContext();
 
     if (!style) {
+#if defined(WEBKIT_IOS6)
+        CGContextSetShadowWithColor(context, CGSizeZero, 0, nullptr);
+#else
         CGContextSetStyle(context, nullptr);
+#endif
         return;
     }
 
@@ -1500,8 +1529,10 @@ bool GraphicsContextCG::knownToHaveFloatBasedBacking() const
 {
     auto context = platformContext();
 
+#if HAVE(IOSURFACE)
     if (CGContextGetType(context) == kCGContextTypeIOSurface)
         return CGIOSurfaceContextGetBitmapInfo(context) & kCGBitmapFloatComponents;
+#endif
     if (CGContextGetType(context) == kCGContextTypeBitmap)
         return CGBitmapContextGetBitmapInfo(context) & kCGBitmapFloatComponents;
     return false;

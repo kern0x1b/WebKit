@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMFileInternal_h
+#define WebKitLegacyDOM_DOMFileInternal_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -30,3 +33,5 @@ class File;
 }
 
 DOMFile *kit(WebCore::File*);
+
+#endif // WebKitLegacyDOM_DOMFileInternal_h

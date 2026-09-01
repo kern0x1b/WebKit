@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMTreeWalkerInternal_h
+#define WebKitLegacyDOM_DOMTreeWalkerInternal_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -31,3 +34,5 @@ class TreeWalker;
 }
 
 DOMTreeWalker *kit(WebCore::TreeWalker*);
+
+#endif // WebKitLegacyDOM_DOMTreeWalkerInternal_h

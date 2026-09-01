@@ -51,7 +51,7 @@ void StyleSheetContentsCache::add(Key&& key, Ref<StyleSheetContents> contents)
     m_cache.add(WTF::move(key), contents);
     contents->addedToMemoryCache();
 
-    static constexpr auto maximumCacheSize = 256;
+    static constexpr auto maximumCacheSize = 24;
     if (m_cache.size() > maximumCacheSize) {
         auto toRemove = m_cache.random();
         toRemove->value->removedFromMemoryCache();

@@ -677,8 +677,12 @@ std::optional<InteractionRegion> interactionRegionForRenderedRegion(const Render
                 if (!clipOffset.isZero())
                     adjustedPath.translate(clipOffset);
 
+#if defined(WEBKIT_IOS6)
+                UNUSED_VARIABLE(adjustedPath);
+#else
                 RetainPtr intersectingPath = adoptCF(CGPathCreateCopyByIntersectingPath(adjustedPath.platformPath(), clipPath->platformPath(), false));
                 clipPath = { PathCG::create(adoptCF(CGPathCreateMutableCopy(intersectingPath.get()))) };
+#endif
 
                 // No need for continuous corners if we're already going to clip.
                 useContinuousCorners = false;

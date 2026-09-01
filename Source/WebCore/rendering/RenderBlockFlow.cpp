@@ -551,6 +551,19 @@ void RenderBlockFlow::layoutBlockWithNoChildren()
 
 void RenderBlockFlow::layoutBlock(RelayoutChildren relayoutChildren, LayoutUnit pageLogicalHeight)
 {
+#if defined(WEBKIT_IOS6)
+    extern unsigned g_webkitIOS6BlocksLaidOut;
+    extern unsigned g_webkitIOS6BlocksForced;
+    extern unsigned g_webkitIOS6BlocksDirty;
+    extern unsigned g_webkitIOS6BlocksViaChild;
+    ++g_webkitIOS6BlocksLaidOut;
+    if (relayoutChildren == RelayoutChildren::Yes)
+        ++g_webkitIOS6BlocksForced;
+    else if (selfNeedsLayout())
+        ++g_webkitIOS6BlocksDirty;
+    else if (normalChildNeedsLayout())
+        ++g_webkitIOS6BlocksViaChild;
+#endif
     ASSERT(needsLayout());
 
     if (relayoutChildren == RelayoutChildren::No && simplifiedLayout())

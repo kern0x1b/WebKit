@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMDocument_h
+#define WebKitLegacyDOM_DOMDocument_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -144,3 +147,5 @@ WEBKIT_CLASS_DEPRECATED_MAC(10_4, 10_14)
 - (DOMXPathResult *)evaluate:(NSString *)expression :(DOMNode *)contextNode :(id <DOMXPathNSResolver>)resolver :(unsigned short)type :(DOMXPathResult *)inResult WEBKIT_DEPRECATED_MAC(10_5, 10_5);
 - (DOMCSSStyleDeclaration *)getComputedStyle:(DOMElement *)element :(NSString *)pseudoElement WEBKIT_DEPRECATED_MAC(10_4, 10_5);
 @end
+
+#endif // WebKitLegacyDOM_DOMDocument_h

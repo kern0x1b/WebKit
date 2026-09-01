@@ -633,9 +633,44 @@ WTF_ALLOW_UNSAFE_BUFFER_USAGE_END
 #define OFFLINE_ASM_ALT_GLOBAL_LABEL(label)
 #endif
 
+// The alt-entry global symbol is an alias for the local label, so the two have to
+// land on the same address. OFFLINE_ASM_ALT_GLOBAL_LABEL() expands to
+// OFFLINE_ASM_GLOBAL_LABEL(), which carries a .balign 4 - and on Thumb-2, where
+// instructions are two bytes, that alignment really can insert a nop between the
+// local label and the symbol that follows it.
+//
+// Everything offlineasm emits addresses code through the local labels, including
+// the .word table that builds the opcode map:
+//
+//     .word Lllint_program_prologue - Lllint_relativePCBase
+//
+// but the matching runtime base is a "mov r3, pc" sitting at the *symbol*
+// _llint_relativePCBase. When a nop separates the two labels, every opcode-map
+// entry comes out wrong by the difference of the two paddings. Measured here:
+// llint_relativePCBase was padded by 2 and llint_program_prologue by 0, so the
+// program entry point was llint_program_prologue + 2 - two bytes past the
+// "push {lr}" that opens the prologue. The frame is then four bytes off, and
+// CodeBlock[cfr] reads the tag half of the CodeBlock slot rather than the
+// payload, which is a null CodeBlock on the first script the process runs.
+//
+// Align first, then emit both labels with nothing in between. This is the same
+// alignment that was already being applied on this platform - only its position
+// moves - so code layout is unchanged and the .word literals keep the 4-byte
+// alignment that Thumb LDR (literal) requires.
+//
+// Only Darwin/Thumb-2 is affected: .alt_entry is Mach-O only, so on Linux ARMv7
+// OFFLINE_ASM_ALT_GLOBAL_LABEL() is empty and the local label is the only label,
+// and on every 4-byte-instruction ISA the .balign never has anything to pad.
+#if COMPILER(CLANG) && ENABLE(OFFLINE_ASM_ALT_ENTRY)
+#define OFFLINE_ASM_LOCAL_LABEL(label) \
+    OFFLINE_ASM_ALIGN4B \
+    LOCAL_LABEL_STRING(label) ":\n" \
+    OFFLINE_ASM_UNALIGNED_GLOBAL_LABEL(label)
+#else
 #define OFFLINE_ASM_LOCAL_LABEL(label) \
     LOCAL_LABEL_STRING(label) ":\n" \
     OFFLINE_ASM_ALT_GLOBAL_LABEL(label)
+#endif
 
 #if OS(LINUX)
 #define OFFLINE_ASM_OPCODE_DEBUG_LABEL(label)  #label ":\n"

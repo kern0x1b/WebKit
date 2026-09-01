@@ -37,7 +37,13 @@ namespace WebCore {
 
 RetainPtr<UIColor> cocoaColor(const Color& color)
 {
-    return [PAL::getUIColorClassSingleton() _disambiguated_due_to_CIImage_colorWithCGColor:cachedCGColor(color).get()];
+    Class colorClass = PAL::getUIColorClassSingleton();
+    auto platformColor = cachedCGColor(color);
+    // The disambiguated spelling exists only to sidestep a CIImage category
+    // added long after iOS 6, where the plain class method is all there is.
+    if ([colorClass respondsToSelector:@selector(_disambiguated_due_to_CIImage_colorWithCGColor:)])
+        return [colorClass _disambiguated_due_to_CIImage_colorWithCGColor:platformColor.get()];
+    return [colorClass colorWithCGColor:platformColor.get()];
 }
 
 #endif

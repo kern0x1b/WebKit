@@ -29,6 +29,18 @@
 #include <wtf/OSObjectPtr.h>
 #include <wtf/darwin/TypeCastsOSObject.h>
 
+// On the iOS 6 SDK dispatch_queue_global_t does not exist; the compat header
+// aliases it to dispatch_queue_t, so it must not get its own specializations.
+#if defined(WEBKIT_IOS6)
+#define WTF_OS_OBJECT_DISPATCH_TYPES(M) \
+    M(dispatch_data) \
+    M(dispatch_group) \
+    M(dispatch_io) \
+    M(dispatch_object) \
+    M(dispatch_queue) \
+    M(dispatch_semaphore) \
+    M(dispatch_source)
+#else
 #define WTF_OS_OBJECT_DISPATCH_TYPES(M) \
     M(dispatch_data) \
     M(dispatch_group) \
@@ -38,6 +50,7 @@
     M(dispatch_queue_global) \
     M(dispatch_semaphore) \
     M(dispatch_source)
+#endif
 
 // Forward declarations for dispatch base struct types.
 WTF_EXTERN_C_BEGIN

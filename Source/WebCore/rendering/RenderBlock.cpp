@@ -744,6 +744,11 @@ void RenderBlock::updateBlockChildDirtyBitsBeforeLayout(RelayoutChildren relayou
         auto& style = child.style();
         return style.height().isPercentOrCalculated() || style.minHeight().isPercentOrCalculated() || style.maxHeight().isPercentOrCalculated();
     };
+    // The FIXME above was implemented here - skipping the marking when this
+    // block cannot resolve a percentage anyway - and measured on the device to
+    // change nothing: the same five to nine thousand blocks were laid out. The
+    // dirt was coming from the grid code, not from here. Removed rather than
+    // carried unverified.
     if (relayoutChildren == RelayoutChildren::Yes || (childHasRelativeHeight() && !isRenderView()))
         child.setChildNeedsLayout(MarkingBehavior::MarkOnlyThis);
 

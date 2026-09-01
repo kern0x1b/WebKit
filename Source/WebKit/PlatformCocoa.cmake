@@ -5,9 +5,21 @@ list(APPEND WebKit_COMPILE_OPTIONS
 )
 
 find_library(NETWORK_LIBRARY Network)
+if (NOT NETWORK_LIBRARY)  # ios6: allow missing frameworks
+    set(NETWORK_LIBRARY "")
+endif ()
 find_library(SECURITY_LIBRARY Security)
+if (NOT SECURITY_LIBRARY)  # ios6: allow missing frameworks
+    set(SECURITY_LIBRARY "")
+endif ()
 find_library(UNIFORMTYPEIDENTIFIERS_LIBRARY UniformTypeIdentifiers)
+if (NOT UNIFORMTYPEIDENTIFIERS_LIBRARY)  # ios6: allow missing frameworks
+    set(UNIFORMTYPEIDENTIFIERS_LIBRARY "")
+endif ()
 find_library(AVFOUNDATION_LIBRARY AVFoundation)
+if (NOT AVFOUNDATION_LIBRARY)  # ios6: allow missing frameworks
+    set(AVFOUNDATION_LIBRARY "")
+endif ()
 find_library(DEVICEIDENTITY_LIBRARY DeviceIdentity HINTS ${CMAKE_OSX_SYSROOT}/System/Library/PrivateFrameworks)
 if (NOT DEVICEIDENTITY_LIBRARY)
     set(DEVICEIDENTITY_LIBRARY "" CACHE FILEPATH "" FORCE)
@@ -384,9 +396,21 @@ list(APPEND WebKit_SOURCES
 )
 
 find_library(CRYPTOTOKENKIT_LIBRARY CryptoTokenKit)
+if (NOT CRYPTOTOKENKIT_LIBRARY)  # ios6: allow missing frameworks
+    set(CRYPTOTOKENKIT_LIBRARY "")
+endif ()
 find_library(USERNOTIFICATIONS_LIBRARY UserNotifications)
+if (NOT USERNOTIFICATIONS_LIBRARY)  # ios6: allow missing frameworks
+    set(USERNOTIFICATIONS_LIBRARY "")
+endif ()
 find_library(WRITINGTOOLS_LIBRARY WritingTools HINTS ${CMAKE_OSX_SYSROOT}/System/Library/PrivateFrameworks)
+if (NOT WRITINGTOOLS_LIBRARY)  # ios6: allow missing frameworks
+    set(WRITINGTOOLS_LIBRARY "")
+endif ()
 find_library(APPLEPUSHSERVICE_LIBRARY ApplePushService HINTS ${CMAKE_OSX_SYSROOT}/System/Library/PrivateFrameworks)
+if (NOT APPLEPUSHSERVICE_LIBRARY)  # ios6: allow missing frameworks
+    set(APPLEPUSHSERVICE_LIBRARY "")
+endif ()
 list(APPEND WebKit_PRIVATE_LIBRARIES
     ${CRYPTOTOKENKIT_LIBRARY}
     ${USERNOTIFICATIONS_LIBRARY}

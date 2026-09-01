@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMAbstractViewFrame_h
+#define WebKitLegacyDOM_DOMAbstractViewFrame_h
+
 /*
  * Copyright (C) 2008 Apple Inc. All rights reserved.
  *
@@ -31,3 +34,5 @@
 @interface DOMAbstractView (Frame)
 - (void)_disconnectFrame;
 @end
+
+#endif // WebKitLegacyDOM_DOMAbstractViewFrame_h

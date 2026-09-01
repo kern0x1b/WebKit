@@ -63,6 +63,11 @@ WEBCORE_EXPORT void WebThreadUnlock(void);
 // Please don't use anything below this line unless you know what you are doing. If unsure, ask.
 // ---------------------------------------------------------------------------------------------
 WEBCORE_EXPORT bool WebThreadIsLocked(void);
+#if defined(WEBKIT_IOS6)
+WEBCORE_EXPORT bool WebThreadIsBusy(void);
+WEBCORE_EXPORT bool WebThreadTryLockForFrame(void);
+WEBCORE_EXPORT bool WebThreadYieldIfAsked(void);
+#endif
 WEBCORE_EXPORT bool WebThreadIsLockedOrDisabled(void);
 WEBCORE_EXPORT bool WebThreadIsLockedOrDisabledInMainOrWebThread(void);
 

@@ -1058,6 +1058,11 @@ LayoutUnit GridTrackSizingAlgorithmStrategy::logicalHeightForGridItem(RenderBox&
             return true;
         return false;
     };
+    // Keeping the overriding size instead of clearing it - so the item is not
+    // dirtied here at all - was tried and measured: the self-dirtied count per
+    // pass halved from 578 to 288, the total walk did not move (4500 blocks
+    // against 4351, 1360 ms either way), and the page rendered grey with empty
+    // boxes. The measurement it does here is load-bearing.
     if (hasOverridingContainingBlockContentSizeForGridItem() && shouldClearOverridingContainingBlockContentSizeForGridItem(gridItem, Style::GridTrackSizingDirection::Rows)) {
         setOverridingContainingBlockContentSizeForGridItem(*renderGrid(), gridItem, gridItemBlockDirection, std::nullopt);
         gridItem.setNeedsLayout(MarkingBehavior::MarkOnlyThis);

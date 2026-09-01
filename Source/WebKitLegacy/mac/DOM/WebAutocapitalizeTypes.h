@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_WebAutocapitalizeTypes_h
+#define WebKitLegacyDOM_WebAutocapitalizeTypes_h
+
 /*
  * Copyright (C) 2016 Apple Inc. All rights reserved.
  *
@@ -30,3 +33,5 @@ typedef enum {
     WebAutocapitalizeTypeSentences,
     WebAutocapitalizeTypeAllCharacters
 } WebAutocapitalizeType;
+
+#endif // WebKitLegacyDOM_WebAutocapitalizeTypes_h

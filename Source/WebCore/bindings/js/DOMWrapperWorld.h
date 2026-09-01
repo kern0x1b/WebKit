@@ -190,7 +190,11 @@ public:
 private:
     WEBCORE_EXPORT void enter();
     WEBCORE_EXPORT void leave();
+#if defined(WEBKIT_IOS6)
+    static IOS6ThreadLocal<WrapperMutationScope*> s_active;
+#else
     static thread_local WrapperMutationScope* s_active;
+#endif
     SingleThreadWeakRef<DOMWrapperWorld> m_world;
     WrapperMutationScope* m_previous { nullptr };
 #endif

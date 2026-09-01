@@ -233,17 +233,26 @@ PlatformCALayer* PlatformCALayer::maskLayer() const
 
 void PlatformCALayer::setDelegatedContents(const PlatformCALayerDelegatedContents& contents)
 {
+#if HAVE(IOSURFACE)
     auto surface = WebCore::IOSurface::createFromSendRight(MachSendRight { contents.surface });
     if (!surface) {
         clearContents();
         return;
     }
     setDelegatedContents({ *surface, contents.finishedFence });
+#else
+    UNUSED_PARAM(contents);
+    clearContents();
+#endif
 }
 
 void PlatformCALayer::setDelegatedContents(const PlatformCALayerInProcessDelegatedContents& contents)
 {
+#if HAVE(IOSURFACE)
     setDelegatedContents({ contents.surface.createSendRight(), contents.finishedFence, std::nullopt });
+#else
+    UNUSED_PARAM(contents);
+#endif
 }
 
 bool PlatformCALayer::needsPlatformContext() const

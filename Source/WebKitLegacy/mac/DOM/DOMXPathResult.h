@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMXPathResult_h
+#define WebKitLegacyDOM_DOMXPathResult_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -54,3 +57,5 @@ WEBKIT_CLASS_DEPRECATED_MAC(10_5, 10_14)
 - (DOMNode *)iterateNext;
 - (DOMNode *)snapshotItem:(unsigned)index;
 @end
+
+#endif // WebKitLegacyDOM_DOMXPathResult_h

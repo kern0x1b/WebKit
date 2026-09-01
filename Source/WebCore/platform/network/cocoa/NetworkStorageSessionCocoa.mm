@@ -155,6 +155,18 @@ void NetworkStorageSession::setAllCookiesToSameSiteStrict(const RegistrableDomai
 {
     ASSERT(hasProcessPrivilege(ProcessPrivilege::CanAccessRawCookies));
 
+#if defined(WEBKIT_IOS6)
+    // SameSite does not exist on this CFNetwork at all: -sameSitePolicy is absent
+    // from NSHTTPCookie, and the jar has no field to record a policy in, so there
+    // is no such thing here as the Strict cookie this is asked to convert cookies
+    // into. Reading the policy raised, WebKit swallowed it, and the loop below
+    // never ran. Rewriting every cookie with a "SameSitePolicy" property that this
+    // jar discards would only make the code look like it did something. Report the
+    // operation as finished, which is what the caller expects when there is
+    // nothing to convert.
+    UNUSED_PARAM(domain);
+    return completionHandler();
+#else
     RetainPtr<NSMutableArray<NSHTTPCookie *>> oldCookiesToDelete = adoptNS([[NSMutableArray alloc] init]);
     RetainPtr<NSMutableArray<NSHTTPCookie *>> newCookiesToAdd = adoptNS([[NSMutableArray alloc] init]);
 
@@ -180,6 +192,23 @@ void NetworkStorageSession::setAllCookiesToSameSiteStrict(const RegistrableDomai
     for (NSHTTPCookie *oldCookie in oldCookiesToDelete.get())
         deleteHTTPCookie(cookieStorage().get(), oldCookie, [aggregator] { });
     END_BLOCK_OBJC_EXCEPTIONS
+#endif
+}
+
+// -_initWithCFHTTPCookieStorage: does not exist on this Foundation, and this
+// CFNetwork has exactly one cookie storage, so a jar scoped to one session is
+// not a thing that can be made here at all. The shared jar is the storage every
+// other path on this port already ends up using, so hand that back rather than
+// raising an exception WebKit will swallow and leave the caller having done
+// nothing.
+static RetainPtr<NSHTTPCookieStorage> wrapCookieStorage(CFHTTPCookieStorageRef storage)
+{
+#if defined(WEBKIT_IOS6)
+    UNUSED_PARAM(storage);
+    return [NSHTTPCookieStorage sharedHTTPCookieStorage];
+#else
+    return adoptNS([[NSHTTPCookieStorage alloc] _initWithCFHTTPCookieStorage:storage]);
+#endif
 }
 
 RetainPtr<NSHTTPCookieStorage> NetworkStorageSession::nsCookieStorage() const
@@ -190,7 +219,7 @@ RetainPtr<NSHTTPCookieStorage> NetworkStorageSession::nsCookieStorage() const
     if (!m_isInMemoryCookieStore && (!cfCookieStorage || [NSHTTPCookieStorage sharedHTTPCookieStorage]._cookieStorage == cfCookieStorage))
         return [NSHTTPCookieStorage sharedHTTPCookieStorage];
 
-    return adoptNS([[NSHTTPCookieStorage alloc] _initWithCFHTTPCookieStorage:cfCookieStorage.get()]);
+    return wrapCookieStorage(cfCookieStorage.get());
 }
 
 CookieStorageObserver& NetworkStorageSession::cookieStorageObserver() const
@@ -275,6 +304,11 @@ void NetworkStorageSession::deleteHTTPCookie(CFHTTPCookieStorageRef cookieStorag
     dispatch_async(globalDispatchQueueSingleton(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), makeBlockPtr(WTF::move(work)).get());
 }
 
+// Every caller of this is now behind #if !defined(WEBKIT_IOS6): the dictionary it
+// builds is the private policyProperties argument of -_getCookiesForURL:... and
+// -_setCookies:..., and it carries SameSite and partition, none of which exist on
+// this CFNetwork. Nothing here can consume it, so it is not built here.
+#if !defined(WEBKIT_IOS6)
 static RetainPtr<NSDictionary> policyProperties(const SameSiteInfo& sameSiteInfo, NSURL *url, NSString *partition, ThirdPartyCookieBlockingDecision thirdPartyCookieBlockingDecision)
 {
 #if ENABLE(OPT_IN_PARTITIONED_COOKIES) && defined(CFN_COOKIE_ACCEPTS_POLICY_PARTITION) && CFN_COOKIE_ACCEPTS_POLICY_PARTITION
@@ -295,6 +329,7 @@ static RetainPtr<NSDictionary> policyProperties(const SameSiteInfo& sameSiteInfo
 #endif
     return policyProperties;
 }
+#endif
 
 static RetainPtr<NSArray> cookiesForURLFromStorage(NSHTTPCookieStorage *storage, NSURL *url, NSURL *mainDocumentURL, const std::optional<SameSiteInfo>& sameSiteInfo, ThirdPartyCookieBlockingDecision thirdPartyCookieBlockingDecision, NSString *partition = nullptr)
 {
@@ -305,9 +340,29 @@ static RetainPtr<NSArray> cookiesForURLFromStorage(NSHTTPCookieStorage *storage,
     auto completionHandler = [&cookiesPtr] (NSArray *cookies) {
         cookiesPtr = retainPtr(cookies);
     };
+#if defined(WEBKIT_IOS6)
+    // This CFNetwork has neither SameSite nor partitioned cookies, and the
+    // private accessor that carries those concepts does not exist on it. The
+    // public API is the same query without them, and this OS enforces
+    // third-party policy through the storage's accept policy instead.
+    UNUSED_PARAM(mainDocumentURL);
+    UNUSED_PARAM(sameSiteInfo);
+    UNUSED_PARAM(partition);
+    completionHandler([storage cookiesForURL:url]);
+#else
     [storage _getCookiesForURL:url mainDocumentURL:mainDocumentURL partition:partition policyProperties:sameSiteInfo ? policyProperties(sameSiteInfo.value(), url, partition, thirdPartyCookieBlockingDecision).get() : nullptr completionHandler:completionHandler];
+#endif
     RELEASE_ASSERT(!!cookiesPtr);
 
+#if defined(WEBKIT_IOS6)
+    // There are no storage partitions on this CFNetwork, so -_storagePartition
+    // does not exist on NSHTTPCookie and there is nothing to filter by: every
+    // cookie in this jar is unpartitioned and `partition` is always nil here,
+    // because ENABLE(OPT_IN_PARTITIONED_COOKIES) is off on this port
+    // (HAVE(ALLOW_ONLY_PARTITIONED_COOKIES) wants iOS 26.2). Hand back what the
+    // jar returned.
+    return WTF::move(*cookiesPtr);
+#else
     // _getCookiesForURL returns only unpartitioned cookies if partition is nil, and it returns both
     // unpartitioned cookies plus cookies in the specified partition if partition is not nil. Return the
     // array of cookies the partition was nil, or if we should return both partitioned and unpartitioned
@@ -323,12 +378,26 @@ static RetainPtr<NSArray> cookiesForURLFromStorage(NSHTTPCookieStorage *storage,
         [partitionedCookies.get() addObject:nsCookie];
     }
     return WTF::move(partitionedCookies);
+#endif
 }
 
 void NetworkStorageSession::setHTTPCookiesForURL(CFHTTPCookieStorageRef cookieStorage, NSArray *cookies, NSURL *url, NSURL *mainDocumentURL, NSString *partition, const SameSiteInfo& sameSiteInfo, ThirdPartyCookieBlockingDecision thirdPartyCookieBlockingDecision) const
 {
     ASSERT(hasProcessPrivilege(ProcessPrivilege::CanAccessRawCookies) || m_isInMemoryCookieStore);
 
+#if defined(WEBKIT_IOS6)
+    // As above: no SameSite, no partitions, and no -_initWithCFHTTPCookieStorage:
+    // either, so a per-session jar cannot be made. This CFNetwork has exactly one
+    // cookie storage and the public setter writes to it. Without this, every
+    // write raised, WebKit swallowed the exception, and document.cookie silently
+    // did nothing - which is most of what makes a wrapped site fail to stay
+    // logged in.
+    UNUSED_PARAM(cookieStorage);
+    UNUSED_PARAM(partition);
+    UNUSED_PARAM(sameSiteInfo);
+    UNUSED_PARAM(thirdPartyCookieBlockingDecision);
+    [[NSHTTPCookieStorage sharedHTTPCookieStorage] setCookies:cookies forURL:url mainDocumentURL:mainDocumentURL];
+#else
     if (!cookieStorage) {
         [[NSHTTPCookieStorage sharedHTTPCookieStorage] _setCookies:cookies forURL:url mainDocumentURL:mainDocumentURL policyProperties:policyProperties(sameSiteInfo, url, partition, thirdPartyCookieBlockingDecision).get()];
         return;
@@ -336,8 +405,9 @@ void NetworkStorageSession::setHTTPCookiesForURL(CFHTTPCookieStorageRef cookieSt
 
     // FIXME: Stop creating a new NSHTTPCookieStorage object each time we want to query the cookie jar.
     // NetworkStorageSession could instead keep a NSHTTPCookieStorage object for us.
-    RetainPtr<NSHTTPCookieStorage> nsCookieStorage = adoptNS([[NSHTTPCookieStorage alloc] _initWithCFHTTPCookieStorage:cookieStorage]);
+    RetainPtr<NSHTTPCookieStorage> nsCookieStorage = wrapCookieStorage(cookieStorage);
     [nsCookieStorage _setCookies:cookies forURL:url mainDocumentURL:mainDocumentURL policyProperties:policyProperties(sameSiteInfo, url, partition, thirdPartyCookieBlockingDecision).get()];
+#endif
 }
 
 RetainPtr<NSArray> NetworkStorageSession::httpCookiesForURL(CFHTTPCookieStorageRef cookieStorage, NSURL *firstParty, const std::optional<SameSiteInfo>& sameSiteInfo, NSURL *url, ThirdPartyCookieBlockingDecision thirdPartyCookieBlockingDecision) const
@@ -350,7 +420,7 @@ RetainPtr<NSArray> NetworkStorageSession::httpCookiesForURL(CFHTTPCookieStorageR
 
     // FIXME: Stop creating a new NSHTTPCookieStorage object each time we want to query the cookie jar.
     // NetworkStorageSession could instead keep a NSHTTPCookieStorage object for us.
-    RetainPtr<NSHTTPCookieStorage> nsCookieStorage = adoptNS([[NSHTTPCookieStorage alloc] _initWithCFHTTPCookieStorage:cookieStorage]);
+    RetainPtr<NSHTTPCookieStorage> nsCookieStorage = wrapCookieStorage(cookieStorage);
 #if ENABLE(OPT_IN_PARTITIONED_COOKIES) && defined(CFN_COOKIE_ACCEPTS_POLICY_PARTITION) && CFN_COOKIE_ACCEPTS_POLICY_PARTITION
     RetainPtr partitionKey = isOptInCookiePartitioningEnabled() ? cookiePartitionIdentifier(firstParty).createNSString() : nil;
 #else
@@ -522,7 +592,21 @@ static RetainPtr<NSHTTPCookie> parseDOMCookie(String cookieString, NSURL* cookie
     // cookiesWithResponseHeaderFields doesn't parse cookies without a value
     cookieString = cookieString.contains('=') ? cookieString : makeString(cookieString, '=');
 
+#if defined(WEBKIT_IOS6)
+    // +_cookieForSetCookieString:forURL:partition: does not exist on this
+    // Foundation, and partitions do not exist on this CFNetwork at all. The
+    // public parser takes the same string in the form it arrives in over the
+    // wire, and the two lines above already put it in the shape it wants.
+    // Without this, assigning to document.cookie raised, WebKit swallowed the
+    // exception, and the assignment silently did nothing.
+    UNUSED_PARAM(partition);
+    NSArray<NSHTTPCookie *> *parsed = [NSHTTPCookie
+        cookiesWithResponseHeaderFields:@{ @"Set-Cookie": cookieString.createNSString().get() }
+                                 forURL:cookieURL];
+    return adjustScriptWrittenCookie([parsed firstObject], cappedLifetime);
+#else
     return adjustScriptWrittenCookie([NSHTTPCookie _cookieForSetCookieString:cookieString.createNSString().get() forURL:cookieURL partition:nsStringNilIfEmpty(partition).get()], cappedLifetime);
+#endif
 }
 
 void NetworkStorageSession::setCookiesFromDOM(const URL& firstParty, const SameSiteInfo& sameSiteInfo, const URL& url, std::optional<FrameIdentifier> frameID, std::optional<PageIdentifier> pageID, ApplyTrackingPrevention applyTrackingPrevention, RequiresScriptTrackingPrivacy requiresScriptTrackingPrivacy, const String& cookieString, ShouldRelaxThirdPartyCookieBlocking shouldRelaxThirdPartyCookieBlocking, IsKnownCrossSiteTracker isKnownCrossSiteTracker) const
@@ -681,11 +765,23 @@ void NetworkStorageSession::deleteCookiesMatching(NOESCAPE const Function<bool(N
     BEGIN_BLOCK_OBJC_EXCEPTIONS
 
     RetainPtr<CFHTTPCookieStorageRef> cookieStorage = this->cookieStorage();
-    auto nsCookieStorage = adoptNS([[NSHTTPCookieStorage alloc] _initWithCFHTTPCookieStorage:cookieStorage.get()]);
+    auto nsCookieStorage = wrapCookieStorage(cookieStorage.get());
     auto aggregator = CallbackAggregator::create([completionHandler = WTF::move(completionHandler), nsCookieStorage = WTF::move(nsCookieStorage)] () mutable {
+#if defined(WEBKIT_IOS6)
+        // -_saveCookies: does not exist on this Foundation and has no public
+        // equivalent, because on this release there is nothing for a client to
+        // ask for: CFNetwork owns writing Cookies.binarycookies and does it
+        // itself. (The jar on the device already survives process launches, so
+        // the writing is happening.) There is no flush to request, but the
+        // completion handler still has to run on the main thread exactly as
+        // _saveCookies:'s block would, or every caller of this hangs.
+        UNUSED_PARAM(nsCookieStorage);
+        ensureOnMainThread(WTF::move(completionHandler));
+#else
         [nsCookieStorage _saveCookies:makeBlockPtr([completionHandler = WTF::move(completionHandler)] () mutable {
             ensureOnMainThread(WTF::move(completionHandler));
         }).get()];
+#endif
     });
 
     RetainPtr<NSArray> cookies = httpCookies(cookieStorage.get());
@@ -704,6 +800,17 @@ void NetworkStorageSession::deleteCookiesMatching(NOESCAPE const Function<bool(N
 
 void NetworkStorageSession::deleteCookies(const ClientOrigin& origin, CompletionHandler<void()>&& completionHandler)
 {
+#if defined(WEBKIT_IOS6)
+    // -_storagePartition does not exist on NSHTTPCookie here because this
+    // CFNetwork has no storage partitions: every cookie in the jar is
+    // unpartitioned, so there is no partition half of this test to run and no
+    // partition to read off a cookie. The domain is the whole test.
+    auto domain = origin.clientOrigin.host();
+
+    deleteCookiesMatching([&domain](auto *cookie) {
+        return domain == String(cookie.domain);
+    }, WTF::move(completionHandler));
+#else
     Vector<String> cachePartitions { cookiePartitionIdentifier(origin.topOrigin.toURL()) };
     if (origin.topOrigin == origin.clientOrigin)
         cachePartitions.append({ });
@@ -715,6 +822,7 @@ void NetworkStorageSession::deleteCookies(const ClientOrigin& origin, Completion
         });
         return partitionMatched && domain == String(cookie.domain);
     }, WTF::move(completionHandler));
+#endif
 }
 
 void NetworkStorageSession::deleteCookiesForHostnames(std::span<const String> hostnames, IncludeHttpOnlyCookies includeHttpOnlyCookies, ScriptWrittenCookiesOnly scriptWrittenCookiesOnly, CompletionHandler<void()>&& completionHandler)
@@ -748,9 +856,16 @@ void NetworkStorageSession::deleteAllCookiesModifiedSince(WallTime timePoint, Co
     NSTimeInterval timeInterval = timePoint.secondsSinceEpoch().seconds();
     auto work = [completionHandler = WTF::move(completionHandler), storage = RetainPtr { nsCookieStorage() }, date = RetainPtr { [NSDate dateWithTimeIntervalSince1970:timeInterval] }] () mutable {
         [storage removeCookiesSinceDate:date.get()];
+#if defined(WEBKIT_IOS6)
+        // As in deleteCookiesMatching: no -_saveCookies: on this Foundation and
+        // no public equivalent, because CFNetwork writes the jar itself on this
+        // release. Nothing to flush; run the handler so the caller finishes.
+        ensureOnMainThread(WTF::move(completionHandler));
+#else
         [storage _saveCookies:makeBlockPtr([completionHandler = WTF::move(completionHandler)] () mutable {
             ensureOnMainThread(WTF::move(completionHandler));
         }).get()];
+#endif
     };
 
     if (m_isInMemoryCookieStore)
@@ -760,6 +875,17 @@ void NetworkStorageSession::deleteAllCookiesModifiedSince(WallTime timePoint, Co
 
 Vector<Cookie> NetworkStorageSession::domCookiesForHost(const URL& firstParty)
 {
+#if defined(WEBKIT_IOS6)
+    // -_getCookiesForDomain: does not exist on this Foundation. The public
+    // per-URL query is the same lookup addressed by URL instead of by bare host,
+    // and it is the one CFNetwork itself uses to decide what applies to a
+    // document loaded from that URL, so it additionally honours the path and
+    // Secure rules the URL carries. This function's callers want the cookies the
+    // DOM at that URL may see, so that narrowing is the correct answer rather
+    // than a loss. There is no partitioned half to add either: this CFNetwork has
+    // no partitions, so the whole jar is unpartitioned.
+    RetainPtr nsCookies = [nsCookieStorage() cookiesForURL:firstParty.createNSURL().get()];
+#else
     RetainPtr host = firstParty.host().createNSString();
 
     // _getCookiesForDomain only returned unpartitioned (i.e., nil partition) cookies
@@ -797,6 +923,7 @@ Vector<Cookie> NetworkStorageSession::domCookiesForHost(const URL& firstParty)
         [nsCookieStorage() _getCookiesForPartition:partitionKey.get() completionHandler:completionHandler];
         RELEASE_ASSERT(wasCompletionHandlerCalled);
     }
+#endif
 #endif
 
     return nsCookiesToCookieVector(nsCookies.get(), [](NSHTTPCookie *cookie) { return !cookie.HTTPOnly; });

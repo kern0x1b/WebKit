@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMMediaError_h
+#define WebKitLegacyDOM_DOMMediaError_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -37,3 +40,5 @@ WEBKIT_CLASS_DEPRECATED_MAC(10_5, 10_14)
 @interface DOMMediaError : DOMObject
 @property (readonly) unsigned short code;
 @end
+
+#endif // WebKitLegacyDOM_DOMMediaError_h

@@ -41,6 +41,21 @@
 #import <wtf/MemoryPressureHandler.h>
 #import <wtf/TZoneMallocInlines.h>
 
+#if defined(WEBKIT_IOS6)
+#include <unistd.h>
+// Our own running commentary. WTFLogAlways reaches a file through stderr, so
+// every one of these is a synchronous write on whichever thread the engine is
+// on - and some of them sit on paths that run for every frame of a scroll.
+static bool engineChatterEnabled()
+{
+    static int enabled = -1;
+    if (enabled < 0)
+        enabled = access("/tmp/native-engine-log", F_OK) == 0 ? 1 : 0;
+    return enabled == 1;
+}
+#endif
+
+
 namespace WebCore {
 
 WTF_MAKE_TZONE_ALLOCATED_IMPL(LegacyTileGrid);
@@ -222,8 +237,11 @@ void LegacyTileGrid::centerTileGridOrigin(const IntRect& visibleRect)
     unsigned currentVerticalTiles = currentBottomRightIndex.y() - currentTopLeftIndex.y() + 1;
 
     // If we have tiles already, only center if we would get benefits from both directions (as we need to throw out existing tiles).
-    if (tileCount() && (currentHorizontalTiles == minimumHorizontalTiles || currentVerticalTiles == minimumVerticalTiles))
+    if (tileCount() && (currentHorizontalTiles == minimumHorizontalTiles || currentVerticalTiles == minimumVerticalTiles)) {
+        if (engineChatterEnabled()) WTFLogAlways("[center] already minimal: h %u/%u v %u/%u at y=%d",
+            currentHorizontalTiles, minimumHorizontalTiles, currentVerticalTiles, minimumVerticalTiles, visibleRect.y());
         return;
+    }
 
     IntPoint newOrigin(0, 0);
     IntSize size = bounds().size();
@@ -238,9 +256,14 @@ void LegacyTileGrid::centerTileGridOrigin(const IntRect& visibleRect)
             newOrigin.setY(0);
     }
 
-    // Drop all existing tiles if the origin moved.
-    if (newOrigin == m_origin)
+    if (newOrigin == m_origin) {
+        if (engineChatterEnabled()) WTFLogAlways("[center] visible y=%d h=%d origin unchanged at %d,%d tiles=%u",
+            visibleRect.y(), visibleRect.height(), m_origin.x(), m_origin.y(), (unsigned)tileCount());
         return;
+    }
+    if (engineChatterEnabled()) WTFLogAlways("[center] visible y=%d h=%d origin %d,%d -> %d,%d (dropping %u tiles)",
+        visibleRect.y(), visibleRect.height(), m_origin.x(), m_origin.y(),
+        newOrigin.x(), newOrigin.y(), (unsigned)tileCount());
     m_tiles.clear();
     m_origin = newOrigin;
 }
@@ -393,9 +416,19 @@ void LegacyTileGrid::invalidateTiles(const IntRect& dirtyRect)
 
 bool LegacyTileGrid::shouldUseMinimalTileCoverage() const
 {
-    return m_tileCache->tilingMode() == LegacyTileCache::Minimal
-        || !m_tileCache->isSpeculativeTileCreationEnabled()
-        || MemoryPressureHandler::singleton().isUnderMemoryPressure();
+    bool minimalMode = m_tileCache->tilingMode() == LegacyTileCache::Minimal;
+    bool noSpeculative = !m_tileCache->isSpeculativeTileCreationEnabled();
+    bool underPressure = MemoryPressureHandler::singleton().isUnderMemoryPressure();
+
+    static int lastReported = -1;
+    int state = (minimalMode ? 1 : 0) | (noSpeculative ? 2 : 0) | (underPressure ? 4 : 0);
+    if (state != lastReported) {
+        lastReported = state;
+        if (engineChatterEnabled()) WTFLogAlways("[tilecoverage] minimal=%d (tilingMode=%d speculativeOff=%d pressure=%d unused=%d)",
+            state ? 1 : 0, (int)m_tileCache->tilingMode(), noSpeculative, underPressure, 0);
+    }
+
+    return minimalMode || noSpeculative || underPressure;
 }
 
 IntRect LegacyTileGrid::adjustCoverRectForPageBounds(const IntRect& rect) const
@@ -420,13 +453,22 @@ IntRect LegacyTileGrid::adjustCoverRectForPageBounds(const IntRect& rect) const
 
 IntRect LegacyTileGrid::calculateCoverRect(const IntRect& visibleRect, bool& centerGrid)
 {
-    // Use minimum coverRect if we are under memory pressure.
     if (shouldUseMinimalTileCoverage()) {
         centerGrid = true;
         return visibleRect;
     }
     IntRect coverRect = visibleRect;
     centerGrid = false;
+
+    // A screen above and a screen below, as upstream chose.
+    //
+    // This was cut to half a screen on the belief that tiles were the largest
+    // block of memory in the process, sixty seven megabytes of it. That was a
+    // misreading of a region report: the tile cache accounts for three to five
+    // megabytes here and the large graphics figure is decoded image data. What
+    // the cut did buy was a flick outrunning its tiles - screenshots taken
+    // mid-drag show a blank page between two correctly pinned bars. Three screens
+    // of coverage at this size is about seven megabytes.
     coverRect.inflateX(visibleRect.width() / 2);
     coverRect.inflateY(visibleRect.height());
     return adjustCoverRectForPageBounds(coverRect);
@@ -505,6 +547,8 @@ void LegacyTileGrid::createTiles(LegacyTileCache::SynchronousTileCreationMode cr
     Vector<LegacyTileGrid::TileIndex> tilesToCreate;
     unsigned pendingTileCount = 0;
 
+    bool coverRectIsOnlyTheViewport = shouldUseMinimalTileCoverage();
+
     LegacyTileGrid::TileIndex topLeftIndex = tileIndexForPoint(topLeft(coverRect));
     LegacyTileGrid::TileIndex bottomRightIndex = tileIndexForPoint(bottomRight(coverRect));
     for (int yIndex = topLeftIndex.y(); yIndex <= bottomRightIndex.y(); ++yIndex) {
@@ -517,6 +561,11 @@ void LegacyTileGrid::createTiles(LegacyTileCache::SynchronousTileCreationMode cr
             if (tileForIndex(index))
                 continue;
             ++pendingTileCount;
+            if (coverRectIsOnlyTheViewport) {
+                shortestDistance = 0;
+                tilesToCreate.append(index);
+                continue;
+            }
             if (distance > shortestDistance)
                 continue;
             if (distance < shortestDistance) {
@@ -549,6 +598,18 @@ void LegacyTileGrid::createTiles(LegacyTileCache::SynchronousTileCreationMode cr
 
     bool didCreateTiles = !!tilesToCreateCount;
     bool createMoreTiles = pendingTileCount > tilesToCreateCount;
+
+    static unsigned reportTick = 0;
+    if (!(reportTick++ % 8)) {
+        double tileBytes = (double)m_tiles.size() * m_tileSize.width() * m_tileSize.height() * 4.0;
+        if (engineChatterEnabled()) WTFLogAlways("[tiles] %u tiles of %dx%d (%.1f MB each) = %.1f MB, coverRect %dx%d, doc %dx%d",
+            (unsigned)m_tiles.size(), m_tileSize.width(), m_tileSize.height(),
+            tileByteSize() / (1024.0 * 1024.0),
+            (double)m_tiles.size() * tileByteSize() / (1024.0 * 1024.0),
+            coverRect.width(), coverRect.height(),
+            tileCache().tileControllerShouldUseLowScaleTiles() ? 0 : bounds().width(), bounds().height());
+    }
+
     protect(tileCache())->finishedCreatingTiles(didCreateTiles, createMoreTiles);
 }
 

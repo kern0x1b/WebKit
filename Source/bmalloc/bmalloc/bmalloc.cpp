@@ -105,6 +105,10 @@ void freeLargeVirtual(void* object, size_t size, HeapKind kind)
     BUNUSED(size);
     BUNUSED(kind);
     mi_free(object);
+#elif BUSE(CLASSIC_BMALLOC)
+    BUNUSED(size);
+    BUNUSED(kind);
+    classic::free(object);
 #else
     BUNUSED(size);
     BUNUSED(kind);
@@ -119,6 +123,8 @@ void scavengeThisThread()
                                   pas_lock_is_not_held);
 #elif BUSE(MIMALLOC)
     mi_theap_collect(mi_theap_get_default(), /* force */ true);
+#elif BUSE(CLASSIC_BMALLOC)
+    classic::scavengeThisThread();
 #endif
 }
 
@@ -129,6 +135,8 @@ void scavenge()
     scavengeThisThread();
 #elif BUSE(MIMALLOC)
     mi_collect(/* force */ true);
+#elif BUSE(CLASSIC_BMALLOC)
+    classic::scavenge();
 #endif
     if (SystemHeap* systemHeap = SystemHeap::tryGetIfShouldSupplantBmalloc()) {
         systemHeap->scavenge();
@@ -138,7 +146,11 @@ void scavenge()
 
 bool isEnabled(HeapKind)
 {
+#if BUSE(CLASSIC_BMALLOC)
+    return classic::isEnabled();
+#else
     return !Environment::get()->shouldBmallocAllocateThroughSystemHeap();
+#endif
 }
 
 bool isMTEEnabled(HeapKind kind)
@@ -157,6 +169,8 @@ void setScavengerThreadQOSClass(qos_class_t overrideClass)
 {
 #if BENABLE(LIBPAS)
     pas_scavenger_set_requested_qos_class(overrideClass);
+#elif BUSE(CLASSIC_BMALLOC)
+    classic::setScavengerThreadQOSClass(overrideClass);
 #else
     BUNUSED(overrideClass);
 #endif

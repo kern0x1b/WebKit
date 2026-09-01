@@ -53,10 +53,16 @@ LocalCurrentTraitCollection::LocalCurrentTraitCollection(bool useDarkAppearance,
     // to return a useful set of traits in cases where it has not been explicitly set. Ideally, this
     // method should also take in a base, full-specified trait collection from the view hierarchy, to be
     // used when building the new trait collection.
+#if defined(WEBKIT_IOS6)
+    RetainPtr combinedTraits = m_savedTraitCollection;
+    UNUSED_PARAM(useDarkAppearance);
+    UNUSED_PARAM(useElevatedUserInterfaceLevel);
+#else
     RetainPtr combinedTraits = [m_savedTraitCollection traitCollectionByModifyingTraits:^(id<UIMutableTraits> traits) {
         traits.userInterfaceStyle = useDarkAppearance ? UIUserInterfaceStyleDark : UIUserInterfaceStyleLight;
         traits.userInterfaceLevel = useElevatedUserInterfaceLevel ? UIUserInterfaceLevelElevated : UIUserInterfaceLevelBase;
     }];
+#endif
 
     [PAL::getUITraitCollectionClassSingleton() setCurrentTraitCollection:traitCollectionWithAdjustedIdiomForSystemColors(combinedTraits.get())];
 }

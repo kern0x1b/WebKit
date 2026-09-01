@@ -6727,11 +6727,32 @@ class YarrGenerator final : public YarrJITInfo {
             size_t stackSizeForCalleeSaves = WTF::roundUpToMultipleOf<stackAlignmentBytes()>(m_calleeSaves.registerCount() * sizeof(UCPURegister));
 #if CPU(X86_64) || CPU(ARM64)
             m_jit.subPtr(GPRInfo::callFrameRegister, CCallHelpers::TrustedImm32(stackSizeForCalleeSaves), MacroAssembler::stackPointerRegister);
+            m_jit.emitSaveCalleeSavesFor(&m_calleeSaves);
 #else
+            // The registers are saved before one of them is used as scratch.
+            //
+            // On a target where the stack pointer cannot be written directly,
+            // the new value is computed into regT0 - and on ARM_THUMB2 regT0 is
+            // r4, which is itself in the callee-save set. Done in the other
+            // order, the caller's r4 is destroyed by the computation and then
+            // that destroyed value is what gets saved and later restored, so the
+            // caller resumes with a stack address where it left a live value.
+            //
+            // Diagnosed on an iPhone 4S: 'aaa'.matchAll(/\w+/g) followed by one
+            // next() took SIGBUS at `str r2, [r1, r4]` inside
+            // JSRegExpStringIterator::nextImpl, with r1 + r4 equal to the
+            // faulting address and r4 holding the frame pointer minus the
+            // callee-save area - exactly the value this prologue computes. Plain
+            // RegExp.prototype.exec survived only because the compiler happened
+            // not to keep anything in r4 across the call there.
+            //
+            // Saving first is safe: emitSaveCalleeSavesFor writes relative to the
+            // frame pointer, which emitFunctionPrologue has already established,
+            // so it does not depend on the stack pointer having moved yet.
+            m_jit.emitSaveCalleeSavesFor(&m_calleeSaves);
             m_jit.subPtr(GPRInfo::callFrameRegister, CCallHelpers::TrustedImm32(stackSizeForCalleeSaves), m_regs.regT0);
             m_jit.move(m_regs.regT0, MacroAssembler::stackPointerRegister);
 #endif
-            m_jit.emitSaveCalleeSavesFor(&m_calleeSaves);
         }
     }
 

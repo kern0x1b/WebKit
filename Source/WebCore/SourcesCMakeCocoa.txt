@@ -99,8 +99,8 @@ platform/graphics/angle/ANGLEUtilities.cpp
 
 platform/graphics/avfoundation/CDMFairPlayStreaming.cpp
 
-platform/graphics/avfoundation/objc/CDMInstanceFairPlayStreamingAVFObjC.mm @nonARC
-platform/graphics/avfoundation/objc/QueuedVideoOutput.mm @nonARC
+// ios6: platform/graphics/avfoundation/objc/CDMInstanceFairPlayStreamingAVFObjC.mm @nonARC
+// ios6: platform/graphics/avfoundation/objc/QueuedVideoOutput.mm @nonARC
 
 platform/graphics/cocoa/ANGLEUtilitiesCocoa.mm @nonARC
 platform/graphics/cocoa/MediaPlayerEnumsCocoa.mm @nonARC

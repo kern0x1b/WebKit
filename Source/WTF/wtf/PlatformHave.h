@@ -101,7 +101,7 @@
 #define HAVE_HISERVICES 1
 #endif
 
-#if PLATFORM(IOS_FAMILY)
+#if PLATFORM(IOS_FAMILY) && !defined(WEBKIT_IOS6_NO_READLINE)
 #define HAVE_READLINE 1
 #endif
 
@@ -221,7 +221,7 @@
 #define HAVE_PTHREAD_SETNAME_NP 1
 #endif
 
-#if OS(DARWIN)
+#if OS(DARWIN) && !defined(WEBKIT_IOS6_NO_READLINE)
 #define HAVE_READLINE 1
 #endif
 
@@ -380,7 +380,7 @@
 #define HAVE_AVASSETREADER 1
 #endif
 
-#if PLATFORM(COCOA)
+#if PLATFORM(COCOA) && !defined(WEBKIT_IOS6)
 #define HAVE_IOSURFACE 1
 #endif
 
@@ -584,7 +584,20 @@
 #define HAVE_APP_SSO 1
 #endif
 
-#if PLATFORM(COCOA) || PLATFORM(GTK) || PLATFORM(WPE)
+// -_setCookiesChangedHandler:onQueue:, -_setCookiesRemovedHandler:onQueue: and
+// -_setSubscribedDomainsForCookieChanges: are all absent from this Foundation.
+// What this release has in their place is NSHTTPCookieManagerCookiesChangedNotification:
+// one notification for the whole jar, carrying no cookie list, no domain, and no
+// distinction between an addition and a removal. Those three things are the entire
+// contract of the listener API, so there is nothing here to map it onto. The only
+// way to synthesise them would be to keep a shadow copy of the jar and diff it,
+// which would report a cookie CFNetwork merely rewrote as a fresh addition - a
+// fallback layer that lies. So state that the capability is absent and let
+// WebCore's existing "this platform has no cookie change listeners" path run;
+// on this port CookieJar::addChangeListener is already the do-nothing base
+// implementation, so nothing observable changes. The coarse notification is
+// still used, correctly, by CookieStorageObserver for "the jar changed, re-read".
+#if (PLATFORM(COCOA) && !defined(WEBKIT_IOS6)) || PLATFORM(GTK) || PLATFORM(WPE)
 #define HAVE_COOKIE_CHANGE_LISTENER_API 1
 #endif
 
@@ -592,7 +605,7 @@
 #define HAVE_NEAR_FIELD 1
 #endif
 
-#if PLATFORM(COCOA)
+#if PLATFORM(COCOA) && !defined(WEBKIT_IOS6)
 #define HAVE_OS_SIGNPOST 1
 #endif
 
@@ -636,7 +649,18 @@
 #define HAVE_UISCENE_BASED_VIEW_SERVICE_STATE_NOTIFICATIONS 1
 #endif
 
-#if PLATFORM(IOS_FAMILY) && !PLATFORM(IOS_FAMILY_SIMULATOR) && !PLATFORM(MACCATALYST)
+// The entitlement gate this turns on - isJITEnabled() requiring
+// "dynamic-codesigning" or "com.apple.developer.cs.allow-jit" - describes an OS
+// that enforces code signing on writable-executable pages. This one does not:
+// mmap of RWX and mprotect RW->RX both succeed and the written code executes,
+// verified directly on the device as root and as mobile. Neither entitlement
+// name existed in 2012 either, so the check can only ever answer false here, and
+// when it does ExecutableAllocator hands back an empty reservation, isValid()
+// goes false, and disableJIT() sets Options::useJIT() = false. The engine then
+// runs the LLInt for the life of the process while still reporting itself as a
+// JIT build - which is exactly what was measured before this was turned off:
+// useJIT=0, execAllocValid=0, and interpreter-shaped benchmark numbers.
+#if PLATFORM(IOS_FAMILY) && !PLATFORM(IOS_FAMILY_SIMULATOR) && !PLATFORM(MACCATALYST) && !defined(WEBKIT_IOS6)
 #define HAVE_IOS_JIT_RESTRICTIONS 1
 #endif
 
@@ -882,7 +906,9 @@
 #define HAVE_ASV_INLINE_PREVIEW 1
 #endif
 
-#if PLATFORM(IOS) || PLATFORM(MACCATALYST) || PLATFORM(MAC) || PLATFORM(VISION)
+#if (PLATFORM(IOS) || PLATFORM(MACCATALYST) || PLATFORM(MAC) || PLATFORM(VISION)) && !defined(WEBKIT_IOS6)
+// App SSO, and this variant of the lookup, arrived long after iOS 6. The older
+// -_protocolClassForRequest: is still there and does the same job.
 #define HAVE_NSURLPROTOCOL_WITH_SKIPAPPSSO 1
 #endif
 
@@ -1114,7 +1140,20 @@
 #define HAVE_SHARED_REGION_SPI 1
 #endif
 
-#if PLATFORM(IOS_FAMILY) && !PLATFORM(MACCATALYST)
+// CarPlay, and with it AVAudioSessionPortCarAudio, arrived in iOS 7. Asking this
+// AVFoundation for that constant gets nothing, and PAL's soft-link asserts
+// rather than returning nil, so the question kills the process the first time a
+// page creates a media element. There is no car head unit to be connected to
+// here, which is what the guarded code concludes anyway.
+#if !defined(WEBKIT_IOS6)
+#define HAVE_AVAUDIOSESSION_CARAUDIO_PORT 1
+#endif
+
+// MediaExperience.framework postdates this OS by years, so AVSystemController
+// and its notifications are not there to soft-link against. The two use sites
+// are already guarded by this HAVE; without it the constant accessors assert
+// and the process dies the first time a script touches a media element.
+#if PLATFORM(IOS_FAMILY) && !PLATFORM(MACCATALYST) && !defined(WEBKIT_IOS6)
 #define HAVE_MEDIAEXPERIENCE_AVSYSTEMCONTROLLER 1
 #endif
 
@@ -1404,7 +1443,9 @@
 #define HAVE_IDLE_SLEEP_STATE 1
 #endif
 
-#if PLATFORM(COCOA)
+#if PLATFORM(COCOA) && !defined(WEBKIT_IOS6)
+// CGStyle is a decade newer than this CoreGraphics. Calling CGContextSetStyle
+// on a context that has never heard of styles aborts the process.
 #define HAVE_CGSTYLE_COLORMATRIX_BLUR 1
 #endif
 
@@ -1925,7 +1966,20 @@
 #define HAVE_UICONTEXTMENUCONFIGURATION_ALLOWTYPESELECT_SUPPORT 0
 #endif
 
+// This CFNetwork has no storage partitions at all - -_storagePartition,
+// -_getCookiesForPartition: and the partition argument of -_getCookiesForURL:...
+// are all absent from it - so partitioned cookies are not a thing that can be
+// turned on here. Today this gate is already off because the deployment target
+// is 6.0 and the version checks below want 26.2, but that is a coincidence of a
+// build flag, not a statement about the OS: build-254 passes
+// -miphoneos-version-min=26.5 and is only saved by clang overriding it with
+// -target armv7-apple-ios6.0. If that flag is ever corrected, this gate would
+// flip on and NetworkStorageSession::setCookiePartition would start sending
+// -_storagePartition to an NSHTTPCookie that has no such method. Say the
+// platform truth instead, so the partition code stays out for the reason it
+// should.
 #if !defined(HAVE_ALLOW_ONLY_PARTITIONED_COOKIES) \
+    && !defined(WEBKIT_IOS6) \
     && ((PLATFORM(MAC) && __MAC_OS_X_VERSION_MIN_REQUIRED >= 260200) \
     || ((PLATFORM(IOS) || PLATFORM(MACCATALYST)) && __IPHONE_OS_VERSION_MIN_REQUIRED >= 260200) \
     || (PLATFORM(VISION) && __VISION_OS_VERSION_MIN_REQUIRED >= 260200) \
@@ -1989,4 +2043,52 @@
 
 #if !defined(HAVE_FULLSCREEN_LIGHTSPILL) && PLATFORM(VISION) && __VISION_OS_VERSION_MIN_REQUIRED >= 270000
 #define HAVE_FULLSCREEN_LIGHTSPILL 1
+#endif
+
+/* ---- iOS 6 port: features whose SDK headers do not exist here ---- */
+#if defined(WEBKIT_IOS6)
+#undef HAVE_SUPPORT_HDR_DISPLAY_APIS
+#define HAVE_SUPPORT_HDR_DISPLAY_APIS 0
+#undef HAVE_TASK_IDENTITY_TOKEN
+#define HAVE_TASK_IDENTITY_TOKEN 0
+#undef HAVE_AVSAMPLEBUFFERVIDEORENDERER
+#define HAVE_AVSAMPLEBUFFERVIDEORENDERER 0
+#undef HAVE_VTDECOMPRESSIONSESSION_MULTIIMAGE
+#define HAVE_VTDECOMPRESSIONSESSION_MULTIIMAGE 0
+#undef HAVE_MULTI_IMAGE_DECODE
+#define HAVE_MULTI_IMAGE_DECODE 0
+#undef HAVE_IOSURFACE_SET_OWNERSHIP
+#define HAVE_IOSURFACE_SET_OWNERSHIP 0
+#undef HAVE_PASSKIT_AUTOMATIC_RELOAD_PAYMENTS
+#define HAVE_PASSKIT_AUTOMATIC_RELOAD_PAYMENTS 0
+#undef HAVE_PASSKIT_AUTOMATIC_RELOAD_SUMMARY_ITEM
+#define HAVE_PASSKIT_AUTOMATIC_RELOAD_SUMMARY_ITEM 0
+#undef HAVE_PASSKIT_DEFAULT_SHIPPING_METHOD
+#define HAVE_PASSKIT_DEFAULT_SHIPPING_METHOD 0
+#undef HAVE_PASSKIT_DEFERRED_PAYMENTS
+#define HAVE_PASSKIT_DEFERRED_PAYMENTS 0
+#undef HAVE_PASSKIT_DEFERRED_SUMMARY_ITEM
+#define HAVE_PASSKIT_DEFERRED_SUMMARY_ITEM 0
+#undef HAVE_PASSKIT_DISBURSEMENTS
+#define HAVE_PASSKIT_DISBURSEMENTS 0
+#undef HAVE_PASSKIT_INSTALLMENTS
+#define HAVE_PASSKIT_INSTALLMENTS 0
+#undef HAVE_PASSKIT_MAC_HELPER_TEMP
+#define HAVE_PASSKIT_MAC_HELPER_TEMP 0
+#undef HAVE_PASSKIT_MODULARIZATION
+#define HAVE_PASSKIT_MODULARIZATION 0
+#undef HAVE_PASSKIT_MULTI_MERCHANT_PAYMENTS
+#define HAVE_PASSKIT_MULTI_MERCHANT_PAYMENTS 0
+#undef HAVE_PASSKIT_PAYMENT_ORDER_DETAILS
+#define HAVE_PASSKIT_PAYMENT_ORDER_DETAILS 0
+#undef HAVE_PASSKIT_PAYMENT_SERVICES_MERCHANT_URL_IS_DELEGATED
+#define HAVE_PASSKIT_PAYMENT_SERVICES_MERCHANT_URL_IS_DELEGATED 0
+#undef HAVE_PASSKIT_RECURRING_PAYMENTS
+#define HAVE_PASSKIT_RECURRING_PAYMENTS 0
+#undef HAVE_PASSKIT_RECURRING_SUMMARY_ITEM
+#define HAVE_PASSKIT_RECURRING_SUMMARY_ITEM 0
+#undef HAVE_PASSKIT_SHIPPING_METHOD_DATE_COMPONENTS_RANGE
+#define HAVE_PASSKIT_SHIPPING_METHOD_DATE_COMPONENTS_RANGE 0
+#undef HAVE_AVCONTENTKEYREQUEST_PENDING_PROTECTION_STATUS
+#define HAVE_AVCONTENTKEYREQUEST_PENDING_PROTECTION_STATUS 0
 #endif

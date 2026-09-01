@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMDocumentFragmentInternal_h
+#define WebKitLegacyDOM_DOMDocumentFragmentInternal_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -31,3 +34,5 @@ class DocumentFragment;
 
 WebCore::DocumentFragment* core(DOMDocumentFragment *);
 DOMDocumentFragment *kit(WebCore::DocumentFragment*);
+
+#endif // WebKitLegacyDOM_DOMDocumentFragmentInternal_h

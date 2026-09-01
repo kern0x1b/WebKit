@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMCSSRuleList_h
+#define WebKitLegacyDOM_DOMCSSRuleList_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -33,3 +36,5 @@ WEBKIT_CLASS_DEPRECATED_MAC(10_4, 10_14)
 
 - (DOMCSSRule *)item:(unsigned)index;
 @end
+
+#endif // WebKitLegacyDOM_DOMCSSRuleList_h

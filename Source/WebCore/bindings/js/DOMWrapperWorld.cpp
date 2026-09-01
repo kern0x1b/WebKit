@@ -60,7 +60,11 @@ static void initializeWrapperMapGuardingOnce()
     });
 }
 
+#if defined(WEBKIT_IOS6)
+IOS6ThreadLocal<WrapperMutationScope*> WrapperMutationScope::s_active;
+#else
 thread_local WrapperMutationScope* WrapperMutationScope::s_active { nullptr };
+#endif
 
 // Registry of live page-aligned m_wrappers backings, so free() knows the mmap length to unmap.
 static Lock backingRegistryLock;

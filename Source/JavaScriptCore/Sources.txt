@@ -467,6 +467,7 @@ dfg/DFGVariableEventStream.cpp
 dfg/DFGVirtualRegisterAllocationPhase.cpp
 
 disassembler/ARM64Disassembler.cpp
+disassembler/ARMv7Disassembler.cpp
 disassembler/CapstoneDisassembler.cpp
 disassembler/Disassembler.cpp
 disassembler/RISCV64Disassembler.cpp
@@ -474,6 +475,8 @@ disassembler/X86Disassembler.cpp
 
 disassembler/ARM64/A64DOpcode.cpp
 disassembler/ARM64/Binja.c @no-unify // C source; cannot bundle with C++.
+
+disassembler/ARMv7/ARMv7DOpcode.cpp
 
 disassembler/zydis/Zydis.c
 

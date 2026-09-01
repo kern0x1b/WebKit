@@ -35,6 +35,7 @@
 #import "WebEvent.h"
 #import "WKContentObservation.h"
 #import "WKViewPrivate.h"
+#import "WKWindow.h"
 #import <QuartzCore/QuartzCore.h>
 #import <wtf/Lock.h>
 #import <wtf/NeverDestroyed.h>
@@ -83,6 +84,12 @@ static RetainPtr<WebEvent>& currentEvent()
 
     _exposedScrollViewRect = CGRectNull;
 
+    // A window is created to be shown. Left off, WebView::_isViewVisible reports
+    // the page hidden, and a hidden page has requestAnimationFrame switched off
+    // - which silently kills every interaction a phone-shaped site finishes on
+    // a frame callback. Whoever wants it hidden can still say so.
+    _visible = YES;
+
     return self;
 }
 
@@ -97,6 +104,7 @@ static RetainPtr<WebEvent>& currentEvent()
     _screenScale = WebCore::screenScaleFactor();
 
     _exposedScrollViewRect = CGRectNull;
+    _visible = YES;
 
     return self;
 }
@@ -105,6 +113,8 @@ static RetainPtr<WebEvent>& currentEvent()
 {
     delete _tileCache;
     [_hostLayer release];
+    WAKRelease(_windowRef);
+    _windowRef = 0;
     
     [super dealloc];
 }
@@ -134,6 +144,13 @@ static RetainPtr<WebEvent>& currentEvent()
 
     [_responderView release];
     _responderView = nil;
+}
+
+- (WKWindowRef)_windowRef
+{
+    if (!_windowRef)
+        _windowRef = WKWindowCreate(self, _frame);
+    return _windowRef;
 }
 
 - (WAKView *)firstResponder

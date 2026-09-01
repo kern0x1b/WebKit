@@ -30,6 +30,7 @@ WTF_ALLOW_UNSAFE_BUFFER_USAGE_BEGIN
 
 #if ENABLE(DFG_JIT)
 
+#include "BaselineJITRegisters.h"
 #include "BinarySwitch.h"
 #include "CPUInlines.h"
 #include "CodeBlockWithJITType.h"
@@ -1860,8 +1861,12 @@ void SpeculativeJIT::compileStringSubstr(Node* node)
 
     if (lengthGPR != InvalidGPRReg) {
         // size = max(0, min(length, tempGPR))
-        moveConditionally32(LessThan, lengthGPR, tempGPR, lengthGPR, tempGPR, tempGPR);
-        moveConditionally32(LessThan, tempGPR, TrustedImm32(0), TrustedImm32(0), tempGPR, tempGPR);
+        Jump notAboveLength = branch32(LessThanOrEqual, tempGPR, lengthGPR);
+        move(lengthGPR, tempGPR);
+        notAboveLength.link(this);
+        Jump notNegative = branch32(GreaterThanOrEqual, tempGPR, TrustedImm32(0));
+        move(TrustedImm32(0), tempGPR);
+        notNegative.link(this);
     }
 
     JumpList doneCases;
@@ -7936,7 +7941,11 @@ void SpeculativeJIT::compileStringEquality(
         setupArguments<decltype(operationCompareStringEq)>(LinkableConstant::globalObject(*this, node), leftGPR, rightGPR);
         prepareForExternalCall();
         emitStoreCodeOrigin(node->origin.semantic);
+#if USE(JSVALUE64)
         nearCallThunk(CodeLocationLabel<JITThunkPtrTag>(vm().getCTIStub(stringEqualThunkGenerator).code()));
+#else
+        appendCall(operationCompareStringEq);
+#endif
         auto exceptionReg = tryHandleOrGetExceptionUnderSilentSpill<decltype(operationCompareStringEq)>(savePlans, leftTempGPR);
         setupResults(leftTempGPR);
         silentFill(savePlans);
@@ -15769,14 +15778,14 @@ void SpeculativeJIT::compileGetCellButterflySlot(Node* node)
 {
     SpeculateCellOperand scratch(this, node->child1());
     SpeculateInt32Operand index(this, node->child2());
-    GPRTemporary result(this);
+    JSValueRegsTemporary result(this);
 
     GPRReg scratchGPR = scratch.gpr();
     GPRReg indexGPR = index.gpr();
-    GPRReg resultGPR = result.gpr();
+    JSValueRegs resultRegs = result.regs();
 
-    load64(BaseIndex(scratchGPR, indexGPR, TimesEight, JSCellButterfly::offsetOfData()), resultGPR);
-    jsValueResult(resultGPR, node);
+    loadValue(BaseIndex(scratchGPR, indexGPR, TimesEight, JSCellButterfly::offsetOfData()), resultRegs);
+    jsValueResult(resultRegs, node);
 }
 
 void SpeculativeJIT::compilePutCellButterflySlot(Node* node)
@@ -15789,7 +15798,7 @@ void SpeculativeJIT::compilePutCellButterflySlot(Node* node)
     GPRReg indexGPR = index.gpr();
     JSValueRegs valueRegs = value.jsValueRegs();
 
-    store64(valueRegs.gpr(), BaseIndex(scratchGPR, indexGPR, TimesEight, JSCellButterfly::offsetOfData()));
+    storeValue(valueRegs, BaseIndex(scratchGPR, indexGPR, TimesEight, JSCellButterfly::offsetOfData()));
     noResult(node);
 }
 
@@ -15803,12 +15812,12 @@ void SpeculativeJIT::compileArraySortCompact(Node* node)
 
     GPRTemporary scratch(this);
     GPRTemporary counter(this);
-    GPRTemporary value(this);
+    JSValueRegsTemporary value(this);
     GPRTemporary butterfly(this);
 
     GPRReg scratchGPR = scratch.gpr();
     GPRReg counterGPR = counter.gpr();
-    GPRReg valueGPR = value.gpr();
+    JSValueRegs valueRegs = value.regs();
     GPRReg butterflyGPR = butterfly.gpr();
 
     loadPtr(&vm().m_cachedSortScratch, scratchGPR);
@@ -15824,12 +15833,12 @@ void SpeculativeJIT::compileArraySortCompact(Node* node)
     move(lengthGPR, counterGPR);
     auto loop = label();
     auto done = branchSub32(Signed, counterGPR, TrustedImm32(1), counterGPR);
-    load64(BaseIndex(butterflyGPR, counterGPR, TimesEight, 0), valueGPR);
+    loadValue(BaseIndex(butterflyGPR, counterGPR, TimesEight, 0), valueRegs);
     JumpList holes;
-    holes.append(branchTest64(Zero, valueGPR));
+    holes.append(branchIfEmpty(valueRegs));
     if (node->arrayMode().type() == Array::Contiguous)
-        holes.append(branch64(Equal, valueGPR, TrustedImm64(JSValue::encode(jsUndefined()))));
-    store64(valueGPR, BaseIndex(scratchGPR, counterGPR, TimesEight, JSCellButterfly::offsetOfData()));
+        holes.append(branchIfUndefined(valueRegs));
+    storeValue(valueRegs, BaseIndex(scratchGPR, counterGPR, TimesEight, JSCellButterfly::offsetOfData()));
     jump().linkTo(loop, this);
 
     holes.link(this);

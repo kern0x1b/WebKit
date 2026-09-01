@@ -102,7 +102,11 @@ SOFT_LINK_CONSTANT(CoreLocation, kCLLocationAccuracyHundredMeters, double)
 
 - (void)locationManagerDidChangeAuthorization:(CLLocationManager *)manager
 {
+#if defined(WEBKIT_IOS6)
+    auto status = [getCLLocationManagerClassSingleton() authorizationStatus];
+#else
     auto status = [_locationManager authorizationStatus];
+#endif
     if (_isWaitingForAuthorization) {
         switch (status) {
         case kCLAuthorizationStatusNotDetermined:

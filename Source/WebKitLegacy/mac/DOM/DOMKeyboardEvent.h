@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMKeyboardEvent_h
+#define WebKitLegacyDOM_DOMKeyboardEvent_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -54,3 +57,5 @@ WEBKIT_CLASS_DEPRECATED_MAC(10_5, 10_14)
 - (void)initKeyboardEvent:(NSString *)type canBubble:(BOOL)canBubble cancelable:(BOOL)cancelable view:(DOMAbstractView *)view keyIdentifier:(NSString *)keyIdentifier keyLocation:(unsigned)keyLocation ctrlKey:(BOOL)ctrlKey altKey:(BOOL)altKey shiftKey:(BOOL)shiftKey metaKey:(BOOL)metaKey altGraphKey:(BOOL)altGraphKey WEBKIT_DEPRECATED_MAC(10_5, 10_5);
 - (void)initKeyboardEvent:(NSString *)type canBubble:(BOOL)canBubble cancelable:(BOOL)cancelable view:(DOMAbstractView *)view keyIdentifier:(NSString *)keyIdentifier keyLocation:(unsigned)keyLocation ctrlKey:(BOOL)ctrlKey altKey:(BOOL)altKey shiftKey:(BOOL)shiftKey metaKey:(BOOL)metaKey WEBKIT_DEPRECATED_MAC(10_5, 10_5);
 @end
+
+#endif // WebKitLegacyDOM_DOMKeyboardEvent_h

@@ -25,6 +25,10 @@
 
 #pragma once
 
+#include <wtf/Platform.h>
+
+#if ENABLE(REMOTE_INSPECTOR)
+
 #include "LegacyWebPageInspectorController.h"
 
 #include <JavaScriptCore/RemoteControllableTarget.h>
@@ -67,3 +71,5 @@ private:
 };
 
 SPECIALIZE_TYPE_TRAITS_CONTROLLABLE_TARGET(LegacyWebPageDebuggable, LegacyWebPage);
+
+#endif // ENABLE(REMOTE_INSPECTOR)

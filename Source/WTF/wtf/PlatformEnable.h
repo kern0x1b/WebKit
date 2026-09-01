@@ -726,8 +726,24 @@
 #endif
 
 #if USE(JSVALUE32_64)
+/* iOS 6 port: 2.54 removed the ARMv7 escape hatch that 2.52 still had, so every
+   32-bit build is forced onto CLoop here. The 2.52 predicate was
+   CPU(ARM_THUMB2) && CPU(ARM_HARDFP) && OS(LINUX); we widen it to Darwin and
+   drop the hardfp term deliberately. Rationale for dropping it: clang does not
+   define __ARM_PCS_VFP for armv7-apple-ios6.0 (Apple uses the softfp calling
+   convention), so CPU(ARM_HARDFP) is 0 for us -- and grepping Source/JavaScriptCore
+   and Source/WTF shows ARM_HARDFP has no references outside PlatformCPU.h, so no
+   assembler or calling-convention code actually branches on it. The term is
+   vestigial, and gating on it would exclude us for no functional reason. */
+#if CPU(ARM_THUMB2) && (OS(LINUX) || OS(DARWIN))
+#if !defined(ENABLE_JIT)
+#define ENABLE_JIT 1
+#endif
+#else
+/* Disable JIT on all other 32bit architectures. */
 #undef ENABLE_JIT
 #define ENABLE_JIT 0
+#endif
 #endif
 
 #if CPU(RISCV64)
@@ -758,8 +774,14 @@
 #if USE(JSVALUE32_64)
 #undef ENABLE_FTL_JIT
 #define ENABLE_FTL_JIT 0
-#undef ENABLE_DFG_JIT
-#define ENABLE_DFG_JIT 0
+/* iOS 6 port: 2.54 widened this block to take the DFG down with the FTL, though the
+   comment above only justifies the FTL. webkitglib/2.52 (wpewebkit-2.52.6) kills only
+   ENABLE_FTL_JIT here and still ships a working 32-bit DFG, and 2.54 still carries every
+   32-bit DFG source (dfg/DFGSpeculativeJIT32_64.cpp, jit/CallFrameShuffler32_64.cpp,
+   jit/JITOpcodes32_64.cpp). Only the predicate changed, so we restore 2.52's behaviour.
+   This is not optional polish: JITInlineCacheGenerator.h puts DFG::UnlinkedPropertyInlineCache
+   in CompileTimePropertyInlineCache unconditionally and dereferences it, so ENABLE_JIT
+   without ENABLE_DFG_JIT does not compile on any architecture. */
 #endif
 
 /* If possible, try to enable a disassembler. This is optional. We proceed in two
@@ -777,7 +799,11 @@
 #define ENABLE_RISCV64_DISASSEMBLER 1
 #endif
 
-#if !defined(ENABLE_DISASSEMBLER) && (ENABLE(ZYDIS) || ENABLE(ARM64_DISASSEMBLER) || ENABLE(RISCV64_DISASSEMBLER) || (ENABLE(JIT) && USE(CAPSTONE)))
+#if !defined(ENABLE_ARMV7_DISASSEMBLER) && ENABLE(JIT) && CPU(ARM_THUMB2) && !USE(CAPSTONE)
+#define ENABLE_ARMV7_DISASSEMBLER 1
+#endif
+
+#if !defined(ENABLE_DISASSEMBLER) && (ENABLE(ZYDIS) || ENABLE(ARM64_DISASSEMBLER) || ENABLE(ARMV7_DISASSEMBLER) || ENABLE(RISCV64_DISASSEMBLER) || (ENABLE(JIT) && USE(CAPSTONE)))
 #define ENABLE_DISASSEMBLER 1
 #endif
 
@@ -789,6 +815,13 @@
 #endif
 
 #if CPU(ARM64) && (OS(DARWIN) || OS(LINUX) || OS(FREEBSD))
+#define ENABLE_DFG_JIT 1
+#endif
+
+/* iOS 6 port: restored verbatim from wpewebkit-2.52.6, which reads
+   "Enable the DFG JIT on ARMv7. Only tested on iOS, Linux, and FreeBSD." -- iOS is
+   named explicitly. 2.54 deleted the ARMv7 arm of this clause. */
+#if CPU(ARM_THUMB2) && (OS(DARWIN) || OS(LINUX) || OS(FREEBSD))
 #define ENABLE_DFG_JIT 1
 #endif
 

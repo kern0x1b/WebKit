@@ -36,7 +36,9 @@
 #import <numeric>
 #import <pal/spi/cg/CoreGraphicsSPI.h>
 #import <pal/spi/cocoa/FeatureFlagsSPI.h>
+#if PLATFORM(MAC)
 #import <pal/spi/mac/NSGraphicsSPI.h>
+#endif
 #import <wtf/SoftLinking.h>
 #import <wtf/StdLibExtras.h>
 
@@ -104,6 +106,15 @@ void GraphicsContextCG::drawFocusRing(const Path& path, float, const Color& colo
     if (path.isEmpty())
         return;
 
+#if defined(WEBKIT_IOS6)
+    // Focus rings are drawn with CGStyle, which this CoreGraphics does not have;
+    // asking for it aborts the process rather than being ignored. A touch device
+    // with no keyboard focus loses nothing by not drawing them.
+    UNUSED_PARAM(color);
+    UNUSED_PARAM(zoomFactor);
+    return;
+#else
+
     CGFocusRingStyle focusRingStyle;
 #if USE(APPKIT)
     NSInitializeCGFocusRingStyleForTime(NSFocusRingOnly, &focusRingStyle, std::numeric_limits<double>::max());
@@ -138,6 +149,7 @@ void GraphicsContextCG::drawFocusRing(const Path& path, float, const Color& colo
     CGContextAddPath(platformContext, path.platformPath());
 
     CGContextFillPath(platformContext);
+#endif
 }
 
 void GraphicsContextCG::drawFocusRing(const Vector<FloatRect>& rects, float outlineWidth, const Color& color, float zoomFactor)

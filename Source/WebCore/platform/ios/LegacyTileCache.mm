@@ -25,6 +25,7 @@
 
 #import "config.h"
 #import "LegacyTileCache.h"
+#import "MemoryRelease.h"
 
 #if PLATFORM(IOS_FAMILY)
 
@@ -38,11 +39,27 @@
 #import "SystemMemory.h"
 #import "WAKWindow.h"
 #import "WKGraphics.h"
+#import "MemoryCache.h"
 #import "WebCoreThreadRun.h"
 #import <CoreText/CoreText.h>
 #import <pal/spi/cocoa/QuartzCoreSPI.h>
 #import <wtf/MemoryPressureHandler.h>
 #import <wtf/RAMSize.h>
+
+#if defined(WEBKIT_IOS6)
+#include <unistd.h>
+// Our own running commentary. WTFLogAlways reaches a file through stderr, so
+// every one of these is a synchronous write on whichever thread the engine is
+// on - and some of them sit on paths that run for every frame of a scroll.
+static bool tileCacheChatterEnabled()
+{
+    static int enabled = -1;
+    if (enabled < 0)
+        enabled = access("/tmp/native-engine-log", F_OK) == 0 ? 1 : 0;
+    return enabled == 1;
+}
+#endif
+
 
 // FIXME: This should go into a WAKViewInternals.h header.
 @interface WAKView (WebViewExtras)
@@ -63,6 +80,10 @@
 @end
 
 namespace WebCore {
+
+#if defined(WEBKIT_IOS6)
+extern "C" int g_webkitIOS6PendingDrawWork;
+#endif
 
 void LegacyTileCache::ref() const
 {
@@ -433,6 +454,9 @@ unsigned LegacyTileCache::tileCapacityForGrid(LegacyTileGrid* grid)
 {
     static unsigned capacity;
     if (!capacity) {
+#if defined(WEBKIT_IOS6)
+        capacity = 32 * 1024 * 1024;
+#else
         size_t totalMemory = ramSize() / 1024 / 1024;
         if (totalMemory >= 1024)
             capacity = 128 * 1024 * 1024;
@@ -440,6 +464,7 @@ unsigned LegacyTileCache::tileCapacityForGrid(LegacyTileGrid* grid)
             capacity = 64 * 1024 * 1024;
         else
             capacity = 32 * 1024 * 1024;
+#endif
     }
 
     int gridCapacity;
@@ -453,6 +478,50 @@ unsigned LegacyTileCache::tileCapacityForGrid(LegacyTileGrid* grid)
         gridCapacity = capacity * 3 / 4;
     else
         gridCapacity = capacity;
+
+    static int lastReportedLevel = -1;
+    if (memoryLevel != lastReportedLevel) {
+        lastReportedLevel = memoryLevel;
+        if (tileCacheChatterEnabled()) WTFLogAlways("[tilebudget] systemMemoryLevel %d -> grid capacity %.1f MB (active grid gets %.1f MB)",
+            memoryLevel, gridCapacity / (1024.0 * 1024.0), (gridCapacity * 3 / 4) / (1024.0 * 1024.0));
+    }
+
+    // This poll is the only place the engine notices the system running out of
+    // memory before the kill arrives - both soak deaths were straight SIGKILLs
+    // with the level in the twenties just before. Shrinking the tile grid alone
+    // saves a few megabytes; the caches and the collector hold far more, and
+    // this tells them too. Rate-limited so a level hovering at the threshold
+    // does not turn into a purge loop.
+    // The critical level of this call throws away every compiled script, the
+    // font caches and the style resolver. Measured on the feed, doing that on a
+    // ten second timer left the engine permanently regenerating bytecode under
+    // the web lock and the interface at one frame per second. So the routine
+    // answer to pressure is a collection and the cheap caches; the destructive
+    // one is kept for the last few megabytes before the kill.
+    if (memoryLevel > 0 && memoryLevel < 25) {
+        static CFAbsoluteTime lastRelease;
+        static CFAbsoluteTime lastCriticalRelease;
+        CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();
+        bool desperate = memoryLevel < 10;
+        double sinceLast = now - (desperate ? lastCriticalRelease : lastRelease);
+        if (sinceLast > (desperate ? 60.0 : 20.0)) {
+            if (desperate)
+                lastCriticalRelease = now;
+            lastRelease = now;
+            if (tileCacheChatterEnabled()) WTFLogAlways("[tilebudget] level %d: releasing engine memory%s", memoryLevel, desperate ? " (critical)" : "");
+            WebThreadRun(^{
+                // The largest identified block of this process's memory is
+                // decoded image data: the layer count is five to eleven and the
+                // tile cache under five megabytes, while the graphics figure sits
+                // near sixty. Those images are live - they are in the render tree
+                // - so an ordinary cache prune leaves them alone. Dropping the
+                // decoded form of the ones furthest from the screen costs a
+                // redecode if the reader scrolls back, and costs nothing else.
+                MemoryCache::singleton().pruneLiveResourcesToSize(4 * 1024 * 1024, false);
+                WebCore::releaseMemory(desperate ? WTF::Critical::Yes : WTF::Critical::No, WTF::Synchronous::No);
+            });
+        }
+    }
 
     if (keepsZoomedOutTiles() && grid == m_zoomedOutTileGrid.get()) {
         if (activeTileGrid() == m_zoomedOutTileGrid.get())
@@ -538,6 +607,16 @@ void LegacyTileCache::drawWindowContent(LegacyTileLayer* layer, CGContextRef con
     } else {
         // Simple repaint
         CGRect dirtyRectInSuper = [hostLayer() convertRect:dirtyRect fromLayer:layer];
+#if defined(WEBKIT_IOS6)
+        if (([]() { static const bool logTilePaintOnce = getenv("WEBKIT_IOS6_LOG_PAINT") != nullptr; return logTilePaintOnce; }())) {
+            fprintf(stderr, "[ios6 paint] tile %g,%g %gx%g dirty %g,%g %gx%g content view %s\n",
+                frame.origin.x, frame.origin.y, frame.size.width, frame.size.height,
+                dirtyRectInSuper.origin.x, dirtyRectInSuper.origin.y,
+                dirtyRectInSuper.size.width, dirtyRectInSuper.size.height,
+                [m_window contentView] ? object_getClassName([m_window contentView]) : "(none)");
+            fflush(stderr);
+        }
+#endif
         [m_window displayRect:dirtyRectInSuper];
     }
     
@@ -554,6 +633,7 @@ void LegacyTileCache::drawLayer(LegacyTileLayer* layer, CGContextRef context, Dr
     }
 
     WKSetCurrentGraphicsContext(context);
+
 
     CGRect dirtyRect = CGContextGetClipBoundingBox(context);
     CGRect frame = [layer frame];
@@ -615,6 +695,7 @@ void LegacyTileCache::scheduleRenderingUpdateForPendingRepaint()
 
 void LegacyTileCache::setNeedsDisplayInRect(const IntRect& dirtyRect)
 {
+    g_webkitIOS6PendingDrawWork = 1;
     Locker locker { m_savedDisplayRectMutex };
     bool addedFirstRect = m_savedDisplayRects.isEmpty();
     m_savedDisplayRects.append(dirtyRect);
@@ -665,6 +746,11 @@ bool LegacyTileCache::isTileCreationSuspended() const
 
 bool LegacyTileCache::isTileInvalidationSuspended() const 
 { 
+    if (m_tilingMode == Panning) {
+        LegacyTileGrid* grid = const_cast<LegacyTileCache*>(this)->activeTileGrid();
+        if (grid && grid->shouldUseMinimalTileCoverage())
+            return false;
+    }
     return m_tilingMode == Zooming || m_tilingMode == Panning || m_tilingMode == ScrollToTop || m_tilingMode == Disabled; 
 }
 
@@ -766,6 +852,62 @@ void LegacyTileCache::setSpeculativeTileCreationEnabled(bool enabled)
         m_tileCreationTimer.startOneShot(0_s);
 }
 
+// Whether the engine has anything for prepareToDraw to do.
+//
+// -[LegacyTileLayer layoutSublayers] runs inside every CoreAnimation layout pass
+// on the main thread and took the web lock unconditionally, so the interface
+// waited for whatever the engine happened to be doing - measured on the device
+// as three waits longer than a second in a single scroll, the worst of them
+// 16.4 seconds, while 97% of acquisitions were under a frame. The median was
+// never the problem; the tail was.
+//
+// The engine raises this when it schedules a layout or invalidates a tile
+// rectangle, and prepareToDraw lowers it. When it is down there is nothing to
+// ask the engine for, so the main thread does not ask, and cannot be made to
+// wait. A plain relaxed atomic: a stale read costs one frame in either
+// direction, and the safety valve below bounds that anyway.
+extern "C" { int g_webkitIOS6PendingDrawWork = 1; }
+
+// When the main thread has to stop asking politely and simply wait.
+//
+// Skipping prepareToDraw skips the compositing flush with it, and that flush is
+// what puts new content into composited layers. Tiles keep painting themselves,
+// so the page looked right while every fixed bar on it stayed empty - the engine
+// reported the bars at their correct places, y 20 and y 430 in window
+// coordinates, and the screen showed neither. Content without its bars is not a
+// win.
+//
+// So the skipping is bounded: after this long without a real pass, the main
+// thread waits however long one engine operation takes. That is a bounded stall
+// - the layouts are around 300 ms now - in exchange for the page being whole.
+bool LegacyTileCache::mainThreadMustWaitForEngine()
+{
+    return CFAbsoluteTimeGetCurrent() - lastPreparedToDraw() > 0.15;
+}
+
+double& LegacyTileCache::lastPreparedToDraw()
+{
+    static double when;
+    return when;
+}
+
+bool LegacyTileCache::mainThreadShouldWaitForEngine()
+{
+    if (g_webkitIOS6PendingDrawWork)
+        return true;
+
+    // Never skipped for long. If the engine has been quiet but something was
+    // missed - a case that raises no flag - this puts the main thread back in
+    // step at four times a second, which is invisible but self-correcting.
+    static CFAbsoluteTime lastSynchronised;
+    CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();
+    if (now - lastSynchronised > 0.25) {
+        lastSynchronised = now;
+        return true;
+    }
+    return false;
+}
+
 void LegacyTileCache::prepareToDraw()
 {
     // This will trigger document relayout if needed.
@@ -775,6 +917,9 @@ void LegacyTileCache::prepareToDraw()
         Locker locker { m_tileMutex };
         flushSavedDisplayRects();
     }
+
+    g_webkitIOS6PendingDrawWork = 0;
+    lastPreparedToDraw() = CFAbsoluteTimeGetCurrent();
 }
 
 void LegacyTileCache::setLayerPoolCapacity(unsigned capacity)

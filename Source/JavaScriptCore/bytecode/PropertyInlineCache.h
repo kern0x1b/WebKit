@@ -838,6 +838,36 @@ struct BaselineUnlinkedPropertyInlineCache : JSC::UnlinkedPropertyInlineCache {
     BytecodeIndex bytecodeIndex;
 };
 
+// ios6/armv7: hoisted out of dfg/DFGJITCode.h, which is wholly #if ENABLE(DFG_JIT).
+// JITInlineCacheGenerator.h puts DFG::UnlinkedPropertyInlineCache into
+// CompileTimePropertyInlineCache and dereferences it with no ENABLE(DFG_JIT) guard, so a
+// baseline-JIT-only build needs the complete type. Nothing in it depends on the DFG.
+namespace DFG {
+
+struct UnlinkedPropertyInlineCache : JSC::UnlinkedPropertyInlineCache {
+    void setUsedRegisters(ScalarRegisterSet value) { m_usedRegisters = value; }
+    void removeUsedRegister(GPRReg reg) { m_usedRegisters.remove(reg); }
+
+    CodeOrigin codeOrigin;
+    CallSiteIndex callSiteIndex;
+    GPRReg m_baseGPR { InvalidGPRReg };
+    GPRReg m_valueGPR { InvalidGPRReg };
+    GPRReg m_extraGPR { InvalidGPRReg };
+    GPRReg m_extra2GPR { InvalidGPRReg };
+    GPRReg m_propertyCacheGPR { InvalidGPRReg };
+#if USE(JSVALUE32_64)
+    GPRReg m_valueTagGPR { InvalidGPRReg };
+    GPRReg m_baseTagGPR { InvalidGPRReg };
+    GPRReg m_extraTagGPR { InvalidGPRReg };
+    GPRReg m_extra2TagGPR { InvalidGPRReg };
+#endif
+
+private:
+    ScalarRegisterSet m_usedRegisters;
+};
+
+} // namespace DFG
+
 } // namespace JSC
 
 SPECIALIZE_TYPE_TRAITS_BEGIN(JSC::HandlerPropertyInlineCache)

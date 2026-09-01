@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMRangeException_h
+#define WebKitLegacyDOM_DOMRangeException_h
+
 /*
  * Copyright (C) 2004, 2006 Apple Inc. All rights reserved.
  * Copyright (C) 2006 Samuel Weinig <sam.weinig@gmail.com>
@@ -34,3 +37,5 @@ enum DOMRangeExceptionCode {
     DOM_BAD_BOUNDARYPOINTS_ERR        = 1,
     DOM_INVALID_NODE_TYPE_ERR         = 2
 } WEBKIT_ENUM_DEPRECATED_MAC(10_4, 10_14);
+
+#endif // WebKitLegacyDOM_DOMRangeException_h

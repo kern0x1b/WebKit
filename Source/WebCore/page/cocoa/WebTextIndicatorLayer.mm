@@ -115,8 +115,16 @@ static bool NODELETE indicatorWantsFadeIn(const WebCore::TextIndicator& indicato
     auto bounceLayers = adoptNS([[NSMutableArray alloc] init]);
 
     RetainPtr<CGColorRef> highlightColor;
+#if defined(WEBKIT_IOS6)
+    auto grayColorSpace = adoptCF(CGColorSpaceCreateDeviceGray());
+    CGFloat rimComponents[2] = { 0, 0.35 };
+    CGFloat dropComponents[2] = { 0, 0.2 };
+    auto rimShadowColor = adoptCF(CGColorCreate(grayColorSpace.get(), rimComponents));
+    auto dropShadowColor = adoptCF(CGColorCreate(grayColorSpace.get(), dropComponents));
+#else
     auto rimShadowColor = adoptCF(CGColorCreateGenericGray(0, 0.35));
     auto dropShadowColor = adoptCF(CGColorCreateGenericGray(0, 0.2));
+#endif
     auto borderColor = adoptCF(CGColorCreateSRGB(0.96, 0.9, 0, 1));
 #if PLATFORM(MAC)
     highlightColor = [NSColor findHighlightColor].CGColor;

@@ -533,6 +533,12 @@ bool RenderLayerScrollableArea::canUseCompositedScrolling() const
     if (renderer.settings().asyncOverflowScrollingEnabled())
         return isVisible && scrollsOverflow() && !m_layer.isInsideSVGForeignObject();
 
+    // Promoting every scrollable overflow area here looked right - repaint
+    // scrolling costs a full compositing update per frame - but it is not
+    // survivable: RenderLayerBacking::updateConfiguration reaches for a
+    // scrolling coordinator that WebKitLegacy does not have and takes the
+    // process down with SIGSEGV about forty seconds into the feed. The property
+    // is left as the only way in, so nothing is promoted unless a page asks.
 #if PLATFORM(IOS_FAMILY) && ENABLE(WEBKIT_OVERFLOW_SCROLLING_CSS_PROPERTY)
     return isVisible && scrollsOverflow() && renderer.style().overflowScrolling() == Style::WebkitOverflowScrolling::Touch;
 #else

@@ -61,8 +61,12 @@
 #import <WebCore/TextIterator.h>
 #import <objc/objc-class.h>
 #import <objc/objc.h>
+#if PLATFORM(MAC)  // ios6: mac SPI
 #import <pal/spi/mac/LookupSPI.h>
+#endif
+#if PLATFORM(MAC)  // ios6: mac SPI
 #import <pal/spi/mac/NSMenuSPI.h>
+#endif
 #import <wtf/RuntimeApplicationChecks.h>
 
 #import <pal/mac/DataDetectorsSoftLink.h>

@@ -36,6 +36,8 @@
 #include <JavaScriptCore/JITOperationValidation.h>
 #include <JavaScriptCore/JITOperations.h>
 #include <JavaScriptCore/JSCJSValue.h>
+#include "PropertyInlineCache.h"  // ios6/armv7: for the complete
+                                 // DFG::UnlinkedPropertyInlineCache used below.
 #include <JavaScriptCore/RegisterSet.h>
 
 namespace JSC {

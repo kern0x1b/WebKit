@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMCSSValueInternal_h
+#define WebKitLegacyDOM_DOMCSSValueInternal_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -31,3 +34,5 @@ class DeprecatedCSSOMValue;
 
 DOMCSSValue *kit(WebCore::DeprecatedCSSOMValue*);
 Class kitClass(WebCore::DeprecatedCSSOMValue*);
+
+#endif // WebKitLegacyDOM_DOMCSSValueInternal_h

@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMTokenListInternal_h
+#define WebKitLegacyDOM_DOMTokenListInternal_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -24,10 +27,14 @@
  */
 
 
-#import <WebKitLegacy/DOMTokenList.h>
+// DOMTokenList.h is deliberately absent from the iOS framework, so it can only
+// be reached as a sibling in the source tree.
+#import "DOMTokenList.h"
 
 namespace WebCore {
 class DOMTokenList;
 }
 
 DOMTokenList *kit(WebCore::DOMTokenList*);
+
+#endif // WebKitLegacyDOM_DOMTokenListInternal_h

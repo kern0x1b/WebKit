@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMHTMLAppletElement_h
+#define WebKitLegacyDOM_DOMHTMLAppletElement_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -41,3 +44,5 @@ WEBKIT_CLASS_DEPRECATED_MAC(10_4, 10_14)
 @property int vspace;
 @property (copy) NSString *width;
 @end
+
+#endif // WebKitLegacyDOM_DOMHTMLAppletElement_h

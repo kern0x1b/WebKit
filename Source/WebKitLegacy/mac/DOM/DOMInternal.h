@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMInternal_h
+#define WebKitLegacyDOM_DOMInternal_h
+
 /*
  * Copyright (C) 2004, 2005, 2006, 2007, 2008, 2009 Apple Inc. All rights reserved.
  * Copyright (C) 2006 James G. Speth (speth@end.com)
@@ -87,3 +90,5 @@ inline WallTime core(NSTimeInterval sec)
 {
     return WallTime::fromRawSeconds(sec + NSTimeIntervalSince1970);
 }
+
+#endif // WebKitLegacyDOM_DOMInternal_h

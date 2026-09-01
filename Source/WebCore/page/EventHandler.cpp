@@ -362,7 +362,14 @@ static inline ScrollGranularity NODELETE wheelGranularityToScrollGranularity(uns
     }
 }
 
-#if (ENABLE(TOUCH_EVENTS) && !PLATFORM(IOS_FAMILY))
+// This guard used to be exactly the guard on the dispatcher that calls it
+// (ENABLE(TOUCH_EVENTS) && !ENABLE(IOS_TOUCH_EVENTS), further down in this
+// file) inverted onto PLATFORM(IOS_FAMILY) - a fair simplification everywhere
+// else, because until this port nothing had ENABLE(TOUCH_EVENTS) on without
+// ENABLE(IOS_TOUCH_EVENTS) also on for PLATFORM(IOS_FAMILY). This build is the
+// first thing in this tree to be exactly that combination, so the two guards
+// have to be written out separately now instead of one implying the other.
+#if (ENABLE(TOUCH_EVENTS) && (!PLATFORM(IOS_FAMILY) || !ENABLE(IOS_TOUCH_EVENTS)))
 static bool shouldGesturesTriggerActive()
 {
     // If the platform we're on supports GestureTapDown and GestureTapCancel then we'll

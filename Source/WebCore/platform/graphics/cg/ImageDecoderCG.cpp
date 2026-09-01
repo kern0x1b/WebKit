@@ -681,7 +681,35 @@ PlatformImagePtr ImageDecoderCG::createFrameImageAtIndex(size_t index, Subsampli
 
     ASSERT(decodingOptions.decodingMode() != DecodingMode::Auto);
 
-    if (decodingOptions.decodingMode() == DecodingMode::Synchronous) {
+    bool decodeForNativeSize = decodingOptions.decodingMode() == DecodingMode::Synchronous;
+
+#if defined(WEBKIT_IOS6)
+    // A synchronous decode is what every image inside the viewport gets
+    // (RenderBoxModelObject::decodingModeForImageDraw returns Synchronous for
+    // isVisibleInViewport()), so on this port the images that are on screen are
+    // exactly the ones decoded at native size. The panel is 640x960 px and the
+    // process budget is about 122MB, so a 1080px-wide photo drawn into a
+    // 320pt column is 4.7MB of RGBA held to paint 1.6MB of it, and the surplus
+    // is resampled away again on every paint.
+    //
+    // Decode it at the size it will be drawn instead, which is what the
+    // asynchronous branch below already does on this same device for the images
+    // below the fold. This is not the subsampling lever: sizeForDrawing is exact
+    // rather than a power of two, so the frame is never smaller than the rect it
+    // is painted into and there is no softening. A later draw at a larger size
+    // re-decodes rather than reusing a small frame - the frame cache keys on it,
+    // see DecodingOptions::isCompatibleWith().
+    //
+    // Only when a drawing size is known and is actually smaller than the image:
+    // a synchronous decode with no sizeForDrawing (canvas, favicons) keeps the
+    // native-size entry point it has always used.
+    if (auto sizeForDrawing = decodingOptions.sizeForDrawing()) {
+        if (sizeForDrawing->unclampedArea() < frameSizeAtIndex(index, SubsamplingLevel::Default).unclampedArea())
+            decodeForNativeSize = false;
+    }
+#endif
+
+    if (decodeForNativeSize) {
         // Decode an image synchronously for its native size.
         options = imageSourceOptions(subsamplingLevel, decodingOptions.decodingDestination());
         image = adoptCF(CGImageSourceCreateImageAtIndex(m_nativeDecoder.get(), index, options.get()));

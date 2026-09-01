@@ -183,7 +183,13 @@ namespace JSC {
         // and return value. Like any sensible architecture would.
         void callDoubleToDouble(CodePtr<CFunctionPtrTag> function)
         {
+#if CPU(ARM_THUMB2) && OS(DARWIN)
+            moveDoubleToInts(fpRegT0, GPRInfo::argumentGPR0, GPRInfo::argumentGPR1);
+#endif
             m_calls.append(std::make_pair(call(OperationPtrTag), function.retagged<OperationPtrTag>()));
+#if CPU(ARM_THUMB2) && OS(DARWIN)
+            moveIntsToDouble(GPRInfo::returnValueGPR, GPRInfo::returnValueGPR2, fpRegT0);
+#endif
         }
         
         void callDoubleToDoublePreservingReturn(CodePtr<CFunctionPtrTag> function)

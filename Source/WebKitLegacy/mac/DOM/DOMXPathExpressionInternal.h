@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMXPathExpressionInternal_h
+#define WebKitLegacyDOM_DOMXPathExpressionInternal_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -30,3 +33,5 @@ class XPathExpression;
 }
 
 DOMXPathExpression *kit(WebCore::XPathExpression*);
+
+#endif // WebKitLegacyDOM_DOMXPathExpressionInternal_h

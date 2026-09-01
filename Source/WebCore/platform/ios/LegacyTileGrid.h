@@ -106,7 +106,9 @@ private:
     TileIndex tileIndexForPoint(const IntPoint&) const;
 
     IntRect adjustCoverRectForPageBounds(const IntRect&) const;
+public:
     bool shouldUseMinimalTileCoverage() const;
+private:
 
 private:        
     WeakRef<LegacyTileCache> m_tileCache;

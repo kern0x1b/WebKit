@@ -25,6 +25,8 @@
 
 #import "config.h"
 #import "WebCoreThread.h"
+#include <execinfo.h>
+#include <unistd.h>
 
 #if PLATFORM(IOS_FAMILY)
 
@@ -80,6 +82,7 @@ void ReleaseWebThreadGlobalState()
     // In single-threaded environments we do not need to unset the context, as there should not be access from
     // multiple threads.
     ASSERT(WebThreadIsEnabled());
+#if ENABLE(WEBGL)
     using ReleaseThreadResourceBehavior = WebCore::GraphicsContextGLANGLE::ReleaseThreadResourceBehavior;
     // For web thread, just release the context as we know we will see calls to it again.
     // For non-web threads, e.g. third-party client threads, we don't know if we ever see another call from the
@@ -87,6 +90,7 @@ void ReleaseWebThreadGlobalState()
     ReleaseThreadResourceBehavior releaseBehavior =
         WebThreadIsCurrent() ? ReleaseThreadResourceBehavior::ReleaseCurrentContext : ReleaseThreadResourceBehavior::ReleaseThreadResources;
     WebCore::GraphicsContextGLANGLE::releaseThreadResources(releaseBehavior);
+#endif
 }
 
 }
@@ -279,6 +283,21 @@ static void SendDelegateMessage(RetainPtr<NSInvocation>&& invocation)
         NSLog(@"delegate send: %@", NSStringFromSelector([delegateInvocation() selector]));
 #endif
 
+#if defined(WEBKIT_IOS6)
+    // What the round trip costs.
+    //
+    // The web thread wakes the main thread and then blocks until it answers, so
+    // every synchronous delegate message is a full main-thread latency. A load
+    // pulls eighty five resources and each one reports progress several times,
+    // and the profile shows the web thread parked for a quarter of the load - this
+    // counts whether this is where it goes.
+    static int recordDelegates = -1;
+    if (recordDelegates < 0)
+        recordDelegates = access("/tmp/native-delegate-cost", F_OK) == 0 ? 1 : 0;
+    CFAbsoluteTime blockedFrom = recordDelegates ? CFAbsoluteTimeGetCurrent() : 0;
+    RetainPtr<NSInvocation> sentInvocation = recordDelegates ? delegateInvocation() : nil;
+#endif
+
     {
         WebThreadDelegateMessageScope delegateScope;
         // Code block created to scope JSC::JSLock::DropAllLocks outside of WebThreadLock()
@@ -303,6 +322,46 @@ static void SendDelegateMessage(RetainPtr<NSInvocation>&& invocation)
         delegateLock.unlock();
         _WebThreadLock();
     }
+
+#if defined(WEBKIT_IOS6)
+    if (blockedFrom) {
+        static unsigned messageCount;
+        static double blockedTotal;
+        static double slowest;
+        static CFAbsoluteTime lastReport;
+        double blocked = CFAbsoluteTimeGetCurrent() - blockedFrom;
+        messageCount++;
+        blockedTotal += blocked;
+        if (blocked > slowest)
+            slowest = blocked;
+        CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();
+        // Which selectors, and what each costs in total - a message sent three
+        // hundred times for a tenth of a millisecond is a different problem from
+        // one sent twice for half a second.
+        if (blocked > 0.02) {
+            const char *name = "(unknown)";
+            const char *detail = "";
+            @try {
+                name = sel_getName([sentInvocation selector]);
+                // For a notification the selector says nothing; the name of the
+                // notification is the first argument, and that is what identifies
+                // whose observers are taking the time.
+                if ([[sentInvocation target] isKindOfClass:[NSNotificationCenter class]]) {
+                    id argument = nil;
+                    [sentInvocation getArgument:&argument atIndex:2];
+                    if ([argument isKindOfClass:[NSString class]])
+                        detail = [argument UTF8String];
+                }
+            } @catch (id) { }
+            WTFLogAlways("[delegate] %.0f ms in %s %s", blocked * 1000, name, detail);
+        }
+        if (now - lastReport > 5.0) {
+            lastReport = now;
+            WTFLogAlways("[delegate] %u messages, %.0f ms blocked in total, slowest %.0f ms",
+                messageCount, blockedTotal * 1000, slowest * 1000);
+        }
+    }
+#endif
 }
 
 void WebThreadRunOnMainThread(void(^delegateBlock)())
@@ -508,6 +567,69 @@ static void MainRunLoopAutoUnlock(CFRunLoopObserverRef, CFRunLoopActivity, void*
     _WebThreadUnlock();
 }
 
+#if defined(WEBKIT_IOS6)
+// Taking the web lock only if it is free, from the main thread.
+//
+// The interface freezes measured on this device are not a slow median - 97% of
+// acquisitions are inside a frame - they are a tail: single waits of one, two,
+// sixteen, nineteen seconds while the web thread runs a long layout or a long
+// script inside one run-loop iteration. The lock is held for that whole
+// iteration by design (WebRunLoopLock at order 0, WebRunLoopUnlock at 2500000),
+// so a main thread that asks for it can be stopped for as long as the page's own
+// JavaScript feels like running.
+//
+// Nothing the main thread does under this lock is worth an unbounded wait: it is
+// preparing tiles, and tiles that already exist keep their content and are moved
+// by UIKit without the engine. So it asks, and if the answer is no it draws what
+// it has and comes back next frame. The engine invalidates the tiles when it is
+// done, which brings the caller straight back here, so nothing is lost - only
+// the waiting.
+// Letting the main thread through, at a point where the engine is between jobs.
+//
+// The web lock is held for a whole turn of the web thread's run loop, so a turn
+// that contains several pieces of work makes the interface wait for their sum.
+// The main thread raises webThreadShouldYield before it blocks; this hands the
+// lock over at a boundary where nothing is half-built, and takes it back
+// afterwards. The main thread's own auto-unlock observer releases it at the end
+// of its turn, so the wait it was in ends immediately.
+//
+// Only safe between whole jobs. Never inside layout - the render tree is
+// inconsistent there and a main-thread reader would see it.
+bool WebThreadYieldIfAsked(void)
+{
+    if (!WebThreadIsCurrent() || !webThreadShouldYield || !isWebThreadLocked)
+        return false;
+    _WebThreadUnlock();
+    isWebThreadLocked = NO;
+    sched_yield();
+    _WebThreadLock();
+    isWebThreadLocked = YES;
+    return true;
+}
+
+bool WebThreadTryLockForFrame(void)
+{
+    if (WebThreadIsCurrent() || !webThreadStarted)
+        return true;
+    if (mainThreadLockCount)
+        return true;
+
+    mainThreadHasPendingAutoUnlock = YES;
+    CFRunLoopAddObserver(CFRunLoopGetCurrent(), mainRunLoopAutoUnlockObserver().get(), kCFRunLoopCommonModes);
+
+    if (!webLock.tryLock()) {
+        CFRunLoopRemoveObserver(CFRunLoopGetCurrent(), mainRunLoopAutoUnlockObserver().get(), kCFRunLoopCommonModes);
+        mainThreadHasPendingAutoUnlock = NO;
+        return false;
+    }
+
+    webThreadShouldYield = false;
+    mainThreadLockCount++;
+    CFRunLoopWakeUp(CFRunLoopGetMain());
+    return true;
+}
+#endif
+
 static void _WebThreadAutoLock(void)
 {
     ASSERT(!WebThreadIsCurrent());
@@ -532,8 +654,39 @@ static void WebRunLoopUnlockInternal(AutoreleasePoolOperation poolOperation)
 {
     ASSERT(sAsyncDelegates());
     if ([sAsyncDelegates() count]) {
+#if defined(WEBKIT_IOS6)
+        // Sent without waiting, which is what "async" was supposed to mean.
+        //
+        // These invocations were queued by callers that explicitly did not want
+        // to block - WKViewNotificationViewFrameSizeChanged says so in its own
+        // comment - and then the queue was drained with SendDelegateMessage,
+        // which wakes the main thread and blocks until it answers. So the block
+        // was only deferred, not removed. Measured over one load: 419 messages,
+        // 1939 ms of web thread blocked, and 1450 ms of that in two postings of
+        // WAKViewFrameSizeDidChangeNotification alone.
+        //
+        // Dispatching instead keeps the web lock on the web thread and lets it
+        // carry on. The ordering that is given up is between these no-reply
+        // messages and later synchronous ones, which is exactly what queueing
+        // them asynchronously already conceded.
+        static int blockOnAsyncDelegates = -1;
+        if (blockOnAsyncDelegates < 0)
+            blockOnAsyncDelegates = access("/tmp/native-block-async-delegates", F_OK) == 0 ? 1 : 0;
+        if (blockOnAsyncDelegates) {
+            for (NSInvocation *invocation in sAsyncDelegates().get())
+                SendDelegateMessage(invocation);
+        } else {
+            for (NSInvocation *invocation in sAsyncDelegates().get()) {
+                RetainPtr<NSInvocation> retained = invocation;
+                RunLoop::mainSingleton().dispatch([retained] {
+                    [retained invoke];
+                });
+            }
+        }
+#else
         for (NSInvocation* invocation in sAsyncDelegates().get())
             SendDelegateMessage(invocation);
+#endif
         [sAsyncDelegates() removeAllObjects];
     }
 
@@ -761,7 +914,76 @@ static void _WebThreadLock()
         CRASH();
     }
 
+#if defined(WEBKIT_IOS6)
+    // Every interface freeze on this port is the main thread waiting here, and
+    // the waiter's own stack never names the work that is holding the lock.
+    // Recording who asked, and for how long, is the only way to see what the
+    // finger is actually blocked behind.
+    static int recordWaits = -1;
+    if (recordWaits < 0)
+        recordWaits = access("/tmp/native-weblock-on", F_OK) == 0 ? 1 : 0;
+
+    CFAbsoluteTime askedAt = (onMainThread && recordWaits) ? CFAbsoluteTimeGetCurrent() : 0;
+#endif
+
     webLock.lock();
+
+#if defined(WEBKIT_IOS6)
+    if (askedAt) {
+        double waited = CFAbsoluteTimeGetCurrent() - askedAt;
+
+        // How long the interface waits for the engine, as a distribution.
+        //
+        // This is the number a person feels as jitter: a frame is 16 ms, so every
+        // wait longer than that is a frame the page did not move. A backtrace per
+        // wait is far too expensive to leave on, so the shape is kept as six
+        // counters and printed twice a second.
+        {
+            static unsigned buckets[6];
+            static double waitedTotal;
+            static double worst;
+            static CFAbsoluteTime lastReport;
+            static unsigned acquisitions;
+            ++acquisitions;
+            waitedTotal += waited;
+            if (waited > worst)
+                worst = waited;
+            unsigned bucket = waited < 0.016 ? 0 : waited < 0.033 ? 1 : waited < 0.1 ? 2
+                : waited < 0.3 ? 3 : waited < 1.0 ? 4 : 5;
+            ++buckets[bucket];
+            CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();
+            if (now - lastReport > 2.0) {
+                lastReport = now;
+                WTFLogAlways("[wait] %u locks, %.0f ms waiting, worst %.0f ms; under a frame %u, to 33 ms %u, to 100 %u, to 300 %u, to 1 s %u, over %u",
+                    acquisitions, waitedTotal * 1000, worst * 1000,
+                    buckets[0], buckets[1], buckets[2], buckets[3], buckets[4], buckets[5]);
+                acquisitions = 0;
+                waitedTotal = 0;
+                worst = 0;
+                for (unsigned i = 0; i < 6; i++)
+                    buckets[i] = 0;
+            }
+        }
+
+        if (waited > 0.025 && access("/tmp/native-weblock-stacks", F_OK) == 0) {
+            static FILE *waitLog;
+            if (!waitLog) {
+                waitLog = fopen("/tmp/native-weblock.log", "w");
+                if (waitLog)
+                    setvbuf(waitLog, NULL, _IOLBF, 0);
+            }
+            if (waitLog) {
+                fprintf(waitLog, "%.3f main thread waited %.0f ms for the engine\n", askedAt, waited * 1000);
+                void *frames[16];
+                int count = backtrace(frames, 16);
+                char **names = backtrace_symbols(frames, count);
+                for (int i = 1; i < count && i < 12; i++)
+                    fprintf(waitLog, "    %s\n", names ? names[i] : "?");
+                free(names);
+            }
+        }
+    }
+#endif
 
 #if LOG_WEB_LOCK || LOG_MAIN_THREAD_LOCKING
     lockCount++;
@@ -874,6 +1096,20 @@ void _WebThreadUnlock()
 
     webLock.unlock();
 }
+
+#if defined(WEBKIT_IOS6)
+// Whether taking the web lock from the main thread would block right now.
+//
+// UIKit calls WebThreadLock from -[UIWebTiledView layoutSubviews], which runs
+// inside every CoreAnimation layout pass - so on every frame of a scroll. Every
+// main-thread freeze over 400 ms captured on the device had exactly that stack
+// and was parked there. This lets the caller ask first and do nothing this
+// frame instead of stopping the interface until the engine is finished.
+bool WebThreadIsBusy(void)
+{
+    return isWebThreadLocked && !mainThreadLockCount;
+}
+#endif
 
 bool WebThreadIsLocked(void)
 {

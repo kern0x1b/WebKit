@@ -1002,7 +1002,12 @@ class Instruction
                 $asm.puts ".indirect_symbol #{operands[0].asmLabel}"
                 $asm.puts ".long 0"
                 
-                $asm.puts "OFFLINE_ASM_TEXT_SECTION"
+                # ios6/armv7: puts() wraps its argument in a C string literal, so the
+                # OFFLINE_ASM_TEXT_SECTION macro was emitted verbatim into the inline asm
+                # and never preprocessed -- the assembler saw it as an instruction.
+                # putStr() emits it unquoted so the macro expands, exactly as the
+                # surrounding #if OS(DARWIN) directives are emitted.
+                $asm.putStr("OFFLINE_ASM_TEXT_SECTION")
                 $asm.puts ".align 4"
 
                 $asm.putStr("#elif OS(LINUX)")

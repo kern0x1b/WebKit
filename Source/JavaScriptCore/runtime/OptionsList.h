@@ -25,6 +25,44 @@
 
 #pragma once
 
+#if defined(WEBKIT_IOS6)
+// Capturing a hundred frames of stack for every exception thrown means a large
+// allocation at exactly the moment a page is doing something unusual - and the
+// login page died in malloc inside Exception::finishCreation, out of memory, with
+// the interpreter nested dozens of frames deep. Twenty five frames is still a
+// usable trace and costs a quarter of the memory.
+#define WEBKIT_IOS6_STACK_TRACE_LIMIT 25u
+#else
+#define WEBKIT_IOS6_STACK_TRACE_LIMIT 100u
+#endif
+
+#if defined(WEBKIT_IOS6)
+// Compile sooner than upstream does.
+//
+// The thresholds upstream picks assume a processor where staying in the
+// interpreter a while is cheap and compiling early wastes work. Here the
+// arithmetic is the other way round: a measured tight loop runs at 56 million
+// iterations a second once compiled and about two before, and the freezes that
+// matter are single passes of the site's renderer running three to seven seconds
+// inside the interpreter. Paying for compilation five times sooner is a good
+// trade when the alternative is interpreting a whole render.
+// Upstream's numbers, kept after measuring. Compiling five times sooner sounded
+// right for a processor this slow and was worse on both axes: passes of 5.4, 12.6,
+// 10.3, 1.7 and 0.7 seconds against 3.9, 9.7, 10.3 and 1.0, and 174 MB resident
+// against 151. Paying baseline compilation for the thousands of functions a
+// bundle calls once costs more than the interpreter does.
+#define WEBKIT_IOS6_JIT_WARMUP 500
+#define WEBKIT_IOS6_JIT_SOON 100
+#define WEBKIT_IOS6_OPTIMIZE_WARMUP 1000
+#define WEBKIT_IOS6_OPTIMIZE_SOON 1000
+#else
+#define WEBKIT_IOS6_JIT_WARMUP 500
+#define WEBKIT_IOS6_JIT_SOON 100
+#define WEBKIT_IOS6_OPTIMIZE_WARMUP 1000
+#define WEBKIT_IOS6_OPTIMIZE_SOON 1000
+#endif
+
+
 #include <JavaScriptCore/GCLogging.h>
 #include <JavaScriptCore/JSCWebPreferenceOptions.h>
 #include <JavaScriptCore/JSExportMacros.h>
@@ -84,8 +122,8 @@ bool hasCapacityToUseLargeGigacage();
     v(Bool, useLLInt,  true, Normal, "allows the LLINT to be used if true"_s) \
     v(Bool, useJIT, jitEnabledByDefault(), Normal, "allows the executable pages to be allocated for JIT and thunks if true"_s) \
     v(Bool, useBaselineJIT, true, Normal, "allows the baseline JIT to be used if true"_s) \
-    v(Bool, useDFGJIT, is64Bit(), Normal, "allows the DFG JIT to be used if true"_s) \
-    v(Bool, useRegExpJIT, jitEnabledByDefault() && is64Bit(), Normal, "allows the RegExp JIT to be used if true"_s) \
+    v(Bool, useDFGJIT, dfgJITEnabledByDefault(), Normal, "allows the DFG JIT to be used if true"_s) \
+    v(Bool, useRegExpJIT, regExpJITEnabledByDefault(), Normal, "allows the RegExp JIT to be used if true"_s) \
     v(Bool, useDOMJIT, is64Bit(), Normal, "allows the DOMJIT to be used if true"_s) \
     \
     v(Bool, reportMustSucceedExecutableAllocations, false, Normal, nullptr) \
@@ -351,12 +389,12 @@ bool hasCapacityToUseLargeGigacage();
     v(Double, dfgThresholdScaleForLowP0Cores, 2.0, Normal, "On low P0-core-count Apple silicon Macs, scale the DFG tier-up thresholds (thresholdForOptimize*) by this factor."_s) \
     v(Double, ftlThresholdScaleForLowP0Cores, 1.5, Normal, "On low P0-core-count Apple silicon Macs, scale the FTL tier-up thresholds (thresholdForFTLOptimize*) by this factor."_s) \
     v(Bool, forceEagerCompilation, false, Normal, nullptr) \
-    v(Int32, thresholdForJITAfterWarmUp, 500, Normal, nullptr) \
-    v(Int32, thresholdForJITSoon, 100, Normal, nullptr) \
+    v(Int32, thresholdForJITAfterWarmUp, WEBKIT_IOS6_JIT_WARMUP, Normal, nullptr) \
+    v(Int32, thresholdForJITSoon, WEBKIT_IOS6_JIT_SOON, Normal, nullptr) \
     \
-    v(Int32, thresholdForOptimizeAfterWarmUp, 1000, Normal, nullptr) \
+    v(Int32, thresholdForOptimizeAfterWarmUp, WEBKIT_IOS6_OPTIMIZE_WARMUP, Normal, nullptr) \
     v(Int32, thresholdForOptimizeAfterLongWarmUp, 1000, Normal, nullptr) \
-    v(Int32, thresholdForOptimizeSoon, 1000, Normal, nullptr) \
+    v(Int32, thresholdForOptimizeSoon, WEBKIT_IOS6_OPTIMIZE_SOON, Normal, nullptr) \
     v(Int32, executionCounterIncrementForLoop, 1, Normal, nullptr) \
     v(Int32, executionCounterIncrementForEntry, 15, Normal, nullptr) \
     \
@@ -458,8 +496,8 @@ bool hasCapacityToUseLargeGigacage();
     v(Bool, verifyHeap, false, Normal, nullptr) \
     v(Unsigned, numberOfGCCyclesToRecordForVerification, 3, Normal, nullptr) \
     \
-    v(Unsigned, exceptionStackTraceLimit, 100, Normal, "Stack trace limit for internal Exception object"_s) \
-    v(Unsigned, defaultErrorStackTraceLimit, 100, Normal, "The default value for Error.stackTraceLimit"_s) \
+    v(Unsigned, exceptionStackTraceLimit, WEBKIT_IOS6_STACK_TRACE_LIMIT, Normal, "Stack trace limit for internal Exception object"_s) \
+    v(Unsigned, defaultErrorStackTraceLimit, WEBKIT_IOS6_STACK_TRACE_LIMIT, Normal, "The default value for Error.stackTraceLimit"_s) \
     v(Bool, exitOnResourceExhaustion, false, Normal, nullptr) \
     v(Bool, useExceptionFuzz, false, Normal, nullptr) \
     v(Unsigned, fireExceptionFuzzAt, 0, Normal, nullptr) \
@@ -467,7 +505,7 @@ bool hasCapacityToUseLargeGigacage();
     v(Bool, validateDFGExceptionHandling, ASSERT_ENABLED, Normal, "Causes the DFG to emit code validating exception handling for each node that can exit"_s) \
     v(Bool, dumpSimulatedThrows, false, Normal, "Dumps the call stack of the last simulated throw if exception scope verification fails"_s) \
     v(Bool, validateExceptionChecks, false, Normal, "Verifies that needed exception checks are performed."_s) \
-    v(Unsigned, unexpectedExceptionStackTraceLimit, 100, Normal, "Stack trace limit for debugging unexpected exceptions observed in the VM"_s) \
+    v(Unsigned, unexpectedExceptionStackTraceLimit, WEBKIT_IOS6_STACK_TRACE_LIMIT, Normal, "Stack trace limit for debugging unexpected exceptions observed in the VM"_s) \
     \
     v(Bool, validateDFGClobberize, false, Normal, "Emits code in the DFG/FTL to validate the Clobberize phase"_s) \
     v(Bool, validateBoundsCheckElimination, false, Normal, "Emits code in the DFG/FTL to validate bounds check elimination"_s) \

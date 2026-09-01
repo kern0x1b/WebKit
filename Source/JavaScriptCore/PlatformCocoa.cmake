@@ -5,8 +5,20 @@ target_compile_options(JavaScriptCore PRIVATE
 )
 
 find_library(SECURITY_LIBRARY Security)
+
+if (NOT SECURITY_LIBRARY)  # ios6: allow missing frameworks
+
+    set(SECURITY_LIBRARY "")
+
+endif ()
 find_library(COREGRAPHICS_LIBRARY CoreGraphics)
+if (NOT COREGRAPHICS_LIBRARY)  # ios6: allow missing frameworks
+    set(COREGRAPHICS_LIBRARY "")
+endif ()
 find_library(CORETEXT_LIBRARY CoreText)
+if (NOT CORETEXT_LIBRARY)  # ios6: allow missing frameworks
+    set(CORETEXT_LIBRARY "")
+endif ()
 list(APPEND JavaScriptCore_LIBRARIES
     ${SECURITY_LIBRARY}
     ${COREGRAPHICS_LIBRARY}

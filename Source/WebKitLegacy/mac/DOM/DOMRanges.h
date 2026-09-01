@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMRanges_h
+#define WebKitLegacyDOM_DOMRanges_h
+
 /*
  * Copyright (C) 2004, 2006 Apple Inc. All rights reserved.
  * Copyright (C) 2006 Samuel Weinig <sam.weinig@gmail.com>
@@ -26,3 +29,5 @@
 
 #import <WebKitLegacy/DOMRange.h>
 #import <WebKitLegacy/DOMRangeException.h>
+
+#endif // WebKitLegacyDOM_DOMRanges_h

@@ -30,7 +30,7 @@ target_link_options(WebKitLegacy PRIVATE
 )
 
 target_link_options(WebKitLegacy PRIVATE
-    -exported_symbols_list ${WEBKITLEGACY_DIR}/WebKitLegacy-iOS.exp
+    -exported_symbols_list ${WEBKIT_IOS6_EXPORTS}  # ios6: class-prefixed copy
 )
 
 # FIXME: Generate this list dynamically (from `tapi reexport` against the
@@ -182,6 +182,8 @@ list(APPEND WebKitLegacy_SOURCES
     mac/WebView/WebNotification.mm
     mac/WebView/WebPolicyDelegate.mm
     mac/WebView/WebPreferences.mm
+    mac/Misc/WebNSStringExtrasIOS6.mm
+    mac/WebView/WebLegacyCompatibilityAPI.mm
     mac/WebView/WebPreferencesDefaultValues.mm
     mac/WebView/WebResource.mm
     mac/WebView/WebTextIterator.mm
@@ -1164,3 +1166,9 @@ unset(_wkl_vfs_modules_entries)
 unset(_wkl_vfs_modules_str)
 unset(_wkl_vfs_headers_entries)
 unset(_wkl_vfs_headers_str)
+
+# WebCore compiles the Objective-C DOM bindings, and those include their own
+# headers as <WebKitLegacy/...>, so the copy has to happen first.
+if (TARGET WebCore AND TARGET WebKitLegacy_CopyHeaders)
+    add_dependencies(WebCore WebKitLegacy_CopyHeaders)
+endif ()

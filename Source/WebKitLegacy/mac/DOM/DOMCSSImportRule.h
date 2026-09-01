@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMCSSImportRule_h
+#define WebKitLegacyDOM_DOMCSSImportRule_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -35,3 +38,5 @@ WEBKIT_CLASS_DEPRECATED_MAC(10_4, 10_14)
 @property (readonly, strong) DOMMediaList *media;
 @property (readonly, strong) DOMCSSStyleSheet *styleSheet;
 @end
+
+#endif // WebKitLegacyDOM_DOMCSSImportRule_h

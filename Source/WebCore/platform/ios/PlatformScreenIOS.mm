@@ -233,7 +233,12 @@ ALLOW_DEPRECATED_DECLARATIONS_END
     if (auto data = screen->screenData(screen->primaryScreenDisplayID()))
         return data->screenRect.size();
 
-    return FloatSize([[PAL::getUIScreenClassSingleton() mainScreen] _referenceBounds].size);
+    // _referenceBounds arrived after iOS 6; there the plain bounds are the
+    // portrait screen and are what the viewport machinery needs.
+    UIScreen *mainScreen = [PAL::getUIScreenClassSingleton() mainScreen];
+    if ([mainScreen respondsToSelector:@selector(_referenceBounds)])
+        return FloatSize([mainScreen _referenceBounds].size);
+    return FloatSize(mainScreen.bounds.size);
 }
 
 FloatSize availableScreenSize()
@@ -286,7 +291,7 @@ ScreenProperties collectScreenProperties()
         screenAvailableRect.setY(NSMaxY(screen.bounds) - (screenAvailableRect.y() + screenAvailableRect.height())); // flip
         screenData.screenAvailableRect = screenAvailableRect;
 
-        screenData.screenRect = screen._referenceBounds;
+        screenData.screenRect = [screen respondsToSelector:@selector(_referenceBounds)] ? screen._referenceBounds : screen.bounds;
         screenData.colorSpace = { screenColorSpace(nullptr) };
         screenData.screenDepth = WebCore::screenDepth(nullptr);
         screenData.screenDepthPerComponent = WebCore::screenDepthPerComponent(nullptr);

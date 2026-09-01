@@ -24,6 +24,13 @@
  */
 
 #include "config.h"
+#include <wtf/MonotonicTime.h>
+
+#if defined(WEBKIT_IOS6)
+extern "C" int g_webkitIOS6PendingDrawWork;
+extern "C" double g_webkitIOS6LayoutMsTotal;
+extern "C" unsigned g_webkitIOS6LayoutCount;
+#endif
 #include "LocalFrameViewLayoutContext.h"
 
 #include "DebugPageOverlays.h"
@@ -66,6 +73,56 @@
 #include <wtf/text/TextStream.h>
 
 namespace WebCore {
+
+#if defined(WEBKIT_IOS6)
+// Counts the blocks a single layout pass walks. Declared where it is used, in
+// RenderBlockFlow::layoutBlock; both live in this namespace.
+unsigned g_webkitIOS6BlocksLaidOut;
+unsigned g_webkitIOS6BlocksForced;
+unsigned g_webkitIOS6BlocksDirty;
+unsigned g_webkitIOS6StylesSet;
+unsigned g_webkitIOS6StyleResolves;
+unsigned g_webkitIOS6DirtyOnEntry;
+unsigned g_webkitIOS6BlocksViaChild;
+extern "C" { double g_webkitIOS6LayoutMsTotal; unsigned g_webkitIOS6LayoutCount; }
+unsigned g_webkitIOS6GridStretchHeight;
+unsigned g_webkitIOS6GridStretchRequirement;
+unsigned g_webkitIOS6GridStretchPercent;
+extern "C" {
+unsigned long long g_webkitIOS6InlineLayoutNs;
+unsigned g_webkitIOS6InlineLayoutCount;
+unsigned long long g_webkitIOS6BoxGeometryNs;
+unsigned g_webkitIOS6BoxGeometryCount;
+}
+
+// A tiny fixed histogram of return addresses; no allocation, no locking beyond
+// the web lock that is already held whenever the render tree is touched.
+static constexpr unsigned needsLayoutSlots = 24;
+static void* needsLayoutCallers[needsLayoutSlots];
+static unsigned needsLayoutCounts[needsLayoutSlots];
+static bool needsLayoutRecording;
+
+void recordNeedsLayoutCaller(void* caller)
+{
+    static int enabled = -1;
+    if (enabled < 0)
+        enabled = access("/tmp/native-layout-log", F_OK) == 0 ? 1 : 0;
+    if (!enabled || !needsLayoutRecording)
+        return;
+    for (unsigned i = 0; i < needsLayoutSlots; i++) {
+        if (needsLayoutCallers[i] == caller) {
+            needsLayoutCounts[i]++;
+            return;
+        }
+        if (!needsLayoutCallers[i]) {
+            needsLayoutCallers[i] = caller;
+            needsLayoutCounts[i] = 1;
+            return;
+        }
+    }
+}
+#endif
+
 
 WTF_MAKE_TZONE_ALLOCATED_IMPL(LocalFrameViewLayoutContext);
 
@@ -234,6 +291,39 @@ void LocalFrameViewLayoutContext::performLayout(bool canDeferUpdateLayerPosition
 #if PLATFORM(IOS_FAMILY)
     if (protect(view())->updateFixedPositionLayoutRect() && subtreeLayoutRoot())
         convertSubtreeLayoutToFullLayout();
+#if defined(WEBKIT_IOS6)
+    // One rectangle for this layout, not two.
+    //
+    // The application publishes where the window is twice: as the custom
+    // fixed-position rectangle, stored under a mutex and read here, and as the
+    // layout viewport override, queued onto the web thread and applied whenever
+    // that thread reaches it. Behind a layout that takes a second or more the
+    // queued one is stale, so the engine laid a fixed element out against one
+    // rectangle and recorded its constraint against the other. The difference is
+    // whatever the finger covered in between - measured on the device, the top
+    // bar sat exactly one flick out of place, 430 px, on 27% of the frames of a
+    // scroll. Taking the layout viewport from the same rectangle, here, removes
+    // the race rather than narrowing it.
+    if (protect(view())->useCustomFixedPositionLayoutRect())
+        protect(view())->setLayoutViewportOverrideRect(LayoutRect(protect(view())->customFixedPositionLayoutRect()),
+            LocalFrameView::TriggerLayoutOrNot::No);
+
+    // The rectangle this layout is running against, kept for the viewport
+    // constraints recorded from its results.
+    //
+    // A constraint pairs "the layer position at the last layout" with "the
+    // viewport rectangle at the last layout" and moves the layer by the
+    // difference between that rectangle and the current one, so the two have to
+    // describe the same instant. They did not: the position came from this
+    // layout and the rectangle was read afterwards, at flush time, and a
+    // whole-document layout of this feed takes up to two and a half seconds
+    // while a flick covers four hundred and thirty pixels.
+    //
+    // Taking it at the start of the compositing update instead was tried and is
+    // worse - 74% of frames right against 91% - because the layer positions come
+    // from the layout, not from that pass.
+    protect(view())->setFixedPositionRectAtLastLayout(protect(view())->rectForFixedPositionLayout());
+#endif
 #endif
     {
         SetForScope layoutPhase(m_layoutPhase, LayoutPhase::InPreLayout);
@@ -272,7 +362,73 @@ void LocalFrameViewLayoutContext::performLayout(bool canDeferUpdateLayerPosition
 #ifndef NDEBUG
         RenderTreeNeedsLayoutChecker checker(*renderView());
 #endif
+#if defined(WEBKIT_IOS6)
+        // Every layout, with its root and what it cost.
+        //
+        // "Layout is expensive" is not actionable; whether the engine is laying
+        // out one post or the whole feed, and how often, is. Off unless the flag
+        // file is there, and the check is cached.
+        static int logLayouts = -1;
+        if (logLayouts < 0)
+            logLayouts = !access("/tmp/native-layout-log", F_OK);
+        MonotonicTime layoutStart = MonotonicTime::now();
+        if (logLayouts) {
+            layoutStart = MonotonicTime::now();
+            g_webkitIOS6BlocksLaidOut = 0;
+            g_webkitIOS6BlocksForced = 0;
+            g_webkitIOS6BlocksDirty = 0;
+            g_webkitIOS6BlocksViaChild = 0;
+            for (unsigned i = 0; i < needsLayoutSlots; i++) {
+                needsLayoutCallers[i] = nullptr;
+                needsLayoutCounts[i] = 0;
+            }
+            needsLayoutRecording = true;
+            g_webkitIOS6GridStretchHeight = 0;
+            g_webkitIOS6GridStretchRequirement = 0;
+            g_webkitIOS6GridStretchPercent = 0;
+            g_webkitIOS6InlineLayoutNs = 0;
+            g_webkitIOS6InlineLayoutCount = 0;
+            g_webkitIOS6BoxGeometryNs = 0;
+            g_webkitIOS6BoxGeometryCount = 0;
+            g_webkitIOS6StylesSet = 0;
+            g_webkitIOS6StyleResolves = 0;
+            // How much of the tree is already dirty on the way in. If the count
+            // is large here the dirtying came from outside the layout; if it is
+            // small yet thousands of blocks get laid out, the layout is dirtying
+            // the tree as it runs.
+            g_webkitIOS6DirtyOnEntry = 0;
+            if (CheckedPtr root = renderView()) {
+                for (CheckedPtr walk = static_cast<RenderObject*>(root.get()); walk; walk = walk->nextInPreOrder()) {
+                    if (walk->selfNeedsLayout())
+                        ++g_webkitIOS6DirtyOnEntry;
+                }
+            }
+        }
+#endif
         layoutRoot->layout();
+#if defined(WEBKIT_IOS6)
+        g_webkitIOS6LayoutMsTotal += (MonotonicTime::now() - layoutStart).milliseconds();
+        ++g_webkitIOS6LayoutCount;
+        if (logLayouts) {
+            auto elapsed = (MonotonicTime::now() - layoutStart).milliseconds();
+            bool wholeDocument = is<RenderView>(*layoutRoot);
+            WTFLogAlways("[layout] %s %.1f ms, %u blocks (%u forced, %u self, %u via child), %u on entry, document %d px",
+                wholeDocument ? "whole document" : "subtree", elapsed, g_webkitIOS6BlocksLaidOut,
+                g_webkitIOS6BlocksForced, g_webkitIOS6BlocksDirty, g_webkitIOS6BlocksViaChild, g_webkitIOS6DirtyOnEntry,
+                renderView() ? renderView()->documentRect().height() : -1);
+            needsLayoutRecording = false;
+            WTFLogAlways("[phase] inline %llu ms in %u calls, box geometry %llu ms in %u calls",
+                g_webkitIOS6InlineLayoutNs / 1000000, g_webkitIOS6InlineLayoutCount,
+                g_webkitIOS6BoxGeometryNs / 1000000, g_webkitIOS6BoxGeometryCount);
+            if (g_webkitIOS6GridStretchHeight || g_webkitIOS6GridStretchRequirement || g_webkitIOS6GridStretchPercent)
+                WTFLogAlways("[grid] stretch relayouts: %u height differs, %u requirement, %u percent descendants",
+                    g_webkitIOS6GridStretchHeight, g_webkitIOS6GridStretchRequirement, g_webkitIOS6GridStretchPercent);
+            for (unsigned i = 0; i < needsLayoutSlots && needsLayoutCallers[i]; i++) {
+                if (needsLayoutCounts[i] > 50)
+                    WTFLogAlways("[dirtied] %u from %p", needsLayoutCounts[i], needsLayoutCallers[i]);
+            }
+        }
+#endif
 #if ENABLE(TEXT_AUTOSIZING)
         {
             CheckedPtr renderView = this->renderView();
@@ -720,6 +876,10 @@ void LocalFrameViewLayoutContext::disableSetNeedsLayout()
 
 void LocalFrameViewLayoutContext::scheduleLayout()
 {
+#if defined(WEBKIT_IOS6)
+    // See LegacyTileCache::mainThreadShouldWaitForEngine.
+    g_webkitIOS6PendingDrawWork = 1;
+#endif
     // FIXME: We should assert the page is not in the back/forward cache, but that is causing
     // too many false assertions. See <rdar://problem/7218118>.
     ASSERT(frame().view() == &view());
@@ -767,6 +927,9 @@ void LocalFrameViewLayoutContext::unscheduleLayout()
 
 void LocalFrameViewLayoutContext::scheduleSubtreeLayout(RenderElement& layoutRoot)
 {
+#if defined(WEBKIT_IOS6)
+    g_webkitIOS6PendingDrawWork = 1;
+#endif
     ASSERT(renderView());
     CheckedRef renderView = *this->renderView();
 

@@ -88,7 +88,7 @@ elseif (APPLE)
         WORKING_DIRECTORY ${WTF_DERIVED_SOURCES_DIR}
         COMMAND ${Mig_EXECUTABLE} -header mach_exc.h -user mach_excUser.c
             -sheader MachExceptionsServer.h -server mach_excServer.c
-            -DMACH_EXC_SERVER_TASKIDTOKEN_STATE -isysroot ${CMAKE_OSX_SYSROOT}
+            -DMACH_EXC_SERVER_TASKIDTOKEN_STATE -isysroot ${MIG_SYSROOT}
             MachExceptions.defs
         VERBATIM)
     list(APPEND WTF_SOURCES

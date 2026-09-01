@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMAbstractViewInternal_h
+#define WebKitLegacyDOM_DOMAbstractViewInternal_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -40,3 +43,5 @@ WebCore::WindowProxy* toWindowProxy(DOMAbstractView *);
 @interface DOMAbstractView (WebKitLegacyInternal)
 - (void)_disconnectFrame;
 @end
+
+#endif // WebKitLegacyDOM_DOMAbstractViewInternal_h

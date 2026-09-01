@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMDocumentTypeInternal_h
+#define WebKitLegacyDOM_DOMDocumentTypeInternal_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -31,3 +34,5 @@ class DocumentType;
 
 WebCore::DocumentType* core(DOMDocumentType *);
 DOMDocumentType *kit(WebCore::DocumentType*);
+
+#endif // WebKitLegacyDOM_DOMDocumentTypeInternal_h

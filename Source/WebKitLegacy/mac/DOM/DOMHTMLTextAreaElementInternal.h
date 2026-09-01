@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMHTMLTextAreaElementInternal_h
+#define WebKitLegacyDOM_DOMHTMLTextAreaElementInternal_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -31,3 +34,5 @@ class HTMLTextAreaElement;
 
 WebCore::HTMLTextAreaElement* core(DOMHTMLTextAreaElement *);
 DOMHTMLTextAreaElement *kit(WebCore::HTMLTextAreaElement*);
+
+#endif // WebKitLegacyDOM_DOMHTMLTextAreaElementInternal_h

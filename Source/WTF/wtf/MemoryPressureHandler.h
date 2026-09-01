@@ -111,10 +111,17 @@ public:
         m_lowMemoryHandler = WTF::move(handler);
     }
 
+    // The footprint policy is folded in on Mac because there the process, not
+    // the system, is what runs out of memory first. That is also true of this
+    // port: the process ceiling is 122MB while the device has 512MB, so
+    // kern.memorystatus_level - which is what m_memoryPressureStatus is driven
+    // from here - still reads healthy when this process alone is about to be
+    // jetsammed. Without this the periodic footprint monitor computes a policy
+    // that nothing ever reads.
     bool isUnderMemoryWarning() const
     {
         return m_memoryPressureStatus == SystemMemoryPressureStatus::Warning
-#if PLATFORM(MAC)
+#if PLATFORM(MAC) || defined(WEBKIT_IOS6)
             || m_memoryUsagePolicy == MemoryUsagePolicy::Conservative
 #endif
             || m_isSimulatingMemoryWarning;
@@ -123,7 +130,7 @@ public:
     bool isUnderMemoryPressure() const
     {
         return m_memoryPressureStatus == SystemMemoryPressureStatus::Critical
-#if PLATFORM(MAC)
+#if PLATFORM(MAC) || defined(WEBKIT_IOS6)
             || m_memoryUsagePolicy >= MemoryUsagePolicy::Strict
 #endif
             || m_isSimulatingMemoryPressure;

@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMHTMLMediaElement_h
+#define WebKitLegacyDOM_DOMHTMLMediaElement_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -78,3 +81,5 @@ WEBKIT_CLASS_DEPRECATED_MAC(10_5, 10_14)
 - (void)pause;
 - (void)fastSeek:(double)time;
 @end
+
+#endif // WebKitLegacyDOM_DOMHTMLMediaElement_h

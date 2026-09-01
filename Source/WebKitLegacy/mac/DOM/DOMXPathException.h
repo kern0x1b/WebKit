@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMXPathException_h
+#define WebKitLegacyDOM_DOMXPathException_h
+
 /*
  * Copyright (C) 2004, 2006 Apple Inc. All rights reserved.
  * Copyright (C) 2006 Samuel Weinig <sam.weinig@gmail.com>
@@ -34,3 +37,5 @@ enum DOMXPathExceptionCode {
     DOM_INVALID_EXPRESSION_ERR      = 51,
     DOM_TYPE_ERR                    = 52
 } WEBKIT_ENUM_DEPRECATED_MAC(10_4, 10_14);
+
+#endif // WebKitLegacyDOM_DOMXPathException_h

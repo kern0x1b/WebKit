@@ -29,8 +29,13 @@
 namespace WTF {
 
 #if ASSERT_ENABLED
+#if defined(WEBKIT_IOS6)
+static IOS6ThreadLocal<unsigned> forbidMallocUseScopeCount;
+static IOS6ThreadLocal<unsigned> disableMallocRestrictionScopeCount;
+#else
 thread_local static unsigned forbidMallocUseScopeCount;
 thread_local static unsigned disableMallocRestrictionScopeCount;
+#endif
 
 ForbidMallocUseForCurrentThreadScope::ForbidMallocUseForCurrentThreadScope()
 {

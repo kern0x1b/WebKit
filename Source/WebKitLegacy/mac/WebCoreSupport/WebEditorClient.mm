@@ -86,7 +86,9 @@
 #import <WebCore/WebCoreMainThread.h>
 #import <WebCore/WebCoreObjCExtras.h>
 #import <pal/spi/cocoa/NSAttributedStringSPI.h>
+#if PLATFORM(MAC)  // ios6: mac SPI
 #import <pal/spi/mac/NSSpellCheckerSPI.h>
+#endif
 #import <wtf/MainThread.h>
 #import <wtf/Markable.h>
 #import <wtf/RefPtr.h>

@@ -5851,6 +5851,15 @@ void LocalFrameView::paintContents(GraphicsContext& context, const IntRect& dirt
 
 void LocalFrameView::paintContents(GraphicsContext& context, const IntRect& dirtyRect, Node* subtreePaintRoot, SecurityOriginPaintPolicy securityOriginPaintPolicy, RegionContext* regionContext)
 {
+#if defined(WEBKIT_IOS6)
+    if (([]() { static const bool logPaintOnce = getenv("WEBKIT_IOS6_LOG_PAINT") != nullptr; return logPaintOnce; }())) {
+        fprintf(stderr, "[ios6 paint] paintContents %d,%d %dx%d transparent %d disabled %d base %s\n",
+            dirtyRect.x(), dirtyRect.y(), dirtyRect.width(), dirtyRect.height(),
+            isTransparent(), context.paintingDisabled(),
+            baseBackgroundColor().isOpaque() ? "opaque" : "not opaque");
+        fflush(stderr);
+    }
+#endif
 #ifndef NDEBUG
     bool fillWithWarningColor = [&] {
         if (m_frame->document()->printing())
@@ -6125,7 +6134,7 @@ void LocalFrameView::checkAndDispatchDidReachVisuallyNonEmptyState()
             return true;
 
         // FIXME: We should also ignore renderers with non-final style.
-        if (document->styleScope().hasPendingSheetsBeforeBody())
+        if (document->styleScope().blocksRenderingBeforeBody())
             return false;
 
         auto finishedParsingMainDocument = m_frame->loader().stateMachine().committedFirstRealDocumentLoad()
@@ -6701,12 +6710,28 @@ bool LocalFrameView::updateFixedPositionLayoutRect()
     if (!page || !page->chrome().client().fetchCustomFixedPositionLayoutRect(newRect))
         return false;
 
-    if (newRect != m_customFixedPositionLayoutRect) {
-        m_customFixedPositionLayoutRect = newRect;
-        setViewportConstrainedObjectsNeedLayout();
-        return true;
-    }
-    return false;
+    if (newRect == m_customFixedPositionLayoutRect)
+        return false;
+
+#if defined(WEBKIT_IOS6)
+    // UIKit owns the scroll view on this port and hands the engine a new rect for
+    // every frame of a drag. Where a fixed element ends up on screen changes with
+    // the scroll, but nothing about its layout does - the layer holding it is
+    // repositioned directly. Treating a scroll as a layout change means marking
+    // every viewport-constrained object dirty and, worse, turning whatever
+    // subtree layout was pending into a layout of the whole document, once per
+    // frame. Measured on the device: a full layout of a real feed takes over a
+    // second, which is the entire freeze.
+    bool onlyScrolled = newRect.size() == m_customFixedPositionLayoutRect.size();
+    m_customFixedPositionLayoutRect = newRect;
+    if (onlyScrolled)
+        return false;
+#else
+    m_customFixedPositionLayoutRect = newRect;
+#endif
+
+    setViewportConstrainedObjectsNeedLayout();
+    return true;
 }
 
 void LocalFrameView::setCustomSizeForResizeEvent(IntSize customSize)

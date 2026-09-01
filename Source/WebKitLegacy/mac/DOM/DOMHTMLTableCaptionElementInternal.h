@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMHTMLTableCaptionElementInternal_h
+#define WebKitLegacyDOM_DOMHTMLTableCaptionElementInternal_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -31,3 +34,5 @@ class HTMLTableCaptionElement;
 
 WebCore::HTMLTableCaptionElement* core(DOMHTMLTableCaptionElement *);
 DOMHTMLTableCaptionElement *kit(WebCore::HTMLTableCaptionElement*);
+
+#endif // WebKitLegacyDOM_DOMHTMLTableCaptionElementInternal_h

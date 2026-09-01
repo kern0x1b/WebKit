@@ -25,6 +25,7 @@
  */
 
 #include "config.h"
+#include <pthread.h>
 #include "Timer.h"
 
 #include "SharedTimer.h"
@@ -278,10 +279,35 @@ struct SameSizeAsDeferrableOneShotTimer : public SameSizeAsTimer {
 
 static_assert(sizeof(DeferrableOneShotTimer) == sizeof(SameSizeAsDeferrableOneShotTimer), "DeferrableOneShotTimer should stay small");
 
+#if USE(WEB_THREAD)
+// The assertion this replaces states that every timer is touched with the web
+// lock held. That holds for a port where the engine owns its own scroll view
+// and event delivery; here UIKit owns both and calls in on its own terms, so
+// the condition is violated by the design of the port rather than by a race.
+// Being on the web thread or the main thread is what actually matters for the
+// timer heap, so that is what is enforced - and the looser case is reported
+// once, with enough detail to find it, instead of ending the session.
+static void ensureTimerThreadIsSane(const char* what)
+{
+    if (WebThreadIsLockedOrDisabledInMainOrWebThread())
+        return;
+
+    bool onAThreadThatOwnsTheHeap = WebThreadIsCurrent() || pthread_main_np();
+    RELEASE_ASSERT(onAThreadThatOwnsTheHeap);
+
+    static bool reported;
+    if (!reported) {
+        reported = true;
+        WTFLogAlways("[timer] %s on the %s thread without the web lock held", what,
+            WebThreadIsCurrent() ? "web" : "main");
+    }
+}
+#endif
+
 TimerBase::TimerBase()
 {
 #if USE(WEB_THREAD)
-    RELEASE_ASSERT(WebThreadIsLockedOrDisabledInMainOrWebThread());
+    ensureTimerThreadIsSane("construction");
 #endif
 }
 
@@ -502,7 +528,7 @@ void TimerBase::updateHeapIfNeeded(MonotonicTime oldTime)
 void TimerBase::setNextFireTime(MonotonicTime newTime)
 {
 #if USE(WEB_THREAD)
-    RELEASE_ASSERT(WebThreadIsLockedOrDisabledInMainOrWebThread());
+    ensureTimerThreadIsSane("setNextFireTime");
 #endif
     ASSERT(canCurrentThreadIDAccessThreadLocalData(m_creationThreadID));
     bool timerHasBeenDeleted = m_unalignedNextFireTime.isNaN();

@@ -427,11 +427,18 @@ Could be worth adding to the API.
 - (DOMCSSStyleDeclaration *)styleAtSelectionStart;
 
 - (NSUInteger)_renderTreeSize;
+- (CGSize)_contentsSize;
 
 - (void)_setResourceLoadSchedulerSuspended:(BOOL)suspend;
 + (void)_setTileCacheLayerPoolCapacity:(unsigned)capacity;
++ (void)_setMemoryCacheCapacitiesForLowMemoryDevice;
 
+- (void)_markScrolledByUser;
 + (void)_releaseMemoryNow;
+- (void)_setLayoutViewportRect:(CGRect)rect;
++ (void)_relieveMemoryPressure;
++ (void)_capDecodedImageMemory:(unsigned)bytes;
++ (void)_reportMemoryBreakdown;
 
 - (void)_replaceCurrentHistoryItem:(WebHistoryItem *)item;
 
@@ -761,6 +768,14 @@ Could be worth adding to the API.
 + (void)_removeUserStyleSheetsFromGroup:(NSString *)groupName world:(WebScriptWorld *)world;
 + (void)_removeAllUserContentFromGroup:(NSString *)groupName;
 
+- (BOOL)_addContentRuleList:(NSString *)ruleJSON name:(NSString *)name;
+- (void)_removeContentRuleListNamed:(NSString *)name;
+- (void)_removeAllContentRuleLists;
+
++ (void)_setJavaScriptBytecodeCacheDirectory:(NSString *)path maximumSize:(unsigned long long)maximumSize;
++ (void)_flushJavaScriptBytecodeCache;
++ (void)_clearJavaScriptBytecodeCache;
+
 // SPI for DumpRenderTree
 + (void)_setLoadResourcesSerially:(BOOL)serialize;
 - (void)_forceRepaintForTesting;
@@ -787,6 +802,9 @@ Could be worth adding to the API.
 
 - (WebPageVisibilityState)_visibilityState;
 - (void)_setVisibilityState:(WebPageVisibilityState)visibilityState isInitialState:(BOOL)isInitialState;
+
+- (void)_sendInputString:(NSString *)string withFlags:(unsigned)flags fromVariantKey:(BOOL)fromVariantKey;
+- (void)_sendDeleteFromInputWithFlags:(unsigned)flags;
 
 #if !TARGET_OS_IPHONE
 - (BOOL)windowOcclusionDetectionEnabled;

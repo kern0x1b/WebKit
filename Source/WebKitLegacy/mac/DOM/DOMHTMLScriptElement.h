@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMHTMLScriptElement_h
+#define WebKitLegacyDOM_DOMHTMLScriptElement_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -37,3 +40,5 @@ WEBKIT_CLASS_DEPRECATED_MAC(10_4, 10_14)
 @property (copy) NSString *src;
 @property (copy) NSString *type;
 @end
+
+#endif // WebKitLegacyDOM_DOMHTMLScriptElement_h

@@ -49,13 +49,13 @@ static JSC_DECLARE_HOST_FUNCTION(convertObjCFallbackObjectToPrimitive);
 
 ClassStructPtr webScriptObjectClass()
 {
-    static ClassStructPtr<WebScriptObject> webScriptObjectClass = NSClassFromString(@"WebScriptObject");
+    static ClassStructPtr<WebScriptObject> webScriptObjectClass = NSClassFromString(@IOS6_CLASS_NAME(WebScriptObject));
     return webScriptObjectClass;
 }
 
 ClassStructPtr webUndefinedClass()
 {
-    static ClassStructPtr<WebUndefined> webUndefinedClass = NSClassFromString(@"WebUndefined");
+    static ClassStructPtr<WebUndefined> webUndefinedClass = NSClassFromString(@IOS6_CLASS_NAME(WebUndefined));
     return webUndefinedClass;
 }
 

@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMEventInternal_h
+#define WebKitLegacyDOM_DOMEventInternal_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -33,3 +36,5 @@ class Event;
 WebCore::Event* core(DOMEvent *);
 DOMEvent *kit(WebCore::Event*);
 Class kitClass(WebCore::Event*);
+
+#endif // WebKitLegacyDOM_DOMEventInternal_h

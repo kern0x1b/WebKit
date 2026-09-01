@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMHTMLDocument_h
+#define WebKitLegacyDOM_DOMHTMLDocument_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -52,3 +55,5 @@ WEBKIT_CLASS_DEPRECATED_MAC(10_4, 10_14)
 - (void)captureEvents WEBKIT_AVAILABLE_MAC(10_5);
 - (void)releaseEvents WEBKIT_AVAILABLE_MAC(10_5);
 @end
+
+#endif // WebKitLegacyDOM_DOMHTMLDocument_h

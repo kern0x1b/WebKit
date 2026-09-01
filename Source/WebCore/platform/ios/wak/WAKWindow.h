@@ -81,6 +81,7 @@ WEBCORE_EXPORT @interface WAKWindow : WAKResponder
     WAKView *_contentView;
     WAKView *_responderView;
     WAKView *_nextResponder;
+    WKWindowRef _windowRef;
 
     BOOL _visible;
     BOOL _isInSnapshottingPaint;
@@ -116,6 +117,7 @@ WEBCORE_EXPORT @interface WAKWindow : WAKResponder
 - (NSSelectionDirection)keyViewSelectionDirection;
 - (BOOL)makeFirstResponder:(WAKResponder *)responder;
 - (WAKView *)_newFirstResponderAfterResigning NS_RETURNS_NOT_RETAINED;
+- (WKWindowRef)_windowRef;
 - (void)setFrame:(CGRect)frameRect display:(BOOL)flag;
 - (CGRect)frame;
 - (void)setContentRect:(CGRect)rect;

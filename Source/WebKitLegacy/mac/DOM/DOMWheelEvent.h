@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMWheelEvent_h
+#define WebKitLegacyDOM_DOMWheelEvent_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -42,3 +45,5 @@ WEBKIT_CLASS_DEPRECATED_MAC(10_5, 10_14)
 
 - (void)initWheelEvent:(int)wheelDeltaX wheelDeltaY:(int)wheelDeltaY view:(DOMAbstractView *)view screenX:(int)screenX screenY:(int)screenY clientX:(int)clientX clientY:(int)clientY ctrlKey:(BOOL)ctrlKey altKey:(BOOL)altKey shiftKey:(BOOL)shiftKey metaKey:(BOOL)metaKey WEBKIT_AVAILABLE_MAC(10_5);
 @end
+
+#endif // WebKitLegacyDOM_DOMWheelEvent_h

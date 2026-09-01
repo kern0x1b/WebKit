@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMComment_h
+#define WebKitLegacyDOM_DOMComment_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -28,3 +31,5 @@
 WEBKIT_CLASS_DEPRECATED_MAC(10_4, 10_14)
 @interface DOMComment : DOMCharacterData
 @end
+
+#endif // WebKitLegacyDOM_DOMComment_h

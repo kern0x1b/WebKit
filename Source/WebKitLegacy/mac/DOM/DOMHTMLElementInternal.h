@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMHTMLElementInternal_h
+#define WebKitLegacyDOM_DOMHTMLElementInternal_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -31,3 +34,5 @@ class HTMLElement;
 
 WebCore::HTMLElement* core(DOMHTMLElement *);
 DOMHTMLElement *kit(WebCore::HTMLElement*);
+
+#endif // WebKitLegacyDOM_DOMHTMLElementInternal_h

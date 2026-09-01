@@ -75,9 +75,18 @@ macro makeReturnProfiled(size, opcodeStruct, get, metadata, dispatch, fn)
 end
 
 macro valueProfile(size, opcodeStruct, profileName, value, scratch)
-    getu(size, opcodeStruct, profileName, scratch)
-    mulq constexpr (-sizeof(ValueProfile)), scratch
-    storeq value, constexpr (-sizeof(UnlinkedMetadataTable::LinkingData)) + ValueProfile::m_buckets[metadataTable, scratch, 1]
+    # ValueProfile::m_buckets is only ever read back by the DFG/FTL prediction
+    # propagator (via CodeBlock::updateAllNonLazyValueProfilePredictions ->
+    # ValueProfileBase::computeUpdatedPrediction, whose result is consumed only
+    # under ENABLE(DFG_JIT)). A C_LOOP build compiles no DFG, so the operand
+    # load, the 64-bit multiply and the 64-bit store here are pure overhead on
+    # every get_by_id / get_by_val / get_length and every call return.
+    # The metadata layout is untouched; only the store is elided.
+    if not C_LOOP
+        getu(size, opcodeStruct, profileName, scratch)
+        mulq constexpr (-sizeof(ValueProfile)), scratch
+        storeq value, constexpr (-sizeof(UnlinkedMetadataTable::LinkingData)) + ValueProfile::m_buckets[metadataTable, scratch, 1]
+    end
 end
 
 # After calling, calling bytecode is claiming input registers are not used.
@@ -2452,13 +2461,18 @@ end)
 
 # we assume t5 contains the metadata, and we should not scratch that
 macro arrayProfileForCall(opcodeStruct, getu)
-    getu(m_argv, t3)
-    negp t3
-    loadq ThisArgumentOffset[cfr, t3, 8], t0
-    btqnz t0, notCellMask, .done
-    loadi JSCell::m_structureID[t0], t3
-    storei t3, %opcodeStruct%::Metadata::m_arrayProfile.m_lastSeenStructureID[t5]
-.done:
+    # Same as arrayProfile(): m_lastSeenStructureID is only folded into
+    # ArrayProfile::m_observedArrayModes by CodeBlock::updateAllArrayProfilePredictions,
+    # and observedArrayModes has no reader outside dfg/ and ftl/.
+    if not C_LOOP
+        getu(m_argv, t3)
+        negp t3
+        loadq ThisArgumentOffset[cfr, t3, 8], t0
+        btqnz t0, notCellMask, .done
+        loadi JSCell::m_structureID[t0], t3
+        storei t3, %opcodeStruct%::Metadata::m_arrayProfile.m_lastSeenStructureID[t5]
+    .done:
+    end
 end
 
 # t5 holds metadata.
@@ -3326,12 +3340,15 @@ end
 
 llintOpWithMetadata(op_iterator_open, OpIteratorOpen, macro (size, get, dispatch, metadata, return)
     macro updateArrayProfile(get, metadata)
+        # callHelper() below requires t5 == metadata, so that load stays.
         metadata(t5, t0)
-        get(m_iterable, t0)
-        btqnz t0, notCellMask, .iteratorOpenArrayProfileDone
-        loadi JSCell::m_structureID[t0], t3
-        storei t3, OpIteratorOpen::Metadata::m_arrayProfile.m_lastSeenStructureID[t5]
-    .iteratorOpenArrayProfileDone:
+        if not C_LOOP
+            get(m_iterable, t0)
+            btqnz t0, notCellMask, .iteratorOpenArrayProfileDone
+            loadi JSCell::m_structureID[t0], t3
+            storei t3, OpIteratorOpen::Metadata::m_arrayProfile.m_lastSeenStructureID[t5]
+        .iteratorOpenArrayProfileDone:
+        end
     end
     iteratorOpenGenericImpl(size, get, dispatch, metadata, OpIteratorOpen, op_iterator_open, _iterator_open_try_fast_narrow, _iterator_open_try_fast_wide16, _iterator_open_try_fast_wide32, _llint_slow_path_iterator_open_get_next, updateArrayProfile)
 end)

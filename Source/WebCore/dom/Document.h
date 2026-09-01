@@ -1586,6 +1586,21 @@ public:
     void NODELETE didAddTouchEventHandler(Node&);
     void NODELETE didRemoveTouchEventHandler(Node&, EventHandlerRemoval = EventHandlerRemoval::One);
 
+#if ENABLE(TOUCH_EVENTS) && PLATFORM(IOS_FAMILY)
+    // A second, additional counted set alongside m_touchEventTargets above -
+    // not a duplicate of it. This one exists to answer a narrower question
+    // (touch-region reporting to a UI process this port does not have, see
+    // shouldUseTouchEventRegions()), and Node.cpp calls both pairs together
+    // for the same node at the same moment, which is upstream's own way of
+    // keeping them in lockstep rather than merging them into one. Currently
+    // unread here since ENABLE_TOUCH_EVENT_REGIONS is off for a single-process
+    // port, kept real and correct rather than deleted so it is not a landmine
+    // if that ever changes.
+    void addTouchEventListener(Node&);
+    void removeTouchEventListener(Node&, EventHandlerRemoval = EventHandlerRemoval::One);
+    void removeTouchEventHandler(Node&, EventHandlerRemoval = EventHandlerRemoval::One);
+#endif
+
     void didRemoveEventTargetNode(Node&);
 
     bool hasWheelEventHandlers() const { return !m_wheelEventTargets.isEmptyIgnoringNullReferences(); }
@@ -2520,6 +2535,9 @@ private:
 
 #if ENABLE(TOUCH_EVENTS) || ENABLE(TOUCH_EVENT_REGIONS)
     EventTargetSet m_touchEventTargets;
+#if ENABLE(TOUCH_EVENTS) && PLATFORM(IOS_FAMILY)
+    EventTargetSet m_touchEventHandlerCounts;
+#endif
 #endif
 
     EventTargetSet m_wheelEventTargets;

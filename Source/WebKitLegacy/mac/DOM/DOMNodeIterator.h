@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMNodeIterator_h
+#define WebKitLegacyDOM_DOMNodeIterator_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -41,3 +44,5 @@ WEBKIT_CLASS_DEPRECATED_MAC(10_4, 10_14)
 - (DOMNode *)previousNode;
 - (void)detach;
 @end
+
+#endif // WebKitLegacyDOM_DOMNodeIterator_h

@@ -163,6 +163,8 @@ typedef enum {
     nw_resolver_class_designated_direct = 2,
 } nw_resolver_class_t;
 
+NW_OBJECT_DECL(nw_resolver_config);
+
 OS_OBJECT_RETURNS_RETAINED nw_resolver_config_t nw_resolver_config_create(void);
 void nw_resolver_config_set_protocol(nw_resolver_config_t, nw_resolver_protocol_t);
 void nw_resolver_config_set_class(nw_resolver_config_t, nw_resolver_class_t);

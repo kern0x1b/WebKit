@@ -672,6 +672,29 @@ static inline void shrinkMapVectorsToFit(RuleSet::AtomRuleMap& map)
 
 void RuleSet::shrinkToFit()
 {
+#if defined(WEBKIT_IOS6)
+    {
+        size_t singles = 0, total = 0;
+        auto tally = [&](const AtomRuleMap& map) {
+            for (auto& entry : map) {
+                total++;
+                if (entry.value && entry.value->size() == 1)
+                    singles++;
+            }
+        };
+        tally(m_idRules);
+        tally(m_classRules);
+        tally(m_attributeLocalNameRules);
+        tally(m_attributeLowercaseLocalNameRules);
+        tally(m_tagLocalNameRules);
+        tally(m_tagLowercaseLocalNameRules);
+        tally(m_userAgentPartRules);
+        tally(m_namedPseudoElementRules);
+        if (total > 200)
+            fprintf(stderr, "[ruleset] keys=%zu singleRuleKeys=%zu classKeys=%u idKeys=%u\n",
+                total, singles, m_classRules.size(), m_idRules.size());
+    }
+#endif
     shrinkMapVectorsToFit(m_idRules);
     shrinkMapVectorsToFit(m_classRules);
     shrinkMapVectorsToFit(m_attributeLocalNameRules);

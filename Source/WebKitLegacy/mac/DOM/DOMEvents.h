@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMEvents_h
+#define WebKitLegacyDOM_DOMEvents_h
+
 /*
  * Copyright (C) 2004, 2006, 2008 Apple Inc. All rights reserved.
  * Copyright (C) 2006 Samuel Weinig <sam.weinig@gmail.com>
@@ -40,3 +43,5 @@
 #import <WebKitLegacy/DOMProgressEvent.h>
 #import <WebKitLegacy/DOMUIEvent.h>
 #import <WebKitLegacy/DOMWheelEvent.h>
+
+#endif // WebKitLegacyDOM_DOMEvents_h

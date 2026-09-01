@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMCSSStyleDeclaration_h
+#define WebKitLegacyDOM_DOMCSSStyleDeclaration_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -48,3 +51,5 @@ WEBKIT_CLASS_DEPRECATED_MAC(10_4, 10_14)
 @interface DOMCSSStyleDeclaration (DOMCSSStyleDeclarationDeprecated)
 - (void)setProperty:(NSString *)propertyName :(NSString *)value :(NSString *)priority WEBKIT_DEPRECATED_MAC(10_4, 10_5);
 @end
+
+#endif // WebKitLegacyDOM_DOMCSSStyleDeclaration_h

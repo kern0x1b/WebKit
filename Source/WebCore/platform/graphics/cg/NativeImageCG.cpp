@@ -37,6 +37,13 @@
 
 #include "CoreVideoSoftLink.h"
 
+#if defined(WEBKIT_IOS6)
+/* Content headroom is an HDR concept from iOS 18. */
+#define WEBKIT_IOS6_HEADROOM(image) ((float)1.0)
+#else
+#define WEBKIT_IOS6_HEADROOM CGImageGetContentHeadroom
+#endif
+
 namespace WebCore {
 
 RefPtr<NativeImage> NativeImage::create(PlatformImagePtr&& image, std::optional<GainMap>&& gainMap)
@@ -100,7 +107,7 @@ void NativeImage::computeHeadroom() const
     constexpr auto gainMapImageHeadroom = Headroom(peakLevel / whiteLevel);
 
 #if HAVE(SUPPORT_HDR_DISPLAY)
-    float headroom = CGImageGetContentHeadroom(m_platformImage.get());
+    float headroom = WEBKIT_IOS6_HEADROOM(m_platformImage.get());
     m_baseImageHeadroom = Headroom(std::max<float>(headroom, Headroom::None));
 #else
     m_baseImageHeadroom = Headroom::None;

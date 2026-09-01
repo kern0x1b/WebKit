@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMText_h
+#define WebKitLegacyDOM_DOMText_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -35,3 +38,5 @@ WEBKIT_CLASS_DEPRECATED_MAC(10_4, 10_14)
 - (DOMText *)splitText:(unsigned)offset;
 - (DOMText *)replaceWholeText:(NSString *)content WEBKIT_AVAILABLE_MAC(10_6);
 @end
+
+#endif // WebKitLegacyDOM_DOMText_h

@@ -72,12 +72,14 @@ JITInlineCacheGenerator::JITInlineCacheGenerator(CodeBlock*, CompileTimeProperty
         [&](BaselineUnlinkedPropertyInlineCache* propertyCache) {
             m_unlinkedPropertyCache = propertyCache;
         }
-#if ENABLE(DFG_JIT)
+        // ios6/armv7: CompileTimePropertyInlineCache always has three alternatives, so the
+        // visitor must always have three lambdas -- guarding this one on ENABLE(DFG_JIT)
+        // made the visitor non-exhaustive in a baseline-JIT-only build. The DFG alternative
+        // is simply never produced when the DFG is off.
         ,
         [&](DFG::UnlinkedPropertyInlineCache* propertyCache) {
             m_unlinkedPropertyCache = propertyCache;
         }
-#endif
         ), propertyCache);
 }
 

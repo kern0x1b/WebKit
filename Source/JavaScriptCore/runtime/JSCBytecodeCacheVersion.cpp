@@ -33,8 +33,10 @@
 
 #if OS(UNIX)
 #include <dlfcn.h>
+#include <sys/stat.h>
 #if OS(DARWIN)
 #include <mach-o/dyld.h>
+#include <mach-o/loader.h>
 #include <uuid/uuid.h>
 #include <wtf/spi/darwin/dyldSPI.h>
 #elif OS(QNX)
@@ -48,6 +50,86 @@ namespace JSC {
 
 namespace JSCBytecodeCacheVersionInternal {
 static constexpr bool verbose = false;
+}
+
+#if OS(DARWIN)
+static bool readMachOUUID(const void* imageBase, std::span<uint8_t, 16> result)
+{
+    if (!imageBase)
+        return false;
+
+    const auto* header = static_cast<const mach_header*>(imageBase);
+    uint32_t commandCount = 0;
+    const uint8_t* cursor = nullptr;
+
+    if (header->magic == MH_MAGIC_64 || header->magic == MH_CIGAM_64) {
+        const auto* header64 = static_cast<const mach_header_64*>(imageBase);
+        commandCount = header64->ncmds;
+        cursor = std::bit_cast<const uint8_t*>(header64 + 1);
+    } else if (header->magic == MH_MAGIC || header->magic == MH_CIGAM) {
+        commandCount = header->ncmds;
+        cursor = std::bit_cast<const uint8_t*>(header + 1);
+    } else
+        return false;
+
+    for (uint32_t i = 0; i < commandCount; ++i) {
+        const auto* command = std::bit_cast<const load_command*>(cursor);
+        if (command->cmdsize < sizeof(load_command))
+            return false;
+        if (command->cmd == LC_UUID) {
+            if (command->cmdsize < sizeof(uuid_command))
+                return false;
+            const auto* uuidCommand = std::bit_cast<const uuid_command*>(command);
+            for (size_t byte = 0; byte < 16; ++byte)
+                result[byte] = uuidCommand->uuid[byte];
+            return true;
+        }
+        cursor += command->cmdsize;
+    }
+    return false;
+}
+#endif
+
+uint64_t computeJSCBinaryIdentity()
+{
+    static LazyNeverDestroyed<uint64_t> identity;
+    static std::once_flag onceFlag;
+    std::call_once(onceFlag, [] {
+        uint64_t value = 0;
+#if OS(UNIX)
+        Dl_info info { };
+        if (dladdr(std::bit_cast<void*>(&computeJSCBinaryIdentity), &info)) {
+#if OS(DARWIN)
+            std::array<uint8_t, 16> uuid { };
+            if (readMachOUUID(info.dli_fbase, std::span<uint8_t, 16> { uuid })) {
+                uint64_t high = 0;
+                uint64_t low = 0;
+                for (size_t i = 0; i < 8; ++i) {
+                    high = (high << 8) | uuid[i];
+                    low = (low << 8) | uuid[i + 8];
+                }
+                value = high ^ (low * 0x9e3779b97f4a7c15ull);
+                dataLogLnIf(JSCBytecodeCacheVersionInternal::verbose, "JavaScriptCore LC_UUID identity: ", value);
+            }
+#endif
+            if (!value && info.dli_fname) {
+                struct stat statBuffer { };
+                if (!stat(info.dli_fname, &statBuffer)) {
+                    value = static_cast<uint64_t>(statBuffer.st_size);
+                    value = (value * 0x100000001b3ull) ^ static_cast<uint64_t>(statBuffer.st_mtime);
+                    value = (value * 0x100000001b3ull) ^ static_cast<uint64_t>(statBuffer.st_ino);
+                    dataLogLnIf(JSCBytecodeCacheVersionInternal::verbose, "JavaScriptCore stat identity: ", value);
+                }
+            }
+        }
+#endif
+        if (!value) {
+            static constexpr uint32_t stamp = SuperFastHash::computeHash(__DATE__ " " __TIME__);
+            value = (static_cast<uint64_t>(stamp) << 32) | stamp | 1;
+        }
+        identity.construct(value);
+    });
+    return identity.get();
 }
 
 uint32_t computeJSCBytecodeCacheVersion()
@@ -66,8 +148,11 @@ uint32_t computeJSCBytecodeCacheVersion()
             dataLogLnIf(JSCBytecodeCacheVersionInternal::verbose, "UUID of JavaScriptCore.framework:", uuidString);
             return;
         }
-        cacheVersion.construct(0);
-        dataLogLnIf(JSCBytecodeCacheVersionInternal::verbose, "Failed to get UUID for JavaScriptCore framework");
+        {
+            uint64_t identity = computeJSCBinaryIdentity();
+            cacheVersion.construct(static_cast<uint32_t>(identity ^ (identity >> 32)));
+        }
+        dataLogLnIf(JSCBytecodeCacheVersionInternal::verbose, "Failed to get UUID for JavaScriptCore framework, using binary identity");
 #elif OS(UNIX) && !PLATFORM(PLAYSTATION) && !OS(HAIKU) && !OS(QNX)
         auto result = ([&] -> std::optional<uint32_t> {
             Dl_info info { };
@@ -150,8 +235,11 @@ uint32_t computeJSCBytecodeCacheVersion()
             cacheVersion.construct(result.value());
             return;
         }
-        cacheVersion.construct(0);
-        dataLogLnIf(JSCBytecodeCacheVersionInternal::verbose, "Failed to get UUID for JavaScriptCore framework");
+        {
+            uint64_t identity = computeJSCBinaryIdentity();
+            cacheVersion.construct(static_cast<uint32_t>(identity ^ (identity >> 32)));
+        }
+        dataLogLnIf(JSCBytecodeCacheVersionInternal::verbose, "Failed to get UUID for JavaScriptCore framework, using binary identity");
 #else
         UNUSED_VARIABLE(jsFunctionAddr);
         static constexpr uint32_t precomputedCacheVersion = SuperFastHash::computeHash(__TIMESTAMP__);

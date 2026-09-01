@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMNode_h
+#define WebKitLegacyDOM_DOMNode_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -98,3 +101,5 @@ WEBKIT_CLASS_DEPRECATED_MAC(10_4, 10_14)
 - (DOMNode *)replaceChild:(DOMNode *)newChild :(DOMNode *)oldChild WEBKIT_DEPRECATED_MAC(10_4, 10_5);
 - (BOOL)isSupported:(NSString *)feature :(NSString *)version WEBKIT_DEPRECATED_MAC(10_4, 10_5);
 @end
+
+#endif // WebKitLegacyDOM_DOMNode_h

@@ -99,6 +99,18 @@ void SystemHeap::scavenge()
     // Currently |goal| does not affect on the behavior of malloc_zone_pressure_relief if (1) we only scavenge one zone and (2) it is not nanomalloc.
     constexpr size_t goal = 0;
     malloc_zone_pressure_relief(m_zone, goal);
+#if !BUSE(LIBPAS) && !BUSE(MIMALLOC)
+    // With neither libpas nor mimalloc built, bmalloc::api::malloc and friends
+    // forward straight to ::malloc/::free (bmalloc.h), so every byte WebKit
+    // allocates and frees lives in the default zone. m_zone is the private zone
+    // the constructor above makes, and nothing but memalignLarge/freeLarge -
+    // that is, tryLargeZeroedMemalignVirtual - ever puts anything in it. Without
+    // this, releaseFastMallocFreeMemory() relieves pressure on a zone that holds
+    // almost nothing and libmalloc keeps every freed page.
+    malloc_zone_t* defaultZone = malloc_default_zone();
+    if (defaultZone != m_zone)
+        malloc_zone_pressure_relief(defaultZone, goal);
+#endif
 }
 
 void SystemHeap::dump()

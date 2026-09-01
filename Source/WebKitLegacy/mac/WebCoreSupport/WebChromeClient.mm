@@ -102,7 +102,9 @@
 #import <WebCore/WKContentObservation.h>
 #import <WebCore/Widget.h>
 #import <WebCore/WindowFeatures.h>
+#if PLATFORM(MAC)  // ios6: mac SPI
 #import <pal/spi/mac/NSViewSPI.h>
+#endif
 #import <wtf/BlockObjCExceptions.h>
 #import <wtf/RefPtr.h>
 #import <wtf/TZoneMallocInlines.h>
@@ -560,6 +562,26 @@ void WebChromeClient::invalidateRootView(const WebCore::IntRect&)
 
 void WebChromeClient::invalidateContentsAndRootView(const WebCore::IntRect& rect)
 {
+#if defined(WEBKIT_IOS6)
+    // This is how WebCore says "this part of the page no longer looks like what
+    // is on screen". Upstream leaves it empty because the clients WebKitLegacy
+    // still has on iOS drive their own painting; an embedder that draws through
+    // WAKWindow's tile cache is told nothing, so the tiles keep showing whatever
+    // they were painted with and the page becomes a photograph of itself.
+    //
+    // That one empty function is the whole of it: a dialog dismissed in the DOM
+    // stays on screen, a feed that has appended posts never shows them, a
+    // position:fixed bar re-laid-out for a new scroll position is still painted
+    // at the old one, and a tap that did exactly what it should appears to have
+    // done nothing. Every one of those was reported as a separate fault.
+    //
+    // The rect is in root-view coordinates, and this embedder's host layer is
+    // the document, so it is already the coordinate system the tiles are in.
+    if (RetainPtr window = [m_webView window])
+        [window setNeedsDisplayInRect:rect];
+#else
+    UNUSED_PARAM(rect);
+#endif
 }
 
 void WebChromeClient::invalidateContentsForSlowScroll(const WebCore::IntRect& rect)
@@ -608,8 +630,12 @@ PlatformPageClient WebChromeClient::platformPageClient() const
     return 0;
 }
 
-void WebChromeClient::contentsSizeChanged(WebCore::LocalFrame&, const WebCore::IntSize&) const
+void WebChromeClient::contentsSizeChanged(WebCore::LocalFrame& frame, const WebCore::IntSize& size) const
 {
+    RetainPtr<id> delegate = [m_webView _UIKitDelegate];
+    if (![delegate respondsToSelector:@selector(webView:contentsSizeChanged:forFrame:)])
+        return;
+    [delegate webView:m_webView contentsSizeChanged:[NSValue valueWithCGSize:CGSizeMake(size.width(), size.height())] forFrame:kit(&frame)];
 }
 
 void WebChromeClient::scrollContainingScrollViewsToRevealRect(const WebCore::IntRect& r) const

@@ -188,7 +188,13 @@ namespace GetByVal {
     static constexpr GPRReg propertyCacheGPR { preferredArgumentGPR<SlowOperation, 2>() };
     static constexpr GPRReg profileGPR { preferredArgumentGPR<SlowOperation, 3>() };
 
-    static_assert(noOverlap(baseJSR, propertyJSR, propertyCacheGPR, profileGPR), "Required for DataIC");
+    // GPRInfo::handlerGPR belongs in this set on every target, not only 64-bit ones:
+    // emitDataICHandlerDispatch() loads the InlineCacheHandler* into it and calls
+    // through it while every register named here is still live. It reads as
+    // 64-bit-only because on those targets it cannot collide - handlerGPR is outside
+    // the eight argument registers - whereas the ARM_THUMB2 preferred-argument list
+    // runs past r0-r3 into the temporaries and used to reach it.
+    static_assert(noOverlap(baseJSR, propertyJSR, propertyCacheGPR, profileGPR, GPRInfo::handlerGPR), "Required for DataIC");
     static constexpr auto scratchRegisters = allocatedScratchRegisters<GPRInfo, baseJSR, propertyJSR, propertyCacheGPR, profileGPR, GPRInfo::handlerGPR>;
     static constexpr GPRReg scratch1GPR { scratchRegisters[0] };
 #if USE(JSVALUE64)
@@ -268,8 +274,14 @@ namespace PutByVal {
     static_assert(noOverlap(baseJSR, propertyJSR, valueJSR, propertyCacheGPR, profileGPR, scratch1GPR, GPRInfo::handlerGPR), "Required for call to slow operation");
     static_assert(noOverlap(baseJSR, propertyJSR, valueJSR, propertyCacheGPR, profileGPR, scratch1GPR, scratch2GPR), "Required for HandlerIC");
 #else
+    // scratch1GPR is deliberately allowed to be GPRInfo::handlerGPR here - it is dead
+    // after emitArrayProfilingSiteWithCellAndProfile(), before the dispatch loads the
+    // handler - but the operands are not, so they get the same guarantee as above.
+    // Excluding handlerGPR from the allocation as well would push scratch1GPR onto
+    // regCS1, the jitData register propertyCacheGPR is still to be materialised from.
     static constexpr auto scratchRegisters = allocatedScratchRegisters<GPRInfo, baseJSR, propertyJSR, valueJSR, propertyCacheGPR, profileGPR>;
     static constexpr GPRReg scratch1GPR { scratchRegisters[0] };
+    static_assert(noOverlap(baseJSR, propertyJSR, valueJSR, propertyCacheGPR, profileGPR, GPRInfo::handlerGPR), "Required for DataIC");
 #endif
 }
 

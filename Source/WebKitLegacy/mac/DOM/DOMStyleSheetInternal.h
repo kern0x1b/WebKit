@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMStyleSheetInternal_h
+#define WebKitLegacyDOM_DOMStyleSheetInternal_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -31,3 +34,5 @@ class StyleSheet;
 
 DOMStyleSheet *kit(WebCore::StyleSheet*);
 Class kitClass(WebCore::StyleSheet*);
+
+#endif // WebKitLegacyDOM_DOMStyleSheetInternal_h

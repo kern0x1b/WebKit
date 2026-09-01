@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMHTMLParamElement_h
+#define WebKitLegacyDOM_DOMHTMLParamElement_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -34,3 +37,5 @@ WEBKIT_CLASS_DEPRECATED_MAC(10_4, 10_14)
 @property (copy) NSString *value;
 @property (copy) NSString *valueType;
 @end
+
+#endif // WebKitLegacyDOM_DOMHTMLParamElement_h

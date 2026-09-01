@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMHTMLTableSectionElementInternal_h
+#define WebKitLegacyDOM_DOMHTMLTableSectionElementInternal_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -31,3 +34,5 @@ class HTMLTableSectionElement;
 
 WebCore::HTMLTableSectionElement* core(DOMHTMLTableSectionElement *);
 DOMHTMLTableSectionElement *kit(WebCore::HTMLTableSectionElement*);
+
+#endif // WebKitLegacyDOM_DOMHTMLTableSectionElementInternal_h

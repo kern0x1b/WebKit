@@ -210,6 +210,7 @@ set(bmalloc_C_SOURCES
 set(bmalloc_PUBLIC_HEADERS
     bmalloc/Algorithm.h
     bmalloc/AllocationCounts.h
+    bmalloc/ClassicBmalloc.h
     bmalloc/CompactAllocationMode.h
     bmalloc/BAssert.h
     bmalloc/BCompiler.h
@@ -637,6 +638,23 @@ if (APPLE)
     )
 endif ()
 
+if (WEBKIT_IOS6_BMALLOC)
+    list(APPEND bmalloc_SOURCES
+        bmalloc/ios6/Allocator.cpp
+        bmalloc/ios6/Cache.cpp
+        bmalloc/ios6/ClassicBmalloc.cpp
+        bmalloc/ios6/Deallocator.cpp
+        bmalloc/ios6/Environment.cpp
+        bmalloc/ios6/Heap.cpp
+        bmalloc/ios6/LargeMap.cpp
+        bmalloc/ios6/Logging.cpp
+        bmalloc/ios6/ObjectType.cpp
+        bmalloc/ios6/StaticMutex.cpp
+        bmalloc/ios6/VMHeap.cpp
+        bmalloc/ios6/Zone.cpp
+    )
+endif ()
+
 set(bmalloc_LIBRARIES
     ${CMAKE_DL_LIBS}
 )
@@ -694,6 +712,10 @@ endif ()
 
 if (USE_SYSTEM_MALLOC)
     add_definitions(-DUSE_SYSTEM_MALLOC=1)
+endif ()
+
+if (WEBKIT_IOS6_BMALLOC)
+    add_definitions(-DWEBKIT_IOS6_BMALLOC=1)
 endif ()
 
 if (MSVC)

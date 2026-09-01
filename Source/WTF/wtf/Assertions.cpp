@@ -778,4 +778,11 @@ String getAndResetAccumulatedLogs()
 
 } // namespace WTF
 
+#if defined(WEBKIT_IOS6)
+extern "C" WTF_EXPORT_PRIVATE void WTFInvokeCrashHook(void);
+extern "C" void WTFInvokeCrashHook(void)
+{
+}
+#endif
+
 WTF_ALLOW_UNSAFE_BUFFER_USAGE_END

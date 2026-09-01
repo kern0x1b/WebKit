@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMHTMLDListElement_h
+#define WebKitLegacyDOM_DOMHTMLDListElement_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -29,3 +32,5 @@ WEBKIT_CLASS_DEPRECATED_MAC(10_4, 10_14)
 @interface DOMHTMLDListElement : DOMHTMLElement
 @property BOOL compact;
 @end
+
+#endif // WebKitLegacyDOM_DOMHTMLDListElement_h

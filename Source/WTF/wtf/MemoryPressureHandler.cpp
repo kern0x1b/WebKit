@@ -248,7 +248,11 @@ void MemoryPressureHandler::measurementTimerFired()
         releaseMemory(Critical::No, Synchronous::No);
         break;
     case MemoryUsagePolicy::Strict:
+#if defined(WEBKIT_IOS6)
+        releaseMemory(footprint >= m_configuration.baseThreshold ? Critical::Yes : Critical::No, Synchronous::No);
+#else
         releaseMemory(Critical::Yes, Synchronous::No);
+#endif
         break;
     }
 }

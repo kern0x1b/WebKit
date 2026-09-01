@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMElement_h
+#define WebKitLegacyDOM_DOMElement_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -108,3 +111,5 @@ WEBKIT_CLASS_DEPRECATED_MAC(10_4, 10_14)
 - (void)scrollByLines:(int)lines WEBKIT_DEPRECATED_MAC(10_5, 10_14);
 - (void)scrollByPages:(int)pages WEBKIT_DEPRECATED_MAC(10_5, 10_14);
 @end
+
+#endif // WebKitLegacyDOM_DOMElement_h

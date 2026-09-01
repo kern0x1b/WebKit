@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMCounterInternal_h
+#define WebKitLegacyDOM_DOMCounterInternal_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -30,3 +33,5 @@ class DeprecatedCSSOMCounter;
 }
 
 DOMCounter *kit(WebCore::DeprecatedCSSOMCounter*);
+
+#endif // WebKitLegacyDOM_DOMCounterInternal_h

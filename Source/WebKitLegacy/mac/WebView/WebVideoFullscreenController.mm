@@ -36,7 +36,9 @@
 #import <objc/message.h>
 #import <objc/runtime.h>
 #import <pal/spi/cocoa/AVKitSPI.h>
+#if PLATFORM(MAC)  // ios6: mac SPI
 #import <pal/spi/mac/NSWindowSPI.h>
+#endif
 #import <wtf/RetainPtr.h>
 
 #import <pal/cf/CoreMediaSoftLink.h>

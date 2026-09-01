@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMHTMLMenuElement_h
+#define WebKitLegacyDOM_DOMHTMLMenuElement_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -29,3 +32,5 @@ WEBKIT_CLASS_DEPRECATED_MAC(10_4, 10_14)
 @interface DOMHTMLMenuElement : DOMHTMLElement
 @property BOOL compact;
 @end
+
+#endif // WebKitLegacyDOM_DOMHTMLMenuElement_h

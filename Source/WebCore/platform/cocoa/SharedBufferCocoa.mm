@@ -180,9 +180,17 @@ RetainPtr<NSData> DataSegment::createNSData() const
 
 void DataSegment::iterate(CFDataRef data, NOESCAPE const Function<void(std::span<const uint8_t>)>& apply) const
 {
+#if defined(WEBKIT_IOS6)
+    // -enumerateByteRangesUsingBlock: arrived in iOS 7, and exists because an
+    // NSData can be backed by a dispatch_data and be discontiguous. A CFData
+    // never is: CFDataGetBytePtr() returns the whole thing. So the loop this
+    // replaces would have had exactly one iteration anyway.
+    apply(unsafeMakeSpan(CFDataGetBytePtr(data), static_cast<size_t>(CFDataGetLength(data))));
+#else
     [(__bridge NSData *)data enumerateByteRangesUsingBlock:^(const void *bytes, NSRange byteRange, BOOL *) {
         apply(unsafeMakeSpan(static_cast<const uint8_t*>(bytes), byteRange.length));
     }];
+#endif
 }
 
 RetainPtr<NSData> SharedBufferDataView::createNSData() const

@@ -46,7 +46,7 @@
 #import <JavaScriptCore/JSCellInlines.h>
 #import <JavaScriptCore/JSGlobalObjectInlines.h>
 #import <JavaScriptCore/TypedArrayInlines.h>
-#import <objc/objc-runtime.h>
+#import <objc/runtime.h>
 #import <pal/spi/cocoa/AVFoundationSPI.h>
 #import <wtf/FileSystem.h>
 #import <wtf/TZoneMallocInlines.h>

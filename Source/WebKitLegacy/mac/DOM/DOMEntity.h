@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMEntity_h
+#define WebKitLegacyDOM_DOMEntity_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -33,3 +36,5 @@ WEBKIT_CLASS_DEPRECATED_MAC(10_4, 10_14)
 @property (readonly, copy) NSString *systemId;
 @property (readonly, copy) NSString *notationName;
 @end
+
+#endif // WebKitLegacyDOM_DOMEntity_h

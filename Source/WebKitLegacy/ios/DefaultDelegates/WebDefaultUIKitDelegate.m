@@ -176,6 +176,14 @@ static WebDefaultUIKitDelegate *sharedDelegate = nil;
 {
 }
 
+- (void)addInputString:(NSString *)str
+{
+}
+
+- (void)addInputString:(NSString *)str fromVariantKey:(BOOL)fromVariantKey
+{
+}
+
 // FIXME: to be removed when UIKit implements the new one below.
 - (void)deleteFromInput
 {

@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMAttrInternal_h
+#define WebKitLegacyDOM_DOMAttrInternal_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -31,3 +34,5 @@ class Attr;
 
 WebCore::Attr* core(DOMAttr *);
 DOMAttr *kit(WebCore::Attr*);
+
+#endif // WebKitLegacyDOM_DOMAttrInternal_h

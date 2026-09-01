@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMTimeRangesInternal_h
+#define WebKitLegacyDOM_DOMTimeRangesInternal_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -30,3 +33,5 @@ class TimeRanges;
 }
 
 DOMTimeRanges *kit(WebCore::TimeRanges*);
+
+#endif // WebKitLegacyDOM_DOMTimeRangesInternal_h

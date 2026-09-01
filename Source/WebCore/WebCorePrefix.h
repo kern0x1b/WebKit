@@ -387,6 +387,13 @@
 #include <JavaScriptCore/JSLock.h>
 #include <JavaScriptCore/JSONAtomStringCache.h>
 #include <JavaScriptCore/JSObject.h>
+#include <JavaScriptCore/JSObjectInlines.h>
+// JSObject::setStructure() is inline and calls JSCell::setStructure(), whose
+// only definition is ALWAYS_INLINE in JSCellInlines.h. A precompiled header
+// emits an out-of-line copy of every inline it carries, so without this the
+// copy calls a symbol no library defines and the process dies at launch
+// rather than at link time.
+#include <JavaScriptCore/JSCellInlines.h>
 #include <JavaScriptCore/JSRunLoopTimer.h>
 #include <JavaScriptCore/JSType.h>
 #include <JavaScriptCore/JSTypeInfo.h>
@@ -434,6 +441,7 @@
 #include <JavaScriptCore/StringSplitCache.h>
 #include <JavaScriptCore/Strong.h>
 #include <JavaScriptCore/Structure.h>
+#include <JavaScriptCore/StructureInlinesLight.h>
 #include <JavaScriptCore/StructureID.h>
 #include <JavaScriptCore/StructureRareData.h>
 #include <JavaScriptCore/StructureTransitionTable.h>

@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMStyleSheet_h
+#define WebKitLegacyDOM_DOMStyleSheet_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -39,3 +42,5 @@ WEBKIT_CLASS_DEPRECATED_MAC(10_4, 10_14)
 @property (readonly, copy) NSString *title;
 @property (readonly, strong) DOMMediaList *media;
 @end
+
+#endif // WebKitLegacyDOM_DOMStyleSheet_h

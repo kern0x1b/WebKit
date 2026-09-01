@@ -2799,8 +2799,10 @@ bool MediaPlayerPrivateAVFoundationObjC::updateLastPixelBuffer()
         m_lastPixelBuffer = m_imageRotationSession->rotate(m_lastPixelBuffer.get());
 
     if (m_resourceOwner && m_lastPixelBuffer) {
+#if HAVE(IOSURFACE)
         if (RetainPtr surface = CVPixelBufferGetIOSurface(m_lastPixelBuffer.get()))
             IOSurface::setOwnershipIdentity(surface.get(), m_resourceOwner);
+#endif
     }
 
     m_lastImage = nullptr;

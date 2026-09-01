@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMProgressEvent_h
+#define WebKitLegacyDOM_DOMProgressEvent_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -31,3 +34,5 @@ WEBKIT_CLASS_DEPRECATED_MAC(10_6, 10_14)
 @property (readonly) unsigned long long loaded;
 @property (readonly) unsigned long long total;
 @end
+
+#endif // WebKitLegacyDOM_DOMProgressEvent_h

@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMHTMLCollectionInternal_h
+#define WebKitLegacyDOM_DOMHTMLCollectionInternal_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -31,3 +34,5 @@ class HTMLCollection;
 
 DOMHTMLCollection *kit(WebCore::HTMLCollection*);
 Class kitClass(WebCore::HTMLCollection*);
+
+#endif // WebKitLegacyDOM_DOMHTMLCollectionInternal_h

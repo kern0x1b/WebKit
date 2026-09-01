@@ -24,6 +24,7 @@
  */
 
 #include "config.h"
+#include <unistd.h>
 #include "RenderLayerCompositor.h"
 
 #include "AsyncScrollingCoordinator.h"
@@ -710,7 +711,15 @@ bool RenderLayerCompositor::updateCompositingPolicy()
 
     static auto cachedMemoryPolicy = WTF::MemoryUsagePolicy::Unrestricted;
     bool nowUnderMemoryPressure = isCurrentlyUnderMemoryPressureOrWarning();
-    static bool cachedIsUnderMemoryPressureOrWarning = nowUnderMemoryPressure;
+    // Seeded to false rather than to the first observation, so that it agrees
+    // with cachedMemoryPolicy above. Seeded from the observation, a process
+    // whose very first call already sees pressure records "under pressure" next
+    // to a policy of Unrestricted and never refreshes the policy until the flag
+    // happens to go false and true again - leaving m_compositingPolicy Normal
+    // for the life of the process. Reachable here because pressure now follows
+    // this process's own footprint, which can already be over the threshold by
+    // the first style recalc.
+    static bool cachedIsUnderMemoryPressureOrWarning = false;
 
     if (cachedIsUnderMemoryPressureOrWarning != nowUnderMemoryPressure) {
         cachedMemoryPolicy = MemoryPressureHandler::singleton().currentMemoryUsagePolicy();
@@ -1040,6 +1049,37 @@ static std::optional<ScrollingNodeID> frameHostingNodeForFrame(LocalFrame& frame
 // Returns true on a successful update.
 bool RenderLayerCompositor::updateCompositingLayers(CompositingUpdateType updateType, RenderLayer* updateRootArg)
 {
+#if defined(WEBKIT_IOS6)
+    // Every layer with a backing store costs a screen of pixels at retina scale -
+    // over two megabytes for a full-width one - and the process reports fifty two
+    // megabytes of graphics while the tile cache accounts for under five. This
+    // says how many there are.
+    {
+        static int recordLayers = -1;
+        if (recordLayers < 0)
+            recordLayers = access("/tmp/native-weblock-on", F_OK) == 0 ? 1 : 0;
+        static CFAbsoluteTime lastLayerReport;
+        CFAbsoluteTime layerNow = CFAbsoluteTimeGetCurrent();
+        if (recordLayers && layerNow - lastLayerReport > 3.0) {
+            lastLayerReport = layerNow;
+            unsigned backed = 0;
+            unsigned total = 0;
+            if (auto* root = m_renderView.layer()) {
+                Vector<const RenderLayer*> stack;
+                stack.append(root);
+                while (!stack.isEmpty()) {
+                    const RenderLayer* current = stack.takeLast();
+                    total++;
+                    if (current->isComposited())
+                        backed++;
+                    for (const RenderLayer* child = current->firstChild(); child; child = child->nextSibling())
+                        stack.append(child);
+                }
+            }
+            WTFLogAlways("[layers] %u composited of %u render layers", backed, total);
+        }
+    }
+#endif
     LOG_WITH_STREAM(Compositing, stream << "RenderLayerCompositor " << this << " [" << m_renderView.frameView() << "] updateCompositingLayers " << updateType << " contentLayersCount " << m_contentLayersCount);
 
     TraceScope tracingScope(CompositingUpdateStart, CompositingUpdateEnd);
@@ -1243,6 +1283,25 @@ bool RenderLayerCompositor::allowBackingStoreDetachingForFixedPosition(RenderLay
         fixedLayoutRect = frameView->rectForFixedPositionLayout();
 
     bool allowDetaching = !fixedLayoutRect.intersects(absoluteBounds);
+
+#if defined(WEBKIT_IOS6)
+    // Never on this port.
+    //
+    // The rule above throws away a fixed layer's backing store when the engine
+    // believes the layer is outside the layout viewport. That belief is formed
+    // from where the element was laid out, and on this port the application
+    // moves pinned layers itself on every frame while layouts happen rarely - so
+    // the two drift apart as soon as the reader scrolls, the engine decides the
+    // page's own header and footer are far away, and their backing stores are
+    // discarded. The result on the device: the bars are in exactly the right
+    // place, measured at y 20 and y 430 in window coordinates, and nothing is
+    // drawn in them.
+    //
+    // The memory this rule is protecting is two bars at 320 by 74 and 320 by 50 -
+    // about 145 kilobytes. Keeping them is not a cost worth the page losing its
+    // furniture.
+    allowDetaching = false;
+#endif
     LOG_WITH_STREAM(Compositing, stream << "RenderLayerCompositor (layer " << &layer << ") allowsBackingStoreDetaching - absoluteBounds " << absoluteBounds << " layoutViewportRect " << fixedLayoutRect << ", allowDetaching " << allowDetaching);
     return allowDetaching;
 }
@@ -4125,16 +4184,28 @@ bool RenderLayerCompositor::requiresCompositingForPosition(RenderLayerModelObjec
 
     auto position = renderer.style().position();
     bool isFixed = renderer.isFixedPositioned();
+#if !defined(WEBKIT_IOS6)
     if (isFixed && !layer.isStackingContext())
         return false;
+#else
+    // A fixed element without a layer of its own is painted from the render
+    // tree, which on this port only learns the new scroll offset at the next
+    // layout - so a site's bars drift with the content and snap back, which is
+    // exactly what a person sees. With a layer, the scroll handler moves it
+    // directly in the same frame as the scroll. Narrowing this back to upstream
+    // behaviour was tried to save memory and saved none: the graphics figure did
+    // not move, because it is decoded images, not layer backing stores. The
+    // layer count on this feed is five to eleven.
+#endif
     
     bool isSticky = renderer.isInFlowPositioned() && position == PositionType::Sticky;
     if (!isFixed && !isSticky)
         return false;
 
     // FIXME: acceleratedCompositingForFixedPositionEnabled should probably be renamed acceleratedCompositingForViewportConstrainedPositionEnabled().
-    if (!m_renderView.settings().acceleratedCompositingForFixedPositionEnabled())
+    if (!m_renderView.settings().acceleratedCompositingForFixedPositionEnabled()) {
         return false;
+    }
 
     if (isSticky)
         return isAsyncScrollableStickyLayer(layer);
@@ -4149,16 +4220,24 @@ bool RenderLayerCompositor::requiresCompositingForPosition(RenderLayerModelObjec
 
     // Don't promote fixed position elements that are descendants of a non-view container, e.g. transformed elements.
     // They will stay fixed wrt the container rather than the enclosing frame.
+#if !defined(WEBKIT_IOS6)
     if (container != &m_renderView) {
         queryData.nonCompositedForPositionReason = RenderLayer::NotCompositedForNonViewContainer;
         return false;
     }
+#else
+    // Being fixed with respect to a transformed container is the lesser error
+    // here: left out of a layer, the element is painted at a stale offset, and a
+    // sheet that appears mid-scroll is never drawn at all.
+    UNUSED_VARIABLE(container);
+#endif
 
     bool paintsContent = layer.isVisuallyNonEmpty() || layer.hasVisibleDescendant();
     if (!paintsContent) {
         queryData.nonCompositedForPositionReason = RenderLayer::NotCompositedForNoVisibleContent;
         return false;
     }
+
 
     // Scroll-adjusted boxes can be scrolled into view, so don't check viewport intersection on them.
     if (!layer.anchorScrollAdjustment() && !fixedLayerIntersectsViewport(layer)) {
@@ -5469,7 +5548,11 @@ FixedPositionViewportConstraints RenderLayerCompositor::computeFixedViewportCons
 
     FixedPositionViewportConstraints constraints;
     constraints.setLayerPositionAtLastLayout(scrollingNodeLayer->position());
+#if defined(WEBKIT_IOS6)
+    constraints.setViewportRectAtLastLayout(layer.backing()->viewportRectWhenPositioned());
+#else
     constraints.setViewportRectAtLastLayout(m_renderView.frameView().rectForFixedPositionLayout());
+#endif
     constraints.setAlignmentOffset(scrollingNodeLayer->pixelAlignmentOffset());
 
     const Style::ComputedStyle& style = layer.renderer().style();
@@ -5517,7 +5600,11 @@ StickyPositionViewportConstraints RenderLayerCompositor::computeStickyViewportCo
     StickyPositionViewportConstraints constraints;
     renderer.computeStickyPositionConstraints(constraints, renderer.constrainingRectForStickyPosition());
 
+#if defined(WEBKIT_IOS6)
+    constraints.setViewportRectAtLastLayout(layer.backing()->viewportRectWhenPositioned());
+#else
     constraints.setViewportRectAtLastLayout(m_renderView.frameView().rectForFixedPositionLayout());
+#endif
     constraints.setLayerPositionAtLastLayout(scrollingNodeLayer->position());
     if (scrollingNodeLayer != anchorLayer)
         constraints.setAnchorLayerOffsetAtLastLayout(toFloatSize(anchorLayer->position()));

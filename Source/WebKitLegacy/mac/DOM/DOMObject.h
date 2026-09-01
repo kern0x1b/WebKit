@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMObject_h
+#define WebKitLegacyDOM_DOMObject_h
+
 /*
  * Copyright (C) 2004, 2006, 2009, 2015 Apple Inc. All rights reserved.
  * Copyright (C) 2006 Samuel Weinig <sam.weinig@gmail.com>
@@ -46,3 +49,5 @@ WEBKIT_CLASS_DEPRECATED_MAC(10_4, 10_14)
 @interface DOMObject (DOMLinkStyle)
 @property (readonly, strong) DOMStyleSheet *sheet WEBKIT_AVAILABLE_MAC(10_4);
 @end
+
+#endif // WebKitLegacyDOM_DOMObject_h

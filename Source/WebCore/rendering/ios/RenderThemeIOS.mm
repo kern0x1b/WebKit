@@ -1019,7 +1019,15 @@ Color RenderThemeIOS::systemFocusRingColor()
 {
     if (!cachedFocusRingColor().has_value()) {
         // FIXME: Should be using +keyboardFocusIndicatorColor. For now, work around <rdar://problem/50838886>.
+#if defined(WEBKIT_IOS6)
+        // +systemBlueColor is iOS 13, along with the rest of the named system
+        // colours. The system blue of this release is a fixed value rather than
+        // a named one - #007AFF, what every tinted control on the device is
+        // drawn in - so name it here instead of asking for it.
+        cachedFocusRingColor() = SRGBA<uint8_t> { 0, 122, 255 };
+#else
         cachedFocusRingColor() = colorFromCocoaColor([PAL::getUIColorClassSingleton() systemBlueColor]);
+#endif
     }
     return *cachedFocusRingColor();
 }
@@ -1167,6 +1175,15 @@ static const Vector<CSSValueSystemColorInformation>& cssValueSystemColorInformat
 
 static inline std::optional<Color> systemColorFromCSSValueSystemColorInformation(CSSValueSystemColorInformation systemColorInformation, bool useDarkAppearance)
 {
+#if defined(WEBKIT_IOS6)
+    // This table names iOS 13's semantic colours - labelColor, systemFillColor
+    // and their kin. This UIColor predates all of them, and sending it one of
+    // those selectors raises rather than returning nil. Ask first; the caller
+    // already knows what to do when there is no colour, and CSS falls back to
+    // the same defaults it uses on a system that never had these names.
+    if (![PAL::getUIColorClassSingleton() respondsToSelector:systemColorInformation.selector])
+        return std::nullopt;
+#endif
     UIColor *color = wtfObjCMsgSend<UIColor *>(PAL::getUIColorClassSingleton(), systemColorInformation.selector);
     if (!color)
         return std::nullopt;

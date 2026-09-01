@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMHTMLScriptElementInternal_h
+#define WebKitLegacyDOM_DOMHTMLScriptElementInternal_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -30,3 +33,5 @@ class HTMLScriptElement;
 }
 
 DOMHTMLScriptElement *kit(WebCore::HTMLScriptElement*);
+
+#endif // WebKitLegacyDOM_DOMHTMLScriptElementInternal_h

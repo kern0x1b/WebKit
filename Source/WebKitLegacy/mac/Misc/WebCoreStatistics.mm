@@ -34,6 +34,7 @@
 #import <JavaScriptCore/JSLock.h>
 #import <JavaScriptCore/MemoryStatistics.h>
 #import <JavaScriptCore/VM.h>
+
 #import <WebCore/BackForwardCache.h>
 #import <WebCore/CommonVM.h>
 #import <WebCore/FontCache.h>
@@ -193,6 +194,21 @@ static RetainPtr<NSCountedSet> createNSCountedSet(const HashCountedSet<ASCIILite
         @"JavaScriptFreeSize": @(heapFree),
         @"JavaScriptStackSize": @(globalMemoryStats.stackBytes),
         @"JavaScriptJITSize": @(globalMemoryStats.JITBytes),
+    };
+}
+
++ (NSDictionary *)codeMemoryStatistics
+{
+    auto& vm = WebCore::commonVM();
+    JSC::JSLockHolder lock(vm);
+    auto statistics = JSC::codeMemoryStatistics(vm);
+    return @{
+        @"UnlinkedCodeBlockCount": @(statistics.unlinkedCodeBlockCount),
+        @"UnlinkedCodeBlockBytes": @(statistics.unlinkedCodeBlockBytes),
+        @"CodeBlockCount": @(statistics.codeBlockCount),
+        @"CodeBlockBytes": @(statistics.codeBlockBytes),
+        @"ExecutableCount": @(statistics.executableCount),
+        @"SourceBytes": @(statistics.sourceBytes),
     };
 }
 

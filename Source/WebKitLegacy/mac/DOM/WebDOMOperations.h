@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_WebDOMOperations_h
+#define WebKitLegacyDOM_WebDOMOperations_h
+
 /*
  * Copyright (C) 2004, 2005 Apple Inc. All rights reserved.
  *
@@ -109,3 +112,5 @@
 @property (nonatomic, readonly, strong) WebFrame *contentFrame;
 
 @end
+
+#endif // WebKitLegacyDOM_WebDOMOperations_h

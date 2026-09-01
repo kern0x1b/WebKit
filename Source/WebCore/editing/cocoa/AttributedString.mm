@@ -640,7 +640,13 @@ inline static ParagraphStyle extractParagraphStyle(NSParagraphStyle *style, Tabl
     Vector<ParagraphStyleTextList> newTextLists;
     Vector<TextTab> newTextTabs;
 
-    for (NSTextList *list in style.textLists) {
+#if defined(WEBKIT_IOS6)
+    NSArray *paragraphTextLists = [style respondsToSelector:@selector(textLists)]
+        ? [style valueForKey:@"textLists"] : nil;
+#else
+    NSArray *paragraphTextLists = style.textLists;
+#endif
+    for (NSTextList *list in paragraphTextLists) {
         if (![list isKindOfClass:PlatformNSTextList])
             return { };
 

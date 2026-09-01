@@ -24,6 +24,7 @@
  */
 
 #include "config.h"
+#include <unistd.h>
 #include "MatchResultCache.h"
 
 #include "MatchResult.h"
@@ -189,9 +190,25 @@ void MatchResultCache::set(const Element& element, const UnadjustedStyle& unadju
     auto* styledElement = dynamicDowncast<StyledElement>(element);
     RefPtr inlineStyle = styledElement ? dynamicDowncast<MutableStyleProperties>(styledElement->inlineStyle()) : nullptr;
 
-    if (inlineStyle)
+    if (inlineStyle) {
+#if defined(WEBKIT_IOS6)
+        // Five hundred and twelve, not sixty four.
+        //
+        // A miss here means matching selectors again for an element the page is
+        // mutating repeatedly, which is what a React feed does constantly.
+        // Measured by domInteractive over four pairs: 6058-7159 ms against
+        // 6176-8087, better on average though the two sets overlap. Kept because
+        // it is never worse and the entries are small.
+        static const unsigned maximumEntries = access("/tmp/native-small-match-cache", F_OK) == 0 ? 64 : 512;
+        constexpr unsigned insertsBetweenSizeChecks = 32;
+        if (++m_insertsSinceSizeCheck >= insertsBetweenSizeChecks) {
+            m_insertsSinceSizeCheck = 0;
+            if (m_entries.computeSize() > maximumEntries)
+                m_entries.clear();
+        }
+#endif
         m_entries.set(element, makeUniqueRef<Entry>(copy(unadjustedStyle), *inlineStyle));
-    else
+    } else
         m_entries.remove(element);
 }
 

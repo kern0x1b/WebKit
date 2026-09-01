@@ -67,6 +67,12 @@ Vector<FloatPoint> convertCornerPoints(const FloatSize& imageSize, VNRectangleOb
     return { topLeft, topRight, bottomRight, bottomLeft };
 }
 
+#if defined(WEBKIT_IOS6)
+void configureRequestToUseCPUOrGPU(VNRequest *request)
+{
+    UNUSED_PARAM(request);
+}
+#else
 void configureRequestToUseCPUOrGPU(VNRequest *request)
 {
     NSError *error = nil;
@@ -95,6 +101,7 @@ void configureRequestToUseCPUOrGPU(VNRequest *request)
         }
     }
 }
+#endif
 
 } // namespace WebCore::ShapeDetection
 

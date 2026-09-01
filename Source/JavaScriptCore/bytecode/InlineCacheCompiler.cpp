@@ -681,6 +681,21 @@ static bool NODELETE isStateless(AccessCase::AccessType type)
 }
 #endif
 
+#if !CPU(ADDRESS64)
+// ios6/armv7: JSC_FOR_EACH_COMMON_THUNK in jit/JITThunks.h is a backslash-continued macro
+// list, so its GetByIdMegamorphicGetterHandler entry cannot be #if'd out and
+// JITThunks::initialize() references this symbol on every architecture. The real
+// definition below is inside #if CPU(ADDRESS64) because it needs the 64-bit-only
+// AssemblyHelpers::loadMegamorphicGetterSetter. initialize() only stores the returned
+// code ref into m_commonThunks, and the only thing that would ever call through it is a
+// LoadMegamorphicGetter access case, which a 32-bit build never creates -- so an empty
+// code ref is stored and never dereferenced.
+MacroAssemblerCodeRef<JITThunkPtrTag> getByIdMegamorphicGetterHandler(VM&)
+{
+    return { };
+}
+#endif
+
 bool NODELETE doesJSCalls(AccessCase::AccessType type)
 {
     switch (type) {
@@ -2034,6 +2049,10 @@ void InlineCacheCompiler::generateWithGuard(unsigned index, AccessCase& accessCa
         return;
     }
 
+#if USE(JSVALUE64)
+    // ios6/armv7: this case is written entirely in 64-bit macro-assembler ops and has
+    // never had a 32-bit path. Repatch.cpp is guarded to match, so it is never created
+    // on a 32-bit build and this arm is unreachable there.
     case AccessCase::ArrayLengthStore: {
         ASSERT(!accessCase.viaGlobalProxy());
 
@@ -2082,6 +2101,7 @@ void InlineCacheCompiler::generateWithGuard(unsigned index, AccessCase& accessCa
             m_failAndIgnore.append(failAndIgnore);
         return;
     }
+#endif // USE(JSVALUE64)
 
     case AccessCase::RegExpLastIndexStore: {
         ASSERT(!accessCase.viaGlobalProxy());
@@ -2468,7 +2488,7 @@ void InlineCacheCompiler::generateWithGuard(unsigned index, AccessCase& accessCa
         fallThrough.append(jit.branchIfNotTrue(m_propertyCache.propertyGPR()));
 #else
         fallThrough.append(jit.branch32(CCallHelpers::NotEqual, m_propertyCache.propertyTagGPR(), CCallHelpers::TrustedImm32(JSValue::BooleanTag)));
-        fallThrough.append(jit.branchTest32(CCallHelpers::Zero, m_propertyCache.propertyPayloadGPR(), CCallHelpers::TrustedImm32(1)));
+        fallThrough.append(jit.branchTest32(CCallHelpers::Zero, m_propertyCache.propertyGPR(), CCallHelpers::TrustedImm32(1)));
 #endif
         emitDefaultGuard();
         break;
@@ -2482,7 +2502,7 @@ void InlineCacheCompiler::generateWithGuard(unsigned index, AccessCase& accessCa
         fallThrough.append(jit.branchIfNotFalse(m_propertyCache.propertyGPR()));
 #else
         fallThrough.append(jit.branch32(CCallHelpers::NotEqual, m_propertyCache.propertyTagGPR(), CCallHelpers::TrustedImm32(JSValue::BooleanTag)));
-        fallThrough.append(jit.branchTest32(CCallHelpers::NonZero, m_propertyCache.propertyPayloadGPR(), CCallHelpers::TrustedImm32(1)));
+        fallThrough.append(jit.branchTest32(CCallHelpers::NonZero, m_propertyCache.propertyGPR(), CCallHelpers::TrustedImm32(1)));
 #endif
         emitDefaultGuard();
         break;
@@ -3535,7 +3555,13 @@ void InlineCacheCompiler::generateAccessCase(unsigned index, AccessCase& accessC
 
             CCallHelpers::JumpList slowCases;
             ASSERT(!useHandlerIC());
+#if USE(JSVALUE64)
             slowCases.append(jit.loadMegamorphicGetterSetter(vm, baseGPR, InvalidGPRReg, uid, scratchGPR, scratch2GPR, scratch3GPR, scratch4GPR));
+#else
+            // ios6/armv7: unreachable -- the case is not created on 32-bit (see above).
+            UNUSED_PARAM(uid);
+            RELEASE_ASSERT_NOT_REACHED();
+#endif
 
             allocator.restoreReusedRegistersByPopping(jit, preservedState);
 
@@ -4878,8 +4904,14 @@ RefPtr<AccessCase> InlineCacheCompiler::tryFoldToMegamorphic(CodeBlock* codeBloc
                         break;
                     }
                 }
+#if USE(JSVALUE64)
+                // ios6/armv7: LoadMegamorphicGetter is generated with
+                // AssemblyHelpers::loadMegamorphicGetterSetter, which lives in a
+                // #if USE(JSVALUE64) block and has no 32-bit implementation. Not creating
+                // the case leaves these sites as ordinary polymorphic getter ICs.
                 if (allGetters)
                     return AccessCase::create(vm(), codeBlock, AccessCase::LoadMegamorphicGetter, identifier);
+#endif
             }
 
             unsigned numberOfUndesiredMegamorphicAccessVariants = 0;

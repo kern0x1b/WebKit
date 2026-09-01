@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMNodeInternal_h
+#define WebKitLegacyDOM_DOMNodeInternal_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -36,3 +39,5 @@ WebCore::Node* core(DOMNode *);
 DOMNode *kit(WebCore::Node*);
 Class kitClass(WebCore::Node*);
 id <DOMEventTarget> kit(WebCore::EventTarget*);
+
+#endif // WebKitLegacyDOM_DOMNodeInternal_h

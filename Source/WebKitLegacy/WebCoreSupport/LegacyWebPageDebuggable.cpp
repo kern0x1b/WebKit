@@ -23,6 +23,10 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include "config.h"
+
+#if ENABLE(REMOTE_INSPECTOR)
+
 #include "LegacyWebPageDebuggable.h"
 
 #include <WebCore/Document.h>
@@ -125,3 +129,5 @@ void LegacyWebPageDebuggable::detachFromPage()
 {
     m_page = nullptr;
 }
+
+#endif // ENABLE(REMOTE_INSPECTOR)

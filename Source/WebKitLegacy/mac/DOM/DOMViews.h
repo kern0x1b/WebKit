@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMViews_h
+#define WebKitLegacyDOM_DOMViews_h
+
 /*
  * Copyright (C) 2004 Apple Inc. All rights reserved.
  * Copyright (C) 2006 Samuel Weinig <sam.weinig@gmail.com>
@@ -29,3 +32,5 @@
 #import <WebKitLegacy/DOMObject.h>
 
 #import <WebKitLegacy/DOMAbstractView.h>
+
+#endif // WebKitLegacyDOM_DOMViews_h

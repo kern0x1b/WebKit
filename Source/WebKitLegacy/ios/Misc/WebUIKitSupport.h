@@ -48,6 +48,8 @@ void WebKitSetEndBackgroundTaskBlock(EndBackgroundTaskBlock);
 // This method gives WebKit the notifications to listen to so it knows about app Suspend/Resume
 void WebKitSetBackgroundAndForegroundNotificationNames(NSString *, NSString *);
 
+void WebKitSetIsClassic(BOOL);
+
 void WebKitInitialize(void);
 float WebKitGetMinimumZoomFontSize(void);
     

@@ -4282,7 +4282,7 @@ protected:
         if (cachedRegisterGetValue(cachedRegister, currentRegisterContents)) {
             intptr_t addressDelta = addressAsInt - currentRegisterContents;
             if (Bounds::within(addressDelta))
-                return reinterpret_cast<int32_t>(addressDelta);
+                return static_cast<int32_t>(addressDelta);
         }
         return { };
     }

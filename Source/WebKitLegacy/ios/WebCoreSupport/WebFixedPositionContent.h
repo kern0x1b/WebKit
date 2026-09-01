@@ -25,8 +25,8 @@
 
 #import <CoreGraphics/CoreGraphics.h>
 #import <Foundation/Foundation.h>
+#import <QuartzCore/CALayer.h>
 
-@class CALayer;
 @class WebView;
 
 typedef NS_ENUM(NSInteger, WebFixedPositionAnchorEdge) {
@@ -39,8 +39,12 @@ typedef NS_ENUM(NSInteger, WebFixedPositionAnchorEdge) {
 // Encapsulates page content that needs to be repositioned during scrolling,
 // like position:fixed layers.
 // Can be called without taking the WebThread lock.
+//
+// It is a CALayer because UIKit puts it into its own layer tree and reads the
+// constrained layers back out of it as sublayers; inheriting from NSObject
+// leaves it answering none of that and the app dies on the first scroll.
 
-@interface WebFixedPositionContent : NSObject
+@interface WebFixedPositionContent : CALayer
 
 - (id)initWithWebView:(WebView *)webView;
 

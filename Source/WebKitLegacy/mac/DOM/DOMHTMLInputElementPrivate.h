@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMHTMLInputElementPrivate_h
+#define WebKitLegacyDOM_DOMHTMLInputElementPrivate_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -61,3 +64,5 @@
 - (void)setRangeText:(NSString *)replacement start:(unsigned)start end:(unsigned)end selectionMode:(NSString *)selectionMode;
 - (void)setValueForUser:(NSString *)value;
 @end
+
+#endif // WebKitLegacyDOM_DOMHTMLInputElementPrivate_h

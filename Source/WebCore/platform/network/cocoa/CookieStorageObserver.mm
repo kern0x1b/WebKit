@@ -126,10 +126,19 @@ void CookieStorageObserver::registerInternalsForNotifications(bool isReregisteri
     if (isReregistering && !m_hasRegisteredInternalsForNotifications)
         return;
 
+#if defined(WEBKIT_IOS6)
+    // This is a workaround for a CFNetwork bug in a far later release, and it
+    // works by reaching through NSHTTPCookieStorage's -_internal ivar to call
+    // -registerForPostingNotificationsWithContext:; this Foundation has neither,
+    // and nothing guarantees that ivar layout here. It could not apply in any
+    // case: this CFNetwork has exactly one cookie storage, so nsCookieStorage()
+    // always hands back the shared one and the test below is always false.
+#else
     if (m_cookieStorage.get() != [NSHTTPCookieStorage sharedHTTPCookieStorage]) {
         RetainPtr internalObject = (static_cast<WebNSHTTPCookieStorageDummyForInternalAccess *>(m_cookieStorage.get()))->_internal;
         [internalObject registerForPostingNotificationsWithContext:m_cookieStorage.get()];
     }
+#endif
 }
 
 void CookieStorageObserver::stopObserving()

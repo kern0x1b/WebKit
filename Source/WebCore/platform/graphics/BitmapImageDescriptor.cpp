@@ -238,10 +238,10 @@ SubsamplingLevel BitmapImageDescriptor::maximumSubsamplingLevel() const
     if (!isSizeAvailable())
         return SubsamplingLevel::Default;
 
-    // FIXME: this value was chosen to be appropriate for Apple ports since the image
-    // subsampling is only enabled by default on Apple ports. Choose a different value
-    // if image subsampling is enabled on other platform.
-    static constexpr int maximumImageAreaBeforeSubsampling = 5 * 1024 * 1024;
+    // This is the floor on how far subsamplingLevelForScaleFactor() is allowed to
+    // go. Nothing on a 640x960 panel can show more than a screenful of pixels at
+    // once, so a decoded frame larger than that is memory this device does not have.
+    static constexpr int maximumImageAreaBeforeSubsampling = 640 * 960;
     auto level = SubsamplingLevel::First;
 
     for (; level < SubsamplingLevel::Last; ++level) {
@@ -269,7 +269,10 @@ SubsamplingLevel BitmapImageDescriptor::subsamplingLevelForScaleFactor(GraphicsC
     if (!(scale > 0 && scale <= 1))
         return SubsamplingLevel::Default;
 
-    int result = std::ceil(std::log2(1 / scale));
+    // Rounding up picks a level whose frame is smaller than the image is drawn,
+    // which is visible as softening. Round down so the frame is never smaller
+    // than the size it will be painted at.
+    int result = std::floor(std::log2(1 / scale));
     return static_cast<SubsamplingLevel>(std::min(result, static_cast<int>(maximumSubsamplingLevel())));
 #else
     UNUSED_PARAM(context);

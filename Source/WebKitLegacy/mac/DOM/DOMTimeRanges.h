@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMTimeRanges_h
+#define WebKitLegacyDOM_DOMTimeRanges_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -32,3 +35,5 @@ WEBKIT_CLASS_DEPRECATED_MAC(10_5, 10_14)
 - (double)start:(unsigned)index;
 - (double)end:(unsigned)index;
 @end
+
+#endif // WebKitLegacyDOM_DOMTimeRanges_h

@@ -1498,7 +1498,7 @@ std::unique_ptr<Update> TreeResolver::resolve()
     if (!documentElement->childNeedsStyleRecalc() && !documentElement->needsStyleRecalc())
         return WTF::move(m_update);
 
-    m_didSeePendingStylesheet = m_document->styleScope().hasPendingSheetsBeforeBody();
+    m_didSeePendingStylesheet = m_document->styleScope().blocksRenderingBeforeBody();
 
     if (!m_update)
         m_update = makeUnique<Update>(m_document);

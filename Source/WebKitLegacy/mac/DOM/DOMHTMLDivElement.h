@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMHTMLDivElement_h
+#define WebKitLegacyDOM_DOMHTMLDivElement_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -31,3 +34,5 @@ WEBKIT_CLASS_DEPRECATED_MAC(10_4, 10_14)
 @interface DOMHTMLDivElement : DOMHTMLElement
 @property (copy) NSString *align;
 @end
+
+#endif // WebKitLegacyDOM_DOMHTMLDivElement_h

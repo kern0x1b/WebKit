@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMHTMLCanvasElement_h
+#define WebKitLegacyDOM_DOMHTMLCanvasElement_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -30,3 +33,5 @@ WEBKIT_CLASS_DEPRECATED_MAC(10_5, 10_14)
 @property int width;
 @property int height;
 @end
+
+#endif // WebKitLegacyDOM_DOMHTMLCanvasElement_h

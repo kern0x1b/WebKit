@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMHTMLStyleElementInternal_h
+#define WebKitLegacyDOM_DOMHTMLStyleElementInternal_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -30,3 +33,5 @@ class HTMLStyleElement;
 }
 
 WebCore::HTMLStyleElement* core(DOMHTMLStyleElement *);
+
+#endif // WebKitLegacyDOM_DOMHTMLStyleElementInternal_h

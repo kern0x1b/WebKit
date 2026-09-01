@@ -273,7 +273,26 @@ void JITCompiler::link(LinkBuffer& linkBuffer)
     if (m_jitCode->m_unlinkedPropertyInlineCaches.size())
         std::move(m_unlinkedPropertyInlineCaches.begin(), m_unlinkedPropertyInlineCaches.end(), m_jitCode->m_unlinkedPropertyInlineCaches.begin());
     ASSERT(m_jitCode->common.m_handlerPropertyInlineCaches.isEmpty());
+#if USE(JSVALUE64)
     ASSERT(m_jitCode->common.m_repatchingPropertyInlineCaches.isEmpty());
+#endif
+
+    auto finalizeInlineCaches = [&](auto& caches) {
+        for (auto& cache : caches)
+            cache.finalize(linkBuffer, linkBuffer);
+    };
+    finalizeInlineCaches(m_getByIds);
+    finalizeInlineCaches(m_getByIdsWithThis);
+    finalizeInlineCaches(m_getByVals);
+    finalizeInlineCaches(m_getByValsWithThis);
+    finalizeInlineCaches(m_putByIds);
+    finalizeInlineCaches(m_putByVals);
+    finalizeInlineCaches(m_delByIds);
+    finalizeInlineCaches(m_delByVals);
+    finalizeInlineCaches(m_inByIds);
+    finalizeInlineCaches(m_inByVals);
+    finalizeInlineCaches(m_instanceOfs);
+    finalizeInlineCaches(m_privateBrandAccesses);
 
     for (auto& record : m_jsDirectCalls) {
         auto& info = *record.info;
@@ -621,9 +640,15 @@ LinkerIR::Constant JITCompiler::addToConstantPool(LinkerIR::Type type, void* pay
 
 std::tuple<CompileTimePropertyInlineCache, PropertyInlineCacheIndex> JITCompiler::addPropertyInlineCache()
 {
+#if USE(JSVALUE64)
     unsigned index = m_unlinkedPropertyInlineCaches.size();
     DFG::UnlinkedPropertyInlineCache* propertyCache = &m_unlinkedPropertyInlineCaches.alloc();
     return std::tuple { propertyCache, PropertyInlineCacheIndex { index } };
+#else
+    RELEASE_ASSERT(!m_graph.m_plan.isUnlinked());
+    auto* propertyCache = static_cast<PropertyInlineCache*>(jitCode()->common.m_repatchingPropertyInlineCaches.add());
+    return std::tuple { propertyCache, PropertyInlineCacheIndex { 0 } };
+#endif
 }
 
 std::tuple<CompileTimeCallLinkInfo, JITCompiler::LinkableConstant> JITCompiler::addCallLinkInfo(CodeOrigin codeOrigin)

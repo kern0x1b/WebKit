@@ -25,6 +25,10 @@
 
 
 #import "WebViewRenderingUpdateScheduler.h"
+#if defined(WEBKIT_IOS6)
+#import <WebCore/WebCoreThread.h>
+#import <WebCore/WebCoreThreadRun.h>
+#endif
 
 #import "WebViewInternal.h"
 #import <pal/spi/cocoa/QuartzCoreSPI.h>
@@ -39,7 +43,9 @@
 #import <wtf/SetForScope.h>
 
 #if PLATFORM(MAC)
+#if PLATFORM(MAC)  // ios6: mac SPI
 #import <pal/spi/mac/NSWindowSPI.h>
+#endif
 #endif
 
 WTF_MAKE_TZONE_ALLOCATED_IMPL(WebViewRenderingUpdateScheduler);
@@ -79,6 +85,22 @@ void WebViewRenderingUpdateScheduler::scheduleRenderingUpdate()
 {
     if (m_insideCallback)
         m_rescheduledInsideCallback = true;
+
+#if defined(WEBKIT_IOS6)
+    // A run loop observer binds to whatever run loop schedules it, once, and
+    // never rebinds. Both of these observers open their bodies with
+    // WebThreadLock(), so one scheduled from the main thread turns into a lock
+    // acquisition on the main thread for every turn of the main run loop -
+    // measured as the last remaining main-thread wait of this kind, 89 ms per
+    // load. Scheduled from the web thread instead, the lock is a recursive
+    // no-op.
+    if (!WebThreadIsCurrent() && WebThreadIsEnabled()) {
+        WebThreadRun(^{
+            m_renderingUpdateRunLoopObserver->schedule();
+        });
+        return;
+    }
+#endif
 
     m_renderingUpdateRunLoopObserver->schedule();
 }

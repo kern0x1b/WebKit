@@ -30,6 +30,7 @@
 #if ENABLE(DFG_JIT)
 
 #include "ArrayPrototype.h"
+#include "BaselineJITRegisters.h"
 #include "CallFrameShuffler.h"
 #include "ClonedArguments.h"
 #include "DFGAbstractInterpreterInlines.h"
@@ -1140,7 +1141,7 @@ GPRReg SpeculativeJIT::fillSpeculateCell(Edge edge)
         if (edge->hasConstant()) {
             GPRReg gpr = allocate();
             m_gprs.retain(gpr, virtualRegister, SpillOrderConstant);
-            move(TrustedImmPtr(edge->constant()), gpr);
+            loadLinkableConstant(LinkableConstant(*this, edge->constant()->cell()), gpr);
             info.fillCell(m_stream, gpr);
             return gpr;
         }
@@ -4045,6 +4046,10 @@ void SpeculativeJIT::compile(Node* node)
         compileIsEmptyStorage(node);
         break;
 
+    case MapStorage:
+        compileMapStorage(node);
+        break;
+
     case MapStorageOrSentinel:
         compileMapStorageOrSentinel(node);
         break;
@@ -4639,7 +4644,6 @@ void SpeculativeJIT::compile(Node* node)
     case InByValMegamorphic:
     case MultiGetByVal:
     case MultiPutByVal:
-    case MapStorage:
     case ArrayShift:
     case ArrayUnshift:
         DFG_CRASH(m_graph, node, "unexpected node in DFG backend");
@@ -5627,6 +5631,31 @@ void SpeculativeJIT::cachedPutById(Node* node, CodeOrigin codeOrigin, GPRReg bas
 void SpeculativeJIT::speculateInt32(Edge edge, JSValueRegs regs)
 {
     speculationCheck(BadType, regs, edge, branchIfNotInt32(regs.tagGPR()));
+}
+
+void SpeculativeJIT::compileMapStorage(Node* node)
+{
+    SpeculateCellOperand map(this, node->child1());
+    JSValueRegsTemporary result(this);
+
+    GPRReg mapGPR = map.gpr();
+    JSValueRegs resultRegs = result.regs();
+
+    if (node->child1().useKind() == MapObjectUse) {
+        speculateMapObject(node->child1(), mapGPR);
+        loadPtr(Address(mapGPR, JSMap::offsetOfStorage()), resultRegs.payloadGPR());
+    } else if (node->child1().useKind() == SetObjectUse) {
+        speculateSetObject(node->child1(), mapGPR);
+        loadPtr(Address(mapGPR, JSSet::offsetOfStorage()), resultRegs.payloadGPR());
+    } else
+        RELEASE_ASSERT_NOT_REACHED();
+
+    move(TrustedImm32(JSValue::CellTag), resultRegs.tagGPR());
+    Jump notEmpty = branchTestPtr(NonZero, resultRegs.payloadGPR());
+    move(TrustedImm32(JSValue::EmptyValueTag), resultRegs.tagGPR());
+    notEmpty.link(this);
+
+    jsValueResult(resultRegs, node);
 }
 
 void SpeculativeJIT::compileMapIteratorNext(Node* node)

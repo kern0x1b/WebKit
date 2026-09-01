@@ -45,6 +45,15 @@ namespace Style {
 
 static float snapLengthAsBorderWidth(float length, float deviceScaleFactor)
 {
+    // A border of no width stays a border of no width whatever the device
+    // scale is, and the overwhelming majority of boxes on a page have no
+    // border at all. Taking the arithmetic below for those means a call to
+    // floorf per edge per box per layout - on armv7 that is a real libm call,
+    // there being no rounding instruction on this VFP unit - and it measured
+    // as the single hottest thing in a layout of an ordinary page.
+    if (!length)
+        return 0;
+
     // https://drafts.csswg.org/css-values-4/#snap-a-length-as-a-border-width
 
     // 1. Assert: `length` is non-negative.

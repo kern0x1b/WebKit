@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMHTMLImageElementInternal_h
+#define WebKitLegacyDOM_DOMHTMLImageElementInternal_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -30,3 +33,5 @@ class HTMLImageElement;
 }
 
 WebCore::HTMLImageElement* core(DOMHTMLImageElement *);
+
+#endif // WebKitLegacyDOM_DOMHTMLImageElementInternal_h

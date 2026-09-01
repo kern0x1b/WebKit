@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMCSSRuleListInternal_h
+#define WebKitLegacyDOM_DOMCSSRuleListInternal_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -30,3 +33,5 @@ class CSSRuleList;
 }
 
 DOMCSSRuleList *kit(WebCore::CSSRuleList*);
+
+#endif // WebKitLegacyDOM_DOMCSSRuleListInternal_h

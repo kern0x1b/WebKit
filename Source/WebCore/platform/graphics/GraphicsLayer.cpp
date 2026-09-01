@@ -51,7 +51,7 @@
 #include "AcceleratedEffectStack.h"
 #endif
 
-#if PLATFORM(COCOA)
+#if PLATFORM(COCOA) && !defined(WEBKIT_IOS6)
 #include <QuartzCore/CALayer.h>
 #endif
 

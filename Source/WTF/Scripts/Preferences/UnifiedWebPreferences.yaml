@@ -6645,6 +6645,20 @@ PeerConnectionVideoScalingAdaptationDisabled:
     WebCore:
       default: false
 
+PendingStylesheetRenderingTimeout:
+  type: double
+  status: embedder
+  webKitLegacyPreferenceKey: WebKitPendingStylesheetRenderingTimeoutPreferenceKey
+  humanReadableName: "Pending Stylesheet Rendering Timeout"
+  humanReadableDescription: "Seconds a stylesheet pending in <head> may block building the render tree before the document is rendered unstyled anyway. Negative means block indefinitely."
+  defaultValue:
+    WebKitLegacy:
+      default: 1
+    WebKit:
+      default: 1
+    WebCore:
+      default: 1
+
 # FIXME: Is this implemented for WebKitLegacy? If not, this should be excluded from WebKitLegacy entirely.
 PerElementSpeakerSelectionEnabled:
   type: bool
@@ -7141,11 +7155,11 @@ RequestIdleCallbackEnabled:
   humanReadableDescription: "Enable requestIdleCallback support"
   defaultValue:
     WebKitLegacy:
-      default: false
+      default: true
     WebKit:
       default: false
     WebCore:
-      default: false
+      default: true
 
 RequestStorageAccessThrowsExceptionUntilReload:
   type: bool

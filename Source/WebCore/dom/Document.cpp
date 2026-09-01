@@ -2842,6 +2842,10 @@ void Document::updateRenderTree(std::unique_ptr<Style::Update> styleUpdate)
 
 void Document::resolveStyle(ResolveStyleType type)
 {
+#if defined(WEBKIT_IOS6)
+    extern unsigned g_webkitIOS6StyleResolves;
+    ++g_webkitIOS6StyleResolves;
+#endif
     ScriptDisallowedScope::InMainThread scriptDisallowedScope;
 
     ASSERT(!view() || !view()->isPainting());
@@ -4488,7 +4492,7 @@ bool Document::shouldScheduleLayout() const
         return true;
     if (!bodyOrFrameset())
         return false;
-    if (styleScope().hasPendingSheetsBeforeBody())
+    if (styleScope().blocksRenderingBeforeBody())
         return false;
     if (view() && !view()->isVisuallyNonEmpty())
         return false;
@@ -5622,11 +5626,15 @@ void Document::metaElementColorSchemeChanged()
 
 void Document::processFormatDetection(const String& features)
 {
+#if ENABLE(TELEPHONE_NUMBER_DETECTION)
     // FIXME: Find a better place for this function.
     processFeaturesString(features, FeatureMode::Viewport, [this](StringView key, StringView value) {
         if (equalLettersIgnoringASCIICase(key, "telephone"_s) && equalLettersIgnoringASCIICase(value, "no"_s))
             m_isTelephoneNumberParsingAllowed = false;
     });
+#else
+    UNUSED_PARAM(features);
+#endif
 }
 
 void Document::processWebAppOrientations()
@@ -9506,6 +9514,23 @@ void Document::didRemoveTouchEventHandler(Node& handler, EventHandlerRemoval rem
     UNUSED_PARAM(removalMode);
 #endif
 }
+
+#if ENABLE(TOUCH_EVENTS) && PLATFORM(IOS_FAMILY)
+void Document::addTouchEventListener(Node& node)
+{
+    m_touchEventHandlerCounts.add(node);
+}
+
+void Document::removeTouchEventListener(Node& node, EventHandlerRemoval removalMode)
+{
+    removeHandlerFromSet(m_touchEventHandlerCounts, node, removalMode);
+}
+
+void Document::removeTouchEventHandler(Node& node, EventHandlerRemoval removalMode)
+{
+    removeHandlerFromSet(m_touchEventHandlerCounts, node, removalMode);
+}
+#endif
 
 void Document::didRemoveEventTargetNode(Node& handler)
 {

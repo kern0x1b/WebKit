@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMStylesheets_h
+#define WebKitLegacyDOM_DOMStylesheets_h
+
 /*
  * Copyright (C) 2004 Apple Inc. All rights reserved.
  * Copyright (C) 2006 Samuel Weinig <sam.weinig@gmail.com>
@@ -31,3 +34,5 @@
 #import <WebKitLegacy/DOMStyleSheet.h>
 #import <WebKitLegacy/DOMStyleSheetList.h>
 #import <WebKitLegacy/DOMMediaList.h>
+
+#endif // WebKitLegacyDOM_DOMStylesheets_h

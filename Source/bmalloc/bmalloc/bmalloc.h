@@ -46,6 +46,47 @@ BALLOW_UNSAFE_BUFFER_USAGE_BEGIN
 #include "mimalloc.h"
 #endif
 
+#if BUSE(CLASSIC_BMALLOC)
+#include "ClassicBmalloc.h"
+#endif
+
+#include <stdlib.h>
+
+#if BUSE(CLASSIC_BMALLOC)
+
+static inline void* bmalloc_aligned_alloc_compat(size_t alignment, size_t size)
+{
+    if (alignment < sizeof(void*))
+        alignment = sizeof(void*);
+    return ::bmalloc::classic::tryMemalign(alignment, size);
+}
+
+static inline void* bmalloc_plain_malloc_compat(size_t size) { return ::bmalloc::classic::tryMalloc(size); }
+static inline void* bmalloc_zeroed_malloc_compat(size_t size) { return ::bmalloc::classic::tryZeroedMalloc(size); }
+static inline void* bmalloc_plain_realloc_compat(void* object, size_t size) { return ::bmalloc::classic::tryRealloc(object, size); }
+static inline void bmalloc_plain_free_compat(void* object) { ::bmalloc::classic::free(object); }
+
+#else
+
+// iOS 6 predates C11 aligned_alloc; posix_memalign has the same contract here
+// because every caller already passes a power-of-two alignment.
+static inline void* bmalloc_aligned_alloc_compat(size_t alignment, size_t size)
+{
+    void* memory = nullptr;
+    if (alignment < sizeof(void*))
+        alignment = sizeof(void*);
+    if (posix_memalign(&memory, alignment, size))
+        return nullptr;
+    return memory;
+}
+
+static inline void* bmalloc_plain_malloc_compat(size_t size) { return ::malloc(size); }
+static inline void* bmalloc_zeroed_malloc_compat(size_t size) { return ::calloc(1, size); }
+static inline void* bmalloc_plain_realloc_compat(void* object, size_t size) { return ::realloc(object, size); }
+static inline void bmalloc_plain_free_compat(void* object) { ::free(object); }
+
+#endif
+
 namespace bmalloc {
 namespace api {
 
@@ -73,7 +114,7 @@ BINLINE void* tryMalloc(size_t size, CompactAllocationMode mode, HeapKind kind =
 #else
     BUNUSED(mode);
     BUNUSED(kind);
-    return ::malloc(size);
+    return bmalloc_plain_malloc_compat(size);
 #endif
 }
 
@@ -93,7 +134,7 @@ BINLINE void* malloc(size_t size, CompactAllocationMode mode, HeapKind kind = He
 #else
     BUNUSED(mode);
     BUNUSED(kind);
-    void* memory = ::malloc(size);
+    void* memory = bmalloc_plain_malloc_compat(size);
     RELEASE_BASSERT(memory);
     return memory;
 #endif
@@ -112,7 +153,7 @@ BINLINE void* tryZeroedMalloc(size_t size, CompactAllocationMode mode, HeapKind 
 #else
     BUNUSED(mode);
     BUNUSED(kind);
-    return ::calloc(1, size);
+    return bmalloc_zeroed_malloc_compat(size);
 #endif
 }
 
@@ -132,7 +173,7 @@ BINLINE void* zeroedMalloc(size_t size, CompactAllocationMode mode, HeapKind kin
 #else
     BUNUSED(mode);
     BUNUSED(kind);
-    void* memory = ::calloc(1, size);
+    void* memory = bmalloc_zeroed_malloc_compat(size);
     RELEASE_BASSERT(memory);
     return memory;
 #endif
@@ -155,7 +196,7 @@ BINLINE void* tryMemalign(size_t alignment, size_t size, CompactAllocationMode m
 #else
     BUNUSED(mode);
     BUNUSED(kind);
-    return ::aligned_alloc(alignment, size);
+    return bmalloc_aligned_alloc_compat(alignment, size);
 #endif
 }
 
@@ -176,7 +217,7 @@ BINLINE void* memalign(size_t alignment, size_t size, CompactAllocationMode mode
 #else
     BUNUSED(mode);
     BUNUSED(kind);
-    void* memory = ::aligned_alloc(alignment, size);
+    void* memory = bmalloc_aligned_alloc_compat(alignment, size);
     RELEASE_BASSERT(memory);
     return memory;
 #endif
@@ -197,7 +238,7 @@ BINLINE void* tryZeroedMemalign(size_t alignment, size_t size, CompactAllocation
 #else
     BUNUSED(mode);
     BUNUSED(kind);
-    void* memory = ::aligned_alloc(alignment, size);
+    void* memory = bmalloc_aligned_alloc_compat(alignment, size);
     if (memory) [[likely]]
         memset(memory, 0, size);
     return memory;
@@ -221,7 +262,7 @@ BINLINE void* zeroedMemalign(size_t alignment, size_t size, CompactAllocationMod
 #else
     BUNUSED(mode);
     BUNUSED(kind);
-    void* memory = ::aligned_alloc(alignment, size);
+    void* memory = bmalloc_aligned_alloc_compat(alignment, size);
     RELEASE_BASSERT(memory);
     memset(memory, 0, size);
     return memory;
@@ -245,7 +286,7 @@ BINLINE void* tryRealloc(void* object, size_t newSize, CompactAllocationMode mod
 #else
     BUNUSED(mode);
     BUNUSED(kind);
-    return ::realloc(object, newSize);
+    return bmalloc_plain_realloc_compat(object, newSize);
 #endif
 }
 
@@ -266,7 +307,7 @@ BINLINE void* realloc(void* object, size_t newSize, CompactAllocationMode mode, 
 #else
     BUNUSED(mode);
     BUNUSED(kind);
-    void* memory = ::realloc(object, newSize);
+    void* memory = bmalloc_plain_realloc_compat(object, newSize);
     RELEASE_BASSERT(memory);
     return memory;
 #endif
@@ -288,7 +329,7 @@ BINLINE void free(void* object, HeapKind kind = HeapKind::Primary)
     mi_free(object);
 #else
     BUNUSED(kind);
-    ::free(object);
+    bmalloc_plain_free_compat(object);
 #endif
 }
 

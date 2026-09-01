@@ -67,6 +67,7 @@ typedef NS_ENUM(NSInteger, WebMediaCaptureType) {
 - (void)webView:(WebView *)webView didObserveDeferredContentChange:(WKContentChange)aChange forFrame:(WebFrame *)frame;
 - (void)webViewDidPreventDefaultForEvent:(WebView *)webView;
 - (void)webThreadWebViewDidLayout:(WebView *)webView byScrolling:(BOOL)byScrolling;
+- (void)webView:(WebView *)webView contentsSizeChanged:(NSValue *)sizeValue forFrame:(WebFrame *)frame;
 - (void)webViewDidStartOverflowScroll:(WebView *)webView;
 - (void)webViewDidEndOverflowScroll:(WebView *)webView;
 
@@ -94,6 +95,8 @@ typedef NS_ENUM(NSInteger, WebMediaCaptureType) {
 - (void)webView:(WebView *)webView didHideFullScreenForPlugInView:(id)plugInView;
 - (void)webView:(WebView *)aWebView didReceiveMessage:(NSDictionary *)aMessage;
 - (void)addInputString:(NSString *)str withFlags:(NSUInteger)flags;
+- (void)addInputString:(NSString *)str;
+- (void)addInputString:(NSString *)str fromVariantKey:(BOOL)fromVariantKey;
 - (BOOL)handleKeyTextCommandForCurrentEvent;
 - (BOOL)handleKeyAppCommandForCurrentEvent;
 // FIXME: remove deleteFromInput when UIKit implements deleteFromInputWithFlags.

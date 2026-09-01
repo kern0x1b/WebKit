@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMEntityReference_h
+#define WebKitLegacyDOM_DOMEntityReference_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -28,3 +31,5 @@
 WEBKIT_CLASS_DEPRECATED_MAC(10_4, 10_14)
 @interface DOMEntityReference : DOMNode
 @end
+
+#endif // WebKitLegacyDOM_DOMEntityReference_h

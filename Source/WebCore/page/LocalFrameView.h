@@ -150,6 +150,13 @@ public:
 #if PLATFORM(IOS_FAMILY)
     bool useCustomFixedPositionLayoutRect() const;
     IntRect customFixedPositionLayoutRect() const { return m_customFixedPositionLayoutRect; }
+#if defined(WEBKIT_IOS6)
+    // The rectangle the last layout actually ran against, which is what a
+    // viewport constraint means by "at last layout" - see the comment where it
+    // is recorded in LocalFrameViewLayoutContext.
+    LayoutRect fixedPositionRectAtLastLayout() const { return m_fixedPositionRectAtLastLayout; }
+    void setFixedPositionRectAtLastLayout(const LayoutRect& rect) { m_fixedPositionRectAtLastLayout = rect; }
+#endif
     WEBCORE_EXPORT void setCustomFixedPositionLayoutRect(const IntRect&);
     bool updateFixedPositionLayoutRect();
 
@@ -1054,6 +1061,9 @@ private:
     bool m_useCustomFixedPositionLayoutRect { false };
 
     IntRect m_customFixedPositionLayoutRect;
+#if defined(WEBKIT_IOS6)
+    LayoutRect m_fixedPositionRectAtLastLayout;
+#endif
     std::optional<IntSize> m_customSizeForResizeEvent;
 #endif
 

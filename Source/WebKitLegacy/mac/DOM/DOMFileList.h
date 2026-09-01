@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMFileList_h
+#define WebKitLegacyDOM_DOMFileList_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -33,3 +36,5 @@ WEBKIT_CLASS_DEPRECATED_MAC(10_6, 10_14)
 
 - (DOMFile *)item:(unsigned)index;
 @end
+
+#endif // WebKitLegacyDOM_DOMFileList_h

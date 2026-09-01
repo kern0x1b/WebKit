@@ -28,6 +28,7 @@
  */
 
 #include "config.h"
+#include <unistd.h>
 #include "MatchedDeclarationsCache.h"
 
 #include "CSSFontSelector.h"
@@ -173,17 +174,34 @@ void MatchedDeclarationsCache::add(const Style::ComputedStyle& style, const Styl
     ASSERT(hash);
     // Note that we don't cache the original ComputedStyle instance. It may be further modified.
     // The ComputedStyle in the cache is really just a holder for the substructures and never used as-is.
+#if defined(WEBKIT_IOS6)
+    // Four, not the two this port used to carry.
+    //
+    // Two was chosen to save memory. It costs more than it saves: a miss here is
+    // a full property cascade rebuild, which is far more work than the two style
+    // clones an entry holds. Measured on the device by domInteractive, four runs
+    // against three: 6508-7010 ms with four entries per hash and a thousand
+    // buckets, 7213-12296 ms with two entries and 256 - no overlap between the
+    // two sets. Resident memory afterwards was 154 MB, no worse than before.
+    static const unsigned maxEntriesPerHash = access("/tmp/native-small-style-cache", F_OK) == 0 ? 2 : 4;
+    auto addResult = m_entries.ensure(hash, [&] {
+        return Vector<Entry> { };
+    });
+#else
     constexpr unsigned maxEntriesPerHash = 4;
     auto addResult = m_entries.ensure(hash, [&] {
         Vector<Entry> newBucket;
         newBucket.reserveCapacity(maxEntriesPerHash);
         return newBucket;
     });
+#endif
     if (addResult.iterator->value.size() < maxEntriesPerHash)
         addResult.iterator->value.append(Entry { &matchResult, Style::ComputedStyle::clonePtr(style), Style::ComputedStyle::clonePtr(parentStyle) });
 
     // Protect against unlimited growth.
-#if PLATFORM(WPE)
+#if defined(WEBKIT_IOS6)
+    static const size_t maximumSize = access("/tmp/native-small-style-cache", F_OK) == 0 ? 256 : 1024;
+#elif PLATFORM(WPE)
     constexpr size_t maximumSize = 1024;
 #else
     constexpr size_t maximumSize = 16 * 1024;

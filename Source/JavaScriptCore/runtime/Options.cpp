@@ -578,10 +578,14 @@ static void overrideDefaults()
         Options::concurrentGCMaxHeadroom() = 1.4;
         Options::minimumGCPauseMS() = 1;
         Options::useStochasticMutatorScheduler() = false;
+#if defined(WEBKIT_IOS6)
+        Options::gcIncrementScale() = 1;
+#else
         if (WTF::numberOfProcessorCores() <= 1)
             Options::gcIncrementScale() = 1;
         else
             Options::gcIncrementScale() = 0;
+#endif
     }
 
 #if OS(DARWIN) && CPU(ARM64)

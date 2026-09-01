@@ -359,6 +359,7 @@ void MediaSessionHelperIOS::mediaServerConnectionDied()
 
 void MediaSessionHelperIOS::updateCarPlayIsConnected()
 {
+#if HAVE(AVAUDIOSESSION_CARAUDIO_PORT)
     AVAudioSession *audioSession = [PAL::getAVAudioSessionClassSingleton() sharedInstance];
     for (AVAudioSessionPortDescription *output in audioSession.currentRoute.outputs) {
         if ([output.portType isEqualToString:AVAudioSessionPortCarAudio]) {
@@ -366,6 +367,7 @@ void MediaSessionHelperIOS::updateCarPlayIsConnected()
             return;
         }
     }
+#endif
 
     setIsPlayingToAutomotiveHeadUnit(false);
 }
@@ -489,6 +491,16 @@ void MediaSessionHelperIOS::externalOutputDeviceAvailableDidChange()
 
         if (RefPtr callback = _callback.get()) {
             BEGIN_BLOCK_OBJC_EXCEPTIONS
+#if defined(WEBKIT_IOS6)
+            // AVRouteDetector is iOS 11. There is no route detection to enable
+            // and no notification to observe, so the only honest answer to
+            // "which wireless routes are available" is the one the callback
+            // already gets when there are none. PAL's soft-link would assert
+            // rather than return nil, which is what killed the process here.
+            callback->externalOutputDeviceAvailableDidChange();
+            _startMonitoringAirPlayRoutesPending = false;
+            return;
+#endif
             _routeDetector = adoptNS([PAL::allocAVRouteDetectorInstance() init]);
             [_routeDetector setRouteDetectionEnabled:_monitoringAirPlayRoutes];
             [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(wirelessRoutesAvailableDidChange:) name:PAL::AVRouteDetectorMultipleRoutesDetectedDidChangeNotification object:_routeDetector.get()];
