@@ -48,7 +48,7 @@ EventListenerMap::EventListenerMap() = default;
 
 bool EventListenerMap::containsCapturing(const AtomString& eventType) const
 {
-    auto* listeners = find(eventType);
+    auto* listeners = const_cast<EventListenerMap*>(this)->findInline(eventType);
     if (!listeners)
         return false;
 
@@ -61,7 +61,7 @@ bool EventListenerMap::containsCapturing(const AtomString& eventType) const
 
 bool EventListenerMap::containsActive(const AtomString& eventType) const
 {
-    auto* listeners = find(eventType);
+    auto* listeners = const_cast<EventListenerMap*>(this)->findInline(eventType);
     if (!listeners)
         return false;
 
@@ -107,7 +107,7 @@ void EventListenerMap::replacePreservingOptions(const AtomString& eventType, Eve
     releaseAssertOrSetThreadUID();
     Locker locker { m_lock };
 
-    auto* listeners = find(eventType);
+    auto* listeners = findInline(eventType);
     ASSERT(listeners);
     size_t index = findListener(*listeners, oldListener, useCapture);
     ASSERT(index != notFound);
@@ -122,7 +122,7 @@ bool EventListenerMap::add(const AtomString& eventType, Ref<EventListener>&& lis
     releaseAssertOrSetThreadUID();
     Locker locker { m_lock };
 
-    if (auto* listeners = find(eventType)) {
+    if (auto* listeners = findInline(eventType)) {
         if (findListener(*listeners, listener, options.capture) != notFound)
             return false; // Duplicate listener.
         listeners->append(RegisteredEventListener::create(WTF::move(listener), options));
@@ -163,12 +163,7 @@ bool EventListenerMap::remove(const AtomString& eventType, EventListener& listen
 
 EventListenerVector* EventListenerMap::find(const AtomString& eventType)
 {
-    for (auto& entry : m_entries) {
-        if (entry.first == eventType)
-            return &entry.second;
-    }
-
-    return nullptr;
+    return findInline(eventType);
 }
 
 static void removeFirstListenerCreatedFromMarkup(EventListenerVector& listenerVector)

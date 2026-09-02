@@ -293,13 +293,10 @@ template<ArrayFillMode fillMode, NeedsGCSafeOps needsGCSafeOps, typename T, type
 ALWAYS_INLINE void copyArrayElements(T* buffer, unsigned offset, U* source, unsigned sourceOffset, unsigned sourceSize, IndexingType sourceType)
 {
     if (sourceType == ArrayWithUndecided) {
-        if constexpr (fillMode == ArrayFillMode::Empty) {
-            for (unsigned i = 0; i < sourceSize; ++i)
-                clearElement<T>(buffer[i + offset]);
-        } else {
-            for (unsigned i = 0; i < sourceSize; ++i)
-                buffer[i + offset].setWithoutWriteBarrier(jsUndefined());
-        }
+        if constexpr (fillMode == ArrayFillMode::Empty)
+            clearArray(buffer + offset, sourceSize);
+        else
+            fillArrayWithUndefined(buffer + offset, sourceSize);
         return;
     }
 
@@ -314,7 +311,7 @@ ALWAYS_INLINE void copyArrayElements(T* buffer, unsigned offset, U* source, unsi
             return;
         } else {
             for (unsigned i = 0; i < sourceSize; ++i) {
-                JSValue value = source[i + sourceOffset].get();
+                JSValue value = loadElementUnordered(source[i + sourceOffset]);
                 if (!value)
                     value = jsUndefined();
                 buffer[i + offset].setWithoutWriteBarrier(value);
@@ -324,7 +321,7 @@ ALWAYS_INLINE void copyArrayElements(T* buffer, unsigned offset, U* source, unsi
         ASSERT(sourceType == ArrayWithInt32);
         static_assert(fillMode == ArrayFillMode::Empty);
         for (unsigned i = 0; i < sourceSize; ++i) {
-            JSValue value = source[i + sourceOffset].get();
+            JSValue value = loadElementUnordered(source[i + sourceOffset]);
             if (value)
                 buffer[i + offset] = value.asInt32();
             else

@@ -51,6 +51,9 @@ WTF_MAKE_TZONE_ALLOCATED_IMPL(MatchedDeclarationsCache);
 MatchedDeclarationsCache::MatchedDeclarationsCache(const Resolver& owner)
     : m_owner(owner)
     , m_sweepTimer(*this, &MatchedDeclarationsCache::sweep)
+#if defined(WEBKIT_IOS6)
+    , m_maxEntriesPerHash(access("/tmp/native-small-style-cache", F_OK) == 0 ? 2 : 4)
+#endif
 {
 }
 
@@ -183,7 +186,7 @@ void MatchedDeclarationsCache::add(const Style::ComputedStyle& style, const Styl
     // against three: 6508-7010 ms with four entries per hash and a thousand
     // buckets, 7213-12296 ms with two entries and 256 - no overlap between the
     // two sets. Resident memory afterwards was 154 MB, no worse than before.
-    static const unsigned maxEntriesPerHash = access("/tmp/native-small-style-cache", F_OK) == 0 ? 2 : 4;
+    const unsigned maxEntriesPerHash = m_maxEntriesPerHash;
     auto addResult = m_entries.ensure(hash, [&] {
         return Vector<Entry> { };
     });

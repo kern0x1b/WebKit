@@ -47,8 +47,8 @@ public:
 private:
     static constexpr size_t inlineCapacity = 2048;
     
-    template<bool lookForWasmCallees, typename MarkHook>
-    void genericAddPointer(char*, HeapVersion markingVersion, HeapVersion newlyAllocatedVersion, TinyBloomFilter<uintptr_t> jsGCFilter, TinyBloomFilter<uintptr_t> boxedWasmCalleeFilter, MarkHook&);
+    template<bool lookForWasmCallees, typename StateType, typename MarkHook>
+    void genericAddPointer(char*, const StateType&, MarkHook&);
 
     template<typename MarkHook>
     void genericAddSpan(void* begin, void* end, MarkHook&);

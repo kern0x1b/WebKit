@@ -25,6 +25,7 @@
 #include "SVGNames.h"
 #include "SVGTests.h"
 #include "SVGUnitTypes.h"
+#include <wtf/NeverDestroyed.h>
 #include <wtf/TZoneMalloc.h>
 
 namespace WebCore {
@@ -69,10 +70,30 @@ private:
     bool selfHasRelativeLengths() const final { return true; }
     bool supportsFocus() const final { return false; }
 
-    const Ref<SVGAnimatedLength> m_x { SVGAnimatedLength::create(this, SVGLengthMode::Width, "-10%"_s) };
-    const Ref<SVGAnimatedLength> m_y { SVGAnimatedLength::create(this, SVGLengthMode::Height, "-10%"_s) };
-    const Ref<SVGAnimatedLength> m_width { SVGAnimatedLength::create(this, SVGLengthMode::Width, "120%"_s) };
-    const Ref<SVGAnimatedLength> m_height { SVGAnimatedLength::create(this, SVGLengthMode::Height, "120%"_s) };
+    static const SVGLengthValue& defaultOrigin(SVGLengthMode mode)
+    {
+        if (mode == SVGLengthMode::Height) {
+            static NeverDestroyed<SVGLengthValue> height { SVGLengthMode::Height, "-10%"_s };
+            return height.get();
+        }
+        static NeverDestroyed<SVGLengthValue> width { SVGLengthMode::Width, "-10%"_s };
+        return width.get();
+    }
+
+    static const SVGLengthValue& defaultExtent(SVGLengthMode mode)
+    {
+        if (mode == SVGLengthMode::Height) {
+            static NeverDestroyed<SVGLengthValue> height { SVGLengthMode::Height, "120%"_s };
+            return height.get();
+        }
+        static NeverDestroyed<SVGLengthValue> width { SVGLengthMode::Width, "120%"_s };
+        return width.get();
+    }
+
+    const Ref<SVGAnimatedLength> m_x { SVGAnimatedLength::create(this, defaultOrigin(SVGLengthMode::Width)) };
+    const Ref<SVGAnimatedLength> m_y { SVGAnimatedLength::create(this, defaultOrigin(SVGLengthMode::Height)) };
+    const Ref<SVGAnimatedLength> m_width { SVGAnimatedLength::create(this, defaultExtent(SVGLengthMode::Width)) };
+    const Ref<SVGAnimatedLength> m_height { SVGAnimatedLength::create(this, defaultExtent(SVGLengthMode::Height)) };
     const Ref<SVGAnimatedEnumeration> m_maskUnits { SVGAnimatedEnumeration::create(this, SVGUnitTypes::SVG_UNIT_TYPE_OBJECTBOUNDINGBOX) };
     const Ref<SVGAnimatedEnumeration> m_maskContentUnits { SVGAnimatedEnumeration::create(this, SVGUnitTypes::SVG_UNIT_TYPE_USERSPACEONUSE) };
 };

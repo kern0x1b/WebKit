@@ -452,7 +452,9 @@ std::optional<ExceptionOr<void>> XMLHttpRequest::prepareToSend()
 
 ExceptionOr<void> XMLHttpRequest::send(std::optional<SendTypes>&& sendType)
 {
+#if !defined(WEBKIT_IOS6)
     InspectorInstrumentation::willSendXMLHttpRequest(protect(scriptExecutionContext()).get(), url().string());
+#endif
     m_userGestureToken = UserGestureIndicator::currentUserGesture();
 
     if (!sendType)

@@ -24,7 +24,6 @@
  
 use strict;
 use warnings;
-use bigint;
 use Getopt::Long qw(:config pass_through);
 
 my $file = shift @ARGV or die("Must provide source file as final argument.");
@@ -46,8 +45,9 @@ my $perfectHashSize;
 my $compactSize;
 my $compactHashSizeMask;
 my $banner = 0;
-my $mask64 = 2**64 - 1;
-my $mask32 = 2**32 - 1;
+my $mask32 = 0xFFFFFFFF;
+my $narrowSecretA = 0x53c5ca59;
+my $narrowSecretB = 0x74743c1b;
 sub calcPerfectHashSize();
 sub calcCompactHashSize();
 sub output();
@@ -211,133 +211,86 @@ sub maskTop8BitsAndAvoidZero($) {
     return $value;
 }
 
-sub uint64_add($$) {
+# 32-bit multiply as four 16-bit partial products: a direct 32x32 multiply
+# overflows Perl's integer and silently degrades to a double.
+sub mul32($$) {
     my ($a, $b) = @_;
-    my $sum = $a + $b;
-    return $sum & $mask64;
-}
 
-sub uint64_multi($$) {
-    my ($a, $b) = @_;
-    my $product = $a * $b;
-    return $product & $mask64;
-}
+    my $al = $a & 0xFFFF;
+    my $ah = ($a >> 16) & 0xFFFF;
+    my $bl = $b & 0xFFFF;
+    my $bh = ($b >> 16) & 0xFFFF;
 
-sub rapid_mul128($$) {
-    my ($A, $B) = @_;
+    my $ll = $al * $bl;
+    my $lh = $al * $bh;
+    my $hl = $ah * $bl;
+    my $hh = $ah * $bh;
 
-    my $ha = $A >> 32;
-    my $hb = $B >> 32;
-    my $la = $A & $mask32;
-    my $lb = $B & $mask32;
-    my $hi;
-    my $lo;
-    my $rh = uint64_multi($ha, $hb);
-    my $rm0 = uint64_multi($ha, $lb);
-    my $rm1 = uint64_multi($hb, $la);
-    my $rl = uint64_multi($la, $lb);
-    my $t = uint64_add($rl, ($rm0 << 32));
-    my $c = int($t < $rl);
-
-    $lo = uint64_add($t, ($rm1 << 32));
-    $c += int($lo < $t);
-    $hi = uint64_add($rh, uint64_add(($rm0 >> 32), uint64_add(($rm1 >> 32), $c)));
+    my $mid = ($ll >> 16) + ($lh & 0xFFFF) + ($hl & 0xFFFF);
+    my $lo = ((($mid & 0xFFFF) << 16) | ($ll & 0xFFFF)) & $mask32;
+    my $hi = ($hh + ($lh >> 16) + ($hl >> 16) + ($mid >> 16)) & $mask32;
 
     return ($lo, $hi);
-};
-
-sub rapid_mix($$) {
-    my ($A, $B) = @_;
-    ($A, $B) = rapid_mul128($A, $B);
-    return $A ^ $B;
 }
 
-sub rapidhash {
+sub narrowMix($$) {
+    my ($a, $b) = @_;
+    return mul32(($a ^ $narrowSecretA) & $mask32, ($b ^ $narrowSecretB) & $mask32);
+}
+
+sub narrowhash {
     # https://github.com/Nicoshev/rapidhash
-    # Hashes raw ASCII bytes (1 byte per character).
+    # 32-bit narrow variant (RapidHash::narrowHash), raw ASCII bytes.
     my @chars = @_;
     my $len = scalar @chars;
-    my @secret = ( 3257665815644502181, 10067880064238660809, 5418857496715711651 );
-
-    my $seed = rapid_mix(0 ^ $secret[0], $secret[1]) ^ $len;
-    my $a = 0;
-    my $b = 0;
-
-    local *read64 = sub {
-        my ($i) = @_;
-        return ord($chars[$i])
-            | (ord($chars[$i + 1]) << 8)
-            | (ord($chars[$i + 2]) << 16)
-            | (ord($chars[$i + 3]) << 24)
-            | (ord($chars[$i + 4]) << 32)
-            | (ord($chars[$i + 5]) << 40)
-            | (ord($chars[$i + 6]) << 48)
-            | (ord($chars[$i + 7]) << 56);
-    };
 
     local *read32 = sub {
         my ($i) = @_;
-        return ord($chars[$i])
+        return (ord($chars[$i])
             | (ord($chars[$i + 1]) << 8)
             | (ord($chars[$i + 2]) << 16)
-            | (ord($chars[$i + 3]) << 24);
+            | (ord($chars[$i + 3]) << 24)) & $mask32;
     };
 
     local *readSmall = sub {
         my ($i, $k) = @_;
-        return (ord($chars[$i]) << 56)
-            | (ord($chars[$i + ($k >> 1)]) << 32)
-            | ord($chars[$i + $k - 1]);
+        return ((ord($chars[$i]) << 16)
+            | (ord($chars[$i + ($k >> 1)]) << 8)
+            | ord($chars[$i + $k - 1])) & $mask32;
     };
 
-    if ($len <= 16) {
-        if ($len >= 4) {
-            my $delta = ($len >= 8) ? 4 : 0;
-            $a = (read32(0) << 32) | read32($len - 4);
-            $b = (read32($delta) << 32) | read32($len - 4 - $delta);
-        } elsif ($len > 0) {
-            $a = readSmall(0, $len);
-            $b = 0;
-        } else {
-            $a = $b = 0;
-        }
-    } else {
-        my $i = $len;
-        my $off = 0;
-        if ($i > 48) {
-            my $see1 = $seed;
-            my $see2 = $seed;
-            do {
-                $seed = rapid_mix(read64($off) ^ $secret[0], read64($off + 8) ^ $seed);
-                $see1 = rapid_mix(read64($off + 16) ^ $secret[1], read64($off + 24) ^ $see1);
-                $see2 = rapid_mix(read64($off + 32) ^ $secret[2], read64($off + 40) ^ $see2);
-                $off += 48;
-                $i -= 48;
-            } while ($i >= 48);
-            $seed ^= $see1 ^ $see2;
-        }
-        if ($i > 16) {
-            $seed = rapid_mix(read64($off) ^ $secret[2], read64($off + 8) ^ $seed ^ $secret[1]);
-            if ($i > 32) {
-                $seed = rapid_mix(read64($off + 16) ^ $secret[2], read64($off + 24) ^ $seed);
-            }
-        }
-        $a = read64($off + $i - 16);
-        $b = read64($off + $i - 8);
+    my $seed = 0;
+    my $see1 = $len & $mask32;
+    ($seed, $see1) = narrowMix($seed, $see1);
+
+    my $remaining = $len;
+    my $offset = 0;
+    while ($remaining > 8) {
+        $seed ^= read32($offset);
+        $see1 ^= read32($offset + 4);
+        ($seed, $see1) = narrowMix($seed, $see1);
+        $offset += 8;
+        $remaining -= 8;
     }
-    $a ^= $secret[1];
-    $b ^= $seed;
 
-    ($a, $b) = rapid_mul128($a, $b);
-    my $hash = rapid_mix($a ^ $secret[0] ^ $len, $b ^ $secret[1]) & $mask32;
+    if ($remaining >= 4) {
+        $seed ^= read32($offset);
+        $see1 ^= read32($offset + $remaining - 4);
+    } elsif ($remaining) {
+        $seed ^= readSmall($offset, $remaining);
+    }
 
-    return maskTop8BitsAndAvoidZero($hash);
+    ($seed, $see1) = narrowMix($seed, $see1);
+    $seed ^= $see1;
+    ($seed, $see1) = narrowMix($seed, $see1);
+
+    return maskTop8BitsAndAvoidZero(($seed ^ $see1) & $mask32);
 }
 
 sub hashValue($) {
     my ($string) = @_;
-    my @chars = split(/ */, $string);
-    return rapidhash(@chars);
+    my @chars = split(//, $string);
+    return narrowhash(@chars);
 }
 
 sub output() {

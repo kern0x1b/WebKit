@@ -101,6 +101,13 @@ static WebMediaCaptureType webMediaCaptureType(MediaCaptureType type)
 
 WTF_MAKE_TZONE_ALLOCATED_IMPL(WebChromeClientIOS);
 
+#if defined(WEBKIT_IOS6)
+static inline bool uiKitDelegateImplements(WebView *webView, SEL selector)
+{
+    return [[webView _UIKitDelegate] respondsToSelector:selector];
+}
+#endif
+
 void WebChromeClientIOS::setWindowRect(const WebCore::FloatRect& r)
 {
     [[webView() _UIDelegateForwarder] webView:webView() setFrame:r];
@@ -172,6 +179,10 @@ void WebChromeClientIOS::showShareSheet(ShareDataWithParsedURL&&, CompletionHand
 
 void WebChromeClientIOS::didPreventDefaultForEvent()
 {
+#if defined(WEBKIT_IOS6)
+    if (!uiKitDelegateImplements(webView(), @selector(webViewDidPreventDefaultForEvent:)))
+        return;
+#endif
     [[webView() _UIKitDelegateForwarder] webViewDidPreventDefaultForEvent:webView()];
 }
 
@@ -272,11 +283,19 @@ void WebChromeClientIOS::didLayout(LayoutType changeType)
 
 void WebChromeClientIOS::didStartOverflowScroll()
 {
+#if defined(WEBKIT_IOS6)
+    if (!uiKitDelegateImplements(webView(), @selector(webViewDidStartOverflowScroll:)))
+        return;
+#endif
     [[[webView() _UIKitDelegateForwarder] asyncForwarder] webViewDidStartOverflowScroll:webView()];
 }
 
 void WebChromeClientIOS::didEndOverflowScroll()
 {
+#if defined(WEBKIT_IOS6)
+    if (!uiKitDelegateImplements(webView(), @selector(webViewDidEndOverflowScroll:)))
+        return;
+#endif
     [[[webView() _UIKitDelegateForwarder] asyncForwarder] webViewDidEndOverflowScroll:webView()];
 }
 
@@ -344,6 +363,10 @@ void WebChromeClientIOS::attachRootGraphicsLayer(LocalFrame&, GraphicsLayer* gra
 
 void WebChromeClientIOS::didFlushCompositingLayers()
 {
+#if defined(WEBKIT_IOS6)
+    if (!uiKitDelegateImplements(webView(), @selector(webViewDidCommitCompositingLayerChanges:)))
+        return;
+#endif
     [[[webView() _UIKitDelegateForwarder] asyncForwarder] webViewDidCommitCompositingLayerChanges:webView()];
 }
 
@@ -365,6 +388,11 @@ void WebChromeClientIOS::updateViewportConstrainedLayers(HashMap<PlatformLayer*,
 
 void WebChromeClientIOS::addOrUpdateScrollingLayer(Node* node, PlatformLayer* scrollingLayer, PlatformLayer* contentsLayer, const IntSize& scrollSize, bool allowHorizontalScrollbar, bool allowVerticalScrollbar)
 {
+#if defined(WEBKIT_IOS6)
+    if (!uiKitDelegateImplements(webView(), @selector(webView:didCreateOrUpdateScrollingLayer:withContentsLayer:scrollSize:forNode:allowHorizontalScrollbar:allowVerticalScrollbar:)))
+        return;
+#endif
+
     DOMNode *domNode = kit(node);
 
     [[[webView() _UIKitDelegateForwarder] asyncForwarder] webView:webView() didCreateOrUpdateScrollingLayer:scrollingLayer withContentsLayer:contentsLayer scrollSize:[NSValue valueWithSize:scrollSize] forNode:domNode
@@ -373,6 +401,11 @@ void WebChromeClientIOS::addOrUpdateScrollingLayer(Node* node, PlatformLayer* sc
 
 void WebChromeClientIOS::removeScrollingLayer(Node* node, PlatformLayer* scrollingLayer, PlatformLayer* contentsLayer)
 {
+#if defined(WEBKIT_IOS6)
+    if (!uiKitDelegateImplements(webView(), @selector(webView:willRemoveScrollingLayer:withContentsLayer:forNode:)))
+        return;
+#endif
+
     DOMNode *domNode = kit(node);
     [[[webView() _UIKitDelegateForwarder] asyncForwarder] webView:webView() willRemoveScrollingLayer:scrollingLayer withContentsLayer:contentsLayer forNode:domNode];
 }

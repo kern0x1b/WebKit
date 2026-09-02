@@ -94,7 +94,15 @@ void LockAlgorithm<LockType, isHeldBit, hasParkedBit, Hooks>::lockSlow(Atomic<Lo
     // wasting memory bandwidth, etc.) depending on the details. But since
     // those factors are harder to frame neatly I'm leaving them to this
     // appendix.
-#if CPU(ARM64) && OS(MACOS)
+#if defined(WEBKIT_IOS6)
+    // Two in-order cores at 800 MHz: a sched_yield syscall costs more than the critical
+    // sections this lock protects, and the generic path below yields on every one of its
+    // 40 spins. Poll with the cheap YIELD hint instead and park after a handful of
+    // rounds, since with only two cores the holder is usually descheduled, not running.
+    static constexpr unsigned spinLimit = 16;
+    static constexpr unsigned nopCount = 8;
+    static constexpr unsigned yieldInterval = 8;
+#elif CPU(ARM64) && OS(MACOS)
     static constexpr unsigned spinLimit = 80;
     static constexpr unsigned nopCount = 8;
     static constexpr unsigned yieldInterval = 16;
@@ -115,8 +123,15 @@ void LockAlgorithm<LockType, isHeldBit, hasParkedBit, Hooks>::lockSlow(Atomic<Lo
     unsigned spinCount = 0;
     
     for (;;) {
+#if defined(WEBKIT_IOS6)
+        // The seq_cst load costs a dmb ish on every trip round the spin loop. Nothing is
+        // decided by this read on its own: the compare-exchange below re-validates it and
+        // carries the acquire.
+        LockType currentValue = lock.load(std::memory_order_relaxed);
+#else
         LockType currentValue = lock.load();
-        
+#endif
+
         // We allow ourselves to barge in.
         if (!(currentValue & isHeldBit)) {
             if (lock.compareExchangeWeak(currentValue, Hooks::lockHook(currentValue | isHeldBit)))
@@ -133,8 +148,13 @@ void LockAlgorithm<LockType, isHeldBit, hasParkedBit, Hooks>::lockSlow(Atomic<Lo
             // without having depressed our own priority beforehand.
             if (!(spinCount % yieldInterval))
                 Thread::yield();
-            for (unsigned i = 0; i < nopCount; i++)
+            for (unsigned i = 0; i < nopCount; i++) {
+#if defined(WEBKIT_IOS6)
+                __asm__ volatile("yield");
+#else
                 simde_mm_pause();
+#endif
+            }
             continue;
         }
 

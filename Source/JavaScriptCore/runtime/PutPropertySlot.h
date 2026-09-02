@@ -42,8 +42,8 @@ public:
     enum Context : uint8_t { UnknownContext, PutById, PutByIdEval };
 
     PutPropertySlot(JSValue thisValue, bool isStrictMode = false, Context context = UnknownContext, bool isInitialization = false)
-        : m_base(nullptr)
-        , m_thisValue(thisValue)
+        : m_thisValue(thisValue)
+        , m_base(nullptr)
         , m_offset(invalidOffset)
         , m_isStrictMode(isStrictMode)
         , m_isInitialization(isInitialization)
@@ -132,8 +132,8 @@ public:
 private:
     bool isCacheable() const { return m_cacheability == CachingAllowed; }
 
-    SUPPRESS_FORWARD_DECL_MEMBER JSObject* m_base;
     JSValue m_thisValue;
+    SUPPRESS_FORWARD_DECL_MEMBER JSObject* m_base;
     PropertyOffset m_offset;
     bool m_isStrictMode : 1;
     bool m_isInitialization : 1;

@@ -300,8 +300,12 @@ void SVGUseElement::updateUserAgentShadowTree()
         Ref shadowRoot = ensureUserAgentShadowRoot();
         ScriptDisallowedScope::EventAllowedScope eventAllowedScope { shadowRoot };
         cloneTarget(shadowRoot, *target);
-        expandUseElementsInShadowTree();
-        expandSymbolElementsInShadowTree();
+        // cloneTarget() strips every <symbol> below the clone root, so the only <symbol> the
+        // symbol pass can find is the clone root itself -- unless expanding a nested <use>
+        // introduced a fresh clone root.
+        bool expandedUseElement = expandUseElementsInShadowTree();
+        if (expandedUseElement || is<SVGSymbolElement>(shadowRoot->firstChild()))
+            expandSymbolElementsInShadowTree();
         updateRelativeLengthsInformation();
     }
 
@@ -436,22 +440,25 @@ static void removeDisallowedElementsFromSubtree(SVGElement& subtree)
     disassociateAndRemoveClones(disallowedElements);
 }
 
-static void removeSymbolElementsFromSubtree(SVGElement& subtree)
+// Symbol elements inside the subtree should not be cloned for two reasons: 1) They are invisible and
+// don't need to be cloned to get correct rendering. 2) expandSymbolElementsInShadowTree will turn them
+// into <svg> elements, which is correct for symbol elements directly referenced by use elements,
+// but incorrect for ones that just happen to be in a subtree.
+static void removeDisallowedAndSymbolElementsFromSubtree(SVGElement& subtree)
 {
-    // Symbol elements inside the subtree should not be cloned for two reasons: 1) They are invisible and
-    // don't need to be cloned to get correct rendering. 2) expandSymbolElementsInShadowTree will turn them
-    // into <svg> elements, which is correct for symbol elements directly referenced by use elements,
-    // but incorrect for ones that just happen to be in a subtree.
-    Vector<Ref<Element>> symbolElements;
+    ASSERT(!subtree.isConnected());
+
+    Vector<Ref<Element>> elementsToRemove;
     for (auto it = descendantsOfType<Element>(subtree).begin(); it; ) {
-        if (is<SVGSymbolElement>(*it)) {
-            symbolElements.append(protect(*it));
+        if (isDisallowedElement(*it) || is<SVGSymbolElement>(*it)) {
+            elementsToRemove.append(protect(*it));
             it.traverseNextSkippingChildren();
             continue;
         }
         ++it;
     }
-    disassociateAndRemoveClones(symbolElements);
+
+    disassociateAndRemoveClones(elementsToRemove);
 }
 
 static void associateClonesWithOriginals(SVGElement& clone, SVGElement& original)
@@ -530,8 +537,7 @@ void SVGUseElement::cloneTarget(ContainerNode& container, SVGElement& target) co
     Ref targetClone = downcast<SVGElement>(target.cloneElementWithChildren(protect(document()), nullptr));
     ScriptDisallowedScope::EventAllowedScope eventAllowedScope { targetClone };
     associateClonesWithOriginals(targetClone.get(), target);
-    removeDisallowedElementsFromSubtree(targetClone.get());
-    removeSymbolElementsFromSubtree(targetClone.get());
+    removeDisallowedAndSymbolElementsFromSubtree(targetClone.get());
     transferSizeAttributesToTargetClone(targetClone.get());
     container.appendChild(targetClone);
 }
@@ -548,10 +554,12 @@ static void cloneDataAndChildren(SVGElement& replacementClone, SVGElement& origi
     removeDisallowedElementsFromSubtree(replacementClone);
 }
 
-void SVGUseElement::expandUseElementsInShadowTree() const
+bool SVGUseElement::expandUseElementsInShadowTree() const
 {
+    bool expandedAny = false;
     auto descendants = descendantsOfType<SVGUseElement>(*userAgentShadowRoot());
     for (auto it = descendants.begin(); it; ) {
+        expandedAny = true;
         Ref originalClone = *it;
         it.dropAssertions();
 
@@ -580,6 +588,7 @@ void SVGUseElement::expandUseElementsInShadowTree() const
         // Resume iterating, starting just inside the replacement clone.
         it = descendants.from(replacementClone.get());
     }
+    return expandedAny;
 }
 
 void SVGUseElement::expandSymbolElementsInShadowTree() const

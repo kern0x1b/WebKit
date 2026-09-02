@@ -629,9 +629,17 @@ void HTMLPreloadScanner::scan(HTMLResourcePreloader& preloader, Document& docume
 
     PreloadRequestStream requests;
 
-    while (auto token = m_tokenizer.nextToken(m_source)) {
+    while (true) {
+#if defined(WEBKIT_IOS6)
+        // Buffering the document's text a second time only to throw it away costs more than the
+        // scan itself on a small device. Keep the payload only while it can reach the CSS scanner.
+        m_tokenizer.setShouldDiscardCharacterData(!m_scanner.inStyle());
+#endif
+        auto token = m_tokenizer.nextToken(m_source);
+        if (!token)
+            break;
         if (token->type() == HTMLToken::Type::StartTag)
-            m_tokenizer.updateStateFor(AtomString::lookUp(token->name().span()));
+            m_tokenizer.updateStateFor(token->name().span());
         m_scanner.scan(*token, requests, document);
     }
 

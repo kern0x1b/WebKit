@@ -89,7 +89,7 @@ private:
     void cloneTarget(ContainerNode&, SVGElement& target) const;
     RefPtr<SVGElement> NODELETE targetClone() const;
 
-    void expandUseElementsInShadowTree() const;
+    bool expandUseElementsInShadowTree() const;
     void expandSymbolElementsInShadowTree() const;
     void transferEventListenersToShadowTree() const;
     void transferSizeAttributesToTargetClone(SVGElement&) const;

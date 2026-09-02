@@ -501,7 +501,8 @@ bool SVGRenderSupport::pointInClippingArea(const RenderElement& renderer, const 
 {
     RELEASE_ASSERT(!renderer.document().settings().layerBasedSVGEngineEnabled());
 
-    if (WTF::holdsAlternative<Style::BasicShapePath>(renderer.style().clipPath()) || WTF::holdsAlternative<Style::BoxPath>(renderer.style().clipPath()))
+    auto& clipPath = renderer.style().clipPath();
+    if (WTF::holdsAlternative<Style::BasicShapePath>(clipPath) || WTF::holdsAlternative<Style::BoxPath>(clipPath))
         return isPointInCSSClippingArea(renderer, point);
 
     // We just take clippers into account to determine if a point is on the node. The Specification may
@@ -527,9 +528,10 @@ void SVGRenderSupport::applyStrokeStyleToContext(GraphicsContext& context, const
     auto usedZoom = style.usedZoomForLength();
     SVGLengthContext lengthContext(element.get());
     context.setStrokeThickness(lengthContext.valueForLength(style.strokeWidth(), usedZoom));
+    auto joinStyle = style.joinStyle();
     context.setLineCap(style.capStyle());
-    context.setLineJoin(style.joinStyle());
-    if (style.joinStyle() == LineJoin::Miter)
+    context.setLineJoin(joinStyle);
+    if (joinStyle == LineJoin::Miter)
         context.setMiterLimit(style.strokeMiterLimit().value.value);
 
     auto& dashes = style.strokeDashArray();

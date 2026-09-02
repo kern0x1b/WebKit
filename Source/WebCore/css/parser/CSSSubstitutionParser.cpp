@@ -44,7 +44,7 @@
 #include "CSSValueKeywords.h"
 #include "StyleCustomProperty.h"
 #include "StyleSheetContents.h"
-#include <stack>
+#include <wtf/Vector.h>
 
 namespace WebCore {
 
@@ -83,20 +83,20 @@ static std::optional<ClassifyBlockResult> classifyBlock(CSSParserTokenRange rang
         unsigned topLevelBraceBlocks = 0;
         bool doneWithThisRange = false;
     };
-    ClassifyBlockState initialState { .range = range };
-
-    std::stack<ClassifyBlockState> stack;
-    stack.push(initialState);
+    // std::stack is deque-backed and heap-allocates on the first push; a Vector with inline
+    // capacity keeps the whole walk on the stack for the nesting depths real stylesheets use.
+    Vector<ClassifyBlockState, 8> stack;
+    stack.append(ClassifyBlockState { .range = range });
 
     auto result = ClassifyBlockResult { };
 
-    while (!stack.empty()) {
-        auto& current = stack.top();
+    while (!stack.isEmpty()) {
+        auto& current = stack.last();
         if (current.doneWithThisRange) {
             // If there is a top level brace block, the value should contains only that.
             if (current.topLevelBraceBlocks > 1 || (current.topLevelBraceBlocks == 1 && current.hasOtherValues))
                 result.hasTopLevelBraceBlockMixedWithOtherValues = true;
-            stack.pop();
+            stack.removeLast();
             continue;
         }
 
@@ -117,54 +117,70 @@ static std::optional<ClassifyBlockResult> classifyBlock(CSSParserTokenRange rang
 
         if (current.range.peek().getBlockType() == CSSParserToken::BlockStart) {
             const CSSParserToken& token = current.range.peek();
+            auto tokenType = token.type();
             CSSParserTokenRange block = current.range.consumeBlock();
             block.consumeWhitespace();
 
-            if (token.type() == LeftBraceToken && current.isTopLevelBlock && block.atEnd())
+            if (current.isTopLevelBlock && tokenType == LeftBraceToken && block.atEnd())
                 result.hasEmptyTopLevelBraceBlock = true;
 
-            if (token.functionId() == CSSValueVar) {
-                if (!isValidVariableReference(block, parserContext))
-                    return { };
-                result.hasSubstitutionFunctions = true;
-                continue;
+            // functionId() resolves the ident through a keyword lookup; ask for it once instead
+            // of once per candidate function name.
+            if (tokenType == FunctionToken) {
+                switch (token.functionId()) {
+                case CSSValueVar:
+                    if (!isValidVariableReference(block, parserContext))
+                        return { };
+                    result.hasSubstitutionFunctions = true;
+                    continue;
+                case CSSValueEnv:
+                    if (!isValidConstantReference(block, parserContext))
+                        return { };
+                    result.hasSubstitutionFunctions = true;
+                    continue;
+                case CSSValueAttr:
+                    if (parserContext.cssAttrSubstitutionFunctionEnabled) {
+                        if (!isValidAttrReference(block, parserContext))
+                            return { };
+                        result.hasSubstitutionFunctions = true;
+                        continue;
+                    }
+                    break;
+                case CSSValueRandomItem:
+                    if (parserContext.cssRandomItemFunctionEnabled) {
+                        if (!isValidRandomItemReference(block, parserContext))
+                            return { };
+                        result.hasSubstitutionFunctions = true;
+                        continue;
+                    }
+                    break;
+                case CSSValueIf:
+                    if (parserContext.cssIfFunctionEnabled) {
+                        if (!isValidIfReference(block, parserContext))
+                            return { };
+                        result.hasSubstitutionFunctions = true;
+                        continue;
+                    }
+                    break;
+                case CSSValueInternalAutoBase:
+                    if (parserContext.cssInternalAutoBaseParsingEnabled) {
+                        result.hasSubstitutionFunctions = true;
+                        continue;
+                    }
+                    break;
+                default:
+                    break;
+                }
+
+                if (parserContext.propertySettings.cssFunctionAtRuleEnabled && isCustomPropertyName(token.value())) {
+                    // https://drafts.csswg.org/css-mixins/#typedef-dashed-function
+                    if (!isValidDashedFunction(block, parserContext))
+                        return { };
+                    result.hasSubstitutionFunctions = true;
+                    continue;
+                }
             }
-            if (token.functionId() == CSSValueEnv) {
-                if (!isValidConstantReference(block, parserContext))
-                    return { };
-                result.hasSubstitutionFunctions = true;
-                continue;
-            }
-            if (token.functionId() == CSSValueAttr && parserContext.cssAttrSubstitutionFunctionEnabled) {
-                if (!isValidAttrReference(block, parserContext))
-                    return { };
-                result.hasSubstitutionFunctions = true;
-                continue;
-            }
-            if (token.functionId() == CSSValueRandomItem && parserContext.cssRandomItemFunctionEnabled) {
-                if (!isValidRandomItemReference(block, parserContext))
-                    return { };
-                result.hasSubstitutionFunctions = true;
-                continue;
-            }
-            if (token.functionId() == CSSValueIf && parserContext.cssIfFunctionEnabled) {
-                if (!isValidIfReference(block, parserContext))
-                    return { };
-                result.hasSubstitutionFunctions = true;
-                continue;
-            }
-            if (token.functionId() == CSSValueInternalAutoBase && parserContext.cssInternalAutoBaseParsingEnabled) {
-                result.hasSubstitutionFunctions = true;
-                continue;
-            }
-            if (token.type() == FunctionToken && isCustomPropertyName(token.value()) && parserContext.propertySettings.cssFunctionAtRuleEnabled) {
-                // https://drafts.csswg.org/css-mixins/#typedef-dashed-function
-                if (!isValidDashedFunction(block, parserContext))
-                    return { };
-                result.hasSubstitutionFunctions = true;
-                continue;
-            }
-            stack.push(ClassifyBlockState {
+            stack.append(ClassifyBlockState {
                 .range = block,
                 .isTopLevelBlock = false, // Nested block, not top-level
             });
@@ -392,6 +408,19 @@ static std::optional<VariableType> classifyVariableRange(CSSParserTokenRange ran
 
 bool CSSSubstitutionParser::containsSubstitutionFunctions(CSSParserTokenRange range, const CSSParserContext& parserContext)
 {
+    // Every path that sets hasSubstitutionFunctions requires a FunctionToken, and the tokens of
+    // nested blocks are laid out flat in the same span, so one scan settles it. This runs for
+    // every declaration the property parser rejects, where the answer is almost always no.
+    bool hasFunctionToken = false;
+    for (auto& token : range.span()) {
+        if (token.type() == FunctionToken) {
+            hasFunctionToken = true;
+            break;
+        }
+    }
+    if (!hasFunctionToken)
+        return false;
+
     auto type = classifyVariableRange(range, parserContext);
     if (!type)
         return false;

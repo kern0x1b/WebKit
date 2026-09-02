@@ -28,6 +28,7 @@
 #include <WebCore/GlyphPage.h>
 #include <WebCore/TextMeasurementCache.h>
 #include <WebCore/TextRun.h>
+#include <array>
 #include <wtf/CurrentThread.h>
 #include <wtf/EnumeratedArray.h>
 #include <wtf/Forward.h>
@@ -184,6 +185,10 @@ private:
 
         GlyphData glyphDataForCharacter(char32_t);
 
+        // True once the cascade and the system fallback have already been walked for this
+        // character and came back with nothing, so the walk must not be repeated.
+        bool isKnownMissing(char32_t) const;
+
         void NODELETE setSingleFontPage(RefPtr<GlyphPage>&&);
         void setGlyphDataForCharacter(char32_t, GlyphData);
 
@@ -196,7 +201,18 @@ private:
         std::unique_ptr<MixedFontGlyphPage> m_mixedFont;
     };
 
+    // Code points 0-255 occupy the first pages and are looked up once per character
+    // measured. They get a direct-mapped slot instead of a hash probe; the rest of the
+    // code space keeps the map.
+    static constexpr unsigned directMappedPageCount = 256 / GlyphPage::size;
+
+    struct DirectMappedPages {
+        std::array<GlyphPageCacheEntry, directMappedPageCount> pages;
+        uint16_t filled { 0 };
+    };
+
     EnumeratedArray<ResolvedEmojiPolicy, HashMap<unsigned, GlyphPageCacheEntry, IntHash<unsigned>, WTF::UnsignedWithZeroKeyHashTraits<unsigned>>, ResolvedEmojiPolicy::RequireEmoji> m_cachedPages;
+    EnumeratedArray<ResolvedEmojiPolicy, DirectMappedPages, ResolvedEmojiPolicy::RequireEmoji> m_directMappedPages;
 
     HashSet<Ref<Font>> m_systemFallbackFontSet;
 

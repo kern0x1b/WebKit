@@ -65,11 +65,34 @@ void ConservativeRoots::grow()
     m_roots = newRoots;
 }
 
+namespace ConservativeRootsInternal {
+
+// Everything in here is loop-invariant for the whole span being scanned: the world is stopped, so
+// neither the block set, the block filter, nor the precise-allocation array can change while we walk
+// the span. Loading them once keeps them in registers instead of re-walking
+// Heap -> MarkedSpace -> MarkedBlockSet on every single stack word.
+struct SpanState {
+    const UncheckedKeyHashSet<MarkedBlock*>* blockSet { nullptr };
+    PreciseAllocation** preciseBegin { nullptr };
+    PreciseAllocation** preciseEnd { nullptr };
+    unsigned preciseSize { 0 };
+    char* preciseLowerBound { nullptr };
+    char* preciseUpperBound { nullptr };
+    HeapVersion markingVersion { 0 };
+    HeapVersion newlyAllocatedVersion { 0 };
+    TinyBloomFilter<uintptr_t> jsGCFilter;
+    TinyBloomFilter<uintptr_t> boxedWasmCalleeFilter;
+};
+
+} // namespace ConservativeRootsInternal
+
 // This function must be run after stopThePeriphery() is called and
 // before liveness data is cleared to be accurate.
-template<bool lookForWasmCallees, typename MarkHook>
-inline void ConservativeRoots::genericAddPointer(char* pointer, HeapVersion markingVersion, HeapVersion newlyAllocatedVersion, TinyBloomFilter<uintptr_t> jsGCFilter, TinyBloomFilter<uintptr_t> boxedWasmCalleeFilter, MarkHook& markHook)
+template<bool lookForWasmCallees, typename StateType, typename MarkHook>
+inline void ConservativeRoots::genericAddPointer(char* pointer, const StateType& state, MarkHook& markHook)
 {
+    const HeapVersion markingVersion = state.markingVersion;
+    const HeapVersion newlyAllocatedVersion = state.newlyAllocatedVersion;
     ASSERT(m_heap.worldIsStopped());
     pointer = removeArrayPtrTag(pointer);
     markHook.mark(pointer);
@@ -84,7 +107,7 @@ inline void ConservativeRoots::genericAddPointer(char* pointer, HeapVersion mark
         m_roots[m_size++] = std::bit_cast<HeapCell*>(p);
     };
 
-    const UncheckedKeyHashSet<MarkedBlock*>& set = m_heap.objectSpace().blocks().set();
+    const UncheckedKeyHashSet<MarkedBlock*>& set = *state.blockSet;
 
     ASSERT(m_heap.objectSpace().isMarking());
     static constexpr bool isMarking = true;
@@ -94,7 +117,7 @@ inline void ConservativeRoots::genericAddPointer(char* pointer, HeapVersion mark
         CalleeBits calleeBits = std::bit_cast<CalleeBits>(pointer);
         // No point in even checking the hash set if the pointer doesn't even look like a native callee.
         if (calleeBits.isNativeCallee()) {
-            if (!boxedWasmCalleeFilter.ruleOut(std::bit_cast<uintptr_t>(pointer))) {
+            if (!state.boxedWasmCalleeFilter.ruleOut(std::bit_cast<uintptr_t>(pointer))) {
                 Wasm::Callee* wasmCallee = static_cast<Wasm::Callee*>(calleeBits.asNativeCallee());
                 if (m_heap.didDiscoverPendingWasmCallee(wasmCallee))
                     return;
@@ -102,17 +125,14 @@ inline void ConservativeRoots::genericAddPointer(char* pointer, HeapVersion mark
             // FIXME: We could probably just return here.
         }
     }
-#else
-    UNUSED_PARAM(boxedWasmCalleeFilter);
 #endif
 
     // It could point to a precise allocation.
-    if (m_heap.objectSpace().preciseAllocationsForThisCollectionSize()) {
-        if (m_heap.objectSpace().preciseAllocationsForThisCollectionBegin()[0]->aboveLowerBound(pointer)
-            && m_heap.objectSpace().preciseAllocationsForThisCollectionEnd()[-1]->belowUpperBound(pointer)) {
+    if (state.preciseSize) {
+        if (pointer >= state.preciseLowerBound && pointer <= state.preciseUpperBound) {
             PreciseAllocation** result = approximateBinarySearch<PreciseAllocation*>(
-                m_heap.objectSpace().preciseAllocationsForThisCollectionBegin(),
-                m_heap.objectSpace().preciseAllocationsForThisCollectionSize(),
+                state.preciseBegin,
+                state.preciseSize,
                 PreciseAllocation::fromCell(pointer),
                 [] (PreciseAllocation** ptr) -> PreciseAllocation* { return *ptr; });
             if (result) {
@@ -121,10 +141,10 @@ inline void ConservativeRoots::genericAddPointer(char* pointer, HeapVersion mark
                         markFoundGCPointer(allocation->cell(), allocation->attributes().cellKind);
                 };
 
-                if (result > m_heap.objectSpace().preciseAllocationsForThisCollectionBegin())
+                if (result > state.preciseBegin)
                     attemptLarge(result[-1]);
                 attemptLarge(result[0]);
-                if (result + 1 < m_heap.objectSpace().preciseAllocationsForThisCollectionEnd())
+                if (result + 1 < state.preciseEnd)
                     attemptLarge(result[1]);
             }
         }
@@ -136,7 +156,7 @@ inline void ConservativeRoots::genericAddPointer(char* pointer, HeapVersion mark
         // We may be interested in the last cell of the previous MarkedBlock.
         char* previousPointer = std::bit_cast<char*>(std::bit_cast<uintptr_t>(pointer) - sizeof(IndexingHeader) - 1);
         MarkedBlock* previousCandidate = MarkedBlock::blockFor(previousPointer);
-        if (!jsGCFilter.ruleOut(std::bit_cast<uintptr_t>(previousCandidate))
+        if (!state.jsGCFilter.ruleOut(std::bit_cast<uintptr_t>(previousCandidate))
             && set.contains(previousCandidate)
             && mayHaveIndexingHeader(previousCandidate->handle().cellKind())) {
             previousPointer = static_cast<char*>(previousCandidate->handle().cellAlign(previousPointer));
@@ -145,7 +165,7 @@ inline void ConservativeRoots::genericAddPointer(char* pointer, HeapVersion mark
         }
     }
 
-    if (jsGCFilter.ruleOut(std::bit_cast<uintptr_t>(candidate))) {
+    if (state.jsGCFilter.ruleOut(std::bit_cast<uintptr_t>(candidate))) {
         ASSERT(!candidate || !set.contains(candidate));
         return;
     }
@@ -200,28 +220,38 @@ void ConservativeRoots::genericAddSpan(void* begin, void* end, MarkHook& markHoo
 
     RELEASE_ASSERT(isPointerAligned(begin));
     RELEASE_ASSERT(isPointerAligned(end));
-    // Make a local copy of filters to show the compiler it won't alias, and can be register-allocated.
-    TinyBloomFilter<uintptr_t> jsGCFilter = m_heap.objectSpace().blocks().filter();
-#if ENABLE(WEBASSEMBLY)
-    TinyBloomFilter<uintptr_t> boxedWasmCalleeFilter = m_heap.boxedWasmCalleeFilter();
-#else
-    TinyBloomFilter<uintptr_t> boxedWasmCalleeFilter;
-#endif
 
-    HeapVersion markingVersion = m_heap.objectSpace().markingVersion();
-    HeapVersion newlyAllocatedVersion = m_heap.objectSpace().newlyAllocatedVersion();
+    // Make a local copy of everything the per-pointer scan reads but never writes, so the compiler
+    // knows it cannot alias with the mark hook and can keep it all in registers.
+    MarkedSpace& space = m_heap.objectSpace();
+    ConservativeRootsInternal::SpanState state;
+    state.blockSet = &space.blocks().set();
+    state.jsGCFilter = space.blocks().filter();
 #if ENABLE(WEBASSEMBLY)
-    if (boxedWasmCalleeFilter.bits()) {
+    state.boxedWasmCalleeFilter = m_heap.boxedWasmCalleeFilter();
+#endif
+    state.markingVersion = space.markingVersion();
+    state.newlyAllocatedVersion = space.newlyAllocatedVersion();
+    state.preciseSize = space.preciseAllocationsForThisCollectionSize();
+    if (state.preciseSize) {
+        state.preciseBegin = space.preciseAllocationsForThisCollectionBegin();
+        state.preciseEnd = space.preciseAllocationsForThisCollectionEnd();
+        state.preciseLowerBound = state.preciseBegin[0]->lowerBound();
+        state.preciseUpperBound = state.preciseEnd[-1]->upperBound();
+    }
+
+#if ENABLE(WEBASSEMBLY)
+    if (state.boxedWasmCalleeFilter.bits()) {
         constexpr bool lookForWasmCallees = true;
         for (char** it = static_cast<char**>(begin); it != static_cast<char**>(end); ++it)
-            genericAddPointer<lookForWasmCallees>(*it, markingVersion, newlyAllocatedVersion, jsGCFilter, boxedWasmCalleeFilter, markHook);
+            genericAddPointer<lookForWasmCallees>(*it, state, markHook);
     } else {
 #else
     {
 #endif
         constexpr bool lookForWasmCallees = false;
         for (char** it = static_cast<char**>(begin); it != static_cast<char**>(end); ++it)
-            genericAddPointer<lookForWasmCallees>(*it, markingVersion, newlyAllocatedVersion, jsGCFilter, boxedWasmCalleeFilter, markHook);
+            genericAddPointer<lookForWasmCallees>(*it, state, markHook);
     }
 }
 

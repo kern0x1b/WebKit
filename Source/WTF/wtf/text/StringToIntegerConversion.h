@@ -60,25 +60,37 @@ template<typename IntegralType, typename CharacterType> std::optional<IntegralTy
     else
         skipExactly(data, '+');
 
-    auto isCharacterAllowedInBase = [] (auto character, auto base) {
+    // Base 10 is overwhelmingly the common case, and everything about the digit test that
+    // depends only on the base is loop invariant. Hoisting both out of the loop leaves a
+    // single unsigned range check per character there, and turns the accumulating multiply
+    // into a multiply by a literal that the compiler can strength-reduce.
+    const bool isBase10 = base == 10;
+    const unsigned letterLimitInBase = base > 10 ? static_cast<unsigned>('a') + std::min<unsigned>(base - 10u, 26u) : 0;
+    auto isCharacterAllowedInBase = [&] (auto character) {
+        if (isBase10)
+            return isASCIIDigit(character);
         if (isASCIIDigit(character))
             return character - '0' < base;
-        return toASCIILowerUnchecked(character) >= 'a' && toASCIILowerUnchecked(character) < 'a' + std::min(base - 10, 26);
+        auto lowered = toASCIILowerUnchecked(character);
+        return lowered >= 'a' && static_cast<unsigned>(lowered) < letterLimitInBase;
     };
 
-    if (!(!data.empty() && isCharacterAllowedInBase(data.front(), base)))
+    if (!(!data.empty() && isCharacterAllowedInBase(data.front())))
         return std::nullopt;
 
     Checked<IntegralType, RecordOverflow> value;
     do {
         auto c = consume(data);
-        IntegralType digitValue = isASCIIDigit(c) ? c - '0' : toASCIILowerUnchecked(c) - 'a' + 10;
-        value *= static_cast<IntegralType>(base);
+        IntegralType digitValue = (isBase10 || isASCIIDigit(c)) ? c - '0' : toASCIILowerUnchecked(c) - 'a' + 10;
+        if (isBase10)
+            value *= static_cast<IntegralType>(10);
+        else
+            value *= static_cast<IntegralType>(base);
         if (isNegative)
             value -= digitValue;
         else
             value += digitValue;
-    } while (!data.empty() && isCharacterAllowedInBase(data.front(), base));
+    } while (!data.empty() && isCharacterAllowedInBase(data.front()));
 
     if (value.hasOverflowed()) [[unlikely]]
         return std::nullopt;

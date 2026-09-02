@@ -639,7 +639,9 @@ std::unique_ptr<MutableCSSSelector> CSSSelectorParser::consumeCompoundSelector(C
     SetForScope ignoreDefaultNamespace(m_ignoreDefaultNamespace, m_resistDefaultNamespace && !parsedName && atEndIgnoringWhitespace(range));
     if (!compoundSelector) {
         auto namespacePrefix = parsedName->namespacePrefix;
-        AtomString namespaceURI = determineNamespace(namespacePrefix);
+        // determineNamespace() returns a reference into a static atom or into the sheet's
+        // namespace map; both outlive this statement, so skip the AtomString refcount pair.
+        const AtomString& namespaceURI = determineNamespace(namespacePrefix);
         if (namespaceURI.isNull()) {
             m_failedParsing = true;
             return nullptr;
@@ -659,18 +661,27 @@ std::unique_ptr<MutableCSSSelector> CSSSelectorParser::consumeSimpleSelector(CSS
 {
     const CSSParserToken& token = range.peek();
     std::unique_ptr<MutableCSSSelector> selector;
-    if (token.type() == HashToken)
+    switch (token.type()) {
+    case HashToken:
         selector = consumeId(range);
-    else if (token.type() == DelimiterToken && token.delimiter() == '.')
-        selector = consumeClass(range);
-    else if (token.type() == DelimiterToken && token.delimiter() == '&')
-        selector = consumeNesting(range);
-    else if (token.type() == LeftBracketToken)
+        break;
+    case DelimiterToken:
+        if (token.delimiter() == '.')
+            selector = consumeClass(range);
+        else if (token.delimiter() == '&')
+            selector = consumeNesting(range);
+        else
+            return nullptr;
+        break;
+    case LeftBracketToken:
         selector = consumeAttribute(range);
-    else if (token.type() == ColonToken)
+        break;
+    case ColonToken:
         selector = consumePseudo(range);
-    else
+        break;
+    default:
         return nullptr;
+    }
 
     if (!selector) {
         m_failedParsing = true;
@@ -780,7 +791,7 @@ std::unique_ptr<MutableCSSSelector> CSSSelectorParser::consumeAttribute(CSSParse
         return nullptr;
     block.consumeWhitespace();
 
-    AtomString namespaceURI = determineNamespace(parsedName->namespacePrefix);
+    const AtomString& namespaceURI = determineNamespace(parsedName->namespacePrefix);
     if (namespaceURI.isNull())
         return nullptr;
 
@@ -1097,21 +1108,23 @@ CSSSelector::Relation CSSSelectorParser::consumeCombinator(CSSParserTokenRange& 
         fallbackResult = CSSSelector::Relation::DescendantSpace;
     }
 
-    if (range.peek().type() != DelimiterToken)
+    auto& token = range.peek();
+    if (token.type() != DelimiterToken)
         return fallbackResult;
 
-    char16_t delimiter = range.peek().delimiter();
-
-    if (delimiter == '+' || delimiter == '~' || delimiter == '>') {
+    switch (token.delimiter()) {
+    case '+':
         range.consumeIncludingWhitespace();
-        if (delimiter == '+')
-            return CSSSelector::Relation::DirectAdjacent;
-        if (delimiter == '~')
-            return CSSSelector::Relation::IndirectAdjacent;
+        return CSSSelector::Relation::DirectAdjacent;
+    case '~':
+        range.consumeIncludingWhitespace();
+        return CSSSelector::Relation::IndirectAdjacent;
+    case '>':
+        range.consumeIncludingWhitespace();
         return CSSSelector::Relation::Child;
+    default:
+        return fallbackResult;
     }
-
-    return fallbackResult;
 }
 
 CSSSelector::Match CSSSelectorParser::consumeAttributeMatch(CSSParserTokenRange& range)
@@ -1275,19 +1288,23 @@ const AtomString& CSSSelectorParser::determineNamespace(const AtomString& prefix
 void CSSSelectorParser::prependTypeSelectorIfNeeded(const AtomString& namespacePrefix, const AtomString& elementName, MutableCSSSelector& compoundSelector)
 {
     bool isShadowDOM = compoundSelector.needsImplicitShadowCombinatorForMatching();
-    
-    if (elementName.isNull() && defaultNamespace() == starAtom() && !isShadowDOM)
+
+    // defaultNamespace() is fixed once @namespace parsing is done; resolve it once per compound
+    // selector instead of up to three times.
+    const AtomString& defaultNamespaceURI = defaultNamespace();
+
+    if (elementName.isNull() && defaultNamespaceURI == starAtom() && !isShadowDOM)
         return;
 
-    AtomString determinedElementName = elementName.isNull() ? starAtom() : elementName;
-    AtomString namespaceURI = determineNamespace(namespacePrefix);
+    // Binding by reference: each AtomString copy here is an atomic refcount pair on armv7.
+    const AtomString& determinedElementName = elementName.isNull() ? starAtom() : elementName;
+    // determineNamespace() returns defaultNamespace() for a null prefix.
+    const AtomString& namespaceURI = namespacePrefix.isNull() ? defaultNamespaceURI : determineNamespace(namespacePrefix);
     if (namespaceURI.isNull()) {
         m_failedParsing = true;
         return;
     }
-    AtomString determinedPrefix = namespacePrefix;
-    if (namespaceURI == defaultNamespace())
-        determinedPrefix = nullAtom();
+    const AtomString& determinedPrefix = namespaceURI == defaultNamespaceURI ? nullAtom() : namespacePrefix;
     QualifiedName tag(determinedPrefix, determinedElementName, namespaceURI);
 
     // *:host never matches, so we can't discard the *,

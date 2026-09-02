@@ -87,6 +87,11 @@ static inline MatchBasedOnRuleHash NODELETE computeMatchBasedOnRuleHash(const CS
 
 static inline PropertyAllowlist determinePropertyAllowlist(const CSSSelector& selector)
 {
+    // The nested selector list scanned below is the one of `selector` itself, so its result does not
+    // depend on `component`. Compute it at most once instead of once per component.
+    bool selectorListScanned = false;
+    auto selectorListAllowlist = PropertyAllowlist::None;
+
     for (const CSSSelector* component = &selector; component; component = component->precedingInComplexSelector()) {
         if (component->match() == CSSSelector::Match::PseudoElement) {
             switch (component->pseudoElement()) {
@@ -114,13 +119,20 @@ static inline PropertyAllowlist determinePropertyAllowlist(const CSSSelector& se
             }
         }
 
-        if (const auto* selectorList = selector.selectorList()) {
-            for (auto& subSelector : *selectorList) {
-                auto allowlistType = determinePropertyAllowlist(subSelector);
-                if (allowlistType != PropertyAllowlist::None)
-                    return allowlistType;
+        if (!selectorListScanned) {
+            selectorListScanned = true;
+            if (const auto* selectorList = selector.selectorList()) {
+                for (auto& subSelector : *selectorList) {
+                    auto allowlistType = determinePropertyAllowlist(subSelector);
+                    if (allowlistType != PropertyAllowlist::None) {
+                        selectorListAllowlist = allowlistType;
+                        break;
+                    }
+                }
             }
         }
+        if (selectorListAllowlist != PropertyAllowlist::None)
+            return selectorListAllowlist;
     }
     return PropertyAllowlist::None;
 }
@@ -128,16 +140,29 @@ static inline PropertyAllowlist determinePropertyAllowlist(const CSSSelector& se
 RuleData::RuleData(const StyleRule& styleRule, unsigned selectorIndex, unsigned selectorListIndex, unsigned position, IsStartingStyle isStartingStyle)
     : m_styleRuleWithSelectorIndex(&styleRule, static_cast<uint16_t>(selectorIndex))
     , m_selectorListIndex(selectorListIndex)
-    , m_matchBasedOnRuleHash(std::to_underlying(computeMatchBasedOnRuleHash(selector())))
-    , m_canMatchPseudoElement(complexSelectorCanMatchPseudoElement(selector()))
-    , m_propertyAllowlist(std::to_underlying(determinePropertyAllowlist(selector())))
+    , m_matchBasedOnRuleHash(0)
+    , m_canMatchPseudoElement(false)
+    , m_propertyAllowlist(std::to_underlying(PropertyAllowlist::None))
     , m_isStartingStyle(std::to_underlying(isStartingStyle))
     , m_isEnabled(true)
     , m_position(position)
-    , m_descendantSelectorIdentifierHashes(SelectorFilter::collectHashes(selector()))
 {
     ASSERT(m_position == position);
     ASSERT(this->selectorIndex() == selectorIndex);
+
+    auto& selector = styleRule.selectorList().selectorAt(selectorIndex);
+
+    m_matchBasedOnRuleHash = std::to_underlying(computeMatchBasedOnRuleHash(selector));
+
+    bool canMatchPseudoElement = complexSelectorCanMatchPseudoElement(selector);
+    m_canMatchPseudoElement = canMatchPseudoElement;
+    // determinePropertyAllowlist can only return something other than None when the complex selector
+    // contains a pseudo-element, and it walks a subset of what complexSelectorCanMatchPseudoElement
+    // walks. So for the vast majority of rules the whole walk is known to be pointless.
+    if (canMatchPseudoElement)
+        m_propertyAllowlist = std::to_underlying(determinePropertyAllowlist(selector));
+
+    m_descendantSelectorIdentifierHashes = SelectorFilter::collectHashes(selector);
 }
 
 } // namespace Style

@@ -23,6 +23,7 @@
 #include <JavaScriptCore/IndexingHeader.h>
 #include <JavaScriptCore/PureNaN.h>
 #include <JavaScriptCore/WriteBarrier.h>
+#include <string.h>
 
 WTF_ALLOW_UNSAFE_BUFFER_USAGE_BEGIN
 
@@ -131,9 +132,17 @@ ALWAYS_INLINE void clearArray(WriteBarrier<Unknown>* base, unsigned count)
         clearArrayMemset(base, count);
         return;
     }
+#elif OS(DARWIN)
+    const unsigned minCountForMemset = 12;
+    if (count >= minCountForMemset) {
+        WriteBarrier<Unknown> hole;
+        static_assert(sizeof(WriteBarrier<Unknown>) == sizeof(uint64_t));
+        memset_pattern8(static_cast<void*>(base), &hole, sizeof(WriteBarrier<Unknown>) * static_cast<size_t>(count));
+        return;
+    }
 #endif
-    
-    for (unsigned i = count; i--;)
+
+    for (unsigned i = 0; i < count; ++i)
         base[i].clear();
 }
 
@@ -145,10 +154,54 @@ ALWAYS_INLINE void clearArray(double* base, unsigned count)
         clearArrayMemset(base, count);
         return;
     }
+#elif OS(DARWIN)
+    const unsigned minCountForMemset = 12;
+    if (count >= minCountForMemset) {
+        constexpr double pattern = PNaN;
+        memset_pattern8(static_cast<void*>(base), &pattern, sizeof(double) * static_cast<size_t>(count));
+        return;
+    }
 #endif
-    
-    for (unsigned i = count; i--;)
+
+    for (unsigned i = 0; i < count; ++i)
         base[i] = PNaN;
+}
+
+ALWAYS_INLINE void fillArrayWithUndefined(WriteBarrier<Unknown>* base, unsigned count)
+{
+#if OS(DARWIN)
+    const unsigned minCountForMemset = 12;
+    if (count >= minCountForMemset) {
+        WriteBarrier<Unknown> undefinedValue;
+        undefinedValue.setUndefined();
+        static_assert(sizeof(WriteBarrier<Unknown>) == sizeof(uint64_t));
+        memset_pattern8(static_cast<void*>(base), &undefinedValue, sizeof(WriteBarrier<Unknown>) * static_cast<size_t>(count));
+        return;
+    }
+#endif
+
+    for (unsigned i = 0; i < count; ++i)
+        base[i].setUndefined();
+}
+
+// Read an indexed element from a butterfly the mutator owns.
+//
+// WriteBarrierBase<Unknown>::get() routes through JSValue::decodeConcurrent(),
+// which on USE(JSVALUE32_64) with ENABLE(CONCURRENT_JS) is a tag/payload/tag
+// retry loop with a WTF::loadLoadFence() on either side of the payload read.
+// On armv7 each of those fences is a `dmb ish`, so a plain element read costs
+// two full barriers - paid per element in every indexOf / includes / spread /
+// flatten / sort loop below. Those barriers exist for a reader on another
+// thread racing WriteBarrierBase<Unknown>::set()'s InvalidTag publish protocol.
+// A mutator reading elements it wrote itself is ordered by program order and
+// needs neither, which is why the surrounding code already reads the very same
+// slots through WTF::find64() and gcSafeMemcpy() without the protocol.
+//
+// Only for butterfly indexed storage read on the mutator. Out-of-line property
+// slots are read concurrently by compiler threads and must keep using get().
+ALWAYS_INLINE JSValue loadElementUnordered(const WriteBarrier<Unknown>& element)
+{
+    return *element.slot();
 }
 
 } // namespace JSC

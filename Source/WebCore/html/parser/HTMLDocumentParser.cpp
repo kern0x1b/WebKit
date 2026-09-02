@@ -276,8 +276,10 @@ bool HTMLDocumentParser::pumpTokenizerLoop(SynchronousMode mode, bool parsingFra
 {
     RefPtr parserScheduler = m_parserScheduler;
     RefPtr frame = parsingFragment ? nullptr : document()->frame();
+    // The scheduler is a UniqueRef member of the frame we already hold, so it outlives the loop.
+    SUPPRESS_UNCOUNTED_LOCAL NavigationScheduler* navigationScheduler = frame ? &frame->navigationScheduler() : nullptr;
     do {
-        if (isWaitingForScripts()) [[unlikely]] {
+        if (!parsingFragment && isWaitingForScriptsWhenNotParsingFragment()) [[unlikely]] {
             if (mode == SynchronousMode::AllowYield && parserScheduler->shouldYieldBeforeExecutingScript(protect(m_treeBuilder->scriptToProcess()).get(), session))
                 return true;
 
@@ -291,7 +293,7 @@ bool HTMLDocumentParser::pumpTokenizerLoop(SynchronousMode mode, bool parsingFra
         // how the parser has always handled stopping when the page assigns window.location. What should
         // happen instead is that assigning window.location causes the parser to stop parsing cleanly.
         // The problem is we're not prepared to do that at every point where we run JavaScript.
-        SUPPRESS_UNCOUNTED_ARG if (frame && frame->navigationScheduler().locationChangePending()) [[unlikely]]
+        if (navigationScheduler && navigationScheduler->locationChangePending()) [[unlikely]]
             return false;
 
         if (mode == SynchronousMode::AllowYield && parserScheduler->shouldYieldBeforeToken(session)) [[unlikely]]
@@ -349,8 +351,14 @@ void HTMLDocumentParser::pumpTokenizer(SynchronousMode mode)
         m_preloadScanner->scan(*m_preloader, *document);
     }
     // The viewport definition is known here, so we can load link preloads with media attributes.
-    if (document->loader())
-        LinkLoader::loadLinksFromHeader(document->loader()->response().httpHeaderField(HTTPHeaderName::Link), document->url(), *document, LinkLoader::MediaAttributeCheck::MediaAttributeNotEmpty);
+    if (!m_checkedForLinkHeader) {
+        if (RefPtr loader = document->loader()) {
+            m_checkedForLinkHeader = true;
+            m_linkHeader = loader->response().httpHeaderField(HTTPHeaderName::Link);
+        }
+    }
+    if (!m_linkHeader.isEmpty())
+        LinkLoader::loadLinksFromHeader(m_linkHeader, document->url(), *document, LinkLoader::MediaAttributeCheck::MediaAttributeNotEmpty);
 }
 
 void HTMLDocumentParser::constructTreeFromHTMLToken(HTMLTokenizer::TokenPtr& rawToken)
@@ -539,6 +547,14 @@ bool HTMLDocumentParser::isWaitingForScripts() const
         ASSERT(!m_scriptRunner || !m_scriptRunner->hasParserBlockingScript());
         return false;
     }
+    return isWaitingForScriptsWhenNotParsingFragment();
+}
+
+// The per-token path in pumpTokenizerLoop already knows whether this is a fragment parse, so it
+// calls this directly rather than paying for the tree builder hop in isParsingFragment() again.
+bool HTMLDocumentParser::isWaitingForScriptsWhenNotParsingFragment() const
+{
+    ASSERT(!isParsingFragment());
     // When the TreeBuilder encounters a </script> tag, it returns to the HTMLDocumentParser
     // where the script is transfered from the treebuilder to the script runner.
     // The script runner will hold the script until its loaded and run. During

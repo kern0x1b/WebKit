@@ -448,10 +448,17 @@ Heap::Heap(VM& vm, HeapType heapType)
 
     m_worldState.store(0);
 
+    m_hasParallelMarkers = heapHelperPool().numberOfThreads() > 0;
+
     for (unsigned i = 0, numberOfParallelThreads = heapHelperPool().numberOfThreads(); i < numberOfParallelThreads; ++i) {
         std::unique_ptr<SlotVisitor> visitor = makeUnique<SlotVisitor>(*this, toCString("P", i + 1));
+#if defined(WEBKIT_IOS6)
+        if (Options::optimizeParallelSlotVisitorsForStoppedMutator() || !Options::useConcurrentGC())
+            visitor->optimizeForStoppedMutator();
+#else
         if (Options::optimizeParallelSlotVisitorsForStoppedMutator())
             visitor->optimizeForStoppedMutator();
+#endif
         m_availableParallelSlotVisitors.append(visitor.get());
         m_parallelSlotVisitors.append(WTF::move(visitor));
     }
@@ -712,7 +719,12 @@ void Heap::deprecatedReportExtraMemorySlowCase(size_t size)
 bool Heap::overCriticalMemoryThreshold(MemoryThresholdCallType memoryThresholdCallType)
 {
 #if USE(MEMORY_FOOTPRINT_API)
-    if (memoryThresholdCallType == MemoryThresholdCallType::Direct || ++m_percentAvailableMemoryCachedCallCount >= 100) {
+#if defined(WEBKIT_IOS6)
+    constexpr unsigned percentAvailableMemoryRecheckInterval = 1000;
+#else
+    constexpr unsigned percentAvailableMemoryRecheckInterval = 100;
+#endif
+    if (memoryThresholdCallType == MemoryThresholdCallType::Direct || ++m_percentAvailableMemoryCachedCallCount >= percentAvailableMemoryRecheckInterval) {
         m_overCriticalMemoryThreshold = WTF::percentAvailableMemoryInUse() > Options::criticalGCMemoryThreshold();
         m_percentAvailableMemoryCachedCallCount = 0;
     }

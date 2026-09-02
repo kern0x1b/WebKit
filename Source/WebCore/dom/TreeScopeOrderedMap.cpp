@@ -123,15 +123,15 @@ inline RefPtr<Element> TreeScopeOrderedMap::get(const AtomString& key, const Tre
 
     // We know there's at least one node that matches; iterate to find the first one.
     Ref rootNode = scope.rootNode();
-    for (Ref<Element> element : descendantsOfType<Element>(rootNode.get())) {
-        if (!element->isInTreeScope())
+    for (auto& element : descendantsOfType<Element>(rootNode.get())) {
+        if (!element.isInTreeScope())
             continue;
         if (!keyMatches(key, element))
             continue;
-        entry.element = element.ptr();
-        RELEASE_ASSERT_WITH_SECURITY_IMPLICATION(&element->treeScope() == &scope);
+        entry.element = &element;
+        RELEASE_ASSERT_WITH_SECURITY_IMPLICATION(&element.treeScope() == &scope);
         ASSERT_WITH_SECURITY_IMPLICATION(entry.registeredElements.contains(entry.element.get()));
-        return element;
+        return &element;
     }
 
 #if ASSERT_ENABLED
@@ -168,7 +168,7 @@ inline Vector<WeakRef<Element, WeakPtrImplWithEventTargetData>>* TreeScopeOrdere
         entry.orderedList.reserveCapacity(entry.count);
         auto elementDescendants = descendantsOfType<Element>(scope.rootNode());
         for (auto it = entry.element ? elementDescendants.beginAt(*entry.element) : elementDescendants.begin(); it; ++it) {
-            if (keyMatches(key, protect(*it)))
+            if (keyMatches(key, *it))
                 entry.orderedList.append(*it);
         }
         RELEASE_ASSERT_WITH_SECURITY_IMPLICATION(entry.orderedList.size() == entry.count);

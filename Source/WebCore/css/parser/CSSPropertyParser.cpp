@@ -141,6 +141,11 @@ CSSPropertyID cssPropertyID(StringView string)
         return CSSPropertyInvalid;
     if (length > maxCSSPropertyNameLength)
         return CSSPropertyInvalid;
+    // Every entry in CSSPropertyNames.in starts with an ASCII letter or '-', so anything else can
+    // be rejected before the lowercasing copy and the perfect-hash lookup.
+    auto first = string[0];
+    if (!isASCIIAlpha(first) && first != '-')
+        return CSSPropertyInvalid;
     return string.is8Bit() ? cssPropertyID(string.span8()) : cssPropertyID(string.span16());
 }
 
@@ -187,7 +192,12 @@ CSSValueID cssValueKeywordID(StringView string)
         return CSSValueInvalid;
     if (length > maxCSSValueKeywordLength)
         return CSSValueInvalid;
-    
+    // Every entry in CSSValueKeywords.in starts with an ASCII letter or '-', so anything else
+    // can be rejected before the lowercasing copy and the hash lookup.
+    auto first = string[0];
+    if (!isASCIIAlpha(first) && first != '-')
+        return CSSValueInvalid;
+
     return string.is8Bit() ? cssValueKeywordID(string.span8()) : cssValueKeywordID(string.span16());
 }
 
@@ -202,6 +212,12 @@ bool isCustomPropertyName(StringView propertyName)
 
 static RefPtr<CSSValue> consumeCSSWideKeywordValue(CSSParserTokenRange& range)
 {
+    // CSSParserToken::id() is CSSValueInvalid for anything but an IdentToken, so every other
+    // declaration - the majority - can skip the range copy and the token consumption. This runs
+    // once per declaration in every stylesheet.
+    if (range.peek().type() != IdentToken)
+        return nullptr;
+
     auto rangeCopy = range;
     auto valueID = rangeCopy.consumeIncludingWhitespace().id();
     if (!rangeCopy.atEnd())
@@ -227,7 +243,11 @@ bool CSSPropertyParser::parseValue(CSSPropertyID property, IsImportant important
     CSS::PropertyParserResult result { parsedProperties };
 
     bool parseSuccess;
-    switch (ruleType) {
+    // Almost every declaration in a sheet is in a plain style rule, which is the switch's default
+    // case. Testing for it first keeps the common path off the jump table.
+    if (ruleType == StyleRuleType::Style) [[likely]]
+        parseSuccess = consumeStyleProperty(range, context, property, important, ruleType, result, namespaceMap);
+    else switch (ruleType) {
     case StyleRuleType::CounterStyle:
         parseSuccess = consumeCounterStyleDescriptor(range, context, property, result);
         break;
@@ -584,7 +604,7 @@ std::optional<Variant<Ref<const Style::CustomProperty>, CSSWideKeyword>> consume
     if (is<CSSValueList>(value.get()) || is<CSSTransformListValue>(value.get())) {
         Ref valueList = downcast<CSSValueContainingVector>(value.releaseNonNull());
         auto syntaxValueList = Style::CustomProperty::ValueList { { }, valueList->separator() };
-        for (Ref listValue : valueList.get()) {
+        for (auto& listValue : valueList.get()) {
             auto syntaxValue = resolveSyntaxValue(listValue);
             if (!syntaxValue)
                 return { };

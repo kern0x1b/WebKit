@@ -179,8 +179,14 @@ bool ElementData::isEquivalent(const ElementData* other) const
 
 Attribute* NODELETE UniqueElementData::findAttributeByName(const QualifiedName& name)
 {
+    auto* targetImpl = name.impl();
+    auto* targetLocalName = targetImpl->m_localName.impl();
+    auto* targetNamespaceURI = targetImpl->m_namespaceURI.impl();
     for (auto& attribute : m_attributeVector) {
-        if (attribute.name().matches(name))
+        auto* impl = attribute.name().impl();
+        if (impl->m_localName.impl() != targetLocalName)
+            continue;
+        if (impl == targetImpl || impl->m_namespaceURI.impl() == targetNamespaceURI)
             return &attribute;
     }
     return nullptr;

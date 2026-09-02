@@ -200,7 +200,7 @@ void Text::updateRendererAfterContentChange(unsigned offsetOfReplacedData, unsig
     if (hasInvalidRenderer())
         return;
 
-    protect(document())->updateTextRenderer(*this, offsetOfReplacedData, lengthOfReplacedData);
+    SUPPRESS_UNCOUNTED_ARG document().updateTextRenderer(*this, offsetOfReplacedData, lengthOfReplacedData);
 }
 
 static void appendTextRepresentation(StringBuilder& builder, const Text& text)

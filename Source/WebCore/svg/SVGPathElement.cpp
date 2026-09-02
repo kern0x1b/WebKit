@@ -116,15 +116,18 @@ Ref<SVGPathElement> SVGPathElement::create(const QualifiedName& tagName, Documen
 void SVGPathElement::attributeChanged(const QualifiedName& name, const AtomString& oldValue, const AtomString& newValue, AttributeModificationReason attributeModificationReason)
 {
     if (name == SVGNames::dAttr) {
-        auto& cache = PathSegListCache::singleton();
+        Ref pathSegList { m_pathSegList };
         if (newValue.isEmpty())
-            protect(m_pathSegList)->baseVal()->clearByteStreamData();
-        else if (auto data = cache.get(newValue))
-            protect(m_pathSegList)->baseVal()->updateByteStreamData(WTF::move(data.value()));
-        else if (protect(m_pathSegList)->baseVal()->parse(newValue))
-            cache.add(newValue, protect(m_pathSegList)->baseVal()->existingPathByteStream().data());
-        else
-            protect(protect(document())->svgExtensions())->reportError(makeString("Problem parsing d=\""_s, newValue, "\""_s));
+            pathSegList->baseVal()->clearByteStreamData();
+        else {
+            auto& cache = PathSegListCache::singleton();
+            if (auto data = cache.get(newValue))
+                pathSegList->baseVal()->updateByteStreamData(WTF::move(data.value()));
+            else if (pathSegList->baseVal()->parse(newValue))
+                cache.add(newValue, pathSegList->baseVal()->existingPathByteStream().data());
+            else
+                protect(protect(document())->svgExtensions())->reportError(makeString("Problem parsing d=\""_s, newValue, "\""_s));
+        }
     }
 
     SVGGeometryElement::attributeChanged(name, oldValue, newValue, attributeModificationReason);
@@ -137,15 +140,13 @@ void SVGPathElement::clearCache()
 
 void SVGPathElement::svgAttributeChanged(const QualifiedName& attrName)
 {
-    if (PropertyRegistry::isKnownAttribute(attrName)) {
-        ASSERT(attrName == SVGNames::dAttr);
+    if (attrName.matches(SVGNames::dAttr)) {
         InstanceInvalidationGuard guard(*this);
         invalidateMPathDependencies();
 
-        if (auto* path = dynamicDowncast<RenderSVGPath>(renderer()))
-            path->setNeedsShapeUpdate();
-
         if (auto* path = dynamicDowncast<LegacyRenderSVGPath>(renderer()))
+            path->setNeedsShapeUpdate();
+        else if (auto* path = dynamicDowncast<RenderSVGPath>(renderer()))
             path->setNeedsShapeUpdate();
 
         updateSVGRendererForElementChange();

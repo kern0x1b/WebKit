@@ -88,37 +88,55 @@ inline auto WidthIterator::applyFontTransforms(GlyphBuffer& glyphBuffer, unsigne
     if (lastGlyphCount >= glyphBufferSize)
         return { 0, makeGlyphBufferAdvance() };
 
+#if defined(WEBKIT_IOS6)
+    // Font::applyTransforms on this port only reverses RTL runs; it never rewrites an
+    // advance. The only thing that can move a width between the two sums below is the
+    // treated-as-space fixup, so with nothing to fix up the two passes are provably equal
+    // and both can be skipped.
+    const bool measureWidthChange = !charactersTreatedAsSpace.isEmpty();
+#else
+    constexpr bool measureWidthChange = true;
+#endif
+
     auto advances = glyphBuffer.advances();
     float beforeWidth = 0;
-    for (unsigned i = lastGlyphCount; i < glyphBufferSize; ++i)
-        beforeWidth += width(advances[i]);
+    if (measureWidthChange) {
+        for (unsigned i = lastGlyphCount; i < glyphBufferSize; ++i)
+            beforeWidth += width(advances[i]);
+    }
 
     auto initialAdvance = font.applyTransforms(glyphBuffer, lastGlyphCount, m_currentCharacterIndex, m_enableKerning, m_requiresShaping, m_fontCascade->fontDescription().computedLocale(), m_run->text(), direction());
 
     glyphBufferSize = glyphBuffer.size();
     advances = glyphBuffer.advances();
 
+    // The sign flip, the treated-as-space fixup and the closing sum all walk the same glyph
+    // range and touch disjoint fields of each entry, so they are one pass. The sum still
+    // reads each advance after that advance has been fixed up, in the same order, so the
+    // total is unchanged.
     auto origins = glyphBuffer.origins();
+    bool hasCharactersTreatedAsSpace = !charactersTreatedAsSpace.isEmpty();
+    float afterWidth = 0;
     for (unsigned i = lastGlyphCount; i < glyphBufferSize; ++i) {
         setHeight(advances[i], -height(advances[i]));
         setY(origins[i], -y(origins[i]));
-    }
 
-    for (unsigned i = lastGlyphCount; i < glyphBufferSize; ++i) {
-        auto characterIndex = glyphBuffer.uncheckedStringOffsetAt(i);
-        auto iterator = std::lower_bound(charactersTreatedAsSpace.begin(), charactersTreatedAsSpace.end(), characterIndex, [](const OriginalAdvancesForCharacterTreatedAsSpace& l, GlyphBufferStringOffset r) -> bool {
-            return l.stringOffset < r;
-        });
-        if (iterator == charactersTreatedAsSpace.end() || iterator->stringOffset != characterIndex)
-            continue;
-        auto& originalAdvances = *iterator;
-        setWidth(glyphBuffer.advanceAt(i), originalAdvances.advance);
+        if (hasCharactersTreatedAsSpace) {
+            auto characterIndex = glyphBuffer.uncheckedStringOffsetAt(i);
+            auto iterator = std::lower_bound(charactersTreatedAsSpace.begin(), charactersTreatedAsSpace.end(), characterIndex, [](const OriginalAdvancesForCharacterTreatedAsSpace& l, GlyphBufferStringOffset r) -> bool {
+                return l.stringOffset < r;
+            });
+            if (iterator != charactersTreatedAsSpace.end() && iterator->stringOffset == characterIndex)
+                setWidth(advances[i], iterator->advance);
+        }
+
+        if (measureWidthChange)
+            afterWidth += width(advances[i]);
     }
     charactersTreatedAsSpace.clear();
 
-    float afterWidth = 0;
-    for (unsigned i = lastGlyphCount; i < glyphBufferSize; ++i)
-        afterWidth += width(advances[i]);
+    if (!measureWidthChange)
+        return { 0, initialAdvance };
 
     return { afterWidth - beforeWidth, initialAdvance };
 }
@@ -287,6 +305,11 @@ struct AdvanceInternalState {
 
     void updateFont(const Font* newFont)
     {
+        // Text almost never changes font mid-run, so once font and lastFont have both
+        // settled on the same Font there is nothing to write. Assigning anyway costs two
+        // refcount round trips per character.
+        if (font.get() == newFont && lastFont.get() == newFont)
+            return;
         lastFont = std::exchange(font, newFont);
     }
 };
@@ -410,6 +433,12 @@ inline void WidthIterator::advanceInternal(TextIterator& textIterator, GlyphBuff
     AdvanceInternalState advanceInternalState(glyphBuffer, primaryFont, textIterator.currentIndex());
     SmallCapsState smallCapsState(fontDescription);
 
+    // Reloading this through the FontCascadeDescription reference every character defeats
+    // the early exit inside applyTextSpacingTrimIfNeeded().
+    const auto textSpacingTrim = fontDescription.textSpacingTrim();
+    const bool needsTextSpacingTrim = !textSpacingTrim.isSpaceAll();
+    const bool skipSmallCaps = smallCapsState.skipSmallCapsProcessing();
+
     char32_t character = 0;
     float width = 0;
     unsigned clusterLength = 0;
@@ -422,9 +451,14 @@ inline void WidthIterator::advanceInternal(TextIterator& textIterator, GlyphBuff
         unsigned advanceLength = clusterLength;
         if (advanceInternalState.currentCharacterIndex + advanceLength == m_run->length())
             m_lastCharacterIndex = advanceInternalState.currentCharacterIndex;
-        bool isDefaultIgnorable = isDefaultIgnorableCodePoint(character);
+        bool isDefaultIgnorable = isDefaultIgnorableCodePointFast(character);
 
-        auto capitalizedCharacter = capitalized(character);
+        // capitalized() is two ICU property lookups. With font-variant-caps: normal its
+        // result is dead: shouldSynthesizeSmallCaps() and updateCharacterAndSmallCapsIfNeeded()
+        // both return before reading it.
+        std::optional<char32_t> capitalizedCharacter;
+        if (!skipSmallCaps)
+            capitalizedCharacter = capitalized(character);
         char32_t characterToWrite = character;
 
         auto advanceToNextCharacter = [&] {
@@ -442,13 +476,20 @@ inline void WidthIterator::advanceInternal(TextIterator& textIterator, GlyphBuff
 #endif
         auto glyphData = m_fontCascade->glyphDataForCharacter(character, false, FontVariant::Normal);
 
-        RefPtr halfWidthFont = applyTextSpacingTrimIfNeeded(glyphData, character, fontDescription.textSpacingTrim());
+        RefPtr<Font> halfWidthFont;
+        if (needsTextSpacingTrim)
+            halfWidthFont = applyTextSpacingTrimIfNeeded(glyphData, character, textSpacingTrim);
 
-        advanceInternalState.updateFont(glyphData.font ? protect(glyphData.font).get() : primaryFont.ptr());
+        // updateFont() stores into a RefPtr, so the raw pointer only has to survive the
+        // call; protect() would ref and immediately deref once per character.
+        advanceInternalState.updateFont(glyphData.font ? glyphData.font.get() : primaryFont.ptr());
         smallCapsState.shouldSynthesizeCharacter = shouldSynthesizeSmallCaps(smallCapsState.dontSynthesizeSmallCaps, advanceInternalState.font.get(), character, capitalizedCharacter, smallCapsState.fontVariantCaps, smallCapsState.engageAllSmallCapsProcessing);
         updateCharacterAndSmallCapsIfNeeded(smallCapsState, capitalizedCharacter, characterToWrite);
 
-        advanceInternalState.rangeFont = fontForRange(advanceInternalState.lastFont.get(), smallCapsState, smallCapsState.isLastSmallCaps);
+        // Same reason as updateFont(): within a run this is the same Font every character,
+        // and assigning it to the RefPtr anyway is a refcount round trip each time.
+        if (const auto* rangeFont = fontForRange(advanceInternalState.lastFont.get(), smallCapsState, smallCapsState.isLastSmallCaps); rangeFont != advanceInternalState.rangeFont.get())
+            advanceInternalState.rangeFont = rangeFont;
         startNewFontRangeIfNeeded(advanceInternalState, smallCapsState, fontDescription);
         if (resetFontRangeIfNeeded(advanceInternalState, smallCapsState, fontDescription, textIterator))
             continue;
@@ -458,7 +499,7 @@ inline void WidthIterator::advanceInternal(TextIterator& textIterator, GlyphBuff
 
         Glyph glyph = glyphData.glyph;
         if (glyphData.font.get() != advanceInternalState.nextRangeFont || character != characterToWrite)
-            glyph = Ref { *advanceInternalState.nextRangeFont }->glyphForCharacter(characterToWrite);
+            glyph = advanceInternalState.nextRangeFont->glyphForCharacter(characterToWrite);
 
         bool isIgnorable = !glyph && isDefaultIgnorable;
         if (isIgnorable) {
@@ -467,13 +508,15 @@ inline void WidthIterator::advanceInternal(TextIterator& textIterator, GlyphBuff
             continue;
         }
 
-        Ref currentRangeFont = *advanceInternalState.nextRangeFont;
+        // nextRangeFont owns the reference for the whole iteration; taking another Ref here
+        // is a refcount round trip per character.
+        const Font& currentRangeFont = *advanceInternalState.nextRangeFont;
 
-        width = currentRangeFont->widthForGlyph(glyph, Font::SyntheticBoldInclusion::Exclude); // We apply synthetic bold after shaping, in applyCSSVisibilityRules().
+        width = currentRangeFont.widthForGlyph(glyph, Font::SyntheticBoldInclusion::Exclude); // We apply synthetic bold after shaping, in applyCSSVisibilityRules().
         advanceInternalState.widthOfCurrentFontRange += width;
 
         if (FontCascade::treatAsSpace(characterToWrite))
-            advanceInternalState.charactersTreatedAsSpace.constructAndAppend(advanceInternalState.currentCharacterIndex, characterToWrite == space, characterToWrite == tabCharacter ? width : currentRangeFont->spaceWidth(Font::SyntheticBoldInclusion::Exclude));
+            advanceInternalState.charactersTreatedAsSpace.constructAndAppend(advanceInternalState.currentCharacterIndex, characterToWrite == space, characterToWrite == tabCharacter ? width : currentRangeFont.spaceWidth(Font::SyntheticBoldInclusion::Exclude));
 
         m_glyphBounds.computeIfNeeded(glyph, currentRangeFont, advanceInternalState.currentCharacterIndex, width);
 
@@ -737,7 +780,7 @@ bool WidthIterator::characterCanUseSimplifiedTextMeasuring(char32_t codePoint, b
         return false;
     }
 
-    if (codePoint >= HiraganaLetterSmallA || isControlCharacter(codePoint))
+    if (codePoint >= HiraganaLetterSmallA || isControlCharacterFast(codePoint))
         return false;
 
     return true;
@@ -784,8 +827,10 @@ void WidthIterator::applyCSSVisibilityRules(GlyphBuffer& glyphBuffer, unsigned g
         glyphBuffer.makeGlyphInvisible(index);
     };
 
-    for (unsigned i = glyphBufferStartIndex; i < glyphBuffer.size(); yPosition += height(glyphBuffer.advanceAt(i)), ++i) {
-        auto stringOffset = glyphBuffer.checkedStringOffsetAt(i, m_run->length());
+    unsigned runLength = m_run->length();
+    unsigned glyphBufferSize = glyphBuffer.size();
+    for (unsigned i = glyphBufferStartIndex; i < glyphBufferSize; yPosition += height(glyphBuffer.advanceAt(i)), ++i) {
+        auto stringOffset = glyphBuffer.checkedStringOffsetAt(i, runLength);
         if (!stringOffset)
             continue;
         auto characterResponsibleForThisGlyph = m_run.get()[stringOffset.value()];
@@ -816,7 +861,7 @@ void WidthIterator::applyCSSVisibilityRules(GlyphBuffer& glyphBuffer, unsigned g
             continue;
         }
         // "Control characters (Unicode category Cc)—other than tabs (U+0009), line feeds (U+000A), carriage returns (U+000D) and sequences that form a segment break—must be rendered as a visible glyph"
-        if (isControlCharacter(characterResponsibleForThisGlyph)) {
+        if (isControlCharacterFast(characterResponsibleForThisGlyph)) {
             // Let's assume that .notdef is visible.
             GlyphBufferGlyph visibleGlyph = 0;
             clobberGlyph(i, visibleGlyph);

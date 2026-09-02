@@ -6133,8 +6133,7 @@ class YarrGenerator final : public YarrJITInfo {
         static_assert(sizeof(BoyerMooreBitmap::Map::WordType) == sizeof(uint32_t));
         static_assert(1 << 5 == 32);
         static_assert(1 << (5 + 2) == BoyerMooreBitmap::Map::size());
-        m_jit.move(m_regs.regT0, m_regs.regT2);
-        m_jit.urshift32(MacroAssembler::TrustedImm32(5), m_regs.regT2);
+        m_jit.urshift32(m_regs.regT0, MacroAssembler::TrustedImm32(5), m_regs.regT2);
         m_jit.and32(MacroAssembler::TrustedImm32(0b11), m_regs.regT2);
         m_jit.load32(MacroAssembler::BaseIndex(m_regs.regT1, m_regs.regT2, MacroAssembler::TimesFour), m_regs.regT2);
         m_jit.urshift32(m_regs.regT0, m_regs.regT2);

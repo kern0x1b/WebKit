@@ -228,21 +228,40 @@ inline void AtomHTMLToken::initializeAttributes(const HTMLToken::AttributeList& 
     if (!size)
         return;
 
-    Vector<AtomStringImpl*, 8> addedAttributes;
-    addedAttributes.reserveInitialCapacity(size);
+    m_attributes.reserveInitialCapacity(size);
 
-    m_attributes = WTF::compactMap(attributes, [&](auto& attribute) -> std::optional<Attribute> {
-        if (attribute.name.isEmpty())
-            return std::nullopt;
+    if (size == 1) [[likely]] {
+        auto& attribute = attributes[0];
+        if (attribute.name.isEmpty()) [[unlikely]]
+            return;
+        m_attributes.append(Attribute(
+            HTMLNameCache::makeAttributeQualifiedName(attribute.name),
+            HTMLNameCache::makeAttributeValue(attribute.value)));
+        return;
+    }
+
+    for (auto& attribute : attributes) {
+        if (attribute.name.isEmpty()) [[unlikely]]
+            continue;
 
         auto qualifiedName = HTMLNameCache::makeAttributeQualifiedName(attribute.name);
-        if (!insertInUniquedSortedVector(addedAttributes, qualifiedName.localName().impl())) [[unlikely]] {
-            m_hasDuplicateAttribute = true;
-            return std::nullopt;
+        AtomStringImpl* localNameImpl = qualifiedName.localName().impl();
+
+        bool isDuplicate = false;
+        for (const auto& existing : m_attributes) {
+            if (existing.name().localName().impl() == localNameImpl) [[unlikely]] {
+                isDuplicate = true;
+                break;
+            }
         }
 
-        return Attribute(WTF::move(qualifiedName), HTMLNameCache::makeAttributeValue(attribute.value));
-    });
+        if (isDuplicate) [[unlikely]] {
+            m_hasDuplicateAttribute = true;
+            continue;
+        }
+
+        m_attributes.append(Attribute(WTF::move(qualifiedName), HTMLNameCache::makeAttributeValue(attribute.value)));
+    }
 }
 
 inline AtomHTMLToken::AtomHTMLToken(HTMLToken& token)

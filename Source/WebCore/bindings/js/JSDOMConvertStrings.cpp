@@ -33,7 +33,7 @@
 namespace WebCore {
 using namespace JSC;
 
-auto Converter<IDLDOMString>::convert(JSC::JSGlobalObject& lexicalGlobalObject, JSC::JSValue value) -> Result
+auto Converter<IDLDOMString>::convertSlow(JSC::JSGlobalObject& lexicalGlobalObject, JSC::JSValue value) -> Result
 {
     auto& vm = lexicalGlobalObject.vm();
     auto scope = DECLARE_THROW_SCOPE(vm);

@@ -344,6 +344,16 @@ namespace JSC {
         void emitGetVirtualRegisterPayload(VirtualRegister src, RegisterID dst);
         void emitPutVirtualRegister(VirtualRegister dst, JSValueRegs src);
 
+        void storeValueToFrame(JSValueRegs from, Address address)
+        {
+#if defined(WEBKIT_IOS6) && USE(JSVALUE32_64)
+            store32(from.payloadGPR(), address.withOffset(PayloadOffset));
+            store32(from.tagGPR(), address.withOffset(TagOffset));
+#else
+            storeValue(from, address);
+#endif
+        }
+
 #if USE(JSVALUE32_64)
         void emitGetVirtualRegisterTag(VirtualRegister src, RegisterID dst);
 #elif USE(JSVALUE64)

@@ -114,6 +114,8 @@ DOMTimerFireState* DOMTimerFireState::current = nullptr;
 struct NestedTimersMap {
     typedef HashMap<int, Ref<DOMTimer>>::const_iterator const_iterator;
 
+    static bool isTracking() { return isTrackingNestedTimers; }
+
     static NestedTimersMap* NODELETE instanceForContext(ScriptExecutionContext& context)
     {
         // For worker threads, we don't use NestedTimersMap as doing so would not
@@ -215,8 +217,10 @@ int DOMTimer::install(ScriptExecutionContext& context, Function<void(ScriptExecu
     InspectorInstrumentation::didInstallTimer(context, timer->m_timeoutId, timeout, type == Type::SingleShot);
 
     // Keep track of nested timer installs.
-    if (NestedTimersMap* nestedTimers = NestedTimersMap::instanceForContext(context))
-        nestedTimers->add(timer->m_timeoutId, timer.get());
+    if (NestedTimersMap::isTracking()) [[unlikely]] {
+        if (NestedTimersMap* nestedTimers = NestedTimersMap::instanceForContext(context))
+            nestedTimers->add(timer->m_timeoutId, timer.get());
+    }
 #if ENABLE(CONTENT_CHANGE_OBSERVER)
     if (RefPtr document = dynamicDowncast<Document>(context)) {
         document->contentChangeObserver().didInstallDOMTimer(timer.get(), timeout, type == Type::SingleShot);
@@ -245,8 +249,10 @@ void DOMTimer::removeById(ScriptExecutionContext& context, int timeoutId)
     }
 #endif
 
-    if (NestedTimersMap* nestedTimers = NestedTimersMap::instanceForContext(context))
-        nestedTimers->remove(timeoutId);
+    if (NestedTimersMap::isTracking()) [[unlikely]] {
+        if (NestedTimersMap* nestedTimers = NestedTimersMap::instanceForContext(context))
+            nestedTimers->remove(timeoutId);
+    }
 
     InspectorInstrumentation::didRemoveTimer(context, timeoutId);
 

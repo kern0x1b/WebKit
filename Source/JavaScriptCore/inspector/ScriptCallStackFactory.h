@@ -48,6 +48,9 @@ class ScriptArguments;
 // FIXME: The subtle differences between these should be eliminated.
 JS_EXPORT_PRIVATE Ref<ScriptCallStack> createScriptCallStack(JSC::JSGlobalObject*, size_t maxStackSize = ScriptCallStack::maxCallStackSizeToCapture);
 JS_EXPORT_PRIVATE Ref<ScriptCallStack> createScriptCallStackForConsole(JSC::JSGlobalObject*, size_t maxStackSize = ScriptCallStack::maxCallStackSizeToCapture);
+#if defined(WEBKIT_IOS6)
+JS_EXPORT_PRIVATE Ref<ScriptCallStack> createScriptCallStackForConsoleSourceFrame(JSC::JSGlobalObject*);
+#endif
 JS_EXPORT_PRIVATE Ref<ScriptCallStack> createScriptCallStackFromException(JSC::JSGlobalObject*, JSC::Exception*, size_t maxStackSize = ScriptCallStack::maxCallStackSizeToCapture);
 JS_EXPORT_PRIVATE Ref<ScriptArguments> createScriptArguments(JSC::JSGlobalObject*, JSC::CallFrame*, unsigned skipArgumentCount);
 

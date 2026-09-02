@@ -189,7 +189,6 @@ void Scope::releaseMemory()
         });
     }
 #endif
-    clearResolver();
 }
 
 Scope& Scope::forNode(Node& node)
@@ -571,6 +570,7 @@ Scope::StyleSheetChange Scope::analyzeStyleSheetChange(const Vector<Ref<CSSStyle
 
 static void filterEnabledNonemptyCSSStyleSheets(Vector<Ref<CSSStyleSheet>>& result, const Vector<Ref<StyleSheet>>& sheets)
 {
+    result.reserveCapacity(result.size() + sheets.size());
     for (auto& sheet : sheets) {
         RefPtr styleSheet = dynamicDowncast<CSSStyleSheet>(sheet.get());
         if (!styleSheet)
@@ -752,6 +752,7 @@ bool Scope::activeStyleSheetsContains(const CSSStyleSheet& sheet) const
         return false;
 
     if (m_weakCopyOfActiveStyleSheetListForFastLookup.isEmpty()) {
+        m_weakCopyOfActiveStyleSheetListForFastLookup.reserveInitialCapacity(m_activeStyleSheets.size());
         for (auto& activeStyleSheet : m_activeStyleSheets)
             m_weakCopyOfActiveStyleSheetListForFastLookup.add(activeStyleSheet.get());
     }

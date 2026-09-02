@@ -1526,6 +1526,20 @@ static ALWAYS_INLINE Ref<HTMLElement> createUpgradeCandidateElement(Document& do
     return createUpgradeCandidateElement(document, registry, QualifiedName { nullAtom(), localName, xhtmlNamespaceURI });
 }
 
+static ALWAYS_INLINE bool isAlreadyASCIILowercase(const AtomString& name)
+{
+    auto* impl = name.impl();
+    if (!impl)
+        return true;
+    if (!impl->is8Bit()) [[unlikely]]
+        return false;
+    for (auto character : impl->span8()) {
+        if (isASCIIUpper(character)) [[unlikely]]
+            return false;
+    }
+    return true;
+}
+
 template<typename NameType>
 static ExceptionOr<Ref<Element>> createHTMLElementWithNameValidation(Document& document, const NameType& name, CustomElementRegistry* registry)
 {
@@ -1563,8 +1577,13 @@ ExceptionOr<Ref<Element>> Document::createElementForBindings(const AtomString& n
     }
 
     auto result = [&]() -> ExceptionOr<Ref<Element>> {
-        if (document->isHTMLDocument())
+        if (document->isHTMLDocument()) {
+            // convertToASCIILowercase() is an out-of-line WTF call that returns a new AtomString even
+            // when it changes nothing, which is the case for every createElement('div') a page makes.
+            if (isAlreadyASCIILowercase(name)) [[likely]]
+                return createHTMLElementWithNameValidation(document, name, registry.get());
             return createHTMLElementWithNameValidation(document, name.convertToASCIILowercase(), registry.get());
+        }
 
         if (document->isXHTMLDocument())
             return createHTMLElementWithNameValidation(document, name, registry.get());

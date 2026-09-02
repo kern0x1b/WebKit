@@ -2087,6 +2087,7 @@ set(WebCore_PRIVATE_FRAMEWORK_HEADERS
     page/SettingsBase.h
     page/ShadowRealmGlobalScope.h
     page/ShareData.h
+    page/Scheduling.h
     page/SocketProvider.h
     page/SpeechRecognitionProvider.h
     page/SpeechSynthesisClient.h

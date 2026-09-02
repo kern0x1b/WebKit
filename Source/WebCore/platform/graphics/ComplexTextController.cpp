@@ -403,7 +403,13 @@ void ComplexTextController::collectComplexTextRuns()
     bool isSmallCaps = false;
     bool nextIsSmallCaps = false;
 
-    auto capitalizedBase = capitalized(baseCharacter);
+    // capitalized() is two ICU property lookups per cluster and shouldSynthesizeSmallCaps()
+    // discards it outright unless small caps are in play.
+    bool mayNeedCapitalization = fontVariantCaps != FontVariantCaps::Normal;
+
+    std::optional<char32_t> capitalizedBase;
+    if (mayNeedCapitalization)
+        capitalizedBase = capitalized(baseCharacter);
     if (shouldSynthesizeSmallCaps(dontSynthesizeSmallCaps, nextFont.get(), baseCharacter, capitalizedBase, fontVariantCaps, engageAllSmallCapsProcessing)) {
         synthesizedFont = nextFont->noSynthesizableFeaturesFont();
         smallSynthesizedFont = synthesizedFont->smallCapsFont(m_fontCascade->fontDescription());
@@ -447,7 +453,7 @@ void ComplexTextController::collectComplexTextRuns()
             nextFont = halfWidthFont ? halfWidthFont : nextFont;
         }
 
-        capitalizedBase = capitalized(baseCharacter);
+        capitalizedBase = mayNeedCapitalization ? capitalized(baseCharacter) : std::optional<char32_t> { };
         if (!synthesizedFont && shouldSynthesizeSmallCaps(dontSynthesizeSmallCaps, nextFont.get(), baseCharacter, capitalizedBase, fontVariantCaps, engageAllSmallCapsProcessing)) {
             // Rather than synthesize each character individually, we should synthesize the entire "run" if any character requires synthesis.
             synthesizedFont = nextFont->noSynthesizableFeaturesFont();
@@ -706,6 +712,8 @@ void ComplexTextController::adjustGlyphsAndAdvances()
     bool runForbidsRightExpansion = m_run->expansionBehavior().right == ExpansionBehavior::Behavior::Forbid;
 
     TextSpacing::CharacterClass previousCharacterClass = m_textSpacingState.lastCharacterClassFromPreviousRun;
+    const auto& textAutoSpace = m_fontCascade->textAutospace();
+    bool hasAutospace = !textAutoSpace.isNoAutospace();
     // We are iterating in glyph order, not string order. Compare this to WidthIterator::advanceInternal()
     for (size_t runIndex = 0; runIndex < runCount; ++runIndex) {
         Ref complexTextRun = *m_complexTextRuns[runIndex];
@@ -770,7 +778,7 @@ void ComplexTextController::adjustGlyphsAndAdvances()
             // https://www.w3.org/TR/css-text-3/#white-space-processing
             // "Control characters (Unicode category Cc)—other than tabs (U+0009), line feeds (U+000A), carriage returns (U+000D) and sequences that form a segment break—must be rendered as a visible glyph"
             // Also, we're omitting Null (U+0000) from this set because Chrome and Firefox do so and it's needed for compat. See https://github.com/w3c/csswg-drafts/pull/6983.
-            if (character != newlineCharacter && character != carriageReturn && character != noBreakSpace && character != tabCharacter && character != nullCharacter && isControlCharacter(character)) {
+            if (character != newlineCharacter && character != carriageReturn && character != noBreakSpace && character != tabCharacter && character != nullCharacter && isControlCharacterFast(character)) {
                 // Let's assume that .notdef is visible.
                 glyph = 0;
 #if USE(CORE_TEXT) || USE(SKIA)
@@ -844,11 +852,10 @@ void ComplexTextController::adjustGlyphsAndAdvances()
                     afterExpansion = false;
             }
 
-            const auto& textAutoSpace =  m_fontCascade->textAutospace();
             float textAutoSpaceSpacing = 0;
             auto characterClass = TextSpacing::CharacterClass::Undefined;
             // Since we are iterating through glyphs here we skip combining marks, since we just care about the grapheme cluster base for text-autospace.
-            if (!textAutoSpace.isNoAutospace() && !isCombiningMark(character)) {
+            if (hasAutospace && !isCombiningMark(character)) {
                 characterClass = TextSpacing::characterClass(character);
                 if (textAutoSpace.shouldApplySpacing(previousCharacterClass, characterClass)) {
                     textAutoSpaceSpacing = complexTextRun->textAutospaceSize();
@@ -858,7 +865,7 @@ void ComplexTextController::adjustGlyphsAndAdvances()
                 previousCharacterClass = characterClass;
             }
 
-            if (!textAutoSpace.isNoAutospace())
+            if (hasAutospace)
                 m_textAutoSpaceSpacings.append(textAutoSpaceSpacing);
 
             m_totalAdvance += advance;

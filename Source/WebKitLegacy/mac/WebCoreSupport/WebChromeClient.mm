@@ -577,7 +577,7 @@ void WebChromeClient::invalidateContentsAndRootView(const WebCore::IntRect& rect
     //
     // The rect is in root-view coordinates, and this embedder's host layer is
     // the document, so it is already the coordinate system the tiles are in.
-    if (RetainPtr window = [m_webView window])
+    if (auto window = [m_webView window])
         [window setNeedsDisplayInRect:rect];
 #else
     UNUSED_PARAM(rect);
@@ -632,7 +632,7 @@ PlatformPageClient WebChromeClient::platformPageClient() const
 
 void WebChromeClient::contentsSizeChanged(WebCore::LocalFrame& frame, const WebCore::IntSize& size) const
 {
-    RetainPtr<id> delegate = [m_webView _UIKitDelegate];
+    id delegate = [m_webView _UIKitDelegate];
     if (![delegate respondsToSelector:@selector(webView:contentsSizeChanged:forFrame:)])
         return;
     [delegate webView:m_webView contentsSizeChanged:[NSValue valueWithCGSize:CGSizeMake(size.width(), size.height())] forFrame:kit(&frame)];

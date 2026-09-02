@@ -355,13 +355,16 @@ inline bool compareCSSValueVector(const Vector<Ref<CSSValueType>>& firstVector, 
 template<typename CSSValueType>
 inline bool compareCSSValuePtr(const RefPtr<CSSValueType>& first, const RefPtr<CSSValueType>& second)
 {
+    if (first.get() == second.get())
+        return true;
     return first ? second && first->equals(*second) : !second;
 }
 
 template<typename CSSValueType>
 inline bool compareCSSValue(const Ref<CSSValueType>& first, const Ref<CSSValueType>& second)
 {
-    return first.get().equals(second);
+    // Pooled and otherwise shared values are the common case; skip the class-type dispatch in equals().
+    return first.ptr() == second.ptr() || first.get().equals(second);
 }
 
 void add(Hasher&, const CSSValue&);

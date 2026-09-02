@@ -103,7 +103,7 @@ void LegacyTileGrid::dropTilesOutsideRect(const IntRect& keepRect)
 
 void LegacyTileGrid::dropTilesBetweenRects(const IntRect& dropRect, const IntRect& keepRect)
 {
-    Vector<TileIndex> toRemove;
+    Vector<TileIndex, 16> toRemove;
     for (const auto& tile : m_tiles) {
         const TileIndex& index = tile.key;
         IntRect tileRect = tile.value->rect();
@@ -128,12 +128,17 @@ static bool isFartherAway(const std::pair<double, T>& a, const std::pair<double,
     return a.first > b.first;
 }
 
-bool LegacyTileGrid::dropDistantTiles(unsigned tilesNeeded, double shortestDistance)
+bool LegacyTileGrid::dropDistantTiles(unsigned tilesNeeded, double shortestDistance, const IntRect& visibleRect)
 {
-    unsigned bytesPerTile = tileByteSize();
+    // One protective reference for both queries: taking it retains and releases
+    // the window, and tileByteSize() would take a second one of its own.
+    Ref tileCache = m_tileCache.get();
+    IntSize tilePixelSize = m_tileSize;
+    tilePixelSize.scale(tileCache->screenScale());
+    unsigned bytesPerTile = LegacyTileLayerPool::bytesBackingLayerWithPixelSize(tilePixelSize);
     unsigned bytesNeeded = tilesNeeded * bytesPerTile;
     unsigned bytesUsed = tileCount() * bytesPerTile;
-    unsigned maximumBytes = protect(tileCache())->tileCapacityForGrid(this);
+    unsigned maximumBytes = tileCache->tileCapacityForGrid(this);
 
     int bytesToReclaim = int(bytesUsed) - (int(maximumBytes) - bytesNeeded);
     if (bytesToReclaim <= 0)
@@ -141,12 +146,12 @@ bool LegacyTileGrid::dropDistantTiles(unsigned tilesNeeded, double shortestDista
 
     unsigned tilesToRemoveCount = bytesToReclaim / bytesPerTile;
 
-    IntRect visibleRect = this->visibleRect();
-    Vector<std::pair<double, TileIndex>> toRemove;
+    const TileDistanceMetrics metrics = distanceMetricsFor(visibleRect);
+    Vector<std::pair<double, TileIndex>, 16> toRemove;
     for (const auto& tile : m_tiles) {
         const TileIndex& index = tile.key;
         const IntRect& tileRect = tile.value->rect();
-        double distance = tileDistance2(visibleRect, tileRect);
+        double distance = tileDistance2(visibleRect, tileRect, metrics);
         if (distance <= shortestDistance)
             continue;
         toRemove.append(std::make_pair(distance, index));
@@ -169,8 +174,9 @@ bool LegacyTileGrid::dropDistantTiles(unsigned tilesNeeded, double shortestDista
 void LegacyTileGrid::addTilesCoveringRect(const IntRect& rectToCover)
 {
     // We never draw anything outside of our bounds.
+    const IntRect bounds = this->bounds();
     IntRect rect(rectToCover);
-    rect.intersect(bounds());
+    rect.intersect(bounds);
     if (rect.isEmpty())
         return;
 
@@ -179,15 +185,20 @@ void LegacyTileGrid::addTilesCoveringRect(const IntRect& rectToCover)
     for (int yIndex = topLeftIndex.y(); yIndex <= bottomRightIndex.y(); ++yIndex) {
         for (int xIndex = topLeftIndex.x(); xIndex <= bottomRightIndex.x(); ++xIndex) {
             TileIndex index(xIndex, yIndex);
-            if (!tileForIndex(index))
-                addTileForIndex(index);
+            if (!m_tiles.contains(index))
+                addTileForIndex(index, bounds);
         }
     }
 }
 
 void LegacyTileGrid::addTileForIndex(const TileIndex& index)
 {
-    m_tiles.set(index, LegacyTileGridTile::create(this, tileRectForIndex(index)));
+    addTileForIndex(index, bounds());
+}
+
+void LegacyTileGrid::addTileForIndex(const TileIndex& index, const IntRect& bounds)
+{
+    m_tiles.set(index, LegacyTileGridTile::create(this, tileRectForIndex(index, bounds)));
 }
 
 CALayer* LegacyTileGrid::tileHostLayer() const
@@ -207,11 +218,18 @@ RefPtr<LegacyTileGridTile> LegacyTileGrid::tileForIndex(const TileIndex& index) 
 
 IntRect LegacyTileGrid::tileRectForIndex(const TileIndex& index) const
 {
+    return tileRectForIndex(index, bounds());
+}
+
+// bounds() is a message send to the host layer. Callers that walk a range of
+// indices read it once and pass it in.
+IntRect LegacyTileGrid::tileRectForIndex(const TileIndex& index, const IntRect& bounds) const
+{
     IntRect rect(index.x() * m_tileSize.width() - (m_origin.x() ? m_tileSize.width() - m_origin.x() : 0),
                  index.y() * m_tileSize.height() - (m_origin.y() ? m_tileSize.height() - m_origin.y() : 0),
                  m_tileSize.width(),
                  m_tileSize.height());
-    rect.intersect(bounds());
+    rect.intersect(bounds);
     return rect;
 }
 
@@ -225,6 +243,11 @@ LegacyTileGrid::TileIndex LegacyTileGrid::tileIndexForPoint(const IntPoint& poin
 }
 
 void LegacyTileGrid::centerTileGridOrigin(const IntRect& visibleRect)
+{
+    centerTileGridOrigin(visibleRect, bounds());
+}
+
+void LegacyTileGrid::centerTileGridOrigin(const IntRect& visibleRect, const IntRect& bounds)
 {
     if (visibleRect.isEmpty())
         return;
@@ -244,7 +267,7 @@ void LegacyTileGrid::centerTileGridOrigin(const IntRect& visibleRect)
     }
 
     IntPoint newOrigin(0, 0);
-    IntSize size = bounds().size();
+    IntSize size = bounds.size();
     if (size.width() > m_tileSize.width()) {
         newOrigin.setX((visibleRect.x() - (minimumHorizontalTiles * m_tileSize.width() - visibleRect.width()) / 2) % m_tileSize.width());
         if (newOrigin.x() < 0)
@@ -275,22 +298,26 @@ RefPtr<LegacyTileGridTile> LegacyTileGrid::tileForPoint(const IntPoint& point) c
 
 bool LegacyTileGrid::tilesCover(const IntRect& rect) const
 {
-    return tileForPoint(rect.location()) && tileForPoint(IntPoint(rect.maxX() - 1, rect.y())) &&
-    tileForPoint(IntPoint(rect.x(), rect.maxY() - 1)) && tileForPoint(IntPoint(rect.maxX() - 1, rect.maxY() - 1));
+    return m_tiles.contains(tileIndexForPoint(rect.location()))
+        && m_tiles.contains(tileIndexForPoint(IntPoint(rect.maxX() - 1, rect.y())))
+        && m_tiles.contains(tileIndexForPoint(IntPoint(rect.x(), rect.maxY() - 1)))
+        && m_tiles.contains(tileIndexForPoint(IntPoint(rect.maxX() - 1, rect.maxY() - 1)));
 }
 
 void LegacyTileGrid::updateTileOpacity()
 {
+    const BOOL opaque = m_tileCache->tilesOpaque();
     TileMap::iterator end = m_tiles.end();
     for (TileMap::iterator it = m_tiles.begin(); it != end; ++it)
-        [it->value->tileLayer() setOpaque:m_tileCache->tilesOpaque()];
+        [it->value->tileLayer() setOpaque:opaque];
 }
 
 void LegacyTileGrid::updateTileBorderVisibility()
 {
+    const bool visible = protect(m_tileCache)->tileBordersVisible();
     TileMap::iterator end = m_tiles.end();
     for (TileMap::iterator it = m_tiles.begin(); it != end; ++it)
-        it->value->showBorder(protect(m_tileCache)->tileBordersVisible());
+        it->value->showBorder(visible);
 }
 
 unsigned LegacyTileGrid::tileCount() const
@@ -300,7 +327,8 @@ unsigned LegacyTileGrid::tileCount() const
 
 bool LegacyTileGrid::checkDoSingleTileLayout()
 {
-    IntSize size = bounds().size();
+    const IntRect bounds = this->bounds();
+    IntSize size = bounds.size();
     if (size.width() > m_tileSize.width() || size.height() > m_tileSize.height())
         return false;
 
@@ -309,7 +337,7 @@ bool LegacyTileGrid::checkDoSingleTileLayout()
         m_origin = IntPoint(0, 0);
     }
 
-    dropInvalidTiles();
+    dropInvalidTiles(bounds);
 
     if (size.isEmpty()) {
         ASSERT(!m_tiles.get(TileIndex(0, 0)));
@@ -318,7 +346,7 @@ bool LegacyTileGrid::checkDoSingleTileLayout()
 
     TileIndex originIndex(0, 0);
     if (!m_tiles.get(originIndex))
-        m_tiles.set(originIndex, LegacyTileGridTile::create(this, tileRectForIndex(originIndex)));
+        m_tiles.set(originIndex, LegacyTileGridTile::create(this, tileRectForIndex(originIndex, bounds)));
 
     return true;
 }
@@ -340,13 +368,17 @@ void LegacyTileGrid::updateHostLayerSize()
 
 void LegacyTileGrid::dropInvalidTiles()
 {
-    IntRect bounds = this->bounds();
+    dropInvalidTiles(bounds());
+}
+
+void LegacyTileGrid::dropInvalidTiles(const IntRect& bounds)
+{
     IntRect dropBounds = intersection(m_validBounds, bounds);
-    Vector<TileIndex> toRemove;
+    Vector<TileIndex, 16> toRemove;
     for (const auto& tile : m_tiles) {
         const TileIndex& index = tile.key;
         const IntRect& tileRect = tile.value->rect();
-        IntRect expectedTileRect = tileRectForIndex(index);
+        IntRect expectedTileRect = tileRectForIndex(index, bounds);
         if (expectedTileRect != tileRect || !dropBounds.contains(tileRect))
             toRemove.append(index);
     }
@@ -370,16 +402,16 @@ void LegacyTileGrid::invalidateTiles(const IntRect& dirtyRect)
         m_validBounds = bounds;
     }
 
-    Vector<TileIndex> invalidatedTiles;
+    Vector<TileIndex, 16> invalidatedTiles;
 
     if (dirtyRect.width() > m_tileSize.width() * 4 || dirtyRect.height() > m_tileSize.height() * 4) {
         // For large invalidates, iterate over live tiles.
         TileMap::iterator end = m_tiles.end();
         for (TileMap::iterator it = m_tiles.begin(); it != end; ++it) {
-            Ref tile = it->value.get();
-            if (!tile->rect().intersects(dirtyRect))
+            LegacyTileGridTile& tile = it->value.get();
+            if (!tile.rect().intersects(dirtyRect))
                continue;
-            tile->invalidateRect(dirtyRect);
+            tile.invalidateRect(dirtyRect);
             invalidatedTiles.append(it->key);
         }
     } else {
@@ -388,7 +420,7 @@ void LegacyTileGrid::invalidateTiles(const IntRect& dirtyRect)
         for (int yIndex = topLeftIndex.y(); yIndex <= bottomRightIndex.y(); ++yIndex) {
             for (int xIndex = topLeftIndex.x(); xIndex <= bottomRightIndex.x(); ++xIndex) {
                 TileIndex index(xIndex, yIndex);
-                RefPtr<LegacyTileGridTile> tile = tileForIndex(index);
+                LegacyTileGridTile* tile = m_tiles.get(index);
                 if (!tile)
                     continue;
                 if (!tile->rect().intersects(dirtyRect))
@@ -408,8 +440,8 @@ void LegacyTileGrid::invalidateTiles(const IntRect& dirtyRect)
     IntRect visibleRect = this->visibleRect();
     unsigned count = invalidatedTiles.size();
     for (unsigned i = 0; i < count; ++i) {
-        RefPtr<LegacyTileGridTile> tile = tileForIndex(invalidatedTiles[i]);
-        if (!tile->rect().intersects(visibleRect))
+        LegacyTileGridTile* tile = m_tiles.get(invalidatedTiles[i]);
+        if (tile && !tile->rect().intersects(visibleRect))
             m_tiles.remove(invalidatedTiles[i]);
     }
 }
@@ -418,7 +450,22 @@ bool LegacyTileGrid::shouldUseMinimalTileCoverage() const
 {
     bool minimalMode = m_tileCache->tilingMode() == LegacyTileCache::Minimal;
     bool noSpeculative = !m_tileCache->isSpeculativeTileCreationEnabled();
+#if defined(WEBKIT_IOS6)
+    // Only when the process is actually near the kill, not merely warned.
+    //
+    // A warning is the normal state here - the page's own memory keeps the
+    // process above three quarters of its budget for as long as it is open - and
+    // answering it by painting only what is on screen means a flick lands on
+    // page that was laid out and never painted. Photographed over six flicks,
+    // the longest unpainted run averaged 263 px of a 480 px screen and five
+    // frames in six ended blank.
+    static const bool coverageFollowsPolicy = !!getenv("WEBKIT_IOS6_MINIMAL_TILES");
+    bool underPressure = coverageFollowsPolicy
+        ? MemoryPressureHandler::singleton().isUnderMemoryPressure()
+        : MemoryPressureHandler::singleton().memoryPressureStatus() == SystemMemoryPressureStatus::Critical;
+#else
     bool underPressure = MemoryPressureHandler::singleton().isUnderMemoryPressure();
+#endif
 
     static int lastReported = -1;
     int state = (minimalMode ? 1 : 0) | (noSpeculative ? 2 : 0) | (underPressure ? 4 : 0);
@@ -431,7 +478,7 @@ bool LegacyTileGrid::shouldUseMinimalTileCoverage() const
     return minimalMode || noSpeculative || underPressure;
 }
 
-IntRect LegacyTileGrid::adjustCoverRectForPageBounds(const IntRect& rect) const
+IntRect LegacyTileGrid::adjustCoverRectForPageBounds(const IntRect& rect, bool useMinimalCoverage) const
 {
     // Adjust the rect so that it stays within the bounds and keeps the pixel size.
     IntRect bounds = this->bounds();
@@ -441,7 +488,7 @@ IntRect LegacyTileGrid::adjustCoverRectForPageBounds(const IntRect& rect) const
     adjustedRect.move(rect.maxX() > bounds.maxX() ? bounds.maxX() - rect.maxX() : 0,
               rect.maxY() > bounds.maxY() ? bounds.maxY() - rect.maxY() : 0);
     adjustedRect = intersection(bounds, adjustedRect);
-    if (adjustedRect == rect || adjustedRect.isEmpty() || shouldUseMinimalTileCoverage())
+    if (adjustedRect == rect || adjustedRect.isEmpty() || useMinimalCoverage)
         return adjustedRect;
     int pixels = adjustedRect.width() * adjustedRect.height();
     if (adjustedRect.width() != rect.width())
@@ -451,9 +498,9 @@ IntRect LegacyTileGrid::adjustCoverRectForPageBounds(const IntRect& rect) const
     return intersection(adjustedRect, bounds);
 }
 
-IntRect LegacyTileGrid::calculateCoverRect(const IntRect& visibleRect, bool& centerGrid)
+IntRect LegacyTileGrid::calculateCoverRect(const IntRect& visibleRect, bool& centerGrid, bool useMinimalCoverage)
 {
-    if (shouldUseMinimalTileCoverage()) {
+    if (useMinimalCoverage) {
         centerGrid = true;
         return visibleRect;
     }
@@ -469,21 +516,29 @@ IntRect LegacyTileGrid::calculateCoverRect(const IntRect& visibleRect, bool& cen
     // the cut did buy was a flick outrunning its tiles - screenshots taken
     // mid-drag show a blank page between two correctly pinned bars. Three screens
     // of coverage at this size is about seven megabytes.
+    // Half a screen above and below rather than a whole one.
+    //
+    // Each tile is 640 by 640 at this scale, which is 1.6 MB, and three screens
+    // of them came to eleven or twelve tiles - about nineteen megabytes of
+    // layers rather than the seven this comment used to claim. Soaked eight
+    // rounds at a time, that set of layers took the process down four times in
+    // nine runs, twice inside the GPU driver, where the smaller set has not
+    // fallen over. Two screens still cover the flick.
+    static const int verticalScreens = [] -> int {
+        if (const char* override = getenv("WEBKIT_IOS6_TILE_COVERAGE_HALVES")) {
+            int value = atoi(override);
+            if (value > 0 && value <= 8)
+                return value;
+        }
+        return 1;
+    }();
     coverRect.inflateX(visibleRect.width() / 2);
-    coverRect.inflateY(visibleRect.height());
-    return adjustCoverRectForPageBounds(coverRect);
+    coverRect.inflateY(visibleRect.height() * verticalScreens / 2);
+    return adjustCoverRectForPageBounds(coverRect, false);
 }
 
-double LegacyTileGrid::tileDistance2(const IntRect& visibleRect, const IntRect& tileRect) const
+LegacyTileGrid::TileDistanceMetrics LegacyTileGrid::distanceMetricsFor(const IntRect& visibleRect) const
 {
-    // The "distance" calculated here is used to pick which tile to cache next. The idea is to create those
-    // closest to the current viewport first so the user is more likely to see already rendered content we she
-    // scrolls. The calculation is weighted to prefer vertical and downward direction.
-    if (visibleRect.intersects(tileRect))
-        return 0;
-    IntPoint visibleCenter = visibleRect.location() + IntSize(visibleRect.width() / 2, visibleRect.height() / 2);
-    IntPoint tileCenter = tileRect.location() + IntSize(tileRect.width() / 2, tileRect.height() / 2);
-    
     double horizontalBias = 1.0;
     double leftwardBias = 1.0;
     double rightwardBias = 1.0;
@@ -514,51 +569,97 @@ double LegacyTileGrid::tileDistance2(const IntRect& visibleRect, const IntRect& 
         break;
     }
 
-    double xScale = horizontalBias * visibleRect.height() / visibleRect.width() * (tileCenter.x() >= visibleCenter.x() ? rightwardBias : leftwardBias);
-    double yScale = verticalBias * visibleRect.width() / visibleRect.height() * (tileCenter.y() >= visibleCenter.y() ? downwardBias : upwardBias);
+    double aspectX = horizontalBias * visibleRect.height() / visibleRect.width();
+    double aspectY = verticalBias * visibleRect.width() / visibleRect.height();
 
-    double xDistance = xScale * (tileCenter.x() - visibleCenter.x());
-    double yDistance = yScale * (tileCenter.y() - visibleCenter.y());
+    return TileDistanceMetrics {
+        visibleRect.location() + IntSize(visibleRect.width() / 2, visibleRect.height() / 2),
+        aspectX * leftwardBias,
+        aspectX * rightwardBias,
+        aspectY * upwardBias,
+        aspectY * downwardBias
+    };
+}
 
-    double distance2 = xDistance * xDistance + yDistance * yDistance;
-    return distance2;
+// The "distance" calculated here is used to pick which tile to cache next. The idea is to create those
+// closest to the current viewport first so the user is more likely to see already rendered content we she
+// scrolls. The calculation is weighted to prefer vertical and downward direction.
+double LegacyTileGrid::tileDistance2(const IntRect& visibleRect, const IntRect& tileRect, const TileDistanceMetrics& metrics)
+{
+    if (visibleRect.intersects(tileRect))
+        return 0;
+    IntPoint tileCenter = tileRect.location() + IntSize(tileRect.width() / 2, tileRect.height() / 2);
+
+    int dx = tileCenter.x() - metrics.visibleCenter.x();
+    int dy = tileCenter.y() - metrics.visibleCenter.y();
+
+    double xDistance = (dx >= 0 ? metrics.xScaleRightward : metrics.xScaleLeftward) * dx;
+    double yDistance = (dy >= 0 ? metrics.yScaleDownward : metrics.yScaleUpward) * dy;
+
+    return xDistance * xDistance + yDistance * yDistance;
 }
 
 void LegacyTileGrid::createTiles(LegacyTileCache::SynchronousTileCreationMode creationMode)
 {
+    if (engineChatterEnabled()) {
+        static MonotonicTime lastReport;
+        MonotonicTime now = MonotonicTime::now();
+        if (now - lastReport > 1_s) {
+            lastReport = now;
+            IntRect reportedVisible = visibleRect();
+            WTFLogAlways("[tiles] creating for visible %d,%d %dx%d, %u tiles, mode %d, minimal %d",
+                reportedVisible.x(), reportedVisible.y(), reportedVisible.width(), reportedVisible.height(),
+                (unsigned)m_tiles.size(), (int)creationMode, shouldUseMinimalTileCoverage());
+        }
+    }
+
     IntRect visibleRect = this->visibleRect();
     if (visibleRect.isEmpty())
         return;
 
+    // bounds() and shouldUseMinimalTileCoverage() are a layer message send and a
+    // memory-pressure query respectively, and neither changes inside one pass.
+    IntRect bounds = this->bounds();
+    const bool coverRectIsOnlyTheViewport = shouldUseMinimalTileCoverage();
+
     // Drop tiles that are wrong size or outside the frame (because the frame has been resized).
-    dropInvalidTiles();
+    dropInvalidTiles(bounds);
 
     bool centerGrid;
-    IntRect coverRect = calculateCoverRect(visibleRect, centerGrid);
+    IntRect coverRect = calculateCoverRect(visibleRect, centerGrid, coverRectIsOnlyTheViewport);
 
     // If tile size is bigger than the view, centering minimizes the painting needed to cover the screen.
-    // This is especially useful after zooming 
+    // This is especially useful after zooming
     centerGrid = centerGrid || !tileCount();
     if (centerGrid)
-        centerTileGridOrigin(visibleRect);
+        centerTileGridOrigin(visibleRect, bounds);
 
     double shortestDistance = std::numeric_limits<double>::infinity();
     double coveredDistance = 0;
-    Vector<LegacyTileGrid::TileIndex> tilesToCreate;
+    Vector<LegacyTileGrid::TileIndex, 16> tilesToCreate;
     unsigned pendingTileCount = 0;
 
-    bool coverRectIsOnlyTheViewport = shouldUseMinimalTileCoverage();
+    const TileDistanceMetrics metrics = distanceMetricsFor(visibleRect);
 
     LegacyTileGrid::TileIndex topLeftIndex = tileIndexForPoint(topLeft(coverRect));
     LegacyTileGrid::TileIndex bottomRightIndex = tileIndexForPoint(bottomRight(coverRect));
+    // tileRectForIndex() reduces to two multiplies once the grid origin is
+    // folded in, and the row's y coordinate does not change across a row.
+    const int tileWidth = m_tileSize.width();
+    const int tileHeight = m_tileSize.height();
+    const int xOriginOffset = m_origin.x() ? tileWidth - m_origin.x() : 0;
+    const int yOriginOffset = m_origin.y() ? tileHeight - m_origin.y() : 0;
     for (int yIndex = topLeftIndex.y(); yIndex <= bottomRightIndex.y(); ++yIndex) {
+        const int tileY = yIndex * tileHeight - yOriginOffset;
         for (int xIndex = topLeftIndex.x(); xIndex <= bottomRightIndex.x(); ++xIndex) {
             LegacyTileGrid::TileIndex index(xIndex, yIndex);
+            IntRect tileRect(xIndex * tileWidth - xOriginOffset, tileY, tileWidth, tileHeight);
+            tileRect.intersect(bounds);
             // Currently visible tiles have distance of 0 and get all created in the same transaction.
-            double distance = tileDistance2(visibleRect, tileRectForIndex(index));
+            double distance = tileDistance2(visibleRect, tileRect, metrics);
             if (distance > coveredDistance)
                 coveredDistance = distance;
-            if (tileForIndex(index))
+            if (m_tiles.contains(index))
                 continue;
             ++pendingTileCount;
             if (coverRectIsOnlyTheViewport) {
@@ -586,7 +687,7 @@ void LegacyTileGrid::createTiles(LegacyTileCache::SynchronousTileCreationMode cr
     // Even if we don't create any tiles, we should still drop distant tiles
     // in case coverRect got smaller.
     double keepDistance = std::min(shortestDistance, coveredDistance);
-    if (!dropDistantTiles(tilesToCreateCount, keepDistance))
+    if (!dropDistantTiles(tilesToCreateCount, keepDistance, visibleRect))
         return;
 
     ASSERT(pendingTileCount >= tilesToCreateCount);
@@ -594,20 +695,19 @@ void LegacyTileGrid::createTiles(LegacyTileCache::SynchronousTileCreationMode cr
         return;
 
     for (size_t n = 0; n < tilesToCreateCount; ++n)
-        addTileForIndex(tilesToCreate[n]);
+        addTileForIndex(tilesToCreate[n], bounds);
 
     bool didCreateTiles = !!tilesToCreateCount;
     bool createMoreTiles = pendingTileCount > tilesToCreateCount;
 
     static unsigned reportTick = 0;
-    if (!(reportTick++ % 8)) {
-        double tileBytes = (double)m_tiles.size() * m_tileSize.width() * m_tileSize.height() * 4.0;
-        if (engineChatterEnabled()) WTFLogAlways("[tiles] %u tiles of %dx%d (%.1f MB each) = %.1f MB, coverRect %dx%d, doc %dx%d",
+    if (engineChatterEnabled() && !(reportTick++ % 8)) {
+        WTFLogAlways("[tiles] %u tiles of %dx%d (%.1f MB each) = %.1f MB, coverRect %dx%d, doc %dx%d",
             (unsigned)m_tiles.size(), m_tileSize.width(), m_tileSize.height(),
             tileByteSize() / (1024.0 * 1024.0),
             (double)m_tiles.size() * tileByteSize() / (1024.0 * 1024.0),
             coverRect.width(), coverRect.height(),
-            tileCache().tileControllerShouldUseLowScaleTiles() ? 0 : bounds().width(), bounds().height());
+            tileCache().tileControllerShouldUseLowScaleTiles() ? 0 : bounds.width(), bounds.height());
     }
 
     protect(tileCache())->finishedCreatingTiles(didCreateTiles, createMoreTiles);

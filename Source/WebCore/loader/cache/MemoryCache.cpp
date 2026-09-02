@@ -130,8 +130,11 @@ bool MemoryCache::add(CachedResource& resource)
 
     auto& resources = ensureSessionResourceMap(resource.sessionID());
 
-    RELEASE_ASSERT(!resources.get(key));
-    resources.set(key, &resource);
+    auto addResult = resources.add(WTF::move(key), &resource);
+    if (!addResult.isNewEntry) {
+        RELEASE_ASSERT(!addResult.iterator->value);
+        addResult.iterator->value = &resource;
+    }
     resource.setInCache(true);
     
     resourceAccessed(resource);

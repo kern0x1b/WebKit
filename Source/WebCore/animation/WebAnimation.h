@@ -159,6 +159,9 @@ public:
     const ResolvableTimelineRange& range() LIFETIME_BOUND;
 
     bool needsTick() const;
+#if defined(WEBKIT_IOS6)
+    bool needsTickForRenderingUpdate() const;
+#endif
     virtual void tick();
     WEBCORE_EXPORT Seconds timeToNextTick() const;
     OptionSet<AnimationImpact> resolve(Style::ComputedStyle& targetStyle, const Style::ResolutionContext&, EndpointInclusiveActiveInterval = EndpointInclusiveActiveInterval::No);
@@ -271,6 +274,9 @@ private:
     TimeToRunPendingTask m_timeToRunPendingPlayTask { TimeToRunPendingTask::NotScheduled };
     TimeToRunPendingTask m_timeToRunPendingPauseTask { TimeToRunPendingTask::NotScheduled };
     ReplaceState m_replaceState { ReplaceState::Active };
+#if defined(WEBKIT_IOS6)
+    std::optional<PlayState> m_playStateAtLastTick;
+#endif
     uint64_t m_globalPosition { 0 };
 
     ResolvableTimelineRange m_timelineRange;

@@ -298,7 +298,9 @@ void FetchResponse::fetch(ScriptExecutionContext& context, FetchRequest& request
 
 void FetchResponse::startLoader(ScriptExecutionContext& context, FetchRequest& request, const String& initiator)
 {
+#if !defined(WEBKIT_IOS6)
     InspectorInstrumentation::willFetch(context, request.url().string());
+#endif
 
     if (RefPtr loader = m_loader; loader && loader->start(context, request, initiator))
         return;

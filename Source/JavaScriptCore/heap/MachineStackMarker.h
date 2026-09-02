@@ -45,6 +45,7 @@ class MachineThreads {
     WTF_MAKE_NONCOPYABLE(MachineThreads);
 public:
     MachineThreads();
+    ~MachineThreads();
 
     void gatherConservativeRoots(ConservativeRoots&, JITStubRoutineSet&, CodeBlockSet&, CurrentThreadState*, Thread*);
 
@@ -61,6 +62,13 @@ private:
     bool tryCopyOtherThreadStacks(const AbstractLocker&, void*, size_t capacity, size_t*, Thread&);
 
     Ref<ThreadGroup> m_threadGroup;
+
+    // Retained across collections. The first sizing pass of tryCopyOtherThreadStacks() has to
+    // suspend and resume every thread in the group just to learn how much room it needs; keeping the
+    // buffer at the high-water mark means that pass normally succeeds on its first try, and it also
+    // takes a fastMalloc/fastFree pair off every single collection.
+    void* m_stackCopyBuffer { nullptr };
+    size_t m_stackCopyCapacity { 0 };
 };
 
 #define DECLARE_AND_COMPUTE_CURRENT_THREAD_STATE(stateName) \

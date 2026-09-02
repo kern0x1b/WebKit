@@ -77,6 +77,7 @@ public:
     const DataVector& name() const LIFETIME_BOUND;
 
     void appendToName(char16_t);
+    void appendToName(std::span<const Latin1Character>);
 
     // DOCTYPE.
 
@@ -105,6 +106,7 @@ public:
 
     void beginAttribute();
     void appendToAttributeName(char16_t);
+    void appendToAttributeName(std::span<const Latin1Character>);
     void appendToAttributeValue(char16_t);
     void appendToAttributeValue(unsigned index, StringView value);
     template<typename CharacterType> void appendToAttributeValue(std::span<const CharacterType>);
@@ -121,6 +123,7 @@ public:
     const DataVector& characters() const LIFETIME_BOUND;
     bool charactersIsAll8BitData() const;
 
+    void makeCharacterWithoutData();
     void appendToCharacter(Latin1Character);
     void appendToCharacter(char16_t);
     void appendToCharacter(const Vector<Latin1Character, 32>&);
@@ -135,6 +138,7 @@ public:
     void appendToComment(char);
     void appendToComment(ASCIILiteral);
     void appendToComment(char16_t);
+    void appendToComment(std::span<const Latin1Character>);
 
 private:
     DataVector m_data;
@@ -182,6 +186,14 @@ inline void HTMLToken::appendToName(char16_t character)
     ASSERT(character);
     m_data.append(character);
     m_data8BitCheck |= character;
+}
+
+// m_data8BitCheck is only ever read back for Character and Comment tokens, and Latin-1 input
+// cannot push it above 0xFF, so the bulk appenders below deliberately leave it alone.
+inline void HTMLToken::appendToName(std::span<const Latin1Character> characters)
+{
+    ASSERT(m_type == Type::StartTag || m_type == Type::EndTag || m_type == Type::DOCTYPE);
+    m_data.append(characters);
 }
 
 inline void HTMLToken::setForceQuirks()
@@ -318,6 +330,13 @@ inline void HTMLToken::appendToAttributeName(char16_t character)
     m_currentAttribute->name.append(character);
 }
 
+inline void HTMLToken::appendToAttributeName(std::span<const Latin1Character> characters)
+{
+    ASSERT(m_type == Type::StartTag || m_type == Type::EndTag);
+    ASSERT(m_currentAttribute);
+    m_currentAttribute->name.append(characters);
+}
+
 inline void HTMLToken::appendToAttributeValue(char16_t character)
 {
     ASSERT(character);
@@ -357,6 +376,15 @@ inline bool HTMLToken::charactersIsAll8BitData() const
 {
     ASSERT(m_type == Type::Character);
     return m_data8BitCheck <= 0xFF;
+}
+
+// Marks the token as a Character token without recording what the characters were. Used by
+// callers that only need token types and boundaries; every other observer of a Character token
+// (the tokenizer's own end-tag bookkeeping included) reads only the type.
+inline void HTMLToken::makeCharacterWithoutData()
+{
+    ASSERT(m_type == Type::Uninitialized || m_type == Type::Character);
+    m_type = Type::Character;
 }
 
 inline void HTMLToken::appendToCharacter(Latin1Character character)
@@ -431,6 +459,12 @@ inline void HTMLToken::appendToComment(char16_t character)
     ASSERT(m_type == Type::Comment);
     m_data.append(character);
     m_data8BitCheck |= character;
+}
+
+inline void HTMLToken::appendToComment(std::span<const Latin1Character> characters)
+{
+    ASSERT(m_type == Type::Comment);
+    m_data.append(characters);
 }
 
 inline const HTMLToken::Attribute* findAttribute(const HTMLToken::AttributeList& attributes, std::span<const char16_t> name)

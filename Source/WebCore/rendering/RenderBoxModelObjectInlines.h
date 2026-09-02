@@ -108,7 +108,7 @@ RectEdges<LayoutUnit> RenderBoxModelObject::padding() const
 inline LayoutUnit RenderBoxModelObject::resolveLengthPercentageUsingContainerLogicalWidth(const auto& value) const
 {
     LayoutUnit containerWidth;
-    if (value.isPercentOrCalculated())
+    if (value.isPercentOrCalculated()) [[unlikely]]
         containerWidth = containingBlockLogicalWidthForContent();
     return Style::evaluateMinimum<LayoutUnit>(value, containerWidth, Style::ZoomNeeded { });
 }
@@ -116,7 +116,7 @@ inline LayoutUnit RenderBoxModelObject::resolveLengthPercentageUsingContainerLog
 inline LayoutUnit RenderBoxModelObject::resolveLengthPercentageUsingContainerLogicalWidth(const auto& value, const Style::ZoomFactor& zoomFactor) const
 {
     LayoutUnit containerWidth;
-    if (value.isPercentOrCalculated())
+    if (value.isPercentOrCalculated()) [[unlikely]]
         containerWidth = containingBlockLogicalWidthForContent();
     return Style::evaluateMinimum<LayoutUnit>(value, containerWidth, zoomFactor);
 }

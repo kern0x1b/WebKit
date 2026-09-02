@@ -551,6 +551,25 @@ NSInvocation* WebThreadMakeNSInvocation(id target, SEL selector)
     return nil;
 }
 
+#if defined(WEBKIT_IOS6)
+// The auto-unlock observer is installed once and left in place.
+//
+// CFRunLoopAddObserver/RemoveObserver for kCFRunLoopCommonModes walks every
+// common mode and edits each one's observer set, and the pair was paid on every
+// single acquisition of the web lock from the main thread - measured at 537
+// attempts from the tile layout pass alone in one scroll. The observer costs
+// nothing to leave installed: it is a C callback that reads one BOOL and returns
+// when there is nothing to unlock, so the flag alone decides.
+static void EnsureMainRunLoopAutoUnlockObserver()
+{
+    static bool installed;
+    if (installed)
+        return;
+    installed = true;
+    CFRunLoopAddObserver(CFRunLoopGetCurrent(), mainRunLoopAutoUnlockObserver().get(), kCFRunLoopCommonModes);
+}
+#endif
+
 static void MainRunLoopAutoUnlock(CFRunLoopObserverRef, CFRunLoopActivity, void*)
 {
     ASSERT(!WebThreadIsCurrent());
@@ -562,7 +581,9 @@ static void MainRunLoopAutoUnlock(CFRunLoopObserverRef, CFRunLoopActivity, void*
         return;
 
     mainThreadHasPendingAutoUnlock = NO;
+#if !defined(WEBKIT_IOS6)
     CFRunLoopRemoveObserver(CFRunLoopGetCurrent(), mainRunLoopAutoUnlockObserver().get(), kCFRunLoopCommonModes);
+#endif
 
     _WebThreadUnlock();
 }
@@ -615,10 +636,9 @@ bool WebThreadTryLockForFrame(void)
         return true;
 
     mainThreadHasPendingAutoUnlock = YES;
-    CFRunLoopAddObserver(CFRunLoopGetCurrent(), mainRunLoopAutoUnlockObserver().get(), kCFRunLoopCommonModes);
+    EnsureMainRunLoopAutoUnlockObserver();
 
     if (!webLock.tryLock()) {
-        CFRunLoopRemoveObserver(CFRunLoopGetCurrent(), mainRunLoopAutoUnlockObserver().get(), kCFRunLoopCommonModes);
         mainThreadHasPendingAutoUnlock = NO;
         return false;
     }
@@ -636,7 +656,11 @@ static void _WebThreadAutoLock(void)
 
     if (!mainThreadLockCount) {
         mainThreadHasPendingAutoUnlock = YES;
+#if defined(WEBKIT_IOS6)
+        EnsureMainRunLoopAutoUnlockObserver();
+#else
         CFRunLoopAddObserver(CFRunLoopGetCurrent(), mainRunLoopAutoUnlockObserver().get(), kCFRunLoopCommonModes);
+#endif
         _WebThreadLock();
         CFRunLoopWakeUp(CFRunLoopGetMain());
     }
@@ -653,7 +677,8 @@ static void WebRunLoopLockInternal(AutoreleasePoolOperation poolOperation)
 static void WebRunLoopUnlockInternal(AutoreleasePoolOperation poolOperation)
 {
     ASSERT(sAsyncDelegates());
-    if ([sAsyncDelegates() count]) {
+    NSMutableArray *asyncDelegates = sAsyncDelegates().get();
+    if ([asyncDelegates count]) {
 #if defined(WEBKIT_IOS6)
         // Sent without waiting, which is what "async" was supposed to mean.
         //
@@ -673,10 +698,10 @@ static void WebRunLoopUnlockInternal(AutoreleasePoolOperation poolOperation)
         if (blockOnAsyncDelegates < 0)
             blockOnAsyncDelegates = access("/tmp/native-block-async-delegates", F_OK) == 0 ? 1 : 0;
         if (blockOnAsyncDelegates) {
-            for (NSInvocation *invocation in sAsyncDelegates().get())
+            for (NSInvocation *invocation in asyncDelegates)
                 SendDelegateMessage(invocation);
         } else {
-            for (NSInvocation *invocation in sAsyncDelegates().get()) {
+            for (NSInvocation *invocation in asyncDelegates) {
                 RetainPtr<NSInvocation> retained = invocation;
                 RunLoop::mainSingleton().dispatch([retained] {
                     [retained invoke];
@@ -684,10 +709,10 @@ static void WebRunLoopUnlockInternal(AutoreleasePoolOperation poolOperation)
             }
         }
 #else
-        for (NSInvocation* invocation in sAsyncDelegates().get())
+        for (NSInvocation* invocation in asyncDelegates)
             SendDelegateMessage(invocation);
 #endif
-        [sAsyncDelegates() removeAllObjects];
+        [asyncDelegates removeAllObjects];
     }
 
     if (poolOperation == PushOrPopAutoreleasePool && !perCalloutAutoreleasepoolEnabled)

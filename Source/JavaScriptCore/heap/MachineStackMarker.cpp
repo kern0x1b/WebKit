@@ -40,6 +40,12 @@ MachineThreads::MachineThreads()
 {
 }
 
+MachineThreads::~MachineThreads()
+{
+    if (m_stackCopyBuffer)
+        fastFree(m_stackCopyBuffer);
+}
+
 SUPPRESS_ASAN
 void MachineThreads::gatherFromCurrentThread(ConservativeRoots& conservativeRoots, JITStubRoutineSet& jitStubRoutines, CodeBlockSet& codeBlocks, CurrentThreadState& currentThreadState)
 {
@@ -98,11 +104,15 @@ static void NODELETE copyMemory(void* dst, const void* src, size_t size)
     RELEASE_ASSERT(srcAsSize == WTF::roundUpToMultipleOf<sizeof(CPURegister)>(srcAsSize));
     RELEASE_ASSERT(size == WTF::roundUpToMultipleOf<sizeof(CPURegister)>(size));
 
+#if defined(WEBKIT_IOS6) && !ASAN_ENABLED
+    memcpy(dst, src, size);
+#else
     CPURegister* dstPtr = reinterpret_cast<CPURegister*>(dst);
     const CPURegister* srcPtr = reinterpret_cast<const CPURegister*>(src);
     size /= sizeof(CPURegister);
     while (size--)
         *dstPtr++ = *srcPtr++;
+#endif
 }
     
 
@@ -216,17 +226,14 @@ void MachineThreads::gatherConservativeRoots(ConservativeRoots& conservativeRoot
         gatherFromCurrentThread(conservativeRoots, jitStubRoutines, codeBlocks, *currentThreadState);
 
     size_t size;
-    size_t capacity = 0;
-    void* buffer = nullptr;
     Locker locker { m_threadGroup->getLock() };
-    while (!tryCopyOtherThreadStacks(locker, buffer, capacity, &size, *currentThread))
-        growBuffer(size, &buffer, &capacity);
+    while (!tryCopyOtherThreadStacks(locker, m_stackCopyBuffer, m_stackCopyCapacity, &size, *currentThread))
+        growBuffer(size, &m_stackCopyBuffer, &m_stackCopyCapacity);
 
-    if (!buffer)
+    if (!m_stackCopyBuffer)
         return;
 
-    conservativeRoots.add(buffer, static_cast<char*>(buffer) + size, jitStubRoutines, codeBlocks);
-    fastFree(buffer);
+    conservativeRoots.add(m_stackCopyBuffer, static_cast<char*>(m_stackCopyBuffer) + size, jitStubRoutines, codeBlocks);
 }
 
 NEVER_INLINE int callWithCurrentThreadState(const ScopedLambda<void(CurrentThreadState&)>& lambda)

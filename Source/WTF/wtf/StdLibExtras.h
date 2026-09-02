@@ -363,7 +363,7 @@ bool findBitInWord(T word, size_t& startOrResultIndex, size_t endIndex, bool val
     size_t index = startOrResultIndex;
     word >>= index;
 
-#if CPU(X86_64) || CPU(ARM64)
+#if CPU(X86_64) || CPU(ARM64) || CPU(ARM_THUMB2) || CPU(ARM)
     // We should only use ctz() when we know that ctz() is implementated using
     // a fast hardware instruction. Otherwise, this will actually result in
     // worse performance.
@@ -1441,7 +1441,7 @@ ALWAYS_INLINE constexpr void forEachSetBit(std::span<const WordType, Extent> bit
             continue;
         size_t base = i * wordSize;
 
-#if CPU(X86_64) || CPU(ARM64)
+#if CPU(X86_64) || CPU(ARM64) || CPU(ARM_THUMB2) || CPU(ARM)
         // We should only use ctz() when we know that ctz() is implemented using
         // a fast hardware instruction. Otherwise, this will actually result in
         // worse performance.
@@ -1477,7 +1477,7 @@ ALWAYS_INLINE constexpr void forEachSetBit(std::span<const WordType, Extent> bit
     auto iterate = [&](WordType word, size_t i) ALWAYS_INLINE_LAMBDA {
         size_t base = i * wordSize;
 
-#if CPU(X86_64) || CPU(ARM64)
+#if CPU(X86_64) || CPU(ARM64) || CPU(ARM_THUMB2) || CPU(ARM)
         // We should only use ctz() when we know that ctz() is implementated using
         // a fast hardware instruction. Otherwise, this will actually result in
         // worse performance.

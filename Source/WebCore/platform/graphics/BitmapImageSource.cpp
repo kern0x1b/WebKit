@@ -535,8 +535,16 @@ const ImageFrame& BitmapImageSource::frameAtIndexCacheIfNeeded(unsigned index, c
     auto& frame = m_frames[index];
     auto subsamplingLevelValue = subsamplingLevel.value_or(frame.subsamplingLevel());
 
+#if defined(WEBKIT_IOS6)
+    // ImageDecoderCG records frame metadata for the encoded image, not for the
+    // reduction it was decoded at, so a complete frame answers whatever level is
+    // asked about. Refetching would destroy the frame the following draw wants.
+    if (frame.isComplete())
+        return frame;
+#else
     if (frame.isComplete() && subsamplingLevelValue == frame.subsamplingLevel())
         return frame;
+#endif
 
     destroyNativeImageAtIndex(index);
 
@@ -600,6 +608,26 @@ Expected<Ref<NativeImage>, DecodingStatus> BitmapImageSource::nativeImageAtIndex
     if (auto compatibleDecodingDestination = compatibleDecodingDestinationWithOptionsAtIndex(index, subsamplingLevel, options))
         decodingDestination = *compatibleDecodingDestination;
     else {
+#if defined(WEBKIT_IOS6)
+        std::optional<IntSize> sizeForDrawing;
+        if (!isAnimated())
+            sizeForDrawing = options.sizeForDrawing();
+
+        auto decodingOptions = DecodingOptions { DecodingMode::Synchronous, decodingDestination, sizeForDrawing };
+
+        auto result = protect(m_decoder)->createNativeImageAtIndex(index, subsamplingLevel, decodingOptions);
+        if (!result)
+            return makeUnexpected(DecodingStatus::Invalid);
+
+        Ref nativeImage = WTF::move(std::get<Ref<NativeImage>>(*result));
+        decodingDestination = std::get<DecodingDestination>(*result);
+
+        if (sizeForDrawing && nativeImage->size() == protect(m_decoder)->frameSizeAtIndex(index, SubsamplingLevel::Default))
+            sizeForDrawing = std::nullopt;
+
+        decodingOptions = { DecodingMode::Synchronous, decodingDestination, sizeForDrawing };
+        cacheNativeImageAtIndex(index, subsamplingLevel, decodingOptions, WTF::move(nativeImage));
+#else
         auto decodingOptions = DecodingOptions { DecodingMode::Synchronous, decodingDestination };
 
         auto result = protect(m_decoder)->createNativeImageAtIndex(index, subsamplingLevel, decodingOptions);
@@ -611,6 +639,7 @@ Expected<Ref<NativeImage>, DecodingStatus> BitmapImageSource::nativeImageAtIndex
 
         decodingOptions = { DecodingMode::Synchronous, decodingDestination };
         cacheNativeImageAtIndex(index, subsamplingLevel, decodingOptions, WTF::move(nativeImage));
+#endif
     }
 
     if (RefPtr nativeImage = frameAtIndex(index).nativeImage(decodingDestination))

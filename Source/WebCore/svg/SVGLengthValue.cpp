@@ -356,6 +356,75 @@ ExceptionOr<void> SVGLengthValue::setValue(const SVGLengthContext& context, floa
     return setValue(context, value);
 }
 
+using SVGLengthVariant = Variant<CSS::Number<>, CSS::LengthPercentage<CSS::AllUnzoomed>>;
+
+static std::optional<SVGLengthVariant> parseScalarSVGLength(StringView string)
+{
+    unsigned length = string.length();
+    unsigned index = 0;
+
+    bool negative = false;
+    if (index < length) {
+        auto character = string[index];
+        if (character == '-') {
+            negative = true;
+            ++index;
+        } else if (character == '+')
+            ++index;
+    }
+
+    uint64_t mantissa = 0;
+    unsigned digitCount = 0;
+    unsigned fractionDigitCount = 0;
+
+    while (index < length && isASCIIDigit(string[index])) {
+        if (++digitCount > 15)
+            return std::nullopt;
+        mantissa = mantissa * 10 + static_cast<uint64_t>(string[index] - '0');
+        ++index;
+    }
+
+    if (index < length && string[index] == '.') {
+        unsigned fractionStart = index + 1;
+        unsigned fractionIndex = fractionStart;
+        while (fractionIndex < length && isASCIIDigit(string[fractionIndex])) {
+            if (++digitCount > 15)
+                return std::nullopt;
+            mantissa = mantissa * 10 + static_cast<uint64_t>(string[fractionIndex] - '0');
+            ++fractionIndex;
+        }
+        if (fractionIndex == fractionStart)
+            return std::nullopt;
+        fractionDigitCount = fractionIndex - fractionStart;
+        index = fractionIndex;
+    }
+
+    if (!digitCount)
+        return std::nullopt;
+
+    static constexpr double powersOfTen[] = {
+        1e0, 1e1, 1e2, 1e3, 1e4, 1e5, 1e6, 1e7,
+        1e8, 1e9, 1e10, 1e11, 1e12, 1e13, 1e14, 1e15
+    };
+
+    double value = static_cast<double>(mantissa);
+    if (fractionDigitCount)
+        value /= powersOfTen[fractionDigitCount];
+    if (negative)
+        value = -value;
+
+    if (index == length)
+        return SVGLengthVariant { CSS::Number<>(value) };
+
+    if (index + 1 == length && string[index] == '%')
+        return SVGLengthVariant { CSS::LengthPercentage<CSS::AllUnzoomed>(CSS::LengthPercentageUnit::Percentage, value) };
+
+    if (index + 2 == length && (string[index] == 'p' || string[index] == 'P') && (string[index + 1] == 'x' || string[index + 1] == 'X'))
+        return SVGLengthVariant { CSS::LengthPercentage<CSS::AllUnzoomed>(CSS::LengthPercentageUnit::Px, value) };
+
+    return std::nullopt;
+}
+
 ExceptionOr<void> SVGLengthValue::setValueAsString(StringView string)
 {
     if (string.isEmpty())
@@ -365,6 +434,11 @@ ExceptionOr<void> SVGLengthValue::setValueAsString(StringView string)
     auto trimmedString = string.trim(isASCIIWhitespace<char16_t>);
     if (trimmedString.isEmpty())
         return Exception { ExceptionCode::SyntaxError };
+
+    if (auto scalarValue = parseScalarSVGLength(trimmedString)) {
+        m_value = WTF::move(*scalarValue);
+        return { };
+    }
 
     // CSS::Range only clamps to boundaries, but we historically handled
     // overflow values like "-45e58" to 0 instead of FLT_MAX.

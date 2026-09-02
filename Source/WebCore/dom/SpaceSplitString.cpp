@@ -69,12 +69,16 @@ bool SpaceSplitStringData::containsAll(SpaceSplitStringData& other)
         return true;
 
     unsigned otherSize = other.m_size;
-    unsigned i = 0;
-    do {
+    if (m_size < otherSize) [[unlikely]]
+        return false;
+
+    if (otherSize == 1) [[likely]]
+        return contains(other[0]);
+
+    for (unsigned i = 0; i < otherSize; ++i) {
         if (!contains(other[i]))
             return false;
-        ++i;
-    } while (i < otherSize);
+    }
     return true;
 }
 

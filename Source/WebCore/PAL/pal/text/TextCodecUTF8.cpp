@@ -314,7 +314,6 @@ String TextCodecUTF8::decode(std::span<const uint8_t> bytes, bool flush, bool st
     StringBuffer<Latin1Character> buffer(bufferSize);
 
     auto source = bytes;
-    auto* alignedEnd = WTF::alignToMachineWord(std::to_address(source.end()));
     auto destination = buffer.span();
 
     do {
@@ -334,22 +333,11 @@ String TextCodecUTF8::decode(std::span<const uint8_t> bytes, bool flush, bool st
         while (!source.empty()) {
             if (isASCII(source[0])) {
                 // Fast path for ASCII. Most UTF-8 text will be ASCII.
-                if (WTF::isAlignedToMachineWord(source.data())) {
-                    while (source.data() < alignedEnd) {
-                        auto chunk = reinterpretCastSpanStartTo<const WTF::MachineWord>(source);
-                        if (!WTF::containsOnlyASCII<Latin1Character>(chunk))
-                            break;
-                        copyASCIIMachineWord(destination, source);
-                        skip(source, sizeof(WTF::MachineWord));
-                        skip(destination, sizeof(WTF::MachineWord));
-                    }
-                    if (source.empty())
-                        break;
-                    if (!isASCII(source[0]))
-                        continue;
-                }
-                consume(destination) = consume(source);
-                continue;
+                size_t asciiLength = copyLeadingASCII(destination, source);
+                skip(source, asciiLength);
+                skip(destination, asciiLength);
+                if (source.empty())
+                    break;
             }
             auto count = nonASCIISequenceLength(source[0]);
             int character;
@@ -373,6 +361,15 @@ String TextCodecUTF8::decode(std::span<const uint8_t> bytes, bool flush, bool st
 
                 goto upConvertTo16Bit;
             }
+#if defined(WEBKIT_IOS6)
+            // A leading byte order mark is the only non-Latin-1 character that produces no output
+            // at all. Dropping it here keeps a document that starts with one on the 8-bit path
+            // instead of storing every following ASCII byte in two bytes.
+            if (character == byteOrderMark && destination.data() == buffer.characters() && std::exchange(m_shouldStripByteOrderMark, false)) {
+                skip(source, count);
+                continue;
+            }
+#endif
             if (!isLatin1(character))
                 goto upConvertTo16Bit;
 
@@ -390,6 +387,13 @@ String TextCodecUTF8::decode(std::span<const uint8_t> bytes, bool flush, bool st
         sawError = true;
         return { };
     }
+#if defined(WEBKIT_IOS6)
+    // String::adopt keeps the whole allocation, so a decode that shrank the input holds the
+    // slack for as long as the string lives. Past a quarter of the buffer it is worth one copy
+    // to hand back an exactly sized string, which is also a single allocation rather than two.
+    if (size_t slack = bufferSize - buffer.length(); slack >= 4096 && slack >= bufferSize / 4)
+        return String { buffer.span() };
+#endif
     return String::adopt(WTF::move(buffer));
 
 upConvertTo16Bit:
@@ -398,11 +402,17 @@ upConvertTo16Bit:
     auto destination16 = buffer16.span();
 
     // Copy the already converted characters
-    auto converted8 = buffer.span();
     size_t charactersToCopy = destination.data() - buffer.characters();
-    for (size_t i = 0; i < charactersToCopy; ++i)
-        destination16[i] = converted8[i];
+    StringImpl::copyCharacters(destination16.first(charactersToCopy), buffer.span().first(charactersToCopy));
     skip(destination16, charactersToCopy);
+
+#if defined(WEBKIT_IOS6)
+    // Nothing below reads the 8-bit buffer again, and it is as large as the input. Releasing it
+    // here means the rest of the decode holds two bytes per input byte instead of three.
+    {
+        auto releasedBuffer = buffer.release();
+    }
+#endif
 
     do {
         if (m_partialSequenceSize) {
@@ -419,22 +429,11 @@ upConvertTo16Bit:
         while (!source.empty()) {
             if (isASCII(source[0])) {
                 // Fast path for ASCII. Most UTF-8 text will be ASCII.
-                if (WTF::isAlignedToMachineWord(source.data())) {
-                    while (source.data() < alignedEnd) {
-                        auto chunk = reinterpretCastSpanStartTo<const WTF::MachineWord>(source);
-                        if (!WTF::containsOnlyASCII<Latin1Character>(chunk))
-                            break;
-                        copyASCIIMachineWord(destination16, source);
-                        skip(source, sizeof(WTF::MachineWord));
-                        skip(destination16, sizeof(WTF::MachineWord));
-                    }
-                    if (source.empty())
-                        break;
-                    if (!isASCII(source[0]))
-                        continue;
-                }
-                consume(destination16) = consume(source);
-                continue;
+                size_t asciiLength = copyLeadingASCII(destination16, source);
+                skip(source, asciiLength);
+                skip(destination16, asciiLength);
+                if (source.empty())
+                    break;
             }
             auto count = nonASCIISequenceLength(source[0]);
             int character;
@@ -475,6 +474,13 @@ upConvertTo16Bit:
         sawError = true;
         return { };
     }
+#if defined(WEBKIT_IOS6)
+    // The 16-bit buffer is two bytes per input byte, so a multi-byte document leaves far more
+    // slack here than on the 8-bit path: three-byte sequences waste four bytes each. String::adopt
+    // would keep that for the lifetime of the string.
+    if (size_t slack = bufferSize - buffer16.length(); slack >= 2048 && slack >= bufferSize / 4)
+        return String { buffer16.span() };
+#endif
     return String::adopt(WTF::move(buffer16));
 }
 

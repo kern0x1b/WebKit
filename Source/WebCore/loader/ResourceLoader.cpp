@@ -459,8 +459,10 @@ void ResourceLoader::willSendRequestInternal(ResourceRequest&& request, const Re
     if (isRedirect) {
         RESOURCELOADER_RELEASE_LOG_FORWARDABLE(ResourceLoaderWillSendRequestInternalCrossOriginRedirect);
         platformStrategies()->loaderStrategy()->crossOriginRedirectReceived(this, request.url());
+#if !defined(WEBKIT_IOS6)
         if (frameLoader)
             protect(frameLoader->client())->didLoadFromRegistrableDomain(RegistrableDomain(request.url()));
+#endif
     }
     m_request = request;
 
@@ -610,8 +612,12 @@ void ResourceLoader::didReceiveBuffer(const FragmentedSharedBuffer& buffer, long
     // Could be an issue with a giant local file.
     RefPtr frame = m_frame.get();
     RefPtr frameLoader = this->frameLoader();
-    if (m_options.sendLoadCallbacks == SendCallbackPolicy::SendCallbacks && frame && frameLoader && m_identifier)
-        frameLoader->notifier().didReceiveData(*this, *m_identifier, buffer.makeContiguous(), static_cast<int>(encodedDataLength));
+    if (m_options.sendLoadCallbacks == SendCallbackPolicy::SendCallbacks && frame && frameLoader && m_identifier) {
+        if (auto* contiguousBuffer = dynamicDowncast<SharedBuffer>(buffer))
+            frameLoader->notifier().didReceiveData(*this, *m_identifier, *contiguousBuffer, static_cast<int>(encodedDataLength));
+        else
+            frameLoader->notifier().didReceiveData(*this, *m_identifier, buffer.makeContiguous(), static_cast<int>(encodedDataLength));
+    }
 }
 
 void ResourceLoader::didFinishLoading(const NetworkLoadMetrics& networkLoadMetrics)

@@ -899,8 +899,8 @@ JSC_DEFINE_HOST_FUNCTION(globalFuncCopyDataProperties, (JSGlobalObject* globalOb
     auto sourceStructure = source->structure();
     if (canPerformFastPropertyEnumerationForCopyDataProperties(sourceStructure)) [[likely]] {
         EnsureStillAliveScope sourceStructureScope(sourceStructure);
-        Vector<UniquedStringImpl*, 8> properties; // sourceStructure ensures the lifetimes of these strings.
-        MarkedArgumentBuffer values;
+        Vector<UniquedStringImpl*, 32> properties; // sourceStructure ensures the lifetimes of these strings.
+        MarkedArgumentBufferWithSize<32> values;
 
         // FIXME: It doesn't seem like we should have to do this in two phases, but
         // we're running into crashes where it appears that source is transitioning
@@ -997,8 +997,8 @@ JSC_DEFINE_HOST_FUNCTION(globalFuncCloneObject, (JSGlobalObject* globalObject, C
 
     if (canPerformFastPropertyEnumerationForCopyDataProperties(sourceStructure)) [[likely]] {
         EnsureStillAliveScope sourceStructureScope(sourceStructure);
-        Vector<UniquedStringImpl*, 8> properties; // sourceStructure ensures the lifetimes of these strings.
-        MarkedArgumentBuffer values;
+        Vector<UniquedStringImpl*, 32> properties; // sourceStructure ensures the lifetimes of these strings.
+        MarkedArgumentBufferWithSize<32> values;
 
         // FIXME: It doesn't seem like we should have to do this in two phases, but
         // we're running into crashes where it appears that source is transitioning
@@ -1007,7 +1007,7 @@ JSC_DEFINE_HOST_FUNCTION(globalFuncCloneObject, (JSGlobalObject* globalObject, C
         // that ends up transitioning the structure underneath us.
         // https://bugs.webkit.org/show_bug.cgi?id=187837
 
-        source->structure()->forEachProperty(vm, [&](const PropertyTableEntry& entry) ALWAYS_INLINE_LAMBDA {
+        sourceStructure->forEachProperty(vm, [&](const PropertyTableEntry& entry) ALWAYS_INLINE_LAMBDA {
             PropertyName propertyName(entry.key());
             if (propertyName.isPrivateName())
                 return true;

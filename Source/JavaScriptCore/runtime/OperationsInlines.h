@@ -253,11 +253,34 @@ ALWAYS_INLINE JSValue jsStringFromRegisterArray(JSGlobalObject* globalObject, Re
 {
     VM& vm = getVM(globalObject);
     auto scope = DECLARE_THROW_SCOPE(vm);
-    JSRopeString::RopeBuilder<RecordOverflow> ropeBuilder(vm);
 
+    if (count == 2) {
+        JSValue v0 = strings[0].jsValue();
+        JSValue v1 = strings[-1].jsValue();
+        JSString* s0 = v0.isString() ? asString(v0) : v0.toString(globalObject);
+        RETURN_IF_EXCEPTION(scope, { });
+        JSString* s1 = v1.isString() ? asString(v1) : v1.toString(globalObject);
+        RETURN_IF_EXCEPTION(scope, { });
+        RELEASE_AND_RETURN(scope, jsString(globalObject, s0, s1));
+    }
+
+    if (count == 3) {
+        JSValue v0 = strings[0].jsValue();
+        JSValue v1 = strings[-1].jsValue();
+        JSValue v2 = strings[-2].jsValue();
+        JSString* s0 = v0.isString() ? asString(v0) : v0.toString(globalObject);
+        RETURN_IF_EXCEPTION(scope, { });
+        JSString* s1 = v1.isString() ? asString(v1) : v1.toString(globalObject);
+        RETURN_IF_EXCEPTION(scope, { });
+        JSString* s2 = v2.isString() ? asString(v2) : v2.toString(globalObject);
+        RETURN_IF_EXCEPTION(scope, { });
+        RELEASE_AND_RETURN(scope, jsString(globalObject, s0, s1, s2));
+    }
+
+    JSRopeString::RopeBuilder<RecordOverflow> ropeBuilder(vm);
     for (unsigned i = 0; i < count; ++i) {
         JSValue v = strings[-static_cast<int>(i)].jsValue();
-        JSString* string = v.toString(globalObject);
+        JSString* string = v.isString() ? asString(v) : v.toString(globalObject);
         RETURN_IF_EXCEPTION(scope, { });
         if (!ropeBuilder.append(string))
             return throwOutOfMemoryError(globalObject, scope);
@@ -430,14 +453,14 @@ ALWAYS_INLINE bool toPrimitiveNumeric(JSGlobalObject* globalObject, JSValue v, J
 template<bool leftFirst>
 ALWAYS_INLINE bool jsLess(JSGlobalObject* globalObject, JSValue v1, JSValue v2)
 {
-    VM& vm = globalObject->vm();
-    auto scope = DECLARE_THROW_SCOPE(vm);
-
-    if (v1.isInt32() && v2.isInt32())
+    if (v1.isInt32() && v2.isInt32()) [[likely]]
         return v1.asInt32() < v2.asInt32();
 
-    if (v1.isNumber() && v2.isNumber())
+    if (v1.isNumber() && v2.isNumber()) [[likely]]
         return v1.asNumber() < v2.asNumber();
+
+    VM& vm = globalObject->vm();
+    auto scope = DECLARE_THROW_SCOPE(vm);
 
     if (isJSString(v1) && isJSString(v2)) {
         auto s1 = asString(v1)->view(globalObject);
@@ -480,14 +503,14 @@ ALWAYS_INLINE bool jsLess(JSGlobalObject* globalObject, JSValue v1, JSValue v2)
 template<bool leftFirst>
 ALWAYS_INLINE bool jsLessEq(JSGlobalObject* globalObject, JSValue v1, JSValue v2)
 {
-    VM& vm = globalObject->vm();
-    auto scope = DECLARE_THROW_SCOPE(vm);
-
-    if (v1.isInt32() && v2.isInt32())
+    if (v1.isInt32() && v2.isInt32()) [[likely]]
         return v1.asInt32() <= v2.asInt32();
 
-    if (v1.isNumber() && v2.isNumber())
+    if (v1.isNumber() && v2.isNumber()) [[likely]]
         return v1.asNumber() <= v2.asNumber();
+
+    VM& vm = globalObject->vm();
+    auto scope = DECLARE_THROW_SCOPE(vm);
 
     if (isJSString(v1) && isJSString(v2)) {
         auto s1 = asString(v1)->value(globalObject);
@@ -553,6 +576,14 @@ ALWAYS_INLINE JSValue jsAddNonNumber(JSGlobalObject* globalObject, JSValue v1, J
 
 ALWAYS_INLINE JSValue jsAdd(JSGlobalObject* globalObject, JSValue v1, JSValue v2)
 {
+    if (v1.isInt32() && v2.isInt32()) [[likely]] {
+        int32_t a = v1.asInt32();
+        int32_t b = v2.asInt32();
+        int32_t res;
+        if (!__builtin_add_overflow(a, b, &res)) [[likely]]
+            return JSValue(res);
+        return JSValue(JSValue::EncodeAsDouble, static_cast<double>(a) + static_cast<double>(b));
+    }
     if (v1.isNumber() && v2.isNumber())
         return jsNumber(v1.asNumber() + v2.asNumber());
 
@@ -595,6 +626,15 @@ ALWAYS_INLINE JSValue arithmeticBinaryOp(JSGlobalObject* globalObject, JSValue v
 
 ALWAYS_INLINE JSValue jsSub(JSGlobalObject* globalObject, JSValue v1, JSValue v2)
 {
+    if (v1.isInt32() && v2.isInt32()) [[likely]] {
+        int32_t a = v1.asInt32();
+        int32_t b = v2.asInt32();
+        int32_t res;
+        if (!__builtin_sub_overflow(a, b, &res)) [[likely]]
+            return JSValue(res);
+        return JSValue(JSValue::EncodeAsDouble, static_cast<double>(a) - static_cast<double>(b));
+    }
+
     auto doubleOp = [] (double left, double right) -> double {
         return left - right;
     };
@@ -608,6 +648,17 @@ ALWAYS_INLINE JSValue jsSub(JSGlobalObject* globalObject, JSValue v1, JSValue v2
 
 ALWAYS_INLINE JSValue jsMul(JSGlobalObject* globalObject, JSValue v1, JSValue v2)
 {
+    if (v1.isInt32() && v2.isInt32()) [[likely]] {
+        int32_t a = v1.asInt32();
+        int32_t b = v2.asInt32();
+        int32_t res;
+        if (!__builtin_mul_overflow(a, b, &res)) [[likely]] {
+            if (res || (a >= 0 && b >= 0) || (a < 0 && b < 0)) [[likely]]
+                return JSValue(res);
+        }
+        return JSValue(JSValue::EncodeAsDouble, static_cast<double>(a) * static_cast<double>(b));
+    }
+
     auto doubleOp = [] (double left, double right) -> double {
         return left * right;
     };
@@ -785,6 +836,9 @@ ALWAYS_INLINE JSValue jsRShift(JSGlobalObject* globalObject, JSValue v1, JSValue
 
 ALWAYS_INLINE JSValue jsURShift(JSGlobalObject* globalObject, JSValue left, JSValue right)
 {
+    if (left.isInt32() && right.isInt32()) [[likely]]
+        return jsNumber(static_cast<uint32_t>(left.asInt32()) >> (right.asInt32() & 31));
+
     VM& vm = globalObject->vm();
     auto scope = DECLARE_THROW_SCOPE(vm);
 
@@ -837,6 +891,9 @@ ALWAYS_INLINE JSValue bitwiseBinaryOp(JSGlobalObject* globalObject, JSValue v1, 
 
 ALWAYS_INLINE JSValue jsBitwiseAnd(JSGlobalObject* globalObject, JSValue v1, JSValue v2)
 {
+    if (v1.isInt32() && v2.isInt32()) [[likely]]
+        return JSValue(v1.asInt32() & v2.asInt32());
+
     auto int32Op = [] (int32_t left, int32_t right) -> int32_t {
         return left & right;
     };
@@ -852,6 +909,9 @@ ALWAYS_INLINE JSValue jsBitwiseAnd(JSGlobalObject* globalObject, JSValue v1, JSV
 
 ALWAYS_INLINE JSValue jsBitwiseOr(JSGlobalObject* globalObject, JSValue v1, JSValue v2)
 {
+    if (v1.isInt32() && v2.isInt32()) [[likely]]
+        return JSValue(v1.asInt32() | v2.asInt32());
+
     auto int32Op = [] (int32_t left, int32_t right) -> int32_t {
         return left | right;
     };
@@ -868,6 +928,9 @@ ALWAYS_INLINE JSValue jsBitwiseOr(JSGlobalObject* globalObject, JSValue v1, JSVa
 
 ALWAYS_INLINE JSValue jsBitwiseXor(JSGlobalObject* globalObject, JSValue v1, JSValue v2)
 {
+    if (v1.isInt32() && v2.isInt32()) [[likely]]
+        return JSValue(v1.asInt32() ^ v2.asInt32());
+
     auto int32Op = [] (int32_t left, int32_t right) -> int32_t {
         return left ^ right;
     };
@@ -884,9 +947,9 @@ ALWAYS_INLINE JSValue jsBitwiseXor(JSGlobalObject* globalObject, JSValue v1, JSV
 ALWAYS_INLINE EncodedJSValue getByValWithIndexAndThis(JSGlobalObject* globalObject, JSCell* base, uint32_t index, JSValue thisValue)
 {
     if (base->isObject()) {
-        if (JSValue result = asObject(base)->tryGetIndexQuickly(index))
+        if (JSValue result = asObject(base)->tryGetIndexQuickly(index)) [[likely]]
             return JSValue::encode(result);
-    } if (isJSString(base)) {
+    } else if (isJSString(base)) {
         if (asString(base)->canGetIndex(index))
             return JSValue::encode(asString(base)->getIndex(globalObject, index));
     }

@@ -42,36 +42,50 @@ CSSTokenizerInputStream::CSSTokenizerInputStream(const String& input)
     , m_stringLength(input.length())
     , m_string(input.impl())
 {
+    if (!m_stringLength)
+        return;
+    m_is8Bit = m_string->is8Bit();
+    if (m_is8Bit)
+        m_characters8 = m_string->span8().data();
+    else
+        m_characters16 = m_string->span16().data();
 }
 
 void CSSTokenizerInputStream::advanceUntilNonWhitespace()
 {
-    // Using ASCII whitespace here rather than CSS space since we don't do preprocessing
-    auto advance = [this](auto characters) {
-        while (m_offset < m_stringLength && isASCIIWhitespace(characters[m_offset]))
-            ++m_offset;
-    };
-
-    if (m_string->is8Bit())
-        advance(m_string->span8());
-    else
-        advance(m_string->span16());
+    // Using ASCII whitespace here rather than CSS space since we don't do preprocessing.
+    // One table lookup per character instead of the five-compare chain in isASCIIWhitespace,
+    // with the length and the buffer pointer held in registers across the loop.
+    size_t index = m_offset;
+    size_t length = m_stringLength;
+    if (m_is8Bit) {
+        const Latin1Character* characters = m_characters8;
+        while (index < length && (cssCharacterClass(characters[index]) & CSSCharacterClassWhitespace))
+            ++index;
+    } else {
+        const char16_t* characters = m_characters16;
+        while (index < length && (cssCharacterClass(characters[index]) & CSSCharacterClassWhitespace))
+            ++index;
+    }
+    m_offset = index;
 }
 
 void CSSTokenizerInputStream::advanceUntilNewlineOrNonWhitespace()
 {
-    auto advance = [this](auto characters) {
-        while (m_offset < m_stringLength && isASCIIWhitespace(characters[m_offset])) {
-            if (isCSSNewline(characters[m_offset]))
-                return;
-            ++m_offset;
-        }
-    };
-
-    if (m_string->is8Bit())
-        advance(m_string->span8());
-    else
-        advance(m_string->span16());
+    // "ASCII whitespace and not a CSS newline" is exactly tab-or-space, so the two predicate
+    // chains collapse into a single table test.
+    size_t index = m_offset;
+    size_t length = m_stringLength;
+    if (m_is8Bit) {
+        const Latin1Character* characters = m_characters8;
+        while (index < length && (cssCharacterClass(characters[index]) & CSSCharacterClassTabOrSpace))
+            ++index;
+    } else {
+        const char16_t* characters = m_characters16;
+        while (index < length && (cssCharacterClass(characters[index]) & CSSCharacterClassTabOrSpace))
+            ++index;
+    }
+    m_offset = index;
 }
 
 double CSSTokenizerInputStream::getDouble(unsigned start, unsigned end) const
@@ -80,10 +94,10 @@ double CSSTokenizerInputStream::getDouble(unsigned start, unsigned end) const
     bool isResultOK = false;
     double result = 0.0;
     if (start < end) {
-        if (m_string->is8Bit())
-            result = charactersToDouble(m_string->span8().subspan(m_offset + start, end - start), &isResultOK);
+        if (m_is8Bit)
+            result = charactersToDouble(std::span<const Latin1Character> { m_characters8 + m_offset + start, end - start }, &isResultOK);
         else
-            result = charactersToDouble(m_string->span16().subspan(m_offset + start, end - start), &isResultOK);
+            result = charactersToDouble(std::span<const char16_t> { m_characters16 + m_offset + start, end - start }, &isResultOK);
     }
     // FIXME: It looks like callers ensure we have a valid number
     return isResultOK ? result : 0.0;

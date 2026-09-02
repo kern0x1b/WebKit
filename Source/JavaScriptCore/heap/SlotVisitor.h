@@ -232,6 +232,10 @@ private:
     HeapAnalyzer* m_heapAnalyzer { nullptr };
     JSCell* m_currentCell { nullptr };
     bool m_isFirstVisit { false };
+#if defined(WEBKIT_IOS6)
+    // Conservative until didStartMarking() has looked at how many markers this Heap actually has.
+    bool m_needsMarkingFence { true };
+#endif
     bool m_mutatorIsStopped { false };
     bool m_canOptimizeForStoppedMutator { false };
     bool m_isInParallelMode { false };

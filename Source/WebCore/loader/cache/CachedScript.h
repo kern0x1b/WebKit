@@ -52,6 +52,7 @@ private:
     void setEncoding(const String&) final;
     ASCIILiteral encoding() const final;
     const TextResourceDecoder* textResourceDecoder() const final { return m_decoder.get(); }
+    bool needsProgressiveData() const final { return false; }
     void finishLoading(const FragmentedSharedBuffer*, const NetworkLoadMetrics&) final;
 
     void destroyDecodedData() final;

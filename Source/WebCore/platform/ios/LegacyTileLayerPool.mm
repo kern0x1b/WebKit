@@ -78,12 +78,38 @@ void LegacyTileLayerPool::addLayer(const RetainPtr<LegacyTileLayer>& layer)
     if (!canReuseLayerWithSize(layerSize))
         return;
 
+#if defined(WEBKIT_IOS6)
+    // Refusing the pool outright turns it off permanently here.
+    //
+    // isUnderMemoryPressure() is true whenever the footprint policy is Strict,
+    // and this process sits there for as long as a page is open - the same
+    // reading that made LegacyTileGrid::shouldUseMinimalTileCoverage() ask for
+    // Critical instead. With the pool refusing every returned layer, each step
+    // of a scroll destroys a tile layer and allocates a fresh one, and its
+    // backing store is a 640x640x4 buffer the kernel has to zero.
+    //
+    // LegacyTileGrid::createTiles() drops distant tiles and then creates the new
+    // ones in the same pass, so the layers a scroll needs are handed back
+    // moments before they are asked for again: a couple of tiles' worth of pool
+    // captures nearly all of the reuse. Under pressure the pool is kept to that,
+    // rather than to nothing, and prune() still walks it down from there.
+    const bool underPressure = MemoryPressureHandler::singleton().isUnderMemoryPressure();
+
+    Locker locker { m_layerPoolMutex };
+
+    if (underPressure) {
+        const unsigned capacityUnderPressure = 4 * 1024 * 1024;
+        if (m_totalBytes + bytesBackingLayerWithPixelSize(layerSize) > capacityUnderPressure)
+            return;
+    }
+#else
     if (MemoryPressureHandler::singleton().isUnderMemoryPressure()) {
         LOG(MemoryPressure, "Under memory pressure: %s, totalBytes: %d", __PRETTY_FUNCTION__, m_totalBytes);
         return;
     }
 
     Locker locker { m_layerPoolMutex };
+#endif
     listOfLayersWithSize(layerSize).prepend(layer);
     m_totalBytes += bytesBackingLayerWithPixelSize(layerSize);
 

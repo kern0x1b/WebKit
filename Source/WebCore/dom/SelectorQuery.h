@@ -39,6 +39,7 @@ namespace WebCore {
 
 class CSSSelector;
 class ContainerNode;
+class SelectorChecker;
 class Document;
 class Element;
 
@@ -65,7 +66,7 @@ private:
 #endif
     };
 
-    bool selectorMatches(const SelectorData&, Element&, const ContainerNode& rootNode, Style::SelectorMatchingState* = nullptr) const;
+    bool selectorMatches(const SelectorChecker&, const SelectorData&, Element&, const ContainerNode* scope, Style::SelectorMatchingState* = nullptr) const;
 
     template <typename OutputType> void execute(ContainerNode& rootNode, OutputType&) const;
     template <typename OutputType> void executeFastPathForIdSelector(const ContainerNode& rootNode, const SelectorData&, const CSSSelector* idSelector, OutputType&) const;

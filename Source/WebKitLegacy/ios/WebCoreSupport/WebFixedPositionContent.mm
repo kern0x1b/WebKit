@@ -134,25 +134,6 @@ WebFixedPositionContentData::~WebFixedPositionContentData() = default;
     BOOL offsetChanged = positionedObjectsRect.origin.y != lastReportedOffset;
     lastReportedOffset = positionedObjectsRect.origin.y;
 
-    // How often the page is told it moved.
-    //
-    // The rectangle above has to be published every frame or the fixed bars lag
-    // the content, but the DOM event is a different matter: a feed answers it by
-    // deciding which posts exist, and a profile of the web thread during a drag
-    // was almost entirely script - property-access slow paths and the
-    // interpreter - with layout and paint barely present. Sixty of those a
-    // second is not something this device can pay for.
-    //
-    // Nor is it what this platform ever did: on iOS through this era the scroll
-    // event did not arrive continuously during a drag at all. A few per second
-    // while the finger moves, and one more when it stops, is both faster and
-    // closer to the behaviour sites of that age were written against.
-    static CFAbsoluteTime lastScrollEvent;
-    CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();
-    BOOL shouldTellThePage = offsetChanged && (now - lastScrollEvent) > 0.25;
-    if (shouldTellThePage)
-        lastScrollEvent = now;
-
     // Told a few times a second, not sixty.
     //
     // A feed loads its next page from a scroll event, so telling the engine
@@ -168,7 +149,7 @@ WebFixedPositionContentData::~WebFixedPositionContentData() = default;
     // thread was taking the web lock on every turn of its own run loop, so
     // anything at all on top of that was fatal.
     static CFAbsoluteTime lastToldThePage;
-    CFAbsoluteTime nowTelling = CFAbsoluteTimeGetCurrent();
+    CFAbsoluteTime nowTelling = offsetChanged ? CFAbsoluteTimeGetCurrent() : lastToldThePage;
     if (offsetChanged && nowTelling - lastToldThePage > 0.25) {
         lastToldThePage = nowTelling;
         WebView *tellWebView = webView;
@@ -226,11 +207,15 @@ WebFixedPositionContentData::~WebFixedPositionContentData() = default;
     }
 #endif
 
+    const LayerInfoMap& constrainedLayers = _private->m_viewportConstrainedLayers;
+    if (constrainedLayers.isEmpty())
+        return;
+
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
 
-    LayerInfoMap::const_iterator end = _private->m_viewportConstrainedLayers.end();
-    for (LayerInfoMap::const_iterator it = _private->m_viewportConstrainedLayers.begin(); it != end; ++it) {
+    LayerInfoMap::const_iterator end = constrainedLayers.end();
+    for (LayerInfoMap::const_iterator it = constrainedLayers.begin(); it != end; ++it) {
         CALayer *layer = it->key.get();
         ViewportConstrainedLayerData* constraintData = it->value.get();
         const ViewportConstraints& constraints = *(constraintData->m_viewportConstraints.get());
@@ -403,12 +388,10 @@ WebFixedPositionContentData::~WebFixedPositionContentData() = default;
 - (void)didFinishScrollingOrZooming
 {
 
-    WebThreadRun(^{
-        if (auto* frame = [_private->m_webView _mainCoreFrame])
-            frame->viewportOffsetChanged(LocalFrame::CompletedScrollOffset);
-    });
     WebView *finishedWebView = _private->m_webView;
     WebThreadRun(^{
+        if (auto* frame = [finishedWebView _mainCoreFrame])
+            frame->viewportOffsetChanged(LocalFrame::CompletedScrollOffset);
         if (auto* frame = [finishedWebView _mainCoreFrame])
             frame->eventHandler().scheduleScrollEvent();
     });

@@ -285,7 +285,7 @@ void GraphicsContextCG::restore(GraphicsContextState::Purpose purpose)
 
 void GraphicsContextCG::drawNativeImage(const NativeImage& nativeImage, const FloatRect& destRect, const FloatRect& srcRect, ImagePaintingOptions options)
 {
-    auto image = nativeImage.platformImage();
+    auto& image = nativeImage.platformImage();
     if (!image)
         return;
     auto imageSize = nativeImage.size();
@@ -352,7 +352,8 @@ void GraphicsContextCG::drawNativeImage(const NativeImage& nativeImage, const Fl
     CGContextStateSaver stateSaver(context, false);
     auto transform = CGContextGetCTM(context);
 
-    auto subImage = image;
+    RetainPtr<CGImageRef> retainedSubImage;
+    auto subImage = image.get();
 
     auto adjustedDestRect = normalizedDestRect;
 
@@ -367,7 +368,8 @@ void GraphicsContextCG::drawNativeImage(const NativeImage& nativeImage, const Fl
             // containing only the portion we want to display. We need to do this because high-quality
             // interpolation smoothes sharp edges, causing pixels from outside the source rect to bleed
             // into the destination rect. See <rdar://problem/6112909>.
-            subImage = getSubimage(subImage.get(), imageSize, subimageRect, options);
+            retainedSubImage = getSubimage(subImage, imageSize, subimageRect, options);
+            subImage = retainedSubImage.get();
 
             auto subPixelPadding = normalizedSrcRect.location() - subimageRect.location();
             adjustedDestRect = { adjustedDestRect.location() - subPixelPadding * scale, subimageRect.size() * scale };
@@ -386,7 +388,8 @@ void GraphicsContextCG::drawNativeImage(const NativeImage& nativeImage, const Fl
 #if PLATFORM(IOS_FAMILY)
     bool wasAntialiased = CGContextGetShouldAntialias(context);
     // Anti-aliasing is on by default on the iPhone. Need to turn it off when drawing images.
-    CGContextSetShouldAntialias(context, false);
+    if (wasAntialiased)
+        CGContextSetShouldAntialias(context, false);
 
     // Align to pixel boundaries
     adjustedDestRect = roundToDevicePixels(adjustedDestRect);
@@ -394,7 +397,9 @@ void GraphicsContextCG::drawNativeImage(const NativeImage& nativeImage, const Fl
 
     auto oldCompositeOperator = compositeOperation();
     auto oldBlendMode = blendMode();
-    setCGBlendMode(context, options.compositeOperator(), options.blendMode());
+    bool blendModeChanged = oldCompositeOperator != options.compositeOperator() || oldBlendMode != options.blendMode();
+    if (blendModeChanged)
+        setCGBlendMode(context, options.compositeOperator(), options.blendMode());
 
 #if HAVE(SUPPORT_HDR_DISPLAY_APIS)
     auto oldHeadroom = CGContextGetEDRTargetHeadroom(context);
@@ -412,7 +417,7 @@ void GraphicsContextCG::drawNativeImage(const NativeImage& nativeImage, const Fl
     }
 
     if (options.dynamicRangeLimit() == PlatformDynamicRangeLimit::standard() && options.drawsHDRContent() == DrawsHDRContent::Yes)
-        setCGDynamicRangeLimitForImage(context, subImage.get(), options.dynamicRangeLimit().value());
+        setCGDynamicRangeLimitForImage(context, subImage, options.dynamicRangeLimit().value());
 #endif
 
     // Make the origin be at adjustedDestRect.location()
@@ -433,14 +438,16 @@ void GraphicsContextCG::drawNativeImage(const NativeImage& nativeImage, const Fl
     CGContextScaleCTM(context, 1, -1);
 
     // Draw the image.
-    CGContextDrawImage(context, adjustedDestRect, subImage.get());
+    CGContextDrawImage(context, adjustedDestRect, subImage);
 
     if (!stateSaver.didSave()) {
         CGContextSetCTM(context, transform);
 #if PLATFORM(IOS_FAMILY)
-        CGContextSetShouldAntialias(context, wasAntialiased);
+        if (wasAntialiased)
+            CGContextSetShouldAntialias(context, true);
 #endif
-        setCGBlendMode(context, oldCompositeOperator, oldBlendMode);
+        if (blendModeChanged)
+            setCGBlendMode(context, oldCompositeOperator, oldBlendMode);
 #if HAVE(SUPPORT_HDR_DISPLAY_APIS)
         CGContextSetContentToneMappingInfo(context, oldToneMappingInfo);
         CGContextSetEDRTargetHeadroom(context, oldHeadroom);

@@ -34,6 +34,16 @@
 #include "VariableEnvironmentInlines.h"
 #include <wtf/TZoneMallocInlines.h>
 
+#if defined(WEBKIT_IOS6)
+#include "VM.h"
+#include <wtf/Condition.h>
+#include <wtf/Deque.h>
+#include <wtf/Lock.h>
+#include <wtf/NeverDestroyed.h>
+#include <wtf/RunLoop.h>
+#include <wtf/Threading.h>
+#endif
+
 namespace JSC {
 
 WTF_MAKE_TZONE_ALLOCATED_IMPL(CodeCache);
@@ -157,6 +167,201 @@ UnlinkedModuleProgramCodeBlock* recursivelyGenerateUnlinkedCodeBlockForModulePro
     return recursivelyGenerateUnlinkedCodeBlock<UnlinkedModuleProgramCodeBlock>(vm, source, lexicallyScopedFeatures, scriptMode, codeGenerationMode, error, evalContextType);
 }
 
+#if defined(WEBKIT_IOS6)
+
+// A third of the web thread's launch is JavaScriptCore turning the site's functions
+// into bytecode, one at a time, at the moment each is first called. That bytecode is a
+// pure function of the source text and the code generation mode, so it can be made
+// somewhere else - but not in this VM. CommonVM.cpp calls apiLock().makeWebThreadAware(),
+// which makes JSLock::lock() take the web lock as well, and the web thread holds the web
+// lock for whole runloop turns; a second thread reaching into the page's VM would queue
+// behind the page instead of running beside it, and _WebThreadLock() calls CRASH()
+// outright when the caller is neither the main nor the web thread. So the pass shares
+// nothing with the page: its own thread, its own VM, its own heap, its own atom string
+// table, its own copy of the source text. The only thing that crosses back is a
+// serialized blob, handed to the provider's bytecode cache on the thread that runs the
+// page, where CodeCacheMap::fetchFromDisk picks it up the next time this program is
+// compiled - under the same SourceCodeKey, which decodeCodeBlock re-checks before it
+// hands anything back.
+
+namespace {
+
+struct AheadOfTimeBytecodeJob {
+    RefPtr<SourceProvider> provider;
+    RefPtr<WTF::RunLoop> runLoop;
+    String source;
+    String sourceURL;
+    URL sourceOriginURL;
+    TextPosition startPosition;
+    int startOffset { 0 };
+    int endOffset { 0 };
+    int firstLine { 1 };
+    int startColumn { 1 };
+    unsigned sourceHash { 0 };
+    SourceTaintedOrigin taintedness { SourceTaintedOrigin::Untainted };
+    LexicallyScopedFeatures lexicallyScopedFeatures { NoLexicallyScopedFeatures };
+    JSParserScriptMode scriptMode { JSParserScriptMode::Classic };
+    OptionSet<CodeGenerationMode> codeGenerationMode;
+};
+
+class AheadOfTimeBytecodeThread {
+    WTF_MAKE_NONCOPYABLE(AheadOfTimeBytecodeThread);
+public:
+    AheadOfTimeBytecodeThread() = default;
+
+    bool enqueue(AheadOfTimeBytecodeJob&&);
+
+private:
+    void run();
+
+    static constexpr unsigned maximumRememberedPrograms = 256;
+
+    Lock m_lock;
+    Condition m_jobAvailable;
+    Deque<AheadOfTimeBytecodeJob> m_queue WTF_GUARDED_BY_LOCK(m_lock);
+    UncheckedKeyHashSet<unsigned> m_alreadyQueued WTF_GUARDED_BY_LOCK(m_lock);
+    RefPtr<Thread> m_thread WTF_GUARDED_BY_LOCK(m_lock);
+};
+
+bool AheadOfTimeBytecodeThread::enqueue(AheadOfTimeBytecodeJob&& job)
+{
+    // Zero is the hash set's empty value, so a provider that hashes to it cannot be
+    // remembered and is refused rather than queued over and over.
+    if (!job.sourceHash)
+        return false;
+
+    Locker locker { m_lock };
+
+    if (m_queue.size() >= Options::aheadOfTimeBytecodeQueueLength())
+        return false;
+
+    if (m_alreadyQueued.size() >= maximumRememberedPrograms)
+        m_alreadyQueued.clear();
+    if (!m_alreadyQueued.add(job.sourceHash).isNewEntry)
+        return false;
+
+    if (!m_thread)
+        m_thread = Thread::create("JSC AOT Bytecode"_s, [this] { run(); }, ThreadType::Compiler, Thread::QOS::Utility);
+
+    m_queue.append(WTF::move(job));
+    m_jobAvailable.notifyOne();
+    return true;
+}
+
+void AheadOfTimeBytecodeThread::run()
+{
+    Ref<VM> vm = VM::create();
+
+    for (;;) {
+        AheadOfTimeBytecodeJob job;
+        {
+            Locker locker { m_lock };
+            while (m_queue.isEmpty())
+                m_jobAvailable.wait(m_lock);
+            job = m_queue.takeFirst();
+        }
+
+        RefPtr<CachedBytecode> bytecode;
+        {
+            JSLockHolder locker(vm.get());
+
+            SourceCode source(
+                RefPtr<SourceProvider> { StringSourceProvider::create(job.source, SourceOrigin { job.sourceOriginURL }, String { job.sourceURL }, job.taintedness, job.startPosition) },
+                job.startOffset, job.endOffset, job.firstLine, job.startColumn);
+
+            ParserError error;
+            UnlinkedProgramCodeBlock* unlinkedCodeBlock = recursivelyGenerateUnlinkedCodeBlockForProgram(vm.get(), source, job.lexicallyScopedFeatures, job.scriptMode, job.codeGenerationMode, error, EvalContextType::None);
+
+            // error also reports any nested function that failed to generate, and that
+            // is not a reason to throw the program away. A function with no bytecode in
+            // the blob decodes into an executable whose code block slot is empty, and
+            // UnlinkedFunctionExecutable::unlinkedCodeBlockFor falls straight through to
+            // generating it, so the page sees exactly the error it would have seen. Only
+            // a null program is fatal here.
+            if (unlinkedCodeBlock) {
+                SourceCodeKey key(
+                    source, String(), SourceCodeType::ProgramType, job.lexicallyScopedFeatures, job.scriptMode,
+                    DerivedContextType::None, EvalContextType::None, false, job.codeGenerationMode,
+                    std::nullopt);
+                bytecode = encodeCodeBlock(vm.get(), key, unlinkedCodeBlock);
+            }
+        }
+
+        {
+            // sourceProviderCacheMap keys on RefPtr<SourceProvider>, so without this the
+            // private VM would hold every source it has ever been given for the life of
+            // the process.
+            JSLockHolder locker(vm.get());
+            vm->clearSourceProviderCaches();
+            vm->codeCache()->clear();
+            vm->heap.collectNow(Sync, CollectionScope::Full);
+        }
+        job.source = String();
+
+        // Dispatched whether or not there is a blob: the job may hold the last reference
+        // to the provider, and ~CachedScriptSourceProvider talks to WebCore, so the final
+        // deref has to happen back on the thread that runs the page.
+        RefPtr<WTF::RunLoop> runLoop = WTF::move(job.runLoop);
+        runLoop->dispatch([provider = WTF::move(job.provider), bytecode = WTF::move(bytecode)] {
+            if (!bytecode)
+                return;
+            provider->cacheBytecode([&] { return bytecode; });
+        });
+    }
+}
+
+} // anonymous namespace
+
+bool enqueueAheadOfTimeBytecodeGeneration(VM& vm, const SourceCode& source, LexicallyScopedFeatures lexicallyScopedFeatures, JSParserScriptMode scriptMode, OptionSet<CodeGenerationMode> codeGenerationMode)
+{
+    if (!Options::useAheadOfTimeBytecode())
+        return false;
+
+    SourceProvider* provider = source.provider();
+    if (!provider || provider->sourceType() != SourceProviderSourceType::Program)
+        return false;
+
+    // cacheBytecode() silently drops the blob when the provider keeps no cache, and this
+    // pass is far too expensive to run on the chance that someone is listening.
+    if (!provider->wantsBytecodeCache())
+        return false;
+
+    // The pass rebuilds the program from its own copy of the text, so its SourceCodeKey
+    // only matches if the SourceCode covers the whole provider: the key's hash comes from
+    // the provider, not from the range. A script that is a slice of a larger document
+    // would need the whole document copied to hash the same, and those are not the ones
+    // that cost seconds.
+    StringView text = provider->source();
+    if (source.startOffset() || static_cast<unsigned>(source.endOffset()) != text.length())
+        return false;
+
+    unsigned length = text.length();
+    if (length < Options::aheadOfTimeBytecodeMinimumSourceLength() || length > Options::aheadOfTimeBytecodeMaximumSourceLength())
+        return false;
+
+    AheadOfTimeBytecodeJob job;
+    job.provider = provider;
+    job.runLoop = &vm.runLoop();
+    job.source = text.toString().isolatedCopy();
+    job.sourceURL = provider->sourceURL().isolatedCopy();
+    job.sourceOriginURL = provider->sourceOrigin().url().isolatedCopy();
+    job.startPosition = provider->startPosition();
+    job.startOffset = source.startOffset();
+    job.endOffset = source.endOffset();
+    job.firstLine = source.firstLine().oneBasedInt();
+    job.startColumn = source.startColumn().oneBasedInt();
+    job.sourceHash = provider->hash();
+    job.taintedness = provider->sourceTaintedOrigin();
+    job.lexicallyScopedFeatures = lexicallyScopedFeatures;
+    job.scriptMode = scriptMode;
+    job.codeGenerationMode = codeGenerationMode;
+
+    static NeverDestroyed<AheadOfTimeBytecodeThread> generator;
+    return generator->enqueue(WTF::move(job));
+}
+
+#endif // defined(WEBKIT_IOS6)
+
 template <class UnlinkedCodeBlockType, class ExecutableType>
 UnlinkedCodeBlockType* CodeCache::getUnlinkedGlobalCodeBlock(VM& vm, ExecutableType* executable, const SourceCode& source, JSParserScriptMode scriptMode, OptionSet<CodeGenerationMode> codeGenerationMode, ParserError& error, EvalContextType evalContextType)
 {
@@ -184,6 +389,25 @@ UnlinkedCodeBlockType* CodeCache::getUnlinkedGlobalCodeBlock(VM& vm, ExecutableT
 
     if (unlinkedCodeBlock && Options::useCodeCache()) {
         m_sourceCode.addCache(key, SourceCodeValue(vm, unlinkedCodeBlock, m_sourceCode.age()));
+
+#if defined(WEBKIT_IOS6)
+        // Reaching here means every cache said no and this thread just paid for a full
+        // parse of the program, so this is the moment we know the source is worth
+        // regenerating: it is real, it is big, and nobody has bytecode for it. What the
+        // web thread has in hand is the top level only - the functions are still
+        // uncompiled - so encoding it now would fill the provider's one blob slot with
+        // the emptiest possible version of the program. Hand the whole source to the
+        // background pass instead and let it produce the version with the functions in
+        // it. recursivelyGenerateUnlinkedCodeBlockForProgram assumes a plain global
+        // program, so anything with a derived context or an arrow function context stays
+        // on the ordinary path.
+        if constexpr (std::is_same_v<UnlinkedCodeBlockType, UnlinkedProgramCodeBlock>) {
+            if (derivedContextType == DerivedContextType::None && !isArrowFunctionContext && evalContextType == EvalContextType::None) {
+                if (enqueueAheadOfTimeBytecodeGeneration(vm, source, executable->lexicallyScopedFeatures(), scriptMode, codeGenerationMode))
+                    return unlinkedCodeBlock;
+            }
+        }
+#endif
 
         key.source().provider().cacheBytecode([&] {
             return encodeCodeBlock(vm, key, unlinkedCodeBlock);

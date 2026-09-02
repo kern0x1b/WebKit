@@ -28,6 +28,19 @@
 #include <atomic>
 namespace WebCore {
 
+#if defined(WEBKIT_IOS6)
+
+#define FAST_RETURN_IF_NO_FRONTENDS(value) \
+    return value;
+
+class WEBCORE_EXPORT InspectorInstrumentationPublic {
+public:
+    static constexpr bool hasFrontends() { return false; }
+    static std::atomic<int> s_frontendCounter;
+};
+
+#else
+
 #define FAST_RETURN_IF_NO_FRONTENDS(value)                          \
     if (!InspectorInstrumentationPublic::hasFrontends()) [[likely]] \
         return value;
@@ -37,5 +50,7 @@ public:
     static bool hasFrontends() { return s_frontendCounter; }
     static std::atomic<int> s_frontendCounter;
 };
+
+#endif
 
 }

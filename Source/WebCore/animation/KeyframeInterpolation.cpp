@@ -41,9 +41,11 @@ const KeyframeInterpolation::KeyframeInterval KeyframeInterpolation::interpolati
     unsigned numberOfKeyframesWithZeroOffset = 0;
     unsigned numberOfKeyframesWithOneOffset = 0;
 
-    Vector<const Keyframe*> propertySpecificKeyframes;
+    auto keyframeCount = numberOfKeyframes();
 
-    for (size_t i = 0; i < numberOfKeyframes(); ++i) {
+    Vector<const Keyframe*, 12> propertySpecificKeyframes;
+
+    for (size_t i = 0; i < keyframeCount; ++i) {
         auto& keyframe = keyframeAtIndex(i);
         if (!keyframe.hasResolvedOffset() || !keyframe.animatesProperty(property))
             continue;
@@ -79,7 +81,7 @@ const KeyframeInterpolation::KeyframeInterval KeyframeInterpolation::interpolati
     }
 
     // 10. Let interval endpoints be an empty sequence of keyframes.
-    Vector<const Keyframe*> intervalEndpoints;
+    Vector<const Keyframe*, maximumIntervalEndpoints> intervalEndpoints;
 
     // 11. Populate interval endpoints by following the steps from the first matching condition from below:
     if (iterationProgress < 0 && numberOfKeyframesWithZeroOffset > 1) {
@@ -118,7 +120,7 @@ const KeyframeInterpolation::KeyframeInterval KeyframeInterpolation::interpolati
         }
     }
 
-    return { intervalEndpoints, hasImplicitZeroKeyframe, hasImplicitOneKeyframe };
+    return { WTF::move(intervalEndpoints), hasImplicitZeroKeyframe, hasImplicitOneKeyframe };
 }
 
 static double NODELETE transformProgressDuration(const WebAnimationTime& duration)
@@ -129,6 +131,15 @@ static double NODELETE transformProgressDuration(const WebAnimationTime& duratio
 }
 
 void KeyframeInterpolation::interpolateKeyframes(Property property, const KeyframeInterval& interval, double iterationProgress, double currentIteration, const WebAnimationTime& iterationDuration, TimingFunction::Before before, const CompositionCallback& compositionCallback, const AccumulationCallback& accumulationCallback, const InterpolationCallback& interpolationCallback, const RequiresInterpolationForAccumulativeIterationCallback& requiresInterpolationForAccumulativeIterationCallback) const
+{
+    interpolateKeyframes(property, interval, iterationProgress, currentIteration, iterationDuration, before,
+        scopedLambdaRef<void(const Keyframe&, CompositeOperation)>(compositionCallback),
+        scopedLambdaRef<void(const Keyframe&)>(accumulationCallback),
+        scopedLambdaRef<void(double, double, IterationCompositeOperation)>(interpolationCallback),
+        scopedLambdaRef<bool()>(requiresInterpolationForAccumulativeIterationCallback));
+}
+
+void KeyframeInterpolation::interpolateKeyframes(Property property, const KeyframeInterval& interval, double iterationProgress, double currentIteration, const WebAnimationTime& iterationDuration, TimingFunction::Before before, const ScopedCompositionCallback& compositionCallback, const ScopedAccumulationCallback& accumulationCallback, const ScopedInterpolationCallback& interpolationCallback, const ScopedRequiresInterpolationForAccumulativeIterationCallback& requiresInterpolationForAccumulativeIterationCallback) const
 {
     auto& intervalEndpoints = interval.endpoints;
     if (intervalEndpoints.isEmpty())

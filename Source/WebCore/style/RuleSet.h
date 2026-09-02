@@ -83,7 +83,10 @@ public:
 
     ~RuleSet();
 
-    typedef Vector<RuleData, 1> RuleDataVector;
+    // Most buckets hold a handful of rules. The default minimum capacity of 16 makes every bucket
+    // that outgrows the inline slot allocate 16 entries and then hand most of them back in
+    // shrinkToFit(); growing from 4 costs less allocator traffic and far less peak memory.
+    typedef Vector<RuleData, 1, WTF::CrashOnOverflow, 4> RuleDataVector;
     typedef HashMap<AtomString, std::unique_ptr<RuleDataVector>> AtomRuleMap;
 
     void addRule(const StyleRule&, unsigned selectorIndex, unsigned selectorListIndex);
@@ -288,7 +291,7 @@ inline CascadeLayerPriority RuleSet::cascadeLayerPriorityForIdentifier(CascadeLa
 
 inline CascadeLayerPriority RuleSet::cascadeLayerPriorityFor(const RuleData& ruleData) const
 {
-    if (m_cascadeLayerIdentifierForRulePosition.size() <= ruleData.position())
+    if (m_cascadeLayerIdentifierForRulePosition.isEmpty() || m_cascadeLayerIdentifierForRulePosition.size() <= ruleData.position()) [[likely]]
         return cascadeLayerPriorityForUnlayered;
     auto identifier = m_cascadeLayerIdentifierForRulePosition[ruleData.position()];
     return cascadeLayerPriorityForIdentifier(identifier);
@@ -307,7 +310,7 @@ inline Vector<Ref<const StyleRuleContainer>> RuleSet::containerQueryChainFor(Con
 
 inline Vector<Ref<const StyleRuleContainer>> RuleSet::containerQueriesFor(const RuleData& ruleData) const
 {
-    if (m_containerQueryIdentifierForRulePosition.size() <= ruleData.position())
+    if (m_containerQueryIdentifierForRulePosition.isEmpty() || m_containerQueryIdentifierForRulePosition.size() <= ruleData.position()) [[likely]]
         return { };
 
     return containerQueryChainFor(m_containerQueryIdentifierForRulePosition[ruleData.position()]);

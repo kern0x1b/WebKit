@@ -172,7 +172,7 @@ private:
     void tileCreationTimerFired();
 
     void drawReplacementImage(LegacyTileLayer *, CGContextRef, CGImageRef);
-    void drawWindowContent(LegacyTileLayer *, CGContextRef, CGRect dirtyRect, DrawingFlags);
+    void drawWindowContent(LegacyTileLayer *, CGContextRef, CGRect dirtyRect, DrawingFlags, CGRect layerFrame);
 
     WAKWindow *m_window { nullptr };
 

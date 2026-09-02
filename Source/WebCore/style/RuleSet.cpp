@@ -76,11 +76,9 @@ void RuleSet::addToRuleSet(const AtomString& key, AtomRuleMap& map, const RuleDa
     rules->append(ruleData);
 }
 
-static unsigned NODELETE rulesCountForName(const RuleSet::AtomRuleMap& map, const AtomString& name)
+static RuleSet::RuleDataVector* NODELETE rulesForName(const RuleSet::AtomRuleMap& map, const AtomString& name)
 {
-    if (const auto* rules = map.get(name))
-        return rules->size();
-    return 0;
+    return map.get(name);
 }
 
 // FIXME: Maybe we can unify both following functions
@@ -186,6 +184,9 @@ void RuleSet::addRule(RuleData&& ruleData, CascadeLayerIdentifier cascadeLayerId
 void RuleSet::addRuleToBucket(RuleData& ruleData)
 {
     unsigned classBucketSize = 0;
+    // Kept so the bucket the class rule lands in is looked up once instead of once for sizing and
+    // once for insertion. The vectors are heap allocated, so this stays valid across map growth.
+    RuleDataVector* classBucket = nullptr;
     const CSSSelector* idSelector = nullptr;
     const CSSSelector* tagSelector = nullptr;
     const CSSSelector* classSelector = nullptr;
@@ -220,11 +221,14 @@ void RuleSet::addRuleToBucket(RuleData& ruleData)
                 auto& className = current->value();
                 if (!classSelector) {
                     classSelector = current;
-                    classBucketSize = rulesCountForName(m_classRules, className);
+                    classBucket = rulesForName(m_classRules, className);
+                    classBucketSize = classBucket ? classBucket->size() : 0;
                 } else if (classBucketSize) {
-                    unsigned newClassBucketSize = rulesCountForName(m_classRules, className);
+                    auto* newClassBucket = rulesForName(m_classRules, className);
+                    unsigned newClassBucketSize = newClassBucket ? newClassBucket->size() : 0;
                     if (newClassBucketSize < classBucketSize) {
                         classSelector = current;
+                        classBucket = newClassBucket;
                         classBucketSize = newClassBucketSize;
                     }
                 }
@@ -425,13 +429,17 @@ void RuleSet::addRuleToBucket(RuleData& ruleData)
     }
 
     if (classSelector) {
-        addToRuleSet(classSelector->value(), m_classRules, ruleData);
+        if (classBucket)
+            classBucket->append(ruleData);
+        else
+            addToRuleSet(classSelector->value(), m_classRules, ruleData);
         return;
     }
 
     if (attributeSelector) {
-        addToRuleSet(attributeSelector->attribute().localName(), m_attributeLocalNameRules, ruleData);
-        addToRuleSet(attributeSelector->attribute().localNameLowercase(), m_attributeLowercaseLocalNameRules, ruleData);
+        auto& attribute = attributeSelector->attribute();
+        addToRuleSet(attribute.localName(), m_attributeLocalNameRules, ruleData);
+        addToRuleSet(attribute.localNameLowercase(), m_attributeLowercaseLocalNameRules, ruleData);
         return;
     }
 
@@ -466,8 +474,9 @@ void RuleSet::addRuleToBucket(RuleData& ruleData)
     }
 
     if (tagSelector) {
-        addToRuleSet(tagSelector->tagQName().localName(), m_tagLocalNameRules, ruleData);
-        addToRuleSet(tagSelector->tagLowercaseLocalName(), m_tagLowercaseLocalNameRules, ruleData);
+        auto& tagQName = tagSelector->tagQName();
+        addToRuleSet(tagQName.localName(), m_tagLocalNameRules, ruleData);
+        addToRuleSet(tagQName.localNameLowercase(), m_tagLowercaseLocalNameRules, ruleData);
         return;
     }
 
@@ -664,37 +673,30 @@ RuleSet::CollectedMediaQueryChanges RuleSet::evaluateDynamicMediaQueryRules(cons
     return collectedChanges;
 }
 
+#if defined(WEBKIT_IOS6)
+// Shrinking reallocates and copies the whole vector. With thousands of buckets that is thousands of
+// allocator round trips for, in most buckets, a few dozen bytes. Only pay it when there is something
+// to reclaim.
+template<typename VectorType> static inline void shrinkVectorIfWorthwhile(VectorType& vector)
+{
+    if (vector.capacity() - vector.size() >= 4)
+        vector.shrinkToFit();
+}
+#else
+template<typename VectorType> static inline void shrinkVectorIfWorthwhile(VectorType& vector)
+{
+    vector.shrinkToFit();
+}
+#endif
+
 static inline void shrinkMapVectorsToFit(RuleSet::AtomRuleMap& map)
 {
     for (auto& vector : map.values())
-        vector->shrinkToFit();
+        shrinkVectorIfWorthwhile(*vector);
 }
 
 void RuleSet::shrinkToFit()
 {
-#if defined(WEBKIT_IOS6)
-    {
-        size_t singles = 0, total = 0;
-        auto tally = [&](const AtomRuleMap& map) {
-            for (auto& entry : map) {
-                total++;
-                if (entry.value && entry.value->size() == 1)
-                    singles++;
-            }
-        };
-        tally(m_idRules);
-        tally(m_classRules);
-        tally(m_attributeLocalNameRules);
-        tally(m_attributeLowercaseLocalNameRules);
-        tally(m_tagLocalNameRules);
-        tally(m_tagLowercaseLocalNameRules);
-        tally(m_userAgentPartRules);
-        tally(m_namedPseudoElementRules);
-        if (total > 200)
-            fprintf(stderr, "[ruleset] keys=%zu singleRuleKeys=%zu classKeys=%u idKeys=%u\n",
-                total, singles, m_classRules.size(), m_idRules.size());
-    }
-#endif
     shrinkMapVectorsToFit(m_idRules);
     shrinkMapVectorsToFit(m_classRules);
     shrinkMapVectorsToFit(m_attributeLocalNameRules);
@@ -704,19 +706,19 @@ void RuleSet::shrinkToFit()
     shrinkMapVectorsToFit(m_userAgentPartRules);
     shrinkMapVectorsToFit(m_namedPseudoElementRules);
 
-    m_linkPseudoClassRules.shrinkToFit();
+    shrinkVectorIfWorthwhile(m_linkPseudoClassRules);
 #if ENABLE(VIDEO)
-    m_cuePseudoRules.shrinkToFit();
+    shrinkVectorIfWorthwhile(m_cuePseudoRules);
 #endif
-    m_hostPseudoClassRules.shrinkToFit();
-    m_slottedPseudoElementRules.shrinkToFit();
-    m_partPseudoElementRules.shrinkToFit();
-    m_focusPseudoClassRules.shrinkToFit();
-    m_focusVisiblePseudoClassRules.shrinkToFit();
-    m_fullscreenPseudoClassRules.shrinkToFit();
-    m_rootElementRules.shrinkToFit();
-    m_universalRules.shrinkToFit();
-    m_universalPseudoElementRules.shrinkToFit();
+    shrinkVectorIfWorthwhile(m_hostPseudoClassRules);
+    shrinkVectorIfWorthwhile(m_slottedPseudoElementRules);
+    shrinkVectorIfWorthwhile(m_partPseudoElementRules);
+    shrinkVectorIfWorthwhile(m_focusPseudoClassRules);
+    shrinkVectorIfWorthwhile(m_focusVisiblePseudoClassRules);
+    shrinkVectorIfWorthwhile(m_fullscreenPseudoClassRules);
+    shrinkVectorIfWorthwhile(m_rootElementRules);
+    shrinkVectorIfWorthwhile(m_universalRules);
+    shrinkVectorIfWorthwhile(m_universalPseudoElementRules);
 
     m_pageRules.shrinkToFit();
     m_features.shrinkToFit();

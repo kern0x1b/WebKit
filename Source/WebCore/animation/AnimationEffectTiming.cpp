@@ -141,7 +141,7 @@ BasicEffectTiming AnimationEffectTiming::getBasicTiming(const ResolutionData& da
 
     auto localTime = data.localTime;
 
-    auto phase = [this, data, localTime]() -> AnimationEffectPhase {
+    auto phase = [this, &data, &localTime]() -> AnimationEffectPhase {
         // 3.5.5. Animation effect phases and states
         // https://drafts.csswg.org/web-animations-2/#animation-effect-phases-and-states
 
@@ -206,7 +206,7 @@ BasicEffectTiming AnimationEffectTiming::getBasicTiming(const ResolutionData& da
         return AnimationEffectPhase::Active;
     }();
 
-    auto activeTime = [this, localTime, phase]() -> std::optional<WebAnimationTime> {
+    auto activeTime = [this, &localTime, phase]() -> std::optional<WebAnimationTime> {
         // 3.8.3.1. Calculating the active time
         // https://drafts.csswg.org/web-animations-1/#calculating-the-active-time
 
@@ -259,7 +259,7 @@ ResolvedEffectTiming AnimationEffectTiming::resolve(const ResolutionData& data) 
     auto activeTime = basicEffectTiming.activeTime;
     auto phase = basicEffectTiming.phase;
 
-    auto overallProgress = [this, phase, activeTime]() -> std::optional<double> {
+    auto overallProgress = [this, phase, &activeTime]() -> std::optional<double> {
         // 3.8.3.2. Calculating the overall progress
         // https://drafts.csswg.org/web-animations-1/#calculating-the-overall-progress
 
@@ -284,7 +284,7 @@ ResolvedEffectTiming AnimationEffectTiming::resolve(const ResolutionData& data) 
         return std::abs(overallProgress);
     }();
 
-    auto simpleIterationProgress = [this, overallProgress, phase, activeTime]() -> std::optional<double> {
+    auto simpleIterationProgress = [this, &overallProgress, phase, &activeTime]() -> std::optional<double> {
         // 3.8.3.3. Calculating the simple iteration progress
         // https://drafts.csswg.org/web-animations-1/#calculating-the-simple-iteration-progress
 
@@ -313,7 +313,7 @@ ResolvedEffectTiming AnimationEffectTiming::resolve(const ResolutionData& data) 
         return simpleIterationProgress;
     }();
 
-    auto currentIteration = [this, activeTime, phase, simpleIterationProgress, overallProgress]() -> std::optional<double> {
+    auto currentIteration = [this, &activeTime, phase, &simpleIterationProgress, &overallProgress]() -> std::optional<double> {
         // 3.8.4. Calculating the current iteration
         // https://drafts.csswg.org/web-animations-1/#calculating-the-current-iteration
 
@@ -335,7 +335,7 @@ ResolvedEffectTiming AnimationEffectTiming::resolve(const ResolutionData& data) 
         return floor(*overallProgress);
     }();
 
-    auto currentDirection = [this, currentIteration]() -> ComputedDirection {
+    auto currentDirection = [this, &currentIteration]() -> ComputedDirection {
         // 3.9.1. Calculating the directed progress
         // https://drafts.csswg.org/web-animations-1/#calculating-the-directed-progress
 
@@ -362,7 +362,7 @@ ResolvedEffectTiming AnimationEffectTiming::resolve(const ResolutionData& data) 
         return ComputedDirection::Reverse;
     }();
 
-    auto directedProgress = [simpleIterationProgress, currentDirection]() -> std::optional<double> {
+    auto directedProgress = [&simpleIterationProgress, currentDirection]() -> std::optional<double> {
         // 3.9.1. Calculating the directed progress
         // https://drafts.csswg.org/web-animations-1/#calculating-the-directed-progress
 
@@ -382,7 +382,7 @@ ResolvedEffectTiming AnimationEffectTiming::resolve(const ResolutionData& data) 
         return 1 - *simpleIterationProgress;
     }();
 
-    auto [transformedProgress, before] = [this, directedProgress, currentDirection, phase]() -> std::pair<std::optional<double>, TimingFunction::Before> {
+    auto [transformedProgress, before] = [this, &directedProgress, currentDirection, phase]() -> std::pair<std::optional<double>, TimingFunction::Before> {
         // 3.10.1. Calculating the transformed progress
         // https://drafts.csswg.org/web-animations-1/#calculating-the-transformed-progress
         auto before = TimingFunction::Before::No;

@@ -36,6 +36,7 @@
 #define WEBKIT_IOS6_STACK_TRACE_LIMIT 100u
 #endif
 
+
 #if defined(WEBKIT_IOS6)
 // Compile sooner than upstream does.
 //
@@ -62,6 +63,16 @@
 #define WEBKIT_IOS6_OPTIMIZE_SOON 1000
 #endif
 
+#if defined(WEBKIT_IOS6)
+// The ahead-of-time bytecode pass only exists on this port, but the option has to
+// exist everywhere because the option list is one macro and cannot be #if'd inside.
+// Off by default off-port so that a build that does not compile the pass also does
+// not advertise a switch that does nothing.
+#define WEBKIT_IOS6_AHEAD_OF_TIME_BYTECODE true
+#else
+#define WEBKIT_IOS6_AHEAD_OF_TIME_BYTECODE false
+#endif
+
 
 #include <JavaScriptCore/GCLogging.h>
 #include <JavaScriptCore/JSCWebPreferenceOptions.h>
@@ -69,6 +80,45 @@
 
 #if OS(DARWIN)
 #include <mach/vm_param.h>
+#endif
+
+#if defined(WEBKIT_IOS6)
+// Heap sizing. minHeapSize() for HeapType::Large is min(largeHeapSize, ramSize *
+// smallHeapRAMFraction), and that product is the floor the collector will never
+// collect below. Upstream's 32 MB against a quarter of RAM is a desktop number:
+// on a 512 MB device it hands the first VM 32 MB before a page exists, and on a
+// 128 MB device it hands it the entire application budget.
+//
+// The armv7 values are the ones the application already exports through
+// JSC_largeHeapSize and friends before WebKit starts, so this changes nothing on
+// that device - it only means the floor is still right when the environment is
+// not set. armv6 has a 128 MB machine and roughly 25-40 MB before the watchdog,
+// so the same fractions of a much smaller budget.
+#if CPU(ARM_THUMB2)
+#define WEBKIT_IOS6_LARGE_HEAP_SIZE (4 * 1024 * 1024)
+#define WEBKIT_IOS6_SMALL_HEAP_RAM_FRACTION 0.08
+#define WEBKIT_IOS6_MEDIUM_HEAP_RAM_FRACTION 0.2
+#define WEBKIT_IOS6_SMALL_HEAP_GROWTH_FACTOR 1.25
+#define WEBKIT_IOS6_MEDIUM_HEAP_GROWTH_FACTOR 1.12
+#define WEBKIT_IOS6_LARGE_HEAP_GROWTH_FACTOR 1.05
+#define WEBKIT_IOS6_MAX_REGEXP_STACK_SIZE (16 * 1024 * 1024)
+#else
+#define WEBKIT_IOS6_LARGE_HEAP_SIZE (2 * 1024 * 1024)
+#define WEBKIT_IOS6_SMALL_HEAP_RAM_FRACTION 0.04
+#define WEBKIT_IOS6_MEDIUM_HEAP_RAM_FRACTION 0.10
+#define WEBKIT_IOS6_SMALL_HEAP_GROWTH_FACTOR 1.20
+#define WEBKIT_IOS6_MEDIUM_HEAP_GROWTH_FACTOR 1.10
+#define WEBKIT_IOS6_LARGE_HEAP_GROWTH_FACTOR 1.03
+#define WEBKIT_IOS6_MAX_REGEXP_STACK_SIZE (4 * 1024 * 1024)
+#endif
+#else
+#define WEBKIT_IOS6_LARGE_HEAP_SIZE (32 * 1024 * 1024)
+#define WEBKIT_IOS6_SMALL_HEAP_RAM_FRACTION 0.25
+#define WEBKIT_IOS6_MEDIUM_HEAP_RAM_FRACTION 0.5
+#define WEBKIT_IOS6_SMALL_HEAP_GROWTH_FACTOR 2
+#define WEBKIT_IOS6_MEDIUM_HEAP_GROWTH_FACTOR 1.5
+#define WEBKIT_IOS6_LARGE_HEAP_GROWTH_FACTOR 1.24
+#define WEBKIT_IOS6_MAX_REGEXP_STACK_SIZE (128 * 1024 * 1024)
 #endif
 
 using WTF::PrintStream;
@@ -139,7 +189,7 @@ bool hasCapacityToUseLargeGigacage();
     v(Size, jitMemoryReservationAddress, 0, Restricted, "If non-zero, we will attempt to allocate JIT memory at the address provided and crash if we cannot.") \
     \
     v(Bool, forceCodeBlockLiveness, false, Normal, nullptr) \
-    v(Bool, forceICFailure, is32Bit(), Normal, nullptr) \
+    v(Bool, forceICFailure, false, Normal, nullptr) \
     v(Bool, forceUnlinkedDFG, false, Normal, nullptr) \
     \
     v(Unsigned, repatchCountForCoolDown, 8, Normal, nullptr) \
@@ -250,14 +300,14 @@ bool hasCapacityToUseLargeGigacage();
     v(Bool, verboseVisitRace, false, Normal, nullptr) \
     v(Bool, optimizeParallelSlotVisitorsForStoppedMutator, false, Normal, nullptr) \
     v(Bool, verboseHeapSnapshotLogging, true, Normal, nullptr) \
-    v(Unsigned, largeHeapSize, 32 * 1024 * 1024, Normal, nullptr) \
+    v(Unsigned, largeHeapSize, WEBKIT_IOS6_LARGE_HEAP_SIZE, Normal, nullptr) \
     v(Unsigned, mediumHeapSize, 4 * 1024 * 1024, Normal, nullptr) \
     v(Unsigned, smallHeapSize, 1 * 1024 * 1024, Normal, nullptr) \
-    v(Double, smallHeapRAMFraction, 0.25, Normal, nullptr) \
-    v(Double, smallHeapGrowthFactor, 2, Normal, nullptr) \
-    v(Double, mediumHeapRAMFraction, 0.5, Normal, nullptr) \
-    v(Double, mediumHeapGrowthFactor, 1.5, Normal, nullptr) \
-    v(Double, largeHeapGrowthFactor, 1.24, Normal, nullptr) \
+    v(Double, smallHeapRAMFraction, WEBKIT_IOS6_SMALL_HEAP_RAM_FRACTION, Normal, nullptr) \
+    v(Double, smallHeapGrowthFactor, WEBKIT_IOS6_SMALL_HEAP_GROWTH_FACTOR, Normal, nullptr) \
+    v(Double, mediumHeapRAMFraction, WEBKIT_IOS6_MEDIUM_HEAP_RAM_FRACTION, Normal, nullptr) \
+    v(Double, mediumHeapGrowthFactor, WEBKIT_IOS6_MEDIUM_HEAP_GROWTH_FACTOR, Normal, nullptr) \
+    v(Double, largeHeapGrowthFactor, WEBKIT_IOS6_LARGE_HEAP_GROWTH_FACTOR, Normal, nullptr) \
     v(Double, miniVMHeapGrowthFactor, 1.20, Normal, nullptr) \
     v(Double, heapGrowthSteepnessFactor, 2.00, Normal, nullptr) \
     v(Double, heapGrowthMaxIncrease, 3.00, Normal, nullptr) \
@@ -598,6 +648,10 @@ bool hasCapacityToUseLargeGigacage();
     \
     v(Bool, useSourceProviderCache, true, Normal, "If false, the parser will not use the source provider cache. It's good to verify everything works when this is false. Because the cache is so successful, it can mask bugs."_s) \
     v(Bool, useCodeCache, true, Normal, "If false, the unlinked byte code cache will not be used."_s) \
+    v(Bool, useAheadOfTimeBytecode, WEBKIT_IOS6_AHEAD_OF_TIME_BYTECODE, Normal, "Generate a program's function bytecode ahead of time on a background thread, in a private VM, and hand the result to the source provider's bytecode cache."_s) \
+    v(Unsigned, aheadOfTimeBytecodeMinimumSourceLength, 65536, Normal, "Programs shorter than this are not worth a background pass."_s) \
+    v(Unsigned, aheadOfTimeBytecodeMaximumSourceLength, 4194304, Normal, "Programs longer than this are refused: the pass holds an isolated copy of the source and a whole second heap of unlinked code blocks while it runs."_s) \
+    v(Unsigned, aheadOfTimeBytecodeQueueLength, 8, Normal, "Maximum number of programs waiting for the ahead-of-time bytecode thread. Each pending job pins a copy of its source."_s) \
     \
     v(Bool, useWasm, canUseWasm(), Normal, "Expose the Wasm global object."_s) \
     \

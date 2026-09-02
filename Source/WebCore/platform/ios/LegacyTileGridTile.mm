@@ -65,15 +65,29 @@ LegacyTileGridTile::LegacyTileGridTile(LegacyTileGrid* tileGrid, const IntRect& 
     }
     LegacyTileLayer* layer = m_tileLayer.get();
 
-    if (NSString *formatString = contentsFormatString(PlatformCALayer::contentsFormatForLayer()))
-        layer.contentsFormat = formatString;
+    // Most of these layers come back out of the pool, where this same code put
+    // them, so the values are already what they are about to be set to. A CA
+    // setter is a write into the layer's transaction and, for contentsScale and
+    // contentsFormat, an invalidation of its backing store; a getter is not. Only
+    // the differences are written.
+    if (NSString *formatString = contentsFormatString(PlatformCALayer::contentsFormatForLayer())) {
+        if (![formatString isEqualToString:layer.contentsFormat])
+            layer.contentsFormat = formatString;
+    }
 
     [layer setTileGrid:tileGrid];
-    [layer setOpaque:tileCache->tilesOpaque()];
-    [layer setEdgeAntialiasingMask:0];
-    [layer setNeedsLayoutOnGeometryChange:NO];
-    [layer setContentsScale:screenScale];
-    [layer setDrawsAsynchronously:tileCache->acceleratedDrawingEnabled()];
+    const BOOL opaque = tileCache->tilesOpaque();
+    if ([layer isOpaque] != opaque)
+        [layer setOpaque:opaque];
+    if ([layer edgeAntialiasingMask])
+        [layer setEdgeAntialiasingMask:0];
+    if ([layer needsLayoutOnGeometryChange])
+        [layer setNeedsLayoutOnGeometryChange:NO];
+    if ([layer contentsScale] != screenScale)
+        [layer setContentsScale:screenScale];
+    const BOOL drawsAsynchronously = tileCache->acceleratedDrawingEnabled();
+    if ([layer drawsAsynchronously] != drawsAsynchronously)
+        [layer setDrawsAsynchronously:drawsAsynchronously];
 
     // Host layer may have other sublayers. Keep the tile layers at the beginning of the array
     // so they are painted behind everything else.
@@ -128,6 +142,8 @@ void LegacyTileGridTile::showBorder(bool flag)
         [layer setBorderColor:cachedCGColor(protect(m_tileGrid->tileCache())->colorForGridTileBorder(m_tileGrid)).get()];
         [layer setBorderWidth:0.5f];
     } else {
+        if (!layer.borderWidth && !layer.borderColor)
+            return;
         [layer setBorderColor:nil];
         [layer setBorderWidth:0];
     }

@@ -54,7 +54,9 @@ struct OriginalInlineProperty {
 struct MatchResultCache::Entry : CanMakeCheckedPtr<MatchResultCache::Entry> {
     UnadjustedStyle unadjustedStyle;
     Ref<const MutableStyleProperties> inlineStyle;
-    Vector<OriginalInlineProperty> originalInlineProperties;
+    // Almost every element with inline style has a handful of properties; inline storage keeps the
+    // Entry allocation single.
+    Vector<OriginalInlineProperty, 4> originalInlineProperties;
 
     Entry(UnadjustedStyle&& unadjustedStyle, const MutableStyleProperties& inlineStyle)
         : unadjustedStyle(WTF::move(unadjustedStyle))
@@ -74,7 +76,20 @@ struct MatchResultCache::Entry : CanMakeCheckedPtr<MatchResultCache::Entry> {
     WTF_DEPRECATED_MAKE_STRUCT_FAST_ALLOCATED(MatchResultCache);
 };
 
+#if defined(WEBKIT_IOS6)
+// Five hundred and twelve, not sixty four.
+//
+// A miss here means matching selectors again for an element the page is mutating repeatedly, which
+// is what a React feed does constantly. Measured by domInteractive over four pairs: 6058-7159 ms
+// against 6176-8087, better on average though the two sets overlap. Kept because it is never worse
+// and the entries are small.
+MatchResultCache::MatchResultCache()
+    : m_maximumEntries(access("/tmp/native-small-match-cache", F_OK) == 0 ? 64 : 512)
+{
+}
+#else
 MatchResultCache::MatchResultCache() = default;
+#endif
 MatchResultCache::~MatchResultCache() = default;
 
 inline UnadjustedStyle copy(const UnadjustedStyle& other)
@@ -177,7 +192,7 @@ void MatchResultCache::update(CachedMatchResult& result, const Style::ComputedSt
 
 void MatchResultCache::updateForFastPathInherit(const Element& element, const Style::ComputedStyle& parentStyle)
 {
-    CheckedPtr entry = m_entries.get(element);
+    auto* entry = m_entries.get(element);
     if (!entry)
         return;
     entry->unadjustedStyle.style->fastPathInheritFrom(parentStyle);
@@ -192,18 +207,10 @@ void MatchResultCache::set(const Element& element, const UnadjustedStyle& unadju
 
     if (inlineStyle) {
 #if defined(WEBKIT_IOS6)
-        // Five hundred and twelve, not sixty four.
-        //
-        // A miss here means matching selectors again for an element the page is
-        // mutating repeatedly, which is what a React feed does constantly.
-        // Measured by domInteractive over four pairs: 6058-7159 ms against
-        // 6176-8087, better on average though the two sets overlap. Kept because
-        // it is never worse and the entries are small.
-        static const unsigned maximumEntries = access("/tmp/native-small-match-cache", F_OK) == 0 ? 64 : 512;
         constexpr unsigned insertsBetweenSizeChecks = 32;
         if (++m_insertsSinceSizeCheck >= insertsBetweenSizeChecks) {
             m_insertsSinceSizeCheck = 0;
-            if (m_entries.computeSize() > maximumEntries)
+            if (m_entries.computeSize() > m_maximumEntries)
                 m_entries.clear();
         }
 #endif

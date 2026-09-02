@@ -582,6 +582,12 @@ _Pragma("clang diagnostic pop") \
 static BOOL s_didSetCacheModel;
 static WebCacheModel s_cacheModel = WebCacheModelDocumentViewer;
 
+#if defined(WEBKIT_IOS6)
+// Defined in LegacyTileCache.mm. Raised while a _dispatchTileDidDraw: perform is
+// in flight so the tile cache schedules one per pass instead of one per tile.
+extern "C" int g_webkitIOS6TileDidDrawPending;
+#endif
+
 const auto WKLockdownModeEnabledKeyCFString = CFSTR(STRINGIZE_VALUE_OF(WKLockdownModeEnabled));
 const auto LDMEnabledKey = CFSTR("LDMGlobalEnabled");
 
@@ -2439,6 +2445,11 @@ static NSMutableSet *knownPluginMIMETypes()
 
 - (void)_dispatchTileDidDraw:(CALayer*)tile
 {
+#if defined(WEBKIT_IOS6)
+    // Lowered here so LegacyTileCache::drawLayer() can schedule the next one.
+    g_webkitIOS6TileDidDrawPending = 0;
+#endif
+
     id mailDelegate = [self _webMailDelegate];
     if ([mailDelegate respondsToSelector:@selector(_webthread_webView:tileDidDraw:)]) {
         [mailDelegate _webthread_webView:self tileDidDraw:tile];

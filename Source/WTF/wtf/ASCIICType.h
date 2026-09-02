@@ -92,7 +92,7 @@ template<Character CharacterType> constexpr bool isASCII(CharacterType character
 
 template<Character CharacterType> constexpr bool isASCIILower(CharacterType character)
 {
-    return character >= 'a' && character <= 'z';
+    return static_cast<unsigned>(character - 'a') <= ('z' - 'a');
 }
 
 template<Character CharacterType> constexpr CharacterType toASCIILowerUnchecked(CharacterType character)
@@ -112,7 +112,7 @@ template<Character CharacterType> constexpr bool isASCIIAlpha(CharacterType char
 
 template<Character CharacterType> constexpr bool isASCIIDigit(CharacterType character)
 {
-    return character >= '0' && character <= '9';
+    return static_cast<unsigned>(character - '0') <= ('9' - '0');
 }
 
 template<Character CharacterType> constexpr bool isASCIIAlphanumeric(CharacterType character)
@@ -122,7 +122,7 @@ template<Character CharacterType> constexpr bool isASCIIAlphanumeric(CharacterTy
 
 template<Character CharacterType> constexpr bool isASCIIHexDigit(CharacterType character)
 {
-    return isASCIIDigit(character) || (toASCIILowerUnchecked(character) >= 'a' && toASCIILowerUnchecked(character) <= 'f');
+    return isASCIIDigit(character) || static_cast<unsigned>(toASCIILowerUnchecked(character) - 'a') <= ('f' - 'a');
 }
 
 template<Character CharacterType> constexpr bool isASCIIBinaryDigit(CharacterType character)
@@ -132,7 +132,7 @@ template<Character CharacterType> constexpr bool isASCIIBinaryDigit(CharacterTyp
 
 template<Character CharacterType> constexpr bool isASCIIOctalDigit(CharacterType character)
 {
-    return character >= '0' && character <= '7';
+    return static_cast<unsigned>(character - '0') <= ('7' - '0');
 }
 
 template<Character CharacterType> constexpr bool isASCIIPrintable(CharacterType character)
@@ -178,7 +178,7 @@ template<Character CharacterType> constexpr bool isUnicodeCompatibleASCIIWhitesp
 
 template<Character CharacterType> constexpr bool isASCIIUpper(CharacterType character)
 {
-    return character >= 'A' && character <= 'Z';
+    return static_cast<unsigned>(character - 'A') <= ('Z' - 'A');
 }
 
 template<Character CharacterType> constexpr bool isNotASCIIWhitespace(CharacterType character)

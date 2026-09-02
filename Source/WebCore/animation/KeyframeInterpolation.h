@@ -30,6 +30,7 @@
 #include <WebCore/TimingFunction.h>
 #include <WebCore/WebAnimationTypes.h>
 #include <optional>
+#include <wtf/ScopedLambda.h>
 #include <wtf/Seconds.h>
 
 namespace WebCore {
@@ -58,8 +59,10 @@ public:
     virtual size_t numberOfKeyframes() const = 0;
     virtual const TimingFunction* timingFunctionForKeyframe(const Keyframe&) const = 0;
 
+    static constexpr size_t maximumIntervalEndpoints = 2;
+
     struct KeyframeInterval {
-        const Vector<const Keyframe*> endpoints;
+        const Vector<const Keyframe*, maximumIntervalEndpoints> endpoints;
         bool hasImplicitZeroKeyframe { false };
         bool hasImplicitOneKeyframe { false };
     };
@@ -70,7 +73,14 @@ public:
     using AccumulationCallback = Function<void(const Keyframe&)>;
     using InterpolationCallback = Function<void(double intervalProgress, double currentIteration, IterationCompositeOperation)>;
     using RequiresInterpolationForAccumulativeIterationCallback = Function<bool()>;
+
+    using ScopedCompositionCallback = ScopedLambda<void(const Keyframe&, CompositeOperation)>;
+    using ScopedAccumulationCallback = ScopedLambda<void(const Keyframe&)>;
+    using ScopedInterpolationCallback = ScopedLambda<void(double intervalProgress, double currentIteration, IterationCompositeOperation)>;
+    using ScopedRequiresInterpolationForAccumulativeIterationCallback = ScopedLambda<bool()>;
+
     void interpolateKeyframes(Property, const KeyframeInterval&, double iterationProgress, double currentIteration, const WebAnimationTime& iterationDuration, TimingFunction::Before, const CompositionCallback&, const AccumulationCallback&, const InterpolationCallback&, const RequiresInterpolationForAccumulativeIterationCallback&) const;
+    void interpolateKeyframes(Property, const KeyframeInterval&, double iterationProgress, double currentIteration, const WebAnimationTime& iterationDuration, TimingFunction::Before, const ScopedCompositionCallback&, const ScopedAccumulationCallback&, const ScopedInterpolationCallback&, const ScopedRequiresInterpolationForAccumulativeIterationCallback&) const;
 
     virtual ~KeyframeInterpolation() = default;
 };

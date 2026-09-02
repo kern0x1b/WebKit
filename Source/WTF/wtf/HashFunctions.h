@@ -30,6 +30,44 @@
 namespace WTF {
     // integer hash function
 
+#if defined(WEBKIT_IOS6)
+
+    // A 64x64->128 multiply costs four umull plus carry propagation on armv7, and every
+    // pointer and integer key in the engine goes through this function. Two 32-bit
+    // multiplies with the same avalanche quality in the low bits is what the table
+    // actually needs, since the index is taken as `hash & sizeMask`.
+    ALWAYS_INLINE unsigned intHash(uint32_t key)
+    {
+        key ^= key >> 16;
+        key *= 0x7feb352dU;
+        key ^= key >> 15;
+        key *= 0x846ca68bU;
+        key ^= key >> 16;
+        return key;
+    }
+
+    ALWAYS_INLINE unsigned intHash(uint64_t key)
+    {
+        return intHash(static_cast<uint32_t>(key) ^ static_cast<uint32_t>(key >> 32));
+    }
+
+    ALWAYS_INLINE unsigned intHash(uint8_t key8)
+    {
+        return intHash(static_cast<uint32_t>(key8));
+    }
+
+    ALWAYS_INLINE unsigned intHash(uint16_t key16)
+    {
+        return intHash(static_cast<uint32_t>(key16));
+    }
+
+    ALWAYS_INLINE unsigned pairIntHash(unsigned key1, unsigned key2)
+    {
+        return intHash(key1 * 277951225U + key2 * 95187966U);
+    }
+
+#else
+
     // rapidhash "mum" mixer.
     // Keep in sync with AssemblyHelpers::rapidHashMix64 and FTL rapidHashMix64 code as we need to use the same hash function.
     inline unsigned intHash(uint64_t key)
@@ -67,6 +105,8 @@ namespace WTF {
         unsigned highBits = static_cast<unsigned>(product >> ((sizeof(uint64_t) - sizeof(unsigned)) * 8));
         return highBits;
     }
+
+#endif
 
     template<typename T> struct IntHash {
         static unsigned hash(T key) { return intHash(static_cast<typename SizedUnsignedTrait<sizeof(T)>::Type>(key)); }

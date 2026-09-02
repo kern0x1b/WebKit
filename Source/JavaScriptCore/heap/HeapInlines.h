@@ -86,9 +86,16 @@ inline void Heap::writeBarrier(const JSCell* from, JSValue to)
 #if ENABLE(WRITE_BARRIER_PROFILING)
     WriteBarrierCounters::countWriteBarrier();
 #endif
+#if USE(JSVALUE32_64)
+    if (to.isCell()) [[unlikely]] {
+        if (isWithinThreshold(from->cellState(), barrierThreshold())) [[unlikely]]
+            writeBarrierSlowPath(from);
+    }
+#else
     if (!to.isCell())
         return;
     writeBarrier(from, to.asCell());
+#endif
 }
 
 inline void Heap::writeBarrier(const JSCell* from, JSCell* to)
@@ -97,9 +104,6 @@ inline void Heap::writeBarrier(const JSCell* from, JSCell* to)
     WriteBarrierCounters::countWriteBarrier();
 #endif
     ASSERT_GC_OBJECT_LOOKS_VALID(const_cast<JSCell*>(from));
-    // FIXME: above assert verifies from is never nullptr so should be unnecessary
-    if (!from) [[unlikely]]
-        return;
     if (!to) [[unlikely]]
         return;
     ASSERT_GC_OBJECT_LOOKS_VALID(to);
@@ -110,9 +114,6 @@ inline void Heap::writeBarrier(const JSCell* from, JSCell* to)
 inline void Heap::writeBarrier(const JSCell* from)
 {
     ASSERT_GC_OBJECT_LOOKS_VALID(const_cast<JSCell*>(from));
-    // FIXME: above assert verifies from is never nullptr so should be unnecessary
-    if (!from) [[unlikely]]
-        return;
     if (isWithinThreshold(from->cellState(), barrierThreshold())) [[unlikely]]
         writeBarrierSlowPath(from);
 }

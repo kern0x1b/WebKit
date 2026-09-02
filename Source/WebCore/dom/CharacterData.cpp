@@ -248,7 +248,8 @@ void CharacterData::dispatchModifiedEvent(const String& oldData)
         dispatchSubtreeModifiedEvent();
     }
 
-    InspectorInstrumentation::characterDataModified(protect(document()), *this);
+    if (InspectorInstrumentationPublic::hasFrontends()) [[unlikely]]
+        InspectorInstrumentation::characterDataModified(protect(document()), *this);
 }
 
 bool CharacterData::containsOnlyASCIIWhitespace() const

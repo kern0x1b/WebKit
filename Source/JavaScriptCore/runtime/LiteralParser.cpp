@@ -35,6 +35,7 @@
 #include "ObjectConstructor.h"
 #include <wtf/ASCIICType.h>
 #include <wtf/Range.h>
+#include <wtf/UnalignedAccess.h>
 #include <wtf/text/FastCharacterComparison.h>
 #include <wtf/text/MakeString.h>
 
@@ -734,7 +735,7 @@ static constexpr const bool safeStringLatin1CharactersInStrictJSON[256] = {
 template <typename CharType>
 static ALWAYS_INLINE bool NODELETE isJSONWhiteSpace(const CharType& c)
 {
-    return tokenTypesOfLatin1Characters[static_cast<uint8_t>(c)] == TokErrorSpace && isLatin1(c);
+    return c == ' ' || c == '\n' || c == '\t' || c == '\r';
 }
 
 template<typename CharType, JSONReviverMode reviverMode>
@@ -927,6 +928,42 @@ static ALWAYS_INLINE bool NODELETE isSafeStringCharacterForIdentifier(char16_t c
         return (c >= ' ' && isLatin1(c) && c != '\\' && c != terminator) || (c == '\t');
 }
 
+#if defined(WEBKIT_IOS6)
+template<typename CharType>
+static ALWAYS_INLINE const CharType* NODELETE findUnsafeStrictJSONStringCharacter(const CharType* ptr, const CharType* end)
+{
+    if constexpr (sizeof(CharType) == 1) {
+        constexpr uint32_t ones = 0x01010101U;
+        constexpr uint32_t highBits = 0x80808080U;
+        constexpr uint32_t quoteBytes = 0x22222222U;
+        constexpr uint32_t escapeBytes = 0x5C5C5C5CU;
+        constexpr uint32_t spaceBytes = 0x20202020U;
+        while (end - ptr >= 4) {
+            uint32_t word = WTF::unalignedLoad<uint32_t>(ptr);
+            uint32_t quotes = word ^ quoteBytes;
+            uint32_t escapes = word ^ escapeBytes;
+            uint32_t hits = (((quotes - ones) & ~quotes) | ((escapes - ones) & ~escapes) | ((word - spaceBytes) & ~word)) & highBits;
+            if (hits) {
+                for (unsigned i = 0; i < 4; ++i) {
+                    if (!safeStringLatin1CharactersInStrictJSON[ptr[i]])
+                        return ptr + i;
+                }
+            }
+            ptr += 4;
+        }
+        for (; ptr < end; ++ptr) {
+            if (!safeStringLatin1CharactersInStrictJSON[*ptr])
+                return ptr;
+        }
+        return end;
+    } else {
+        while (ptr < end && isSafeStringCharacter<SafeStringCharacterSet::Strict>(*ptr, static_cast<CharType>('"')))
+            ++ptr;
+        return ptr;
+    }
+}
+#endif
+
 template<typename CharType, JSONReviverMode reviverMode>
 template <JSONIdentifierHint hint>
 ALWAYS_INLINE TokenType LiteralParser<CharType, reviverMode>::Lexer::lexString(LiteralParserToken<CharType>& token, CharType terminator)
@@ -940,6 +977,9 @@ ALWAYS_INLINE TokenType LiteralParser<CharType, reviverMode>::Lexer::lexString(L
             while (m_ptr < m_end && isSafeStringCharacterForIdentifier<SafeStringCharacterSet::Strict>(*m_ptr, terminator))
                 ++m_ptr;
         } else {
+#if defined(WEBKIT_IOS6)
+            m_ptr = findUnsafeStrictJSONStringCharacter(m_ptr, m_end);
+#else
             using UnsignedType = SameSizeUnsignedInteger<CharType>;
             constexpr auto quoteMask = SIMD::splat<UnsignedType>('"');
             constexpr auto escapeMask = SIMD::splat<UnsignedType>('\\');
@@ -957,12 +997,17 @@ ALWAYS_INLINE TokenType LiteralParser<CharType, reviverMode>::Lexer::lexString(L
             };
 
             m_ptr = SIMD::find(std::span { m_ptr, m_end }, vectorMatch, scalarMatch);
+#endif
         }
     } else {
         if constexpr (hint == JSONIdentifierHint::MaybeIdentifier) {
             while (m_ptr < m_end && isSafeStringCharacterForIdentifier<SafeStringCharacterSet::Sloppy>(*m_ptr, terminator))
                 ++m_ptr;
         } else {
+#if defined(WEBKIT_IOS6)
+            while (m_ptr < m_end && isSafeStringCharacter<SafeStringCharacterSet::Sloppy>(*m_ptr, terminator))
+                ++m_ptr;
+#else
             using UnsignedType = SameSizeUnsignedInteger<CharType>;
             auto quoteMask = SIMD::splat<UnsignedType>(terminator);
             constexpr auto escapeMask = SIMD::splat<UnsignedType>('\\');
@@ -983,6 +1028,7 @@ ALWAYS_INLINE TokenType LiteralParser<CharType, reviverMode>::Lexer::lexString(L
             };
 
             m_ptr = SIMD::find(std::span { m_ptr, m_end }, vectorMatch, scalarMatch);
+#endif
         }
     }
 
@@ -1003,8 +1049,12 @@ TokenType LiteralParser<CharType, reviverMode>::Lexer::lexStringSlow(LiteralPars
     do {
         runStart = m_ptr;
         if (m_mode == StrictJSON) {
+#if defined(WEBKIT_IOS6)
+            m_ptr = findUnsafeStrictJSONStringCharacter(m_ptr, m_end);
+#else
             while (m_ptr < m_end && isSafeStringCharacter<SafeStringCharacterSet::Strict>(*m_ptr, terminator))
                 ++m_ptr;
+#endif
         } else {
             while (m_ptr < m_end && isSafeStringCharacter<SafeStringCharacterSet::Sloppy>(*m_ptr, terminator))
                 ++m_ptr;
@@ -1133,12 +1183,14 @@ TokenType LiteralParser<CharType, reviverMode>::Lexer::lexNumber(LiteralParserTo
     auto* start = m_ptr; // Do not include '-'.
 
     // (0 | [1-9][0-9]*)
+    uint32_t accumulator = 0;
     if (m_ptr < m_end && isASCIIDigit(*m_ptr)) [[likely]] {
         auto character = *m_ptr++;
+        accumulator = character - '0';
         if (character != '0') {
             // [0-9]*
             while (m_ptr < m_end && isASCIIDigit(*m_ptr))
-                ++m_ptr;
+                accumulator = accumulator * 10 + (*m_ptr++ - '0');
         }
     } else {
         m_lexErrorMessage = "Invalid number"_s;
@@ -1147,11 +1199,7 @@ TokenType LiteralParser<CharType, reviverMode>::Lexer::lexNumber(LiteralParserTo
 
     const int numberOfDigitsForSafeInt32 = 9; // The numbers from -999999999 to 999999999 are always in range of Int32.
     if (m_ptr < m_end && (*m_ptr != '.' && *m_ptr != 'e' && *m_ptr != 'E') && (m_ptr - start) <= numberOfDigitsForSafeInt32) {
-        int32_t result = 0;
-        const CharType* cursor = start;
-        do {
-            result = result * 10 + (*cursor++) - '0';
-        } while (cursor < m_ptr);
+        int32_t result = static_cast<int32_t>(accumulator);
 
         if (!negative) [[likely]] {
             token.type = TokNumberInt32;
@@ -1268,6 +1316,15 @@ ALWAYS_INLINE JSValue LiteralParser<CharType, reviverMode>::parsePrimitiveValue(
     case TokFalse:
         m_lexer.next();
         return jsBoolean(false);
+    default:
+        return parsePrimitiveValueError();
+    }
+}
+
+template<typename CharType, JSONReviverMode reviverMode>
+NEVER_INLINE JSValue LiteralParser<CharType, reviverMode>::parsePrimitiveValueError()
+{
+    switch (m_lexer.currentToken()->type) {
     case TokRBracket:
         m_parseErrorMessage = "Unexpected token ']'"_s;
         return { };

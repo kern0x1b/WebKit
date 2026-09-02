@@ -58,10 +58,16 @@ private:
     inline NodeType* traverseBackwardTo(const Collection&, unsigned);
     inline NodeType* traverseForwardTo(const Collection&, unsigned);
 
+#if defined(WEBKIT_IOS6)
+    using CachedListEntry = NodeType*;
+#else
+    using CachedListEntry = WeakPtr<NodeType, WeakPtrImplWithEventTargetData>;
+#endif
+
     Iterator m_current { };
     unsigned m_currentIndex { 0 };
     unsigned m_nodeCount { 0 };
-    Vector<WeakPtr<NodeType, WeakPtrImplWithEventTargetData>> m_cachedList;
+    Vector<CachedListEntry> m_cachedList;
     bool m_nodeCountValid : 1;
     bool m_listValid : 1;
 };

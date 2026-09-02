@@ -2251,6 +2251,8 @@ page/NavigationDestination.cpp
 page/NavigationHistoryEntry.cpp
 page/NavigationTransition.cpp
 page/Navigator.cpp
+page/Scheduling.cpp
+page/NavigatorScheduling.cpp
 page/NavigatorBase.cpp
 page/NavigatorGlobalPrivacyControl.cpp
 page/NavigatorLoginStatus.cpp

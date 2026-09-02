@@ -52,7 +52,11 @@ unsigned CollectionIndexCache<Collection, Iterator>::computeNodeCountUpdatingLis
 
     unsigned oldCapacity = m_cachedList.capacity();
     while (current) {
+#if defined(WEBKIT_IOS6)
+        m_cachedList.append(&*current);
+#else
         m_cachedList.append(*current);
+#endif
         unsigned traversed;
         collection.collectionTraverseForward(current, 1, traversed);
         ASSERT(traversed == (current ? 1 : 0));
@@ -130,8 +134,13 @@ inline typename CollectionIndexCache<Collection, Iterator>::NodeType* Collection
     if (m_nodeCountValid && index >= m_nodeCount)
         return nullptr;
 
-    if (m_listValid)
+    if (m_listValid) {
+#if defined(WEBKIT_IOS6)
+        return m_cachedList[index];
+#else
         return m_cachedList[index].get();
+#endif
+    }
 
     if (m_current) {
         if (index > m_currentIndex)

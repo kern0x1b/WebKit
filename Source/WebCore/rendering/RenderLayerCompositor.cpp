@@ -183,16 +183,19 @@ struct RenderLayerCompositor::CompositingState {
 
     void updateWithDescendantStateAndLayer(const CompositingState& childState, const RenderLayer& layer, const RenderLayer* ancestorLayer, const OverlapExtent& layerExtent, bool isUnchangedSubtree = false)
     {
+        // Asked five times below, and this runs once per layer of the paint-order tree.
+        const bool layerIsComposited = layer.isComposited();
+
         // Subsequent layers in the parent stacking context also need to composite.
-        subtreeIsCompositing |= childState.subtreeIsCompositing | layer.isComposited();
+        subtreeIsCompositing |= childState.subtreeIsCompositing | layerIsComposited;
         if (!isUnchangedSubtree)
             fullPaintOrderTraversalRequired |= childState.fullPaintOrderTraversalRequired;
 
         // Turn overlap testing off for later layers if it's already off, or if we have an animating transform.
         // Note that if the layer clips its descendants, there's no reason to propagate the child animation to the parent layers. That's because
         // we know for sure the animation is contained inside the clipping rectangle, which is already added to the overlap map.
-        auto canReenableOverlapTesting = [&layer] {
-            return layer.isComposited() && RenderLayerCompositor::clipsCompositingDescendants(layer);
+        auto canReenableOverlapTesting = [&layer, layerIsComposited] {
+            return layerIsComposited && RenderLayerCompositor::clipsCompositingDescendants(layer);
         };
         if ((!childState.testingOverlap && !canReenableOverlapTesting()) || layerExtent.knownToBeHaveExtentUncertainty())
             testingOverlap = false;
@@ -202,7 +205,7 @@ struct RenderLayerCompositor::CompositingState {
                 return true;
             if (!ancestorLayer)
                 return false;
-            if (!layer.isComposited())
+            if (!layerIsComposited)
                 return false;
             if (!layer.renderer().isOutOfFlowPositioned())
                 return false;
@@ -213,14 +216,14 @@ struct RenderLayerCompositor::CompositingState {
 
         hasCompositedNonContainedDescendants = computeHasCompositedNonContainedDescendants();
 
-        if ((layer.isComposited() && layer.hasBlendMode()) || (layer.hasNotIsolatedCompositedBlendingDescendants() && !layer.isolatesCompositedBlending()))
+        if ((layerIsComposited && layer.hasBlendMode()) || (layer.hasNotIsolatedCompositedBlendingDescendants() && !layer.isolatesCompositedBlending()))
             hasNotIsolatedCompositedBlendingDescendants = true;
 
-        if ((layer.isComposited() && layer.hasBackdropFilter()) || (layer.hasBackdropFilterDescendantsWithoutRoot() && !layer.isBackdropRoot()))
+        if ((layerIsComposited && layer.hasBackdropFilter()) || (layer.hasBackdropFilterDescendantsWithoutRoot() && !layer.isBackdropRoot()))
             hasBackdropFilterDescendantsWithoutRoot = true;
 
 #if HAVE(CORE_MATERIAL)
-        if (layer.isComposited() && layer.hasAppleVisualEffectRequiringBackdropFilter())
+        if (layerIsComposited && layer.hasAppleVisualEffectRequiringBackdropFilter())
             hasBackdropFilterDescendantsWithoutRoot = true;
 #endif
     }
@@ -989,7 +992,7 @@ void RenderLayerCompositor::applyToCompositedLayerIncludingDescendants(RenderLay
 {
     if (layer.isComposited())
         function(layer);
-    for (CheckedPtr childLayer = layer.firstChild(); childLayer; childLayer = childLayer->nextSibling())
+    for (SUPPRESS_UNCHECKED_LOCAL auto* childLayer = layer.firstChild(); childLayer; childLayer = childLayer->nextSibling())
         applyToCompositedLayerIncludingDescendants(*childLayer, function);
 }
 
@@ -1002,7 +1005,7 @@ void RenderLayerCompositor::updateEventRegionsRecursive(RenderLayer& layer)
     if (!layer.hasDescendantNeedingEventRegionUpdate())
         return;
 
-    for (CheckedPtr childLayer = layer.firstChild(); childLayer; childLayer = childLayer->nextSibling())
+    for (SUPPRESS_UNCHECKED_LOCAL auto* childLayer = layer.firstChild(); childLayer; childLayer = childLayer->nextSibling())
         updateEventRegionsRecursive(*childLayer);
 
     layer.clearHasDescendantNeedingEventRegionUpdate();
@@ -1083,6 +1086,35 @@ bool RenderLayerCompositor::updateCompositingLayers(CompositingUpdateType update
     LOG_WITH_STREAM(Compositing, stream << "RenderLayerCompositor " << this << " [" << m_renderView.frameView() << "] updateCompositingLayers " << updateType << " contentLayersCount " << m_contentLayersCount);
 
     TraceScope tracingScope(CompositingUpdateStart, CompositingUpdateEnd);
+
+#if defined(WEBKIT_IOS6)
+    struct CompositingUpdateTimer {
+        bool report;
+        CompositingUpdateType type;
+        MonotonicTime startedAt;
+        CompositingUpdateTimer(bool r, CompositingUpdateType t)
+            : report(r), type(t), startedAt(r ? MonotonicTime::now() : MonotonicTime()) { }
+        ~CompositingUpdateTimer()
+        {
+            if (!report)
+                return;
+            static unsigned counts[8];
+            static double totals[8];
+            static MonotonicTime lastReport;
+            unsigned index = static_cast<unsigned>(type) & 7;
+            counts[index]++;
+            totals[index] += (MonotonicTime::now() - startedAt).milliseconds();
+            MonotonicTime now = MonotonicTime::now();
+            if (now - lastReport > 3_s) {
+                lastReport = now;
+                for (unsigned i = 0; i < 8; i++) {
+                    if (counts[i])
+                        WTFLogAlways("[compositing] kind %u: %u updates, %.0f ms", i, counts[i], totals[i]);
+                }
+            }
+        }
+    } compositingUpdateTimer(getenv("WEBKIT_IOS6_COMPOSITING_LOG") != nullptr, updateType);
+#endif
 
 #if ENABLE(TREE_DEBUGGING)
     if (compositingLogEnabled())
@@ -1338,7 +1370,8 @@ void RenderLayerCompositor::computeCompositingRequirements(RenderLayer* ancestor
     unsigned treeDepth = 0;
 #endif
 
-    layer.updateDescendantDependentFlags();
+    // updateLayerListsIfNeeded() starts by calling updateDescendantDependentFlags(); calling it
+    // here as well is one more out-of-line call per layer for nothing.
     layer.updateLayerListsIfNeeded();
 
     if (!layer.hasDescendantNeedingCompositingRequirementsTraversal()
@@ -1371,6 +1404,15 @@ void RenderLayerCompositor::computeCompositingRequirements(RenderLayer* ancestor
 
     OverlapExtent layerExtent;
 
+    // Asked at up to three points below, and nothing this traversal does to the layer can change
+    // the answer: it reads self-painting, skipped-content and fragmented-flow state only.
+    std::optional<bool> canBeCompositedResult;
+    auto layerCanBeComposited = [&] {
+        if (!canBeCompositedResult)
+            canBeCompositedResult = canBeComposited(layer);
+        return *canBeCompositedResult;
+    };
+
     // Use the fact that we're composited as a hint to check for an animating transform.
     // FIXME: Maybe needsToBeComposited() should return a bitmask of reasons, to avoid the need to recompute things.
     if (willBeComposited && !layer.isRenderViewLayer())
@@ -1380,7 +1422,7 @@ void RenderLayerCompositor::computeCompositingRequirements(RenderLayer* ancestor
     overlapMap.geometryMap().pushMappingsToAncestor(&layer, ancestorLayer, respectTransforms);
 
     InlineWeakPtr<RenderLayer> providedBackingLayer;
-    if (!willBeComposited && compositingState.subtreeIsCompositing && canBeComposited(layer)) {
+    if (!willBeComposited && compositingState.subtreeIsCompositing && layerCanBeComposited()) {
         if (auto* provider = backingSharingState.backingProviderCandidateForLayer(layer, *this, overlapMap, layerExtent)) {
             provider->sharingLayers.add(layer);
             LOG_WITH_STREAM(Compositing, stream << TextStream::Repeat(treeDepth * 2, ' ') << " " << &layer << " can share with " << backingSharingState.backingProviderCandidates());
@@ -1411,7 +1453,7 @@ void RenderLayerCompositor::computeCompositingRequirements(RenderLayer* ancestor
         layer.setIndirectCompositingReason(compositingReason);
 
     // Check if the computed indirect reason will force the layer to become composited.
-    if (!willBeComposited && layer.mustCompositeForIndirectReasons() && canBeComposited(layer)) {
+    if (!willBeComposited && layer.mustCompositeForIndirectReasons() && layerCanBeComposited()) {
         LOG_WITH_STREAM(Compositing, stream << TextStream::Repeat(treeDepth * 2, ' ') << "layer " << &layer << " compositing for indirect reason " << layer.indirectCompositingReason() << " (was sharing: " << !!providedBackingLayer << ")");
         willBeComposited = true;
         providedBackingLayer = nullptr;
@@ -1500,7 +1542,7 @@ void RenderLayerCompositor::computeCompositingRequirements(RenderLayer* ancestor
                 didSpeculativelyPushOverlapContainer = true;
             }
 
-            for (CheckedPtr childLayer : layer.negativeZOrderLayers()) {
+            for (SUPPRESS_UNCHECKED_LOCAL auto* childLayer : layer.negativeZOrderLayers()) {
                 computeCompositingRequirements(&layer, *childLayer, overlapMap, currentState, backingSharingState);
 
                 // If we have to make a layer for this child, make one now so we can have a contents layer
@@ -1522,10 +1564,10 @@ void RenderLayerCompositor::computeCompositingRequirements(RenderLayer* ancestor
             }
         }
 
-        for (CheckedPtr childLayer : layer.normalFlowLayers())
+        for (SUPPRESS_UNCHECKED_LOCAL auto* childLayer : layer.normalFlowLayers())
             computeCompositingRequirements(&layer, *childLayer, overlapMap, currentState, backingSharingState);
 
-        for (CheckedPtr childLayer : layer.positiveZOrderLayers())
+        for (SUPPRESS_UNCHECKED_LOCAL auto* childLayer : layer.positiveZOrderLayers())
             computeCompositingRequirements(&layer, *childLayer, overlapMap, currentState, backingSharingState);
 
         // Set the flag to say that this layer has compositing children.
@@ -1554,7 +1596,7 @@ void RenderLayerCompositor::computeCompositingRequirements(RenderLayer* ancestor
         layer.setNeedsCompositingConfigurationUpdate();
 
     // Now check for reasons to become composited that depend on the state of descendant layers.
-    if (!willBeComposited && canBeComposited(layer)) {
+    if (!willBeComposited && layerCanBeComposited()) {
         layer.update3DTransformedDescendantStatus();
         auto indirectReason = computeIndirectCompositingReason(layer, currentState.subtreeIsCompositing, layer.has3DTransformedDescendant(), !!providedBackingLayer);
         if (indirectReason != IndirectCompositingReason::None) {
@@ -1637,7 +1679,8 @@ void RenderLayerCompositor::traverseUnchangedSubtree(RenderLayer* ancestorLayer,
     unsigned treeDepth = 0;
 #endif
 
-    layer.updateDescendantDependentFlags();
+    // updateLayerListsIfNeeded() starts by calling updateDescendantDependentFlags(); calling it
+    // here as well is one more out-of-line call per layer for nothing.
     layer.updateLayerListsIfNeeded();
 
     ASSERT(!compositingState.fullPaintOrderTraversalRequired);
@@ -1700,16 +1743,16 @@ void RenderLayerCompositor::traverseUnchangedSubtree(RenderLayer* ancestorLayer,
 #endif
 
     if (!canSkipComputeCompositingRequirementsForSubtree(layer, layerIsComposited)) {
-        for (CheckedPtr childLayer : layer.negativeZOrderLayers()) {
+        for (SUPPRESS_UNCHECKED_LOCAL auto* childLayer : layer.negativeZOrderLayers()) {
             traverseUnchangedSubtree(&layer, *childLayer, overlapMap, currentState, backingSharingState);
             if (currentState.subtreeIsCompositing)
                 ASSERT(layerIsComposited);
         }
 
-        for (CheckedPtr childLayer : layer.normalFlowLayers())
+        for (SUPPRESS_UNCHECKED_LOCAL auto* childLayer : layer.normalFlowLayers())
             traverseUnchangedSubtree(&layer, *childLayer, overlapMap, currentState, backingSharingState);
 
-        for (CheckedPtr childLayer : layer.positiveZOrderLayers())
+        for (SUPPRESS_UNCHECKED_LOCAL auto* childLayer : layer.positiveZOrderLayers())
             traverseUnchangedSubtree(&layer, *childLayer, overlapMap, currentState, backingSharingState);
 
         // Set the flag to say that this layer has compositing children.
@@ -1766,7 +1809,8 @@ void RenderLayerCompositor::collectViewTransitionNewContentLayers(RenderLayer& l
 
 void RenderLayerCompositor::updateBackingAndHierarchy(RenderLayer& layer, Vector<Ref<GraphicsLayer>>& childLayersOfEnclosingLayer, UpdateBackingTraversalState& traversalState, ScrollingTreeState& scrollingTreeState, OptionSet<UpdateLevel> updateLevel)
 {
-    layer.updateDescendantDependentFlags();
+    // updateLayerListsIfNeeded() starts by calling updateDescendantDependentFlags(); calling it
+    // here as well is one more out-of-line call per layer for nothing.
     layer.updateLayerListsIfNeeded();
 
     bool layerNeedsUpdate = !updateLevel.isEmpty();
@@ -1876,19 +1920,19 @@ void RenderLayerCompositor::updateBackingAndHierarchy(RenderLayer& layer, Vector
     };
 
     if (requireDescendantTraversal) {
-        for (CheckedPtr renderLayer : layer.negativeZOrderLayers()) {
+        for (SUPPRESS_UNCHECKED_LOCAL auto* renderLayer : layer.negativeZOrderLayers()) {
             updateBackingAndHierarchy(*renderLayer, childList, traversalStateForDescendants, scrollingStateForDescendants, updateLevel);
             appendSVGSegmentLayerIfNecessary(*renderLayer);
         }
 
         appendForegroundLayerIfNecessary();
 
-        for (CheckedPtr renderLayer : layer.normalFlowLayers()) {
+        for (SUPPRESS_UNCHECKED_LOCAL auto* renderLayer : layer.normalFlowLayers()) {
             updateBackingAndHierarchy(*renderLayer, childList, traversalStateForDescendants, scrollingStateForDescendants, updateLevel);
             appendSVGSegmentLayerIfNecessary(*renderLayer);
         }
 
-        for (CheckedPtr renderLayer : layer.positiveZOrderLayers()) {
+        for (SUPPRESS_UNCHECKED_LOCAL auto* renderLayer : layer.positiveZOrderLayers()) {
             updateBackingAndHierarchy(*renderLayer, childList, traversalStateForDescendants, scrollingStateForDescendants, updateLevel);
             appendSVGSegmentLayerIfNecessary(*renderLayer);
         }
@@ -2036,26 +2080,26 @@ void RenderLayerCompositor::adjustOverflowScrollbarContainerLayers(RenderLayer& 
     if (layersClippedByScrollers.isEmpty())
         return;
 
-    HashMap<CheckedPtr<RenderLayer>, CheckedPtr<RenderLayer>> overflowScrollToLastContainedLayerMap;
+    HashMap<RenderLayer*, RenderLayer*> overflowScrollToLastContainedLayerMap;
 
-    for (CheckedPtr clippedLayer : layersClippedByScrollers) {
+    for (SUPPRESS_UNCHECKED_LOCAL auto* clippedLayer : layersClippedByScrollers) {
         auto* clippingStack = clippedLayer->backing()->ancestorClippingStack();
 
         for (const auto& stackEntry : clippingStack->stack()) {
             if (!stackEntry.clipData.isOverflowScroll)
                 continue;
 
-            if (CheckedPtr layer = stackEntry.clipData.clippingLayer.get())
+            if (SUPPRESS_UNCHECKED_LOCAL auto* layer = stackEntry.clipData.clippingLayer.get())
                 overflowScrollToLastContainedLayerMap.set(layer, clippedLayer);
         }
     }
 
-    for (CheckedPtr overflowScrollingLayer : overflowScrollLayers) {
+    for (SUPPRESS_UNCHECKED_LOCAL auto* overflowScrollingLayer : overflowScrollLayers) {
         auto it = overflowScrollToLastContainedLayerMap.find(overflowScrollingLayer);
         if (it == overflowScrollToLastContainedLayerMap.end())
             continue;
     
-        CheckedPtr lastContainedDescendant = it->value;
+        SUPPRESS_UNCHECKED_LOCAL auto* lastContainedDescendant = it->value;
         if (!lastContainedDescendant || !lastContainedDescendant->isComposited())
             continue;
 
@@ -2399,7 +2443,7 @@ static void clearBackingSharingWithinStackingContext(RenderLayer& stackingContex
     if (&curLayer != &stackingContextRoot && curLayer.isStackingContext())
         return;
 
-    for (CheckedPtr child = curLayer.firstChild(); child; child = child->nextSibling()) {
+    for (SUPPRESS_UNCHECKED_LOCAL auto* child = curLayer.firstChild(); child; child = child->nextSibling()) {
         if (child->isComposited())
             child->backing()->clearBackingSharingLayers({ });
 
@@ -2660,10 +2704,8 @@ void RenderLayerCompositor::computeExtent(const LayerOverlapMap& overlapMap, con
     if (extent.extentComputed)
         return;
 
-    auto markExtentAsComputed = WTF::makeScopeExit([&]() {
-        extent.extentComputed = true;
-    });
-
+    // Nothing below returns early, so the flag can just be set at the end rather than through a
+    // scope guard, which the compiler has to keep alive across the whole body.
     LayoutRect layerBounds;
     if (extent.hasTransformAnimation)
         extent.animationCausesExtentUncertainty = !layer.getOverlapBoundsIncludingChildrenAccountingForTransformAnimations(layerBounds);
@@ -2696,6 +2738,8 @@ void RenderLayerCompositor::computeExtent(const LayerOverlapMap& overlapMap, con
         // rect that covers all the locations that the fixed element could move to.
         extent.bounds = m_renderView.frameView().fixedScrollableAreaBoundsInflatedForScrolling(extent.bounds);
     }
+
+    extent.extentComputed = true;
 }
 
 enum class AncestorTraversal { Continue, Stop };
@@ -2705,9 +2749,9 @@ template <typename Function>
 static AncestorTraversal traverseAncestorLayers(const RenderLayer& layer, Function&& function)
 {
     auto positioningBehavior = layer.renderer().style().position();
-    CheckedPtr nextPaintOrderParent = layer.paintOrderParent();
+    SUPPRESS_UNCHECKED_LOCAL const RenderLayer* nextPaintOrderParent = layer.paintOrderParent();
 
-    for (CheckedPtr<const RenderLayer> ancestorLayer = layer.parent(); ancestorLayer; ancestorLayer = ancestorLayer->parent()) {
+    for (SUPPRESS_UNCHECKED_LOCAL const RenderLayer* ancestorLayer = layer.parent(); ancestorLayer; ancestorLayer = ancestorLayer->parent()) {
         bool inContainingBlockChain = true;
 
         switch (positioningBehavior) {
@@ -2806,9 +2850,9 @@ void RenderLayerCompositor::addToOverlapMap(LayerOverlapMap& overlapMap, const R
     if (layer.isRenderViewLayer())
         return;
 
+    // computeClippedOverlapBounds() has already computed the clipping scopes.
     auto clippedBounds = computeClippedOverlapBounds(overlapMap, layer, extent);
-
-    computeClippingScopes(layer, extent);
+    ASSERT(extent.clippingScopesComputed);
     overlapMap.add(layer, clippedBounds, extent.clippingScopes);
 }
 
@@ -2829,13 +2873,13 @@ void RenderLayerCompositor::addDescendantsToOverlapMapRecursive(LayerOverlapMap&
     LayerListMutationDetector mutationChecker(const_cast<RenderLayer&>(layer));
 #endif
 
-    for (CheckedPtr renderLayer : layer.negativeZOrderLayers())
+    for (SUPPRESS_UNCHECKED_LOCAL auto* renderLayer : layer.negativeZOrderLayers())
         addDescendantsToOverlapMapRecursive(overlapMap, *renderLayer, &layer);
 
-    for (CheckedPtr renderLayer : layer.normalFlowLayers())
+    for (SUPPRESS_UNCHECKED_LOCAL auto* renderLayer : layer.normalFlowLayers())
         addDescendantsToOverlapMapRecursive(overlapMap, *renderLayer, &layer);
 
-    for (CheckedPtr renderLayer : layer.positiveZOrderLayers())
+    for (SUPPRESS_UNCHECKED_LOCAL auto* renderLayer : layer.positiveZOrderLayers())
         addDescendantsToOverlapMapRecursive(overlapMap, *renderLayer, &layer);
     
     if (ancestorLayer)
@@ -3193,14 +3237,14 @@ void RenderLayerCompositor::recursiveRepaintLayer(RenderLayer& layer)
 #endif
 
     if (layer.hasCompositingDescendant()) {
-        for (CheckedPtr renderLayer : layer.negativeZOrderLayers())
+        for (SUPPRESS_UNCHECKED_LOCAL auto* renderLayer : layer.negativeZOrderLayers())
             recursiveRepaintLayer(*renderLayer);
 
-        for (CheckedPtr renderLayer : layer.positiveZOrderLayers())
+        for (SUPPRESS_UNCHECKED_LOCAL auto* renderLayer : layer.positiveZOrderLayers())
             recursiveRepaintLayer(*renderLayer);
     }
 
-    for (CheckedPtr renderLayer : layer.normalFlowLayers())
+    for (SUPPRESS_UNCHECKED_LOCAL auto* renderLayer : layer.normalFlowLayers())
         recursiveRepaintLayer(*renderLayer);
 }
 
@@ -3209,7 +3253,7 @@ bool RenderLayerCompositor::layerRepaintTargetsBackingSharingLayer(RenderLayer& 
     if (sharingState.backingProviderCandidates().isEmpty())
         return false;
 
-    for (CheckedPtr<const RenderLayer> currLayer = &layer; currLayer; currLayer = currLayer->paintOrderParent()) {
+    for (SUPPRESS_UNCHECKED_LOCAL const RenderLayer* currLayer = &layer; currLayer; currLayer = currLayer->paintOrderParent()) {
         if (compositedWithOwnBackingStore(*currLayer))
             return false;
         
@@ -4385,7 +4429,7 @@ ViewportConstrainedSublayers RenderLayerCompositor::viewportConstrainedSublayers
     if (layer.renderer().effectiveCapturedInViewTransition())
         return None;
 
-    for (CheckedPtr ancestor = layer.parent(); ancestor; ancestor = ancestor->parent()) {
+    for (SUPPRESS_UNCHECKED_LOCAL auto* ancestor = layer.parent(); ancestor; ancestor = ancestor->parent()) {
         if (ancestor->hasCompositedScrollableOverflow())
             return sublayersForViewportConstrainedLayer();
 
@@ -5500,17 +5544,17 @@ bool RenderLayerCompositor::layerHas3DContent(const RenderLayer& layer) const
     LayerListMutationDetector mutationChecker(const_cast<RenderLayer&>(layer));
 #endif
 
-    for (CheckedPtr renderLayer : layer.negativeZOrderLayers()) {
+    for (SUPPRESS_UNCHECKED_LOCAL auto* renderLayer : layer.negativeZOrderLayers()) {
         if (layerHas3DContent(*renderLayer))
             return true;
     }
 
-    for (CheckedPtr renderLayer : layer.positiveZOrderLayers()) {
+    for (SUPPRESS_UNCHECKED_LOCAL auto* renderLayer : layer.positiveZOrderLayers()) {
         if (layerHas3DContent(*renderLayer))
             return true;
     }
 
-    for (CheckedPtr renderLayer : layer.normalFlowLayers()) {
+    for (SUPPRESS_UNCHECKED_LOCAL auto* renderLayer : layer.normalFlowLayers()) {
         if (layerHas3DContent(*renderLayer))
             return true;
     }

@@ -37,11 +37,16 @@ namespace CSS {
 
 WebCore::Color createColor(const ColorLayers& value, PlatformColorResolutionState& state)
 {
+    if (value.colors.isEmpty()) [[unlikely]]
+        return WebCore::Color::transparentBlack;
+
+    if (value.colors.size() == 1) [[likely]]
+        return createColor(value.colors[0], state);
+
     PlatformColorResolutionStateNester nester { state };
 
     auto resolver = ColorLayersResolver {
         .blendMode = value.blendMode,
-        // FIXME: This should be made into a lazy transformed range to avoid the unnecessary temporary allocation.
         .colors = value.colors.map([&](const auto& color) {
             return createColor(color, state);
         })

@@ -194,4 +194,55 @@ inline void CSSParserToken::updateCharacters(std::span<const CharacterType> char
     m_valueDataCharRaw = characters.data();
 }
 
+// The tokenizer runs one of these per token and returns the result by value; defining them here
+// lets the token be built in place instead of through an out-of-line call and a copy.
+
+inline CSSParserToken::CSSParserToken(CSSParserTokenType type, BlockType blockType)
+    : m_type(type)
+    , m_blockType(blockType)
+{
+}
+
+inline CSSParserToken::CSSParserToken(unsigned nonNewlineWhitespaceCount)
+    : m_type(NonNewlineWhitespaceToken)
+    , m_blockType(NotBlock)
+    , m_whitespaceCount(nonNewlineWhitespaceCount)
+{
+}
+
+inline CSSParserToken::CSSParserToken(CSSParserTokenType type, char16_t c)
+    : m_type(type)
+    , m_blockType(NotBlock)
+    , m_delimiter(c)
+{
+    ASSERT(m_type == DelimiterToken);
+}
+
+inline CSSParserToken::CSSParserToken(CSSParserTokenType type, StringView value, BlockType blockType)
+    : m_type(type)
+    , m_blockType(blockType)
+    , m_id(-1)
+{
+    initValueFromStringView(value);
+}
+
+inline CSSParserToken::CSSParserToken(double numericValue, NumericValueType numericValueType, NumericSign sign, StringView originalText)
+    : m_type(NumberToken)
+    , m_blockType(NotBlock)
+    , m_numericValueType(numericValueType)
+    , m_numericSign(sign)
+    , m_unit(static_cast<unsigned>(CSSUnitType::CSS_NUMBER))
+    , m_numericValue(numericValue)
+{
+    initValueFromStringView(originalText);
+}
+
+inline CSSParserToken::CSSParserToken(HashTokenType type, StringView value)
+    : m_type(HashToken)
+    , m_blockType(NotBlock)
+    , m_hashTokenType(type)
+{
+    initValueFromStringView(value);
+}
+
 } // namespace WebCore

@@ -106,7 +106,7 @@ LineLayoutResult TextOnlySimpleLineBuilder::layoutInlineContent(const LineInput&
     }
 
     initialize(lineInput.needsLayoutRange, lineInput.initialLogicalRect, previousLine, isFirstFormattedLineCandidate);
-    CheckedRef rootStyle = this->rootStyle();
+    auto& rootStyle = this->rootStyle();
     auto placedContentEnd = TextUtil::isWrappingAllowed(rootStyle) ? placeInlineTextContent(rootStyle, lineInput.needsLayoutRange) : placeNonWrappingInlineTextContent(rootStyle, lineInput.needsLayoutRange);
     auto result = m_line.close();
 
@@ -526,9 +526,9 @@ bool TextOnlySimpleLineBuilder::isEligibleForSimplifiedInlineLayoutByStyle(const
         return true;
     };
 
-    CheckedRef style = box.style();
-    CheckedRef firstLineStyle = box.firstLineStyle();
-    return isEligibleByStyle(style.get()) && (style.ptr() == firstLineStyle.ptr() || isEligibleByStyle(firstLineStyle.get()));
+    auto& style = box.style();
+    auto& firstLineStyle = box.firstLineStyle();
+    return isEligibleByStyle(style) && (&style == &firstLineStyle || isEligibleByStyle(firstLineStyle));
 }
 
 bool TextOnlySimpleLineBuilder::isEligibleForSimplifiedDisplayBuild(const ElementBox& rootBlockContainer)

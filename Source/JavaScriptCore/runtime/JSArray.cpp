@@ -81,14 +81,13 @@ static ALWAYS_INLINE bool tryGrowAndShiftButterflyRight(JSObject* object, VM& vm
     if (startIndex)
         memcpy(newData, oldData, startIndex * sizeof(ElementType));
 
-    for (unsigned i = startIndex; i < startIndex + count; ++i)
-        clearElement(newData[i]);
+    clearArray(newData + startIndex, count);
 
     if (unsigned moveCount = oldLength - startIndex)
         memcpy(newData + startIndex + count, oldData + startIndex, moveCount * sizeof(ElementType));
 
-    for (unsigned i = oldLength + count; i < newVectorLength; ++i)
-        clearElement(newData[i]);
+    if (newVectorLength > oldLength + count)
+        clearArray(newData + oldLength + count, newVectorLength - (oldLength + count));
 
     newButterfly->setVectorLength(newVectorLength);
     newButterfly->setPublicLength(newLength);
@@ -126,13 +125,10 @@ JSArray* JSArray::tryCreateUninitializedRestricted(ObjectInitializationScope& sc
         butterfly = Butterfly::fromBase(temp, 0, outOfLineStorage);
         butterfly->setVectorLength(vectorLength);
         butterfly->setPublicLength(initialLength);
-        if (hasDouble(indexingType)) {
-            for (unsigned i = initialLength; i < vectorLength; ++i)
-                butterfly->contiguousDouble().atUnsafe(i) = PNaN;
-        } else {
-            for (unsigned i = initialLength; i < vectorLength; ++i)
-                butterfly->contiguous().atUnsafe(i).clear();
-        }
+        if (hasDouble(indexingType))
+            clearArray(butterfly->contiguousDouble().data() + initialLength, vectorLength - initialLength);
+        else
+            clearArray(butterfly->contiguous().data() + initialLength, vectorLength - initialLength);
     } else {
         ASSERT(
             indexingType == ArrayWithSlowPutArrayStorage
@@ -151,8 +147,7 @@ JSArray* JSArray::tryCreateUninitializedRestricted(ObjectInitializationScope& sc
         storage->m_indexBias = indexBias;
         storage->m_sparseMap.clear();
         storage->m_numValuesInVector = initialLength;
-        for (unsigned i = initialLength; i < vectorLength; ++i)
-            storage->m_vector[i].clear();
+        clearArray(storage->m_vector + initialLength, vectorLength - initialLength);
     }
 
     JSArray* result = createWithButterfly(vm, deferralContext, structure, butterfly);
@@ -174,17 +169,13 @@ void JSArray::eagerlyInitializeButterfly(ObjectInitializationScope& scope, JSArr
     // ObjectInitializationScope::notifyInitialized() will verify that all elements are
     // initialized.
     if (!hasAnyArrayStorage(indexingType)) [[likely]] {
-        if (hasDouble(indexingType)) {
-            for (unsigned i = 0; i < initialLength; ++i)
-                butterfly->contiguousDouble().atUnsafe(i) = PNaN;
-        } else {
-            for (unsigned i = 0; i < initialLength; ++i)
-                butterfly->contiguous().atUnsafe(i).clear();
-        }
+        if (hasDouble(indexingType))
+            clearArray(butterfly->contiguousDouble().data(), initialLength);
+        else
+            clearArray(butterfly->contiguous().data(), initialLength);
     } else {
         ArrayStorage* storage = butterfly->arrayStorage();
-        for (unsigned i = 0; i < initialLength; ++i)
-            storage->m_vector[i].clear();
+        clearArray(storage->m_vector, initialLength);
     }
     scope.notifyInitialized(array);
 }
@@ -387,10 +378,14 @@ bool JSArray::unshiftCountSlowCase(const AbstractLocker&, VM& vm, DeferGC&, bool
     ASSERT(storage->vectorLength() <= MAX_STORAGE_VECTOR_LENGTH && (MAX_STORAGE_VECTOR_LENGTH - storage->vectorLength()) >= storage->m_indexBias);
     unsigned currentCapacity = storage->vectorLength() + storage->m_indexBias;
     // The calculation of desiredCapacity won't overflow, due to the range of MAX_STORAGE_VECTOR_LENGTH.
-    // FIXME: This code should be fixed to avoid internal fragmentation. It's not super high
-    // priority since increaseVectorLength() will "fix" any mistakes we make, but it would be cool
-    // to get this right eventually.
-    unsigned desiredCapacity = std::min(MAX_STORAGE_VECTOR_LENGTH, std::max(BASE_ARRAY_STORAGE_VECTOR_LEN, requiredVectorLength) << 1);
+    // Compute desired capacity using size-class growth to avoid fragmentation:
+    // for small arrays, double; for larger arrays, grow by 1.5x for tighter packing.
+    unsigned baseRequired = std::max(BASE_ARRAY_STORAGE_VECTOR_LEN, requiredVectorLength);
+    unsigned desiredCapacity;
+    if (baseRequired <= 128)
+        desiredCapacity = std::min(MAX_STORAGE_VECTOR_LENGTH, baseRequired << 1);
+    else
+        desiredCapacity = std::min(MAX_STORAGE_VECTOR_LENGTH, baseRequired + (baseRequired >> 1));
 
     // Step 2:
     // We're either going to choose to allocate a new ArrayStorage, or we're going to reuse the existing one.
@@ -577,10 +572,13 @@ bool JSArray::fastFill(VM& vm, unsigned startIndex, unsigned endIndex, JSValue v
 #endif
         vm.writeBarrier(this);
     } else {
-        // FIXME: https://bugs.webkit.org/show_bug.cgi?id=283786
-        auto contiguousStorage = butterfly()->contiguous();
-        for (unsigned i = startIndex; i < endIndex; ++i)
-            contiguousStorage.at(this, i).setWithoutWriteBarrier(value);
+        auto* data = butterfly()->contiguous().data();
+        auto pattern = std::bit_cast<const WriteBarrier<Unknown>>(JSValue::encode(value));
+#if OS(DARWIN)
+        memset_pattern8(data + startIndex, &pattern, sizeof(JSValue) * (endIndex - startIndex));
+#else
+        std::fill(data + startIndex, data + endIndex, pattern);
+#endif
         vm.writeBarrier(this);
     }
 
@@ -831,16 +829,16 @@ std::optional<bool> JSArray::fastIncludes(JSGlobalObject* globalObject, JSValue 
         auto& butterfly = *this->butterfly();
         auto data = butterfly.contiguous().data();
 
-        if (searchElement.isObject()) {
+        bool searchElementIsUndefined = searchElement.isUndefined();
+        if (!searchElementIsUndefined && !searchElement.isNumber() && !searchElement.isString() && !searchElement.isBigInt()) {
             auto* result = std::bit_cast<const WriteBarrier<Unknown>*>(WTF::find64(std::bit_cast<const uint64_t*>(data + index), JSValue::encode(searchElement), length - index));
             if (result)
                 return true;
             return false;
         }
 
-        bool searchElementIsUndefined = searchElement.isUndefined();
         for (; index < length; ++index) {
-            JSValue value = data[index].get();
+            JSValue value = loadElementUnordered(data[index]);
             if (!value) {
                 if (searchElementIsUndefined)
                     return true;
@@ -1146,13 +1144,10 @@ bool JSArray::appendMemcpy(JSGlobalObject* globalObject, VM& vm, unsigned startI
 
     if (otherType == ArrayWithUndecided) [[unlikely]] {
         auto* butterfly = this->butterfly();
-        if (type == ArrayWithDouble) {
-            for (unsigned i = startIndex; i < newLength; ++i)
-                butterfly->contiguousDouble().at(this, i) = PNaN;
-        } else {
-            for (unsigned i = startIndex; i < newLength; ++i)
-                butterfly->contiguousInt32().at(this, i).setWithoutWriteBarrier(JSValue());
-        }
+        if (type == ArrayWithDouble)
+            clearArray(butterfly->contiguousDouble().data() + startIndex, newLength - startIndex);
+        else
+            clearArray(butterfly->contiguousInt32().data() + startIndex, newLength - startIndex);
     } else if (type == ArrayWithDouble) {
         auto data = butterfly()->contiguousDouble().data();
         unsigned index = startIndex;
@@ -1214,13 +1209,10 @@ bool JSArray::appendMemcpy(JSGlobalObject* globalObject, VM& vm, unsigned startI
 
     if (otherType == ArrayWithUndecided) [[unlikely]] {
         auto* butterfly = this->butterfly();
-        if (type == ArrayWithDouble) {
-            for (unsigned i = startIndex; i < newLength; ++i)
-                butterfly->contiguousDouble().at(this, i) = PNaN;
-        } else {
-            for (unsigned i = startIndex; i < newLength; ++i)
-                butterfly->contiguousInt32().at(this, i).setWithoutWriteBarrier(JSValue());
-        }
+        if (type == ArrayWithDouble)
+            clearArray(butterfly->contiguousDouble().data() + startIndex, newLength - startIndex);
+        else
+            clearArray(butterfly->contiguousInt32().data() + startIndex, newLength - startIndex);
     } else if (type == ArrayWithDouble) {
         // Double array storage do not need to be safe against GC since they are not scanned.
         memcpy(butterfly()->contiguousDouble().data() + startIndex, otherArray->butterfly()->contiguousDouble().data(), sizeof(double) * otherLength);
@@ -1337,7 +1329,7 @@ JSValue JSArray::pop(JSGlobalObject* globalObject)
             return jsUndefined();
         
         RELEASE_ASSERT(length < butterfly->vectorLength());
-        JSValue value = butterfly->contiguous().at(this, length).get();
+        JSValue value = loadElementUnordered(butterfly->contiguous().at(this, length));
         if (value) {
             butterfly->contiguous().at(this, length).clear();
             butterfly->setPublicLength(length);
@@ -1375,9 +1367,8 @@ JSValue JSArray::pop(JSGlobalObject* globalObject)
         unsigned index = length - 1;
         if (index < storage->vectorLength()) {
             WriteBarrier<Unknown>& valueSlot = storage->m_vector[index];
-            if (valueSlot) {
+            if (JSValue element = loadElementUnordered(valueSlot)) {
                 --storage->m_numValuesInVector;
-                JSValue element = valueSlot.get();
                 valueSlot.clear();
             
                 RELEASE_ASSERT(isLengthWritable());
@@ -1434,7 +1425,7 @@ JSValue JSArray::fastShift(VM& vm)
         if (length > shiftThreshold) [[unlikely]]
             return { };
 
-        JSValue result = butterfly->contiguous().at(this, 0).get();
+        JSValue result = loadElementUnordered(butterfly->contiguous().at(this, 0));
         if (!result)
             return { };
 
@@ -1706,7 +1697,7 @@ bool JSArray::shiftCountWithAnyIndexingType(JSGlobalObject* globalObject, unsign
         if (moveCount) {
             if (holesMustForwardToPrototype()) [[unlikely]] {
                 for (unsigned i = startIndex; i < end; ++i) {
-                    JSValue v = butterfly->contiguous().at(this, i + count).get();
+                    JSValue v = loadElementUnordered(butterfly->contiguous().at(this, i + count));
                     if (!v) [[unlikely]] {
                         startIndex = i;
                         return shiftCountWithArrayStorage(vm, startIndex, count, ensureArrayStorage(vm));
@@ -2025,10 +2016,10 @@ void JSArray::fillArgList(JSGlobalObject* globalObject, MarkedArgumentBuffer& ar
     }
     
     for (; i < vectorEnd; ++i) {
-        WriteBarrier<Unknown>& v = vector[i];
+        JSValue v = loadElementUnordered(vector[i]);
         if (!v)
             break;
-        args.append(v.get());
+        args.append(v);
     }
 
     // FIXME: What prevents this from being called with a RuntimeArray? The length function will always return 0 in that case.
@@ -2097,10 +2088,10 @@ void JSArray::copyToArguments(JSGlobalObject* globalObject, JSValue* firstElemen
     }
     
     for (; i < vectorEnd; ++i) {
-        WriteBarrier<Unknown>& v = vector[i];
+        JSValue v = loadElementUnordered(vector[i]);
         if (!v)
             break;
-        firstElementDest[i - offset] = v.get();
+        firstElementDest[i - offset] = v;
     }
     
     for (; i < length; ++i) {
@@ -2374,7 +2365,7 @@ static uint64_t calculateFlattenedLength(JSGlobalObject* globalObject, JSArray* 
     case ArrayWithInt32: {
         auto* sourceBuffer = sourceArray->butterfly()->contiguous().data();
         for (uint64_t i = 0; i < sourceLength; ++i) {
-            JSValue element = sourceBuffer[i].get();
+            JSValue element = loadElementUnordered(sourceBuffer[i]);
             if (!element) [[unlikely]]
                 continue;
             resultLength++;
@@ -2388,7 +2379,7 @@ static uint64_t calculateFlattenedLength(JSGlobalObject* globalObject, JSArray* 
     case ArrayWithContiguous: {
         auto* sourceBuffer = sourceArray->butterfly()->contiguous().data();
         for (uint64_t i = 0; i < sourceLength; ++i) {
-            JSValue element = sourceBuffer[i].get();
+            JSValue element = loadElementUnordered(sourceBuffer[i]);
             if (!element) [[unlikely]]
                 continue;
             if (depth > 0 && isJSArray(element)) {
@@ -2460,7 +2451,7 @@ static uint64_t fastFlatIntoBuffer(JSGlobalObject* globalObject, T* resultBuffer
         for (uint64_t i = 0; i < sourceLength; ++i) {
             if (resultIndex >= vectorLength) [[unlikely]]
                 return std::numeric_limits<uint64_t>::max();
-            JSValue element = sourceBuffer[i].get();
+            JSValue element = loadElementUnordered(sourceBuffer[i]);
             if (!element) [[unlikely]]
                 continue;
             if constexpr (std::is_same_v<T, double>)
@@ -2476,7 +2467,7 @@ static uint64_t fastFlatIntoBuffer(JSGlobalObject* globalObject, T* resultBuffer
         for (uint64_t i = 0; i < sourceLength; ++i) {
             if (resultIndex >= vectorLength) [[unlikely]]
                 return std::numeric_limits<uint64_t>::max();
-            JSValue element = sourceBuffer[i].get();
+            JSValue element = loadElementUnordered(sourceBuffer[i]);
             if (!element) [[unlikely]]
                 continue;
             if (depth > 0 && isJSArray(element)) {

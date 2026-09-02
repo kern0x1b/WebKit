@@ -63,7 +63,7 @@ public:
     WEBCORE_EXPORT EventListenerMap();
 
     bool isEmpty() const { return m_entries.isEmpty(); }
-    bool contains(const AtomString& eventType) const { return find(eventType); }
+    bool contains(const AtomString& eventType) const { return const_cast<EventListenerMap*>(this)->findInline(eventType); }
     bool NODELETE containsCapturing(const AtomString& eventType) const;
     bool NODELETE containsActive(const AtomString& eventType) const;
 
@@ -77,8 +77,16 @@ public:
     void replacePreservingOptions(const AtomString& eventType, EventListener& oldListener, Ref<EventListener>&& newListener, bool useCapture = false);
     bool add(const AtomString& eventType, Ref<EventListener>&&, const RegisteredEventListener::Options&);
     bool remove(const AtomString& eventType, EventListener&, bool useCapture);
+    EventListenerVector* NODELETE findInline(const AtomString& eventType)
+    {
+        for (auto& entry : m_entries) {
+            if (entry.first.impl() == eventType.impl())
+                return &entry.second;
+        }
+        return nullptr;
+    }
     WEBCORE_EXPORT EventListenerVector* NODELETE find(const AtomString& eventType);
-    const EventListenerVector* find(const AtomString& eventType) const { return const_cast<EventListenerMap*>(this)->find(eventType); }
+    const EventListenerVector* find(const AtomString& eventType) const { return const_cast<EventListenerMap*>(this)->findInline(eventType); }
     Vector<AtomString> eventTypes() const;
 
     template<typename CallbackType>

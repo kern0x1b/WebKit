@@ -59,7 +59,9 @@ BasicBlock::BasicBlock(BytecodeIndex bytecodeBegin, unsigned numArguments, unsig
     , variablesAtTail(numArguments, numLocals, numTmps)
     , valuesAtHead(numArguments, numLocals, numTmps)
     , valuesAtTail(numArguments, numLocals, numTmps)
+#if !defined(WEBKIT_IOS6)
     , intersectionOfPastValuesAtHead(numArguments, numLocals, numTmps, AbstractValue::fullTop())
+#endif
     , executionCount(executionCount)
 {
 }
@@ -72,7 +74,9 @@ void BasicBlock::ensureLocals(unsigned newNumLocals)
     variablesAtTail.ensureLocals(newNumLocals);
     valuesAtHead.ensureLocals(newNumLocals);
     valuesAtTail.ensureLocals(newNumLocals);
+#if !defined(WEBKIT_IOS6)
     intersectionOfPastValuesAtHead.ensureLocals(newNumLocals, AbstractValue::fullTop());
+#endif
 }
 
 void BasicBlock::ensureTmps(unsigned newNumTmps)
@@ -81,7 +85,9 @@ void BasicBlock::ensureTmps(unsigned newNumTmps)
     variablesAtTail.ensureTmps(newNumTmps);
     valuesAtHead.ensureTmps(newNumTmps);
     valuesAtTail.ensureTmps(newNumTmps);
+#if !defined(WEBKIT_IOS6)
     intersectionOfPastValuesAtHead.ensureTmps(newNumTmps, AbstractValue::fullTop());
+#endif
 }
 
 void BasicBlock::replaceTerminal(Graph& graph, Node* node)

@@ -132,6 +132,7 @@ public:
     const DocumentResourceMap& allCachedResources() const LIFETIME_BOUND { return m_documentResources; }
 
     void notifyFinished(const CachedResource&);
+    bool hasCachedSVGImages() const { return !m_cachedSVGImagesURLs.isEmpty(); }
     Vector<Ref<SVGImage>> allCachedSVGImages() const;
 
     bool autoLoadImages() const { return m_autoLoadImages; }

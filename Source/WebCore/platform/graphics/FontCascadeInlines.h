@@ -142,6 +142,19 @@ inline bool FontCascade::treatAsSpace(char32_t c)
     return c == space || c == tabCharacter || c == newlineCharacter || c == noBreakSpace;
 }
 
+inline constexpr char32_t lastControlCharacter = 0x9F;
+inline constexpr char32_t firstDefaultIgnorableCharacter = softHyphen;
+
+inline bool isControlCharacterFast(char32_t character)
+{
+    return character <= lastControlCharacter && isControlCharacter(character);
+}
+
+inline bool isDefaultIgnorableCodePointFast(char32_t character)
+{
+    return character >= firstDefaultIgnorableCharacter && isDefaultIgnorableCodePoint(character);
+}
+
 inline bool FontCascade::isCharacterWhoseGlyphsShouldBeDeletedForTextRendering(char32_t character)
 {
     // https://www.w3.org/TR/css-text-3/#white-space-processing
@@ -151,6 +164,8 @@ inline bool FontCascade::isCharacterWhoseGlyphsShouldBeDeletedForTextRendering(c
     // Also, we're omitting Null (U+0000) from this set because Chrome and Firefox do so and it's needed for compat. See https://github.com/w3c/csswg-drafts/pull/6983.
     if (character == nullCharacter)
         return true;
+    if (character < firstDefaultIgnorableCharacter)
+        return false;
     if (isControlCharacter(character))
         return false;
     // "Unsupported Default_ignorable characters must be ignored for text rendering."

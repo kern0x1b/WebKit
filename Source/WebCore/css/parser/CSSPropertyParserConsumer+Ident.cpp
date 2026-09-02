@@ -168,6 +168,10 @@ RefPtr<CSSValue> consumeDashedIdent(CSSParserTokenRange& range, CSS::PropertyPar
 
 std::optional<CSSWideKeyword> consumeCSSWideKeyword(CSSParserTokenRange& range)
 {
+    // Only an IdentToken can have a CSS-wide keyword id; skip the copy and consume otherwise.
+    if (range.peek().type() != IdentToken)
+        return { };
+
     auto rangeCopy = range;
     auto valueID = rangeCopy.consumeIncludingWhitespace().id();
     if (!rangeCopy.atEnd())

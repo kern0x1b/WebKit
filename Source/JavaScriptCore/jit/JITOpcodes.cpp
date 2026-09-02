@@ -54,18 +54,8 @@ void JIT::emit_op_mov(const JSInstruction* currentInstruction)
     VirtualRegister dst = bytecode.m_dst;
     VirtualRegister src = bytecode.m_src;
 
-    if (src.isConstant()) {
-        if (m_profiledCodeBlock->isConstantOwnedByUnlinkedCodeBlock(src)) {
-            storeValue(m_unlinkedCodeBlock->getConstant(src), addressFor(dst), jsRegT10);
-        } else {
-            loadCodeBlockConstant(src, jsRegT10);
-            storeValue(jsRegT10, addressFor(dst));
-        }
-        return;
-    }
-
-    loadValue(addressFor(src), jsRegT10);
-    storeValue(jsRegT10, addressFor(dst));
+    emitGetVirtualRegister(src, jsRegT10);
+    emitPutVirtualRegister(dst, jsRegT10);
 }
 
 void JIT::emit_op_jmp(const JSInstruction* currentInstruction)

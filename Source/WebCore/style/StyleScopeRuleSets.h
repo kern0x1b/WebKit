@@ -87,10 +87,32 @@ public:
     ~ScopeRuleSets();
 
     bool isAuthorStyleDefined() const { return m_isAuthorStyleDefined; }
+#if defined(WEBKIT_IOS6)
+    RuleSet* userAgentMediaQueryStyle() const
+    {
+        if (m_userAgentMediaQueryStyle && m_userAgentMediaQueryStyleVersionOnUpdate == UserAgentStyle::defaultStyleVersion)
+            return m_userAgentMediaQueryStyle.get();
+        updateUserAgentMediaQueryStyleIfNeeded();
+        return m_userAgentMediaQueryStyle.get();
+    }
+#else
     RuleSet* userAgentMediaQueryStyle() const;
+#endif
     RuleSet* NODELETE dynamicViewTransitionsStyle() const;
     RuleSet& authorStyle() const { return *m_authorStyle; }
+#if defined(WEBKIT_IOS6)
+    // Only shadow tree resolvers share the document's user style. Reaching it means an out-of-line
+    // Scope::resolver() with a lazy-create branch, and this runs from the ElementRuleCollector
+    // constructor, i.e. once per element.
+    RuleSet* userStyle() const
+    {
+        if (m_usesSharedUserStyle) [[unlikely]]
+            return sharedUserStyle();
+        return m_userStyle.get();
+    }
+#else
     RuleSet* userStyle() const;
+#endif
     RuleSet* styleForDeclarationOrigin(DeclarationOrigin);
 
     const RuleFeatureSet& features() const LIFETIME_BOUND;
@@ -136,6 +158,9 @@ private:
     void collectFeatures() const;
     void collectRulesFromUserStyleSheets(const Vector<Ref<CSSStyleSheet>>&, RuleSet& userStyle, const MQ::MediaQueryEvaluator&);
     void updateUserAgentMediaQueryStyleIfNeeded() const;
+#if defined(WEBKIT_IOS6)
+    RuleSet* sharedUserStyle() const;
+#endif
 
     RefPtr<RuleSet> m_authorStyle;
     mutable RefPtr<RuleSet> m_userAgentMediaQueryStyle;
@@ -153,6 +178,15 @@ private:
     mutable std::optional<HashSet<AtomString>> m_customPropertyNamesInStyleContainerQueries;
 
     mutable std::optional<SelectorsForStyleAttribute> m_cachedSelectorsForStyleAttribute;
+
+#if defined(WEBKIT_IOS6)
+    mutable RuleFeatureBaseline m_userAgentFeatureBaseline;
+    mutable unsigned m_userAgentFeatureBaselineVersion { 0 };
+    // The user agent media query sheet can only gain rules through UserAgentStyle::addToDefaultStyle(),
+    // which bumps defaultStyleVersion. Comparing one counter beats summing four Vector::size() out of
+    // four cache lines once per element.
+    mutable unsigned m_userAgentMediaQueryStyleVersionOnUpdate { 0 };
+#endif
 
     mutable unsigned m_defaultStyleVersionOnFeatureCollection { 0 };
     mutable unsigned m_userAgentMediaQueryRuleCountOnUpdate { 0 };

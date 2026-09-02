@@ -320,14 +320,27 @@ float FontCascade::width(const TextRun& run, SingleThreadWeakHashSet<const Font>
     if (!run.length())
         return 0;
 
-    CodePath codePathToUse = codePath(run);
-    if (codePathToUse != CodePath::Complex) {
-        // The complex path is more restrictive about returning fallback fonts than the simple path, so we need an explicit test to make their behaviors match.
-        if constexpr (!canReturnFallbackFontsForComplexText())
-            fallbackFonts = nullptr;
-        // The simple path can optimize the case where glyph overflow is not observable.
-        if (codePathToUse != CodePath::SimpleWithGlyphOverflow && (glyphOverflow && !glyphOverflow->computeBounds))
+    // For a 16-bit run, deciding the code path means scanning every character of the run.
+    // A run whose width is already cached does not need the decision at all, so it is only
+    // made where its answer is actually read.
+    std::optional<CodePath> memoizedCodePath;
+    auto codePathToUse = [&]() -> CodePath {
+        if (!memoizedCodePath)
+            memoizedCodePath = codePath(run);
+        return *memoizedCodePath;
+    };
+
+    // The simple path can optimize the case where glyph overflow is not observable.
+    if (glyphOverflow && !glyphOverflow->computeBounds) {
+        auto path = codePathToUse();
+        if (path != CodePath::Complex && path != CodePath::SimpleWithGlyphOverflow)
             glyphOverflow = nullptr;
+    }
+
+    // The complex path is more restrictive about returning fallback fonts than the simple path, so we need an explicit test to make their behaviors match.
+    if constexpr (!canReturnFallbackFontsForComplexText()) {
+        if (fallbackFonts && codePathToUse() != CodePath::Complex)
+            fallbackFonts = nullptr;
     }
 
     auto* cacheEntry = fonts()->glyphGeometryCache().add(run, { }, TextShapingContext { *this });
@@ -352,7 +365,7 @@ float FontCascade::width(const TextRun& run, SingleThreadWeakHashSet<const Font>
     if (!fallbackFonts)
         fallbackFonts = &localFallbackFonts;
 
-    float result = width(codePathToUse, run, fallbackFonts, glyphOverflow);
+    float result = width(codePathToUse(), run, fallbackFonts, glyphOverflow);
     bool hasFallbackFonts = !fallbackFonts->isEmptyIgnoringNullReferences();
 
     if (cacheEntry) {
@@ -397,6 +410,19 @@ NEVER_INLINE float FontCascade::widthForSimpleTextSlow(StringView text, TextDire
 #if PLATFORM(GTK) || PLATFORM(WPE)
     TextRun run { text, 0, 0, ExpansionBehavior::defaultBehavior(), textDirection, false, false };
     float result = width(CodePath::Simple, run);
+#elif defined(WEBKIT_IOS6)
+    UNUSED_PARAM(textDirection);
+    Ref font = primaryFont();
+    ASSERT(!font->syntheticBoldOffset());
+
+    auto sumWidths = [&](const Font& font, auto characters) {
+        float total = 0;
+        for (size_t i = 0; i < characters.size(); ++i)
+            total += font.widthForGlyph(font.glyphForCharacter(characters[i]));
+        return total;
+    };
+
+    float result = text.is8Bit() ? sumWidths(font, text.span8()) : sumWidths(font, text.span16());
 #else
     GlyphBuffer glyphBuffer;
     Ref font = primaryFont();
@@ -686,7 +712,18 @@ bool FontCascade::shouldDisableFontSubpixelAntialiasingForTesting()
 
 bool FontCascade::canHandleRunAsSimpleText(const TextRun& run, unsigned from, unsigned to) const
 {
-#if !PLATFORM(GTK) && !PLATFORM(WPE) && !USE(FREETYPE)
+#if defined(WEBKIT_IOS6)
+    // Font::applyTransforms on this port returns before the shaper, so a sub-range measures
+    // and paints exactly as the whole run does and there is no boundary effect left to
+    // guard against. enableKerning() and requiresShaping() are both true by default, so the
+    // test below was sending every partial run through ComplexTextController - a CTLine per
+    // paint - for plain Latin text. Scripts that really need shaping still reach the complex
+    // path through characterRangeCodePath().
+    UNUSED_PARAM(run);
+    UNUSED_PARAM(from);
+    UNUSED_PARAM(to);
+    return true;
+#elif !PLATFORM(GTK) && !PLATFORM(WPE) && !USE(FREETYPE)
     // FIXME: Use the fast code path once it handles partial runs with kerning and ligatures. See http://webkit.org/b/100050
     return !((enableKerning() || requiresShaping()) && (from || to != run.length()));
 #else
@@ -751,9 +788,23 @@ FontCascade::CodePath FontCascade::characterRangeCodePath(std::span<const char16
     // are not 'combining', but still need to go to the complex path.
     // Alternatively, we may as well consider binary search over a sorted
     // list of ranges.
+    size_t size = span.size();
+
+    // Every early exit below needs a code point >= U+02E5, and so does the zero-width
+    // joiner. A max-reduction, which vectorizes, settles the whole run in one pass for
+    // Latin text - the reason this path is reached at all is usually a stray non-Latin1
+    // character elsewhere in the string - instead of walking the ladder of range
+    // comparisons per character.
+    char16_t highest = 0;
+    for (size_t i = 0; i < size; ++i) {
+        if (span[i] > highest)
+            highest = span[i];
+    }
+    if (highest < 0x2E5)
+        return CodePath::Simple;
+
     CodePath result = CodePath::Simple;
     bool previousCharacterIsEmojiGroupCandidate = false;
-    size_t size = span.size();
     for (size_t i = 0; i < size; ++i) {
         auto c = span[i];
         if (c == zeroWidthJoiner && previousCharacterIsEmojiGroupCandidate)
@@ -1574,22 +1625,32 @@ inline bool NODELETE shouldDrawIfLoading(const Font& font, FontCascade::CustomFo
 void FontCascade::drawGlyphBuffer(GraphicsContext& context, const GlyphBuffer& glyphBuffer, FloatPoint& point, CustomFontNotReadyAction customFontNotReadyAction) const
 {
     ASSERT(glyphBuffer.isFlattened());
-    Ref fontData = glyphBuffer.fontAt(0);
+
+    // The font is compared per glyph but only referenced per run: taking a Ref for every
+    // glyph just to find out it is the same font as the previous one costs a weak-pointer
+    // dereference plus a refcount round trip on each character painted.
+    const Font* fontData = &glyphBuffer.fontAt(0);
+    auto smoothing = m_fontDescription.usedFontSmoothing();
+    auto flush = [&](unsigned lastFrom, unsigned glyphCount, const FloatPoint& origin) {
+        if (!shouldDrawIfLoading(*fontData, customFontNotReadyAction))
+            return;
+        Ref protectedFont { *fontData };
+        context.drawGlyphs(protectedFont.get(), glyphBuffer.glyphs(lastFrom, glyphCount), glyphBuffer.advances(lastFrom, glyphCount), origin, smoothing);
+    };
+
     FloatPoint startPoint = point;
     float nextX = startPoint.x() + WebCore::width(glyphBuffer.advanceAt(0));
     float nextY = startPoint.y() + height(glyphBuffer.advanceAt(0));
     unsigned lastFrom = 0;
     unsigned nextGlyph = 1;
-    while (nextGlyph < glyphBuffer.size()) {
-        Ref nextFontData = glyphBuffer.fontAt(nextGlyph);
+    unsigned size = glyphBuffer.size();
+    while (nextGlyph < size) {
+        const Font* nextFontData = &glyphBuffer.fontAt(nextGlyph);
 
         if (nextFontData != fontData) {
-            if (shouldDrawIfLoading(fontData.get(), customFontNotReadyAction)) {
-                size_t glyphCount = nextGlyph - lastFrom;
-                context.drawGlyphs(fontData.get(), glyphBuffer.glyphs(lastFrom, glyphCount), glyphBuffer.advances(lastFrom, glyphCount), startPoint, m_fontDescription.usedFontSmoothing());
-            }
+            flush(lastFrom, nextGlyph - lastFrom, startPoint);
             lastFrom = nextGlyph;
-            fontData = WTF::move(nextFontData);
+            fontData = nextFontData;
             startPoint.setX(nextX);
             startPoint.setY(nextY);
         }
@@ -1598,10 +1659,7 @@ void FontCascade::drawGlyphBuffer(GraphicsContext& context, const GlyphBuffer& g
         nextGlyph++;
     }
 
-    if (shouldDrawIfLoading(fontData.get(), customFontNotReadyAction)) {
-        size_t glyphCount = nextGlyph - lastFrom;
-        context.drawGlyphs(fontData.get(), glyphBuffer.glyphs(lastFrom, glyphCount), glyphBuffer.advances(lastFrom, glyphCount), startPoint, m_fontDescription.usedFontSmoothing());
-    }
+    flush(lastFrom, nextGlyph - lastFrom, startPoint);
     point.setX(nextX);
 }
 

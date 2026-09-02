@@ -256,7 +256,15 @@ JS_EXPORT_PRIVATE extern const WTF::BitSet<256> whiteSpaceTable;
 template <>
 ALWAYS_INLINE bool Lexer<Latin1Character>::isWhiteSpace(Latin1Character ch)
 {
+#if defined(WEBKIT_IOS6)
+    if (ch > ' ') [[likely]]
+        return ch == 0xA0;
+    if (ch == ' ')
+        return true;
+    return ch == '\t' || ch == 0x0B || ch == 0x0C;
+#else
     return whiteSpaceTable.get(ch);
+#endif
 }
 
 template <>

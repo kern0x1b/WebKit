@@ -73,25 +73,24 @@ public:
 
     bool setLastIndex(JSGlobalObject* globalObject, size_t lastIndex)
     {
-        VM& vm = getVM(globalObject);
-        auto scope = DECLARE_THROW_SCOPE(vm);
-
         if (lastIndexIsWritable()) [[likely]] {
             m_lastIndex.setWithoutWriteBarrier(jsNumber(lastIndex));
             return true;
         }
+        VM& vm = getVM(globalObject);
+        auto scope = DECLARE_THROW_SCOPE(vm);
         throwTypeError(globalObject, scope, ReadonlyPropertyWriteError);
         return false;
     }
     bool setLastIndex(JSGlobalObject* globalObject, JSValue lastIndex, bool shouldThrow)
     {
         VM& vm = getVM(globalObject);
-        auto scope = DECLARE_THROW_SCOPE(vm);
 
         if (lastIndexIsWritable()) [[likely]] {
             m_lastIndex.set(vm, this, lastIndex);
             return true;
         }
+        auto scope = DECLARE_THROW_SCOPE(vm);
         return typeError(globalObject, scope, shouldThrow, ReadonlyPropertyWriteError);
     }
     JSValue getLastIndex() const

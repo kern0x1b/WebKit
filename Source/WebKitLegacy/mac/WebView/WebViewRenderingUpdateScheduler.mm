@@ -62,20 +62,20 @@ WebViewRenderingUpdateScheduler::WebViewRenderingUpdateScheduler(WebView* webVie
         // However if the flush is rescheduled from the callback it may get pushed past it, to the next cycle.
         WebThreadLock();
 #endif
-        CheckedPtr checkedThis = weakThis;
-        if (!checkedThis)
+        auto* scheduler = weakThis.get();
+        if (!scheduler)
             return;
-        checkedThis->renderingUpdateRunLoopObserverCallback();
+        scheduler->renderingUpdateRunLoopObserverCallback();
     });
 
     m_postRenderingUpdateRunLoopObserver = makeUnique<WebCore::RunLoopObserver>(WebCore::RunLoopObserver::WellKnownOrder::PostRenderingUpdate, [weakThis = WeakPtr { this }] {
 #if PLATFORM(IOS_FAMILY)
         WebThreadLock();
 #endif
-        CheckedPtr checkedThis = weakThis;
-        if (!checkedThis)
+        auto* scheduler = weakThis.get();
+        if (!scheduler)
             return;
-        checkedThis->postRenderingUpdateCallback();
+        scheduler->postRenderingUpdateCallback();
     });
 }
 
@@ -121,6 +121,20 @@ void WebViewRenderingUpdateScheduler::didCompleteRenderingUpdateDisplay()
 
 void WebViewRenderingUpdateScheduler::schedulePostRenderingUpdate()
 {
+#if defined(WEBKIT_IOS6)
+    // Same reason as scheduleRenderingUpdate(): this observer's body opens with
+    // WebThreadLock(), and it is scheduled from a CoreAnimation post-commit
+    // handler that runs on whichever thread committed. Bound to the main run
+    // loop it makes the interface take the web lock once per frame for work that
+    // belongs to the engine.
+    if (!WebThreadIsCurrent() && WebThreadIsEnabled()) {
+        WebThreadRun(^{
+            m_postRenderingUpdateRunLoopObserver->schedule();
+        });
+        return;
+    }
+#endif
+
     m_postRenderingUpdateRunLoopObserver->schedule();
 }
 

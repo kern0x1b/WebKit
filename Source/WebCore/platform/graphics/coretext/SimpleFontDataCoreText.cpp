@@ -93,4 +93,15 @@ extern RetainPtr<CFDictionaryRef> getCFStringAttributes(const Font& font, bool e
     return adoptCF(CFDictionaryCreate(kCFAllocatorDefault, keys.data(), values.data(), count, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks));
 }
 
+RetainPtr<CFDictionaryRef> Font::cfStringAttributes(bool enableKerning, const AtomString& locale) const
+{
+    if (m_cachedStringAttributes && m_cachedStringAttributesEnableKerning == enableKerning && m_cachedStringAttributesLocale == locale)
+        return m_cachedStringAttributes;
+
+    m_cachedStringAttributes = getCFStringAttributes(*this, enableKerning, m_platformData.orientation(), locale);
+    m_cachedStringAttributesEnableKerning = enableKerning;
+    m_cachedStringAttributesLocale = locale;
+    return m_cachedStringAttributes;
+}
+
 } // namespace WebCore

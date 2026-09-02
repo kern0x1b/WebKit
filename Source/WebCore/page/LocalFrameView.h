@@ -861,7 +861,9 @@ private:
 
     void updateScrollGeometryContentSize();
 
-    void applyRecursivelyWithVisibleRect(NOESCAPE const Function<void(LocalFrameView& frameView, const IntRect& visibleRect)>&);
+    // A WTF::Function always heap-allocates its wrapper, even for a captureless lambda, and this
+    // runs on every scroll frame. Every caller is in LocalFrameView.cpp, where the definition is.
+    template<typename ApplyFunction> void applyRecursivelyWithVisibleRect(NOESCAPE const ApplyFunction&);
     void resumeVisibleImageAnimations(const IntRect& visibleRect);
 #if ENABLE(ACCESSIBILITY_ANIMATION_CONTROL)
     void updatePlayStateForAllAnimations(const IntRect& visibleRect);

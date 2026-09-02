@@ -23,6 +23,7 @@
 
 #pragma once
 
+#include <WebCore/CSSProperty.h>
 #include <WebCore/CSSNamespacePrefixMap.h>
 #include <wtf/Forward.h>
 
@@ -54,7 +55,7 @@ enum class IsAttrTainted : bool;
 class CSSPropertyParser {
 public:
     // Parses any CSS property or descriptor. If successful, the result will be appended to the `result` Vector and the function will return true, otherwise, the function will return false and the `result` Vector will be unmodified.
-    static bool parseValue(CSSPropertyID, IsImportant, CSSParserTokenRange, const CSSParserContext&, Vector<CSSProperty, 256>& result, StyleRuleType, const CSSNamespacePrefixMap& = { });
+    static bool parseValue(CSSPropertyID, IsImportant, CSSParserTokenRange, const CSSParserContext&, ParsedPropertyVector& result, StyleRuleType, const CSSNamespacePrefixMap& = { });
 
     // Parses a longhand style property.
     static RefPtr<CSSValue> parseStylePropertyLonghand(CSSPropertyID, const String&, const CSSParserContext&);

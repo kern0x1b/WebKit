@@ -495,9 +495,12 @@ static RetainPtr<WebEvent>& currentEvent()
 
     static Class windowClass = NSClassFromString(@"UIWindow");
 
-    while (superlayer && layer != _rootLayer && (!layer.delegate || ![layer.delegate isKindOfClass:windowClass])) {
+    while (superlayer && layer != _rootLayer) {
+        id delegate = [layer delegate];
+        if (delegate && [delegate isKindOfClass:windowClass])
+            break;
         CGRect rectInSuper = [superlayer convertRect:rect fromLayer:layer];
-        if ([superlayer masksToBounds] || !respectsMasksToBounds)
+        if (!respectsMasksToBounds || [superlayer masksToBounds])
             rect = CGRectIntersection([superlayer bounds], rectInSuper);
         else
             rect = rectInSuper;
@@ -635,7 +638,7 @@ static RetainPtr<WebEvent>& currentEvent()
 
 - (void)displayRect:(NSRect)rect
 {
-    [[self contentView] displayRect:rect];
+    [_contentView displayRect:rect];
 }
 
 - (void)willRotate

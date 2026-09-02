@@ -71,6 +71,9 @@ public:
     virtual StringView source() const = 0;
     virtual RefPtr<CachedBytecode> cachedBytecode() const { return nullptr; }
     virtual void cacheBytecode(const BytecodeCacheGenerator&) const { }
+    // cacheBytecode() runs its generator only if the provider actually keeps a blob,
+    // so a caller that wants to know before doing the work has to ask separately.
+    virtual bool wantsBytecodeCache() const { return false; }
     virtual void updateCache(const UnlinkedFunctionExecutable*, const SourceCode&, CodeSpecializationKind, const UnlinkedFunctionCodeBlock*) const { }
     virtual void commitCachedBytecode() const { }
 

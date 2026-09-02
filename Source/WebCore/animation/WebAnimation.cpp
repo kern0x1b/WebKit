@@ -1054,6 +1054,9 @@ ExceptionOr<void> WebAnimation::finish()
 void WebAnimation::timingDidChange(DidSeek didSeek, SynchronouslyNotify synchronouslyNotify, Silently silently)
 {
     m_shouldSkipUpdatingFinishedStateWhenResolving = false;
+#if defined(WEBKIT_IOS6)
+    m_playStateAtLastTick = std::nullopt;
+#endif
     updateFinishedState(didSeek, synchronouslyNotify);
 
     if (silently == Silently::No && m_timeline)
@@ -1574,6 +1577,23 @@ bool WebAnimation::needsTick() const
     return pending() || playState() == PlayState::Running || m_hasScheduledEventsDuringTick;
 }
 
+#if defined(WEBKIT_IOS6)
+bool WebAnimation::needsTickForRenderingUpdate() const
+{
+    if (pending() || m_hasScheduledEventsDuringTick)
+        return true;
+
+    if (m_timeline && m_timeline->isProgressBased())
+        return true;
+
+    auto playState = this->playState();
+    if (playState == PlayState::Running)
+        return true;
+
+    return !m_playStateAtLastTick || *m_playStateAtLastTick != playState;
+}
+#endif
+
 void WebAnimation::tick()
 {
     auto wasPending = pending();
@@ -1598,6 +1618,10 @@ void WebAnimation::tick()
                 keyframeEffect->animationBecameReady();
         }
     }
+
+#if defined(WEBKIT_IOS6)
+    m_playStateAtLastTick = playState();
+#endif
 }
 
 void WebAnimation::maybeMarkAsReady()
@@ -1847,15 +1871,13 @@ ExceptionOr<void> WebAnimation::commitStyles()
     // 2.3 Let inline style be the result of getting the CSS declaration block corresponding to target’s style attribute. If target does not have a style
     // attribute, let inline style be a new empty CSS declaration block with the readonly flag unset and owner node set to target.
 
-    auto unanimatedStyle = [&]() {
-        if (auto styleable = Styleable::fromRenderer(*renderer)) {
-            if (auto* lastStyleChangeEventStyle = styleable->lastStyleChangeEventStyle())
-                return Style::ComputedStyle::clone(*lastStyleChangeEventStyle);
-        }
-        // If we don't have a style for the last style change event, then the
-        // current renderer style cannot be animated.
-        return Style::ComputedStyle::clone(renderer->style());
-    }();
+    // If we don't have a style for the last style change event, then the
+    // current renderer style cannot be animated.
+    const Style::ComputedStyle* unanimatedStyle = &renderer->style();
+    if (auto styleable = Styleable::fromRenderer(*renderer)) {
+        if (auto* lastStyleChangeEventStyle = styleable->lastStyleChangeEventStyle())
+            unanimatedStyle = lastStyleChangeEventStyle;
+    }
 
     Style::Extractor computedStyleExtractor { styledElement.get() };
 
@@ -1895,7 +1917,7 @@ ExceptionOr<void> WebAnimation::commitStyles()
 
         // We actually perform those steps in a different way: instead of building a copy of the sorted animation list and then removing stuff, we iterate through the
         // sorted animation list and stop when we've found this animation's effect or when we've found an effect associated with an animation with a higher composite order.
-        auto animatedStyle = Style::ComputedStyle::clonePtr(unanimatedStyle);
+        auto animatedStyle = Style::ComputedStyle::clonePtr(*unanimatedStyle);
         for (const auto& animation : sortedAnimations) {
             RefPtr effectInStack = animation->keyframeEffect();
             if (!effectInStack)
@@ -1958,7 +1980,8 @@ Seconds WebAnimation::timeToNextTick() const
         return Seconds::infinity();
 
     ASSERT(effect());
-    return protect(effect())->timeToNextTick(protect(effect())->getBasicTiming()) / playbackRate;
+    Ref protectedEffect = *effect();
+    return protectedEffect->timeToNextTick(protectedEffect->getBasicTiming()) / playbackRate;
 }
 
 std::optional<Seconds> WebAnimation::convertAnimationTimeToTimelineTime(Seconds animationTime) const

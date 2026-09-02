@@ -438,9 +438,15 @@ void Adjuster::adjustFirstLineStyle(Style::ComputedStyle& style)
     style.setDisplayMaintainingOriginalDisplay(DisplayType::InlineFlow);
 }
 
-
 #if defined(WEBKIT_IOS6)
-// See the comment at the call site in Adjuster::adjust.
+static bool viewportBoundedLayoutEnabled()
+{
+    static int enabled = -1;
+    if (enabled < 0)
+        enabled = access("/tmp/native-viewport-layout", F_OK) == 0 ? 1 : 0;
+    return enabled > 0;
+}
+
 static bool shouldBoundLayoutToViewport(const Style::ComputedStyle& style, const Element& element)
 {
     // Off unless asked for, and this is why.
@@ -456,12 +462,6 @@ static bool shouldBoundLayoutToViewport(const Style::ComputedStyle& style, const
     // The measurement that said otherwise was mine and it was wrong: it counted
     // a hole only when the box had no height, and a placeholder has height. An
     // empty box of the right size is still an empty box on the screen.
-    static int enabled = -1;
-    if (enabled < 0)
-        enabled = access("/tmp/native-viewport-layout", F_OK) == 0 ? 1 : 0;
-    if (!enabled)
-        return false;
-
     if (style.position() != PositionType::Static && style.position() != PositionType::Relative)
         return false;
     if (style.floating() != Float::None)
@@ -516,7 +516,7 @@ void Adjuster::adjust(Style::ComputedStyle& style) const
     // previous frame, so the bar appears to double and smear. An opaque bar is
     // the nearest honest rendering of a blurred one, and it costs the compositor
     // nothing.
-    if (!style.backdropFilter().isNone()) {
+    if (style.display() != DisplayType::None && !style.backdropFilter().isNone()) {
         auto& declared = style.backgroundColor();
         if (declared.isResolvedColor()) {
             auto& background = declared.resolvedColor();
@@ -735,13 +735,13 @@ void Adjuster::adjust(Style::ComputedStyle& style) const
             style.setAutoRevealsWhenFound();
     }
 
-    bool overflowIsClipOrVisible = isOverflowClipOrVisible(style.overflowY()) && isOverflowClipOrVisible(style.overflowX());
+    auto usedDisplay = style.display();
 
     // The overflow property does not apply to table row elements (CSS2 section 11.1.1).
-    if (style.display() == DisplayType::TableRow) {
+    if (usedDisplay == DisplayType::TableRow) {
         style.setOverflowX(ComputedStyle::initialOverflowX());
         style.setOverflowY(ComputedStyle::initialOverflowY());
-    } else if (!overflowIsClipOrVisible && style.display().isTableBox()) {
+    } else if (usedDisplay.isTableBox() && !(isOverflowClipOrVisible(style.overflowY()) && isOverflowClipOrVisible(style.overflowX()))) {
         // Tables only support overflow:hidden and overflow:visible and ignore anything else,
         // see https://drafts.csswg.org/css2/#overflow. As a table is not a block
         // container box the rules for resolving conflicting x and y values in CSS Overflow Module
@@ -921,7 +921,7 @@ void Adjuster::adjust(Style::ComputedStyle& style) const
     // content-visibility of its own, no fixed or sticky position, and not a
     // replaced or form element. contain-intrinsic-size gains "auto" below, so a
     // skipped child keeps the size it last had and the scroll bar does not jump.
-    if (m_element && style.contentVisibility() == ContentVisibility::Visible && shouldBoundLayoutToViewport(style, *m_element)) {
+    if (viewportBoundedLayoutEnabled() && m_element && style.contentVisibility() == ContentVisibility::Visible && shouldBoundLayoutToViewport(style, *m_element)) {
         style.setContentVisibility(ContentVisibility::Auto);
 
         // A size to stand in until the box has been laid out once.

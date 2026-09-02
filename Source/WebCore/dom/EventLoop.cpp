@@ -312,9 +312,12 @@ void EventLoop::stopGroup(EventLoopTaskGroup& group)
 
 void EventLoop::scheduleToRunIfNeeded()
 {
-    if (microtaskQueue().isScheduledToRun())
+    // microtaskQueue() is virtual and creates the queue on first use; asking for
+    // it twice per queued task and per queued microtask bought nothing.
+    SUPPRESS_UNCOUNTED_LOCAL auto& microtaskQueue = this->microtaskQueue();
+    if (microtaskQueue.isScheduledToRun())
         return;
-    microtaskQueue().setIsScheduledToRun(true);
+    microtaskQueue.setIsScheduledToRun(true);
     scheduleToRun();
 }
 
@@ -350,9 +353,15 @@ void EventLoop::run(JSC::VM& vm, std::optional<ApproximateTime> deadline)
             didPerformMicrotaskCheckpoint = true;
             performMicrotaskCheckpoint(vm);
         }
-        for (auto& task : m_tasks)
-            remainingTasks.append(WTF::move(task));
-        m_tasks = WTF::move(remainingTasks);
+        // Nothing was deferred in the overwhelmingly common case, and then
+        // m_tasks already holds exactly the tasks queued while running, in
+        // order: moving them through a second vector only threw away the
+        // buffer that had just been allocated for them.
+        if (!remainingTasks.isEmpty()) {
+            for (auto& task : m_tasks)
+                remainingTasks.append(WTF::move(task));
+            m_tasks = WTF::move(remainingTasks);
+        }
 
         if (!m_tasks.isEmpty() && hasReachedDeadline)
             scheduleToRunIfNeeded();

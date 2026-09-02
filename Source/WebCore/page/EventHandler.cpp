@@ -3088,8 +3088,15 @@ void EventHandler::updateMouseEventTargetNode(const AtomString& eventType, Node*
         m_textRecognitionHoverTimer.restart();
 #endif // ENABLE(IMAGE_ANALYSIS)
 
+#if !defined(WEBKIT_IOS6)
     if (RefPtr page = frame->page())
         protect(page->imageOverlayController())->elementUnderMouseDidChange(frame, m_elementUnderMouse);
+#else
+    // ImageOverlayController::elementUnderMouseDidChange has an empty body off
+    // Mac, and imageOverlayController() is the lazily-creating accessor, so this
+    // built the controller on the first mouse move and then called into nothing
+    // for every move after it.
+#endif
 
     ASSERT_IMPLIES(m_elementUnderMouse, &m_elementUnderMouse->document() == frame->document());
     ASSERT_IMPLIES(m_lastElementUnderMouse, &m_lastElementUnderMouse->document() == frame->document());
@@ -3118,17 +3125,21 @@ void EventHandler::updateMouseEventTargetNode(const AtomString& eventType, Node*
             for (RefPtr element = m_elementUnderMouse; element; element = element->parentElementInComposedTree())
                 elementsUnderMouse.append(element);
 
-            Vector enteredElementsChain = elementsUnderMouse;
-            if (!leftElementsChain.isEmpty() && !enteredElementsChain.isEmpty() && leftElementsChain.last().ptr() == enteredElementsChain.last().get()) {
-                size_t minHeight = std::min(leftElementsChain.size(), enteredElementsChain.size());
+            // The entered chain is the head of elementsUnderMouse; tracking its
+            // length is enough, and saves copying a vector of weak pointers -
+            // one ref count pair per ancestor - on every change of hovered
+            // element, which on a touch port is every tap.
+            size_t enteredElementsChainSize = elementsUnderMouse.size();
+            if (!leftElementsChain.isEmpty() && enteredElementsChainSize && leftElementsChain.last().ptr() == elementsUnderMouse.last().get()) {
+                size_t minHeight = std::min(leftElementsChain.size(), enteredElementsChainSize);
                 size_t i;
                 for (i = 0; i < minHeight; ++i) {
-                    WeakPtr enteredElement = enteredElementsChain[enteredElementsChain.size() - i - 1];
+                    WeakPtr enteredElement = elementsUnderMouse[enteredElementsChainSize - i - 1];
                     if (leftElementsChain[leftElementsChain.size() - i - 1].ptr() != enteredElement.get())
                         break;
                 }
                 leftElementsChain.shrink(leftElementsChain.size() - i);
-                enteredElementsChain.shrink(enteredElementsChain.size() - i);
+                enteredElementsChainSize -= i;
             }
 
             if (auto lastElementUnderMouse = m_lastElementUnderMouse)
@@ -3142,7 +3153,8 @@ void EventHandler::updateMouseEventTargetNode(const AtomString& eventType, Node*
             if (auto elementUnderMouse = m_elementUnderMouse)
                 elementUnderMouse->dispatchMouseEvent(platformMouseEvent, eventNames.mouseoverEvent, 0, m_lastElementUnderMouse);
 
-            for (auto& chain : enteredElementsChain | std::views::reverse) {
+            for (size_t i = enteredElementsChainSize; i > 0; --i) {
+                RefPtr chain = elementsUnderMouse[i - 1].get();
                 if (!chain)
                     continue;
 
@@ -5652,13 +5664,17 @@ Expected<bool, RemoteFrameGeometryTransformer> EventHandler::handleTouchEvent(co
         m_originatingTouchPointDocument = nullptr;
 
     // Now iterate the changedTouches list and m_targets within it, sending events to the targets as required.
-    RefPtr<TouchList> emptyList = TouchList::create();
+    // The empty list is only ever read for a touch cancel, so it is built on demand rather than
+    // allocated on every touchmove of every drag.
+    RefPtr<TouchList> emptyList;
     for (unsigned state = 0; state != PlatformTouchPoint::TouchStateEnd; ++state) {
         if (!changedTouches[state].m_touches)
             continue;
 
         // When sending a touch cancel event, use empty touches and targetTouches lists.
         bool isTouchCancelEvent = (state == PlatformTouchPoint::TouchCancelled);
+        if (isTouchCancelEvent && !emptyList)
+            emptyList = TouchList::create();
         RefPtr<TouchList>& effectiveTouches(isTouchCancelEvent ? emptyList : touches);
         const AtomString& stateName(eventNameForTouchPointState(static_cast<PlatformTouchPoint::State>(state)));
 

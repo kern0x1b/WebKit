@@ -109,7 +109,11 @@ inline bool JSValue::toBoolean(JSGlobalObject* globalObject) const
     if (isBigInt32())
         return !!bigInt32AsInt32();
 #endif
+#if USE(JSVALUE32_64)
+    return payload();
+#else
     return isTrue(); // false, null, and undefined all convert to false.
+#endif
 }
 
 inline JSObject* JSValue::toObject(JSGlobalObject* globalObject) const

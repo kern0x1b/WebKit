@@ -414,6 +414,20 @@ bool PropertySetCSSStyleProperties::isPropertyImplicit(const String& propertyNam
     return protect(m_propertySet)->isPropertyImplicit(cssPropertyID(propertyName));
 }
 
+// cssParserContext() is virtual and materialises an OptionalOrReference<CSSParserContext> — an object
+// the size of a whole parser context — on the stack. The IDL-attribute setters are the hottest CSSOM
+// path there is, so fetch it once and share it with the exposure test instead of asking twice.
+static bool isExposedInContext(CSSPropertyID propertyID, const CSSParserContext& parserContext)
+{
+    if (propertyID == CSSPropertyInvalid)
+        return false;
+
+    bool parsingDescriptor = parserContext.enclosingRuleType && *parserContext.enclosingRuleType != StyleRuleType::Style;
+
+    return WebCore::isExposed(propertyID, &parserContext.propertySettings)
+        && (!CSSProperty::isDescriptorOnly(propertyID) || parsingDescriptor);
+}
+
 ExceptionOr<void> PropertySetCSSStyleProperties::setProperty(const String& propertyName, const String& value, const String& priority)
 {
     StyleAttributeMutationScope mutationScope { parentElement() };
@@ -422,7 +436,8 @@ ExceptionOr<void> PropertySetCSSStyleProperties::setProperty(const String& prope
     if (isCustomPropertyName(propertyName))
         propertyID = CSSPropertyCustom;
 
-    if (!isExposed(propertyID))
+    auto parserContext = cssParserContext();
+    if (!isExposedInContext(propertyID, parserContext.get()))
         return { };
 
     if (!willMutate())
@@ -434,9 +449,9 @@ ExceptionOr<void> PropertySetCSSStyleProperties::setProperty(const String& prope
 
     bool changed;
     if (propertyID == CSSPropertyCustom) [[unlikely]]
-        changed = protect(m_propertySet)->setCustomProperty(propertyName, value, cssParserContext(), important ? IsImportant::Yes : IsImportant::No);
+        changed = protect(m_propertySet)->setCustomProperty(propertyName, value, parserContext.get(), important ? IsImportant::Yes : IsImportant::No);
     else
-        changed = protect(m_propertySet)->setProperty(propertyID, value, cssParserContext(), important ? IsImportant::Yes : IsImportant::No);
+        changed = protect(m_propertySet)->setProperty(propertyID, value, parserContext.get(), important ? IsImportant::Yes : IsImportant::No);
 
     didMutate(changed ? MutationType::PropertyChanged : MutationType::NoChanges);
 
@@ -490,10 +505,11 @@ ExceptionOr<void> PropertySetCSSStyleProperties::setPropertyInternal(CSSProperty
     if (!willMutate())
         return { };
 
-    if (!isExposed(propertyID))
+    auto parserContext = cssParserContext();
+    if (!isExposedInContext(propertyID, parserContext.get()))
         return { };
 
-    SUPPRESS_UNCOUNTED_ARG if (m_propertySet->setProperty(propertyID, value, cssParserContext(), important)) {
+    SUPPRESS_UNCOUNTED_ARG if (m_propertySet->setProperty(propertyID, value, parserContext.get(), important)) {
         didMutate(MutationType::PropertyChanged);
         mutationScope.enqueueMutationRecord();
     } else
@@ -507,11 +523,7 @@ bool PropertySetCSSStyleProperties::isExposed(CSSPropertyID propertyID) const
     if (propertyID == CSSPropertyInvalid)
         return false;
 
-    auto parserContext = cssParserContext();
-    bool parsingDescriptor = parserContext->enclosingRuleType && *parserContext->enclosingRuleType != StyleRuleType::Style;
-
-    return WebCore::isExposed(propertyID, &parserContext->propertySettings)
-        && (!CSSProperty::isDescriptorOnly(propertyID) || parsingDescriptor);
+    return isExposedInContext(propertyID, cssParserContext().get());
 }
 
 RefPtr<DeprecatedCSSOMValue> PropertySetCSSStyleProperties::wrapForDeprecatedCSSOM(CSSValue* internalValue)
@@ -614,8 +626,12 @@ void StyleRuleCSSStyleProperties::reattach(MutableStyleProperties& propertySet)
 
 bool InlineCSSStyleProperties::willMutate()
 {
-    if (m_parentElement)
-        InspectorInstrumentation::willInvalidateStyleAttr(protect(*m_parentElement));
+    // protect() is a ref/deref pair that every element.style.foo = ... used to pay for, ahead of an
+    // instrumentation hook that bails on this same counter.
+    if (InspectorInstrumentationPublic::hasFrontends()) [[unlikely]] {
+        if (m_parentElement)
+            InspectorInstrumentation::willInvalidateStyleAttr(protect(*m_parentElement));
+    }
     return true;
 }
 

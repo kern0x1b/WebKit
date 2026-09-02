@@ -1047,6 +1047,9 @@ private:
 #endif
 
     bool m_parallelMarkersShouldExit { false };
+    // Fixed for the lifetime of the Heap: heapHelperPool() sizes itself from
+    // Options::numberOfGCMarkers() the first time a Heap is constructed and never resizes.
+    bool m_hasParallelMarkers { false };
     Lock m_collectContinuouslyLock;
     Condition m_collectContinuouslyCondition;
 

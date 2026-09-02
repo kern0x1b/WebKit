@@ -37,7 +37,7 @@ public:
 
     // FIXME: Remove this after FunctionCallResolveNode is fixed not to pass resolved scope as |this| value.
     // https://bugs.webkit.org/show_bug.cgi?id=225397
-    static JSClass* cast(JSC::JSGlobalObject& lexicalGlobalObject, JSC::CallFrame& callFrame)
+    static ALWAYS_INLINE JSClass* cast(JSC::JSGlobalObject& lexicalGlobalObject, JSC::CallFrame& callFrame)
     {
         if constexpr (std::is_base_of_v<JSDOMGlobalObject, JSClass>)
             return castThisValue<JSClass>(lexicalGlobalObject, callFrame.thisValue().toThis(&lexicalGlobalObject, JSC::ECMAMode::strict()));
@@ -46,7 +46,7 @@ public:
     }
 
     template<Operation operation, CastedThisErrorBehavior shouldThrow = CastedThisErrorBehavior::Throw>
-    static JSC::EncodedJSValue call(JSC::JSGlobalObject& lexicalGlobalObject, JSC::CallFrame& callFrame, const char* operationName)
+    static ALWAYS_INLINE JSC::EncodedJSValue call(JSC::JSGlobalObject& lexicalGlobalObject, JSC::CallFrame& callFrame, const char* operationName)
     {
         auto throwScope = DECLARE_THROW_SCOPE(JSC::getVM(&lexicalGlobalObject));
         
@@ -64,7 +64,7 @@ public:
     }
 
     template<StaticOperation operation, CastedThisErrorBehavior shouldThrow = CastedThisErrorBehavior::Throw>
-    static JSC::EncodedJSValue callStatic(JSC::JSGlobalObject& lexicalGlobalObject, JSC::CallFrame& callFrame, const char*)
+    static ALWAYS_INLINE JSC::EncodedJSValue callStatic(JSC::JSGlobalObject& lexicalGlobalObject, JSC::CallFrame& callFrame, const char*)
     {
         // FIXME: We should refactor the binding generated code to use references for lexicalGlobalObject.
         return operation(&lexicalGlobalObject, &callFrame);

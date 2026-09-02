@@ -55,10 +55,19 @@ namespace WTF {
         static constexpr bool canCompareWithMemcmp = true;
     };
 
-    // Requiring std::has_unique_object_representations_v<T> to make sure the type doesn't have padding and can
-    // be used with memcmp().
     template<typename T>
-    struct VectorTraits : VectorTraitsBase<std::is_standard_layout_v<T> && std::is_trivially_copyable_v<T> && std::is_trivially_default_constructible_v<T> && std::has_unique_object_representations_v<T>, T> { };
+    struct VectorTraits
+    {
+        static constexpr bool isTriviallyCopyable = std::is_trivially_copyable_v<T>;
+        static constexpr bool isTriviallyDefaultConstructible = std::is_trivially_default_constructible_v<T>;
+
+        static constexpr bool needsInitialization = !isTriviallyDefaultConstructible;
+        static constexpr bool canInitializeWithMemset = isTriviallyDefaultConstructible;
+        static constexpr bool canMoveWithMemcpy = isTriviallyCopyable;
+        static constexpr bool canCopyWithMemcpy = isTriviallyCopyable;
+        static constexpr bool canFillWithMemset = sizeof(T) == sizeof(char) && std::is_integral<T>::value;
+        static constexpr bool canCompareWithMemcmp = isTriviallyCopyable && std::has_unique_object_representations_v<T>;
+    };
 
     struct SimpleClassVectorTraits : VectorTraitsBase<false, void>
     {

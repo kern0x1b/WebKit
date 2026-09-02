@@ -128,22 +128,43 @@ MicrotaskQueue& WindowEventLoop::microtaskQueue()
 
 void WindowEventLoop::scheduleIdlePeriod()
 {
+    m_maybeHasPendingIdleCallbacks = true;
     m_idleTimer.startOneShot(0_s);
 }
 
 void WindowEventLoop::opportunisticallyRunIdleCallbacks(std::optional<MonotonicTime> deadline)
 {
-    if (shouldEndIdlePeriod())
-        return; // No need to schedule m_idleTimer since there is a task. didReachTimeToRun() will call this function.
+#if defined(WEBKIT_IOS6)
+    // This runs after every turn of the event loop and after every opportunistic
+    // task, and on a page that never calls requestIdleCallback every one of those
+    // turns walked the associated contexts and the microtask queue to conclude
+    // there was nothing to do. IdleCallbackController::queueIdleCallback is the
+    // only thing that can create an idle callback, and it always calls
+    // scheduleIdlePeriod() on this loop; the flag is cleared again below as soon
+    // as the walk finds nothing pending, so it stays honest.
+    if (!m_maybeHasPendingIdleCallbacks)
+        return;
+#endif
 
+    // Both checks are pure reads and either of them ends the function, so the
+    // cheaper one that almost always fires goes first: requestIdleCallback is
+    // rare, and this runs after every turn of the event loop. The old order paid
+    // for a scan of the task queue and of the microtask queue first.
     auto hasPendingIdleCallbacks = findMatchingAssociatedContext([&](ScriptExecutionContext& context) {
         if (auto* document = dynamicDowncast<Document>(context))
             return document->hasPendingIdleCallback();
         return false;
     });
 
-    if (!hasPendingIdleCallbacks)
+    if (!hasPendingIdleCallbacks) {
+#if defined(WEBKIT_IOS6)
+        m_maybeHasPendingIdleCallbacks = false;
+#endif
         return;
+    }
+
+    if (shouldEndIdlePeriod())
+        return; // No need to schedule m_idleTimer since there is a task. didReachTimeToRun() will call this function.
 
     auto now = MonotonicTime::now();
     if (auto scheduledWork = nextScheduledWorkTime()) {

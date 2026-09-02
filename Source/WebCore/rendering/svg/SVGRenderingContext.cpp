@@ -123,7 +123,9 @@ void SVGRenderingContext::prepareToRenderSVGContent(RenderElement& renderer, Pai
             isolateMaskForBlending = graphicsElement->shouldIsolateBlending();
     }
 
-    if (!(renderer.document().settings().layerBasedSVGEngineEnabled() && is<RenderSVGText>(renderer))) {
+    bool layerBasedSVGEngineEnabled = renderer.document().settings().layerBasedSVGEngineEnabled();
+
+    if (!(layerBasedSVGEngineEnabled && is<RenderSVGText>(renderer))) {
         if (opacity < 1 || hasBlendMode || isolateMaskForBlending || hasIsolation) {
             FloatRect repaintRect = m_renderer->repaintRectInLocalCoordinates();
             m_paintInfo->context().clip(repaintRect);
@@ -140,13 +142,14 @@ void SVGRenderingContext::prepareToRenderSVGContent(RenderElement& renderer, Pai
         }
     }
 
-    bool hasSimpleClip = WTF::holdsAlternative<Style::BasicShapePath>(style.clipPath()) || WTF::holdsAlternative<Style::BoxPath>(style.clipPath());
+    auto& clipPath = style.clipPath();
+    bool hasSimpleClip = WTF::holdsAlternative<Style::BasicShapePath>(clipPath) || WTF::holdsAlternative<Style::BoxPath>(clipPath);
     if (hasSimpleClip && !is<LegacyRenderSVGRoot>(renderer))
         SVGRenderSupport::clipContextToCSSClippingArea(m_paintInfo->context(), renderer);
 
     // FIXME: Text painting under LBSE reaches this code path, since all text painting code is shared between legacy / LBSE.
     SVGResources* resources = nullptr;
-    if (!renderer.document().settings().layerBasedSVGEngineEnabled())
+    if (!layerBasedSVGEngineEnabled)
         resources = SVGResourcesCache::cachedResourcesForRenderer(*m_renderer);
 
     if (!resources) {

@@ -63,7 +63,14 @@ inline JSArray* JSArray::tryCreate(VM& vm, Structure* structure, unsigned initia
         butterfly = Butterfly::fromBase(temp, 0, outOfLineStorage);
         butterfly->setVectorLength(vectorLength);
         butterfly->setPublicLength(initialLength);
+#if USE(JSVALUE32_64)
+        if (hasDouble(indexingType))
+            clearArray(butterfly->contiguousDouble().data(), vectorLength);
+        else
+            clearArray(butterfly->contiguous().data(), vectorLength);
+#else
         Butterfly::clearRange(indexingType, butterfly, 0, vectorLength);
+#endif
     } else {
         ASSERT(
             indexingType == ArrayWithSlowPutArrayStorage

@@ -330,6 +330,48 @@ bool isFastMallocEnabled()
     return bmalloc::api::isEnabled();
 }
 
+#if defined(WEBKIT_IOS6) && USE(SYSTEM_MALLOC) && !ENABLE(MALLOC_HEAP_BREAKDOWN)
+
+void* fastMalloc(size_t size)
+{
+    ASSERT_IS_WITHIN_LIMIT(size);
+    return systemMallocOrCrash(size);
+}
+
+void* fastZeroedMalloc(size_t size)
+{
+    ASSERT_IS_WITHIN_LIMIT(size);
+    return systemZeroedMallocOrCrash(size);
+}
+
+TryMallocReturnValue tryFastZeroedMalloc(size_t size)
+{
+    FAIL_IF_EXCEEDS_LIMIT(size);
+    return ::calloc(1, size);
+}
+
+void* fastCalloc(size_t numElements, size_t elementSize)
+{
+    ASSERT_IS_WITHIN_LIMIT(numElements * elementSize);
+    void* result = ::calloc(numElements, elementSize);
+    if (!result) [[unlikely]]
+        CRASH();
+    return result;
+}
+
+void* fastRealloc(void* object, size_t size)
+{
+    ASSERT_IS_WITHIN_LIMIT(size);
+    return systemReallocOrCrash(object, size);
+}
+
+void fastFree(void* object)
+{
+    ::free(object);
+}
+
+#else
+
 void* fastMalloc(size_t size)
 {
     ASSERT_IS_WITHIN_LIMIT(size);
@@ -399,6 +441,8 @@ void fastFree(void* object)
 #endif
 }
 
+#endif // defined(WEBKIT_IOS6) && USE(SYSTEM_MALLOC) && !ENABLE(MALLOC_HEAP_BREAKDOWN)
+
 size_t fastMallocSize(const void* p)
 {
 #if BENABLE(MALLOC_SIZE)
@@ -446,6 +490,94 @@ void* tryFastAlignedMalloc(size_t alignment, size_t size)
     BPROFILE_TRY_ALLOCATION(NON_JS_CELL, result, size);
     return result;
 }
+
+#if defined(WEBKIT_IOS6) && USE(SYSTEM_MALLOC) && !ENABLE(MALLOC_HEAP_BREAKDOWN)
+
+TryMallocReturnValue tryFastMalloc(size_t size)
+{
+    FAIL_IF_EXCEEDS_LIMIT(size);
+    return ::malloc(size);
+}
+
+TryMallocReturnValue tryFastCalloc(size_t numElements, size_t elementSize)
+{
+    FAIL_IF_EXCEEDS_LIMIT(numElements * elementSize);
+    return ::calloc(numElements, elementSize);
+}
+
+TryMallocReturnValue tryFastRealloc(void* object, size_t newSize)
+{
+    FAIL_IF_EXCEEDS_LIMIT(newSize);
+    return ::realloc(object, newSize);
+}
+
+void* fastCompactMalloc(size_t size)
+{
+    ASSERT_IS_WITHIN_LIMIT(size);
+    return systemMallocOrCrash(size);
+}
+
+void* fastCompactZeroedMalloc(size_t size)
+{
+    ASSERT_IS_WITHIN_LIMIT(size);
+    return systemZeroedMallocOrCrash(size);
+}
+
+TryMallocReturnValue tryFastCompactZeroedMalloc(size_t size)
+{
+    FAIL_IF_EXCEEDS_LIMIT(size);
+    return ::calloc(1, size);
+}
+
+void* fastCompactCalloc(size_t numElements, size_t elementSize)
+{
+    ASSERT_IS_WITHIN_LIMIT(numElements * elementSize);
+    void* result = ::calloc(numElements, elementSize);
+    if (!result) [[unlikely]]
+        CRASH();
+    return result;
+}
+
+void* fastCompactRealloc(void* object, size_t size)
+{
+    ASSERT_IS_WITHIN_LIMIT(size);
+    return systemReallocOrCrash(object, size);
+}
+
+TryMallocReturnValue tryFastCompactMalloc(size_t size)
+{
+    FAIL_IF_EXCEEDS_LIMIT(size);
+    return ::malloc(size);
+}
+
+void* fastCompactAlignedMalloc(size_t alignment, size_t size)
+{
+    ASSERT_IS_WITHIN_LIMIT(size);
+    void* result = bmalloc_aligned_alloc_compat(alignment, size);
+    if (!result) [[unlikely]]
+        CRASH();
+    return result;
+}
+
+void* tryFastCompactAlignedMalloc(size_t alignment, size_t size)
+{
+    FAIL_IF_EXCEEDS_LIMIT(size);
+    return bmalloc_aligned_alloc_compat(alignment, size);
+}
+
+TryMallocReturnValue tryFastCompactCalloc(size_t numElements, size_t elementSize)
+{
+    FAIL_IF_EXCEEDS_LIMIT(numElements * elementSize);
+    return ::calloc(numElements, elementSize);
+}
+
+TryMallocReturnValue tryFastCompactRealloc(void* object, size_t newSize)
+{
+    FAIL_IF_EXCEEDS_LIMIT(newSize);
+    return ::realloc(object, newSize);
+}
+
+#else
 
 TryMallocReturnValue tryFastMalloc(size_t size)
 {
@@ -586,6 +718,8 @@ TryMallocReturnValue tryFastCompactRealloc(void* object, size_t newSize)
     BPROFILE_ALLOCATION(COMPACTIBLE, result, newSize);
     return result;
 }
+
+#endif // defined(WEBKIT_IOS6) && USE(SYSTEM_MALLOC) && !ENABLE(MALLOC_HEAP_BREAKDOWN)
 
 void releaseFastMallocFreeMemoryForThisThread()
 {

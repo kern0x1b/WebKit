@@ -152,7 +152,8 @@ JSC_DEFINE_HOST_FUNCTION(objectProtoFuncIsPrototypeOf, (JSGlobalObject* globalOb
     VM& vm = globalObject->vm();
     auto scope = DECLARE_THROW_SCOPE(vm);
 
-    if (!callFrame->argument(0).isObject())
+    JSValue argument = callFrame->argument(0);
+    if (!argument.isObject())
         return JSValue::encode(jsBoolean(false));
 
     JSValue thisValue = callFrame->thisValue().toThis(globalObject, ECMAMode::strict());
@@ -161,7 +162,7 @@ JSC_DEFINE_HOST_FUNCTION(objectProtoFuncIsPrototypeOf, (JSGlobalObject* globalOb
     if (!thisObj) [[unlikely]]
         return encodedJSValue();
 
-    JSValue v = asObject(callFrame->argument(0))->getPrototype(globalObject);
+    JSValue v = asObject(argument)->getPrototype(globalObject);
     RETURN_IF_EXCEPTION(scope, encodedJSValue());
 
     while (true) {

@@ -231,9 +231,55 @@ template<typename T, typename U> inline bool operator==(const FastAllocator<T>&,
 
 struct FastCompactMalloc;
 
+#if defined(WEBKIT_IOS6) && USE(SYSTEM_MALLOC) && !ENABLE(MALLOC_HEAP_BREAKDOWN)
+
+ALWAYS_INLINE void* systemMallocOrCrash(size_t size)
+{
+    void* result = ::malloc(size);
+    if (!result) [[unlikely]]
+        CRASH();
+    return result;
+}
+
+ALWAYS_INLINE void* systemZeroedMallocOrCrash(size_t size)
+{
+    void* result = ::calloc(1, size);
+    if (!result) [[unlikely]]
+        CRASH();
+    return result;
+}
+
+ALWAYS_INLINE void* systemReallocOrCrash(void* p, size_t size)
+{
+    void* result = ::realloc(p, size);
+    if (!result) [[unlikely]]
+        CRASH();
+    return result;
+}
+
+struct FastMalloc {
+    static void* malloc(size_t size) { return systemMallocOrCrash(size); }
+    static void* tryMalloc(size_t size) { return ::malloc(size); }
+    static void* zeroedMalloc(size_t size) { return systemZeroedMallocOrCrash(size); }
+    static void* tryZeroedMalloc(size_t size) { return ::calloc(1, size); }
+    static void* realloc(void* p, size_t size) { return systemReallocOrCrash(p, size); }
+    static void* tryRealloc(void* p, size_t size) { return ::realloc(p, size); }
+    static void free(void* p) { ::free(p); }
+    static void fastFree(void* p) { ::free(p); }
+
+    static constexpr ALWAYS_INLINE size_t nextCapacity(size_t capacity)
+    {
+        return std::max(capacity + capacity / 2, capacity + 1);
+    }
+
+    using CompactMalloc = FastCompactMalloc;
+};
+
+#else
+
 struct FastMalloc {
     static void* malloc(size_t size) { return fastMalloc(size); }
-    
+
     static void* tryMalloc(size_t size)
     {
         auto result = tryFastMalloc(size);
@@ -264,7 +310,7 @@ struct FastMalloc {
             return realResult;
         return nullptr;
     }
-    
+
     static void free(void* p) { fastFree(p); }
 
     static void fastFree(void* p) { ::WTF::fastFree(p); }
@@ -277,11 +323,33 @@ struct FastMalloc {
     using CompactMalloc = FastCompactMalloc;
 };
 
+#endif
+
 struct FastAlignedMalloc {
     static void* alignedMalloc(size_t alignment, size_t size) { return fastAlignedMalloc(alignment, size); }
     static void* tryAlignedMalloc(size_t alignment, size_t size) { return tryFastAlignedMalloc(alignment, size); }
     static void free(void* p) { fastFree(p); }
 };
+
+#if defined(WEBKIT_IOS6) && USE(SYSTEM_MALLOC) && !ENABLE(MALLOC_HEAP_BREAKDOWN)
+
+struct FastCompactMalloc {
+    static void* malloc(size_t size) { return systemMallocOrCrash(size); }
+    static void* tryMalloc(size_t size) { return ::malloc(size); }
+    static void* zeroedMalloc(size_t size) { return systemZeroedMallocOrCrash(size); }
+    static void* tryZeroedMalloc(size_t size) { return ::calloc(1, size); }
+    static void* realloc(void* p, size_t size) { return systemReallocOrCrash(p, size); }
+    static void* tryRealloc(void* p, size_t size) { return ::realloc(p, size); }
+    static void free(void* p) { ::free(p); }
+    static void fastFree(void* p) { ::free(p); }
+
+    static constexpr ALWAYS_INLINE size_t nextCapacity(size_t capacity)
+    {
+        return std::max(capacity + capacity / 2, capacity + 1);
+    }
+};
+
+#else
 
 struct FastCompactMalloc {
     static void* malloc(size_t size) { return fastCompactMalloc(size); }
@@ -326,6 +394,8 @@ struct FastCompactMalloc {
         return std::max(capacity + capacity / 2, capacity + 1);
     }
 };
+
+#endif
 
 template<typename T>
 struct FastFree {
@@ -457,6 +527,14 @@ using WTF::tryFastCompactMalloc;
 using WTF::tryFastCompactZeroedMalloc;
 using WTF::fastCompactAlignedMalloc;
 
+#if defined(WEBKIT_IOS6) && USE(SYSTEM_MALLOC) && !ENABLE(MALLOC_HEAP_BREAKDOWN)
+#define WTF_FAST_ALLOCATED_NEW(size) ::WTF::systemMallocOrCrash(size)
+#define WTF_FAST_ALLOCATED_DELETE(p) ::free(p)
+#else
+#define WTF_FAST_ALLOCATED_NEW(size) ::WTF::fastMalloc(size)
+#define WTF_FAST_ALLOCATED_DELETE(p) ::WTF::fastFree(p)
+#endif
+
 #define WTF_DEPRECATED_MAKE_FAST_ALLOCATED_IMPL(_type) \
     static_assert(!WTF::usesTZoneHeap<_type>(), "Decendents of TZONE_ALLOCATED classes must also be TZONE_ALLOCATED"); \
     \
@@ -465,22 +543,22 @@ using WTF::fastCompactAlignedMalloc;
     \
     void* operator new(size_t size) \
     { \
-        return ::WTF::fastMalloc(size); \
+        return WTF_FAST_ALLOCATED_NEW(size); \
     } \
     \
     void operator delete(void* p) \
     { \
-        ::WTF::fastFree(p); \
+        WTF_FAST_ALLOCATED_DELETE(p); \
     } \
     \
     void* operator new[](size_t size) \
     { \
-        return ::WTF::fastMalloc(size); \
+        return WTF_FAST_ALLOCATED_NEW(size); \
     } \
     \
     void operator delete[](void* p) \
     { \
-        ::WTF::fastFree(p); \
+        WTF_FAST_ALLOCATED_DELETE(p); \
     } \
     void* operator new(size_t, NotNullTag, void* location) \
     { \
@@ -489,7 +567,7 @@ using WTF::fastCompactAlignedMalloc;
     } \
     static void freeAfterDestruction(void* p) \
     { \
-        ::WTF::fastFree(p); \
+        WTF_FAST_ALLOCATED_DELETE(p); \
     } \
     using WTFIsFastMallocAllocated = int; \
 
@@ -502,22 +580,22 @@ using WTF::fastCompactAlignedMalloc;
     \
     void* operator new(size_t size) \
     { \
-        return ::WTF::fastCompactMalloc(size); \
+        return WTF_FAST_ALLOCATED_NEW(size); \
     } \
     \
     void operator delete(void* p) \
     { \
-        ::WTF::fastFree(p); \
+        WTF_FAST_ALLOCATED_DELETE(p); \
     } \
     \
     void* operator new[](size_t size) \
     { \
-        return ::WTF::fastCompactMalloc(size); \
+        return WTF_FAST_ALLOCATED_NEW(size); \
     } \
     \
     void operator delete[](void* p) \
     { \
-        ::WTF::fastFree(p); \
+        WTF_FAST_ALLOCATED_DELETE(p); \
     } \
     void* operator new(size_t, NotNullTag, void* location) \
     { \
@@ -526,7 +604,7 @@ using WTF::fastCompactAlignedMalloc;
     } \
     static void freeAfterDestruction(void* p) \
     { \
-        ::WTF::fastFree(p); \
+        WTF_FAST_ALLOCATED_DELETE(p); \
     } \
     using WTFIsFastMallocAllocated = int; \
 

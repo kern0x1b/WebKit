@@ -432,7 +432,14 @@ void SpeculativeJIT::nonSpeculativePeepholeStrictEq(Node* node, Node* branchNode
         callOperationWithSilentSpill(operationCompareStrictEqCell, resultPayloadGPR, LinkableConstant::globalObject(*this, node), arg1PayloadGPR, arg2PayloadGPR);
         branchTest32(invert ? Zero : NonZero, resultPayloadGPR, taken);
     } else {
-        // FIXME: Add fast paths for twoCells, number etc.
+        MacroAssembler::Jump notSameTag = branch32(NotEqual, arg1Regs.tagGPR(), arg2Regs.tagGPR());
+        MacroAssembler::Jump notSamePayload = branch32(NotEqual, arg1PayloadGPR, arg2PayloadGPR);
+        MacroAssembler::Jump isDouble = branch32(Below, arg1Regs.tagGPR(), TrustedImm32(JSValue::LowestTag));
+        jump(invert ? notTaken : taken);
+
+        notSameTag.link(this);
+        notSamePayload.link(this);
+        isDouble.link(this);
         callOperationWithSilentSpill(operationCompareStrictEq, resultPayloadGPR, LinkableConstant::globalObject(*this, node), arg1Regs, arg2Regs);
         branchTest32(invert ? Zero : NonZero, resultPayloadGPR, taken);
     }
@@ -458,9 +465,6 @@ void SpeculativeJIT::genericJSValueNonPeepholeStrictEq(Node* node, bool invert)
     arg2.use();
     
     if (isKnownCell(node->child1().node()) && isKnownCell(node->child2().node())) {
-        // see if we get lucky: if the arguments are cells and they reference the same
-        // cell, then they must be strictly equal.
-        // FIXME: this should flush registers instead of silent spill/fill.
         Jump notEqualCase = branchPtr(NotEqual, arg1PayloadGPR, arg2PayloadGPR);
 
         move(TrustedImm32(!invert), resultPayloadGPR);
@@ -473,9 +477,19 @@ void SpeculativeJIT::genericJSValueNonPeepholeStrictEq(Node* node, bool invert)
 
         done.link(this);
     } else {
-        // FIXME: Add fast paths.
+        MacroAssembler::Jump notSameTag = branch32(NotEqual, arg1Regs.tagGPR(), arg2Regs.tagGPR());
+        MacroAssembler::Jump notSamePayload = branch32(NotEqual, arg1PayloadGPR, arg2PayloadGPR);
+        MacroAssembler::Jump isDouble = branch32(Below, arg1Regs.tagGPR(), TrustedImm32(JSValue::LowestTag));
+        move(TrustedImm32(!invert), resultPayloadGPR);
+        Jump doneFast = jump();
+
+        notSameTag.link(this);
+        notSamePayload.link(this);
+        isDouble.link(this);
         callOperationWithSilentSpill(operationCompareStrictEq, resultPayloadGPR, LinkableConstant::globalObject(*this, node), arg1Regs, arg2Regs);
         andPtr(TrustedImm32(1), resultPayloadGPR);
+
+        doneFast.link(this);
     }
 
     booleanResult(resultPayloadGPR, node, UseChildrenCalledExplicitly);

@@ -1347,6 +1347,7 @@ set(WebCore_NON_SVG_IDL_FILES
     html/TimeRanges.idl
     html/URLSearchParams.idl
     html/UserActivation.idl
+    page/Scheduling.idl
     html/ValidityState.idl
     html/VideoFrameMetadata.idl
     html/VideoFrameRequestCallback.idl
@@ -2116,6 +2117,7 @@ set(WebCore_SUPPLEMENTAL_IDL_FILES
     page/DOMWindow+RequestIdleCallback.idl
     page/DOMWindow+Selection.idl
     page/DOMWindow+VisualViewport.idl
+    page/Navigator+Scheduling.idl
     page/Navigator+UserActivation.idl
     page/NavigatorCookies.idl
     page/NavigatorGlobalPrivacyControl.idl

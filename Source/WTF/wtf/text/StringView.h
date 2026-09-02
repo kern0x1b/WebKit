@@ -466,16 +466,17 @@ inline StringView::StringView(const StringImpl* string LIFETIME_BOUND)
 
 inline StringView::StringView(const String& string LIFETIME_BOUND)
 {
-    setUnderlyingString(string.impl());
-    if (!string.impl()) {
+    SUPPRESS_UNCOUNTED_LOCAL auto* impl = string.impl();
+    setUnderlyingString(impl);
+    if (!impl) {
         clear();
         return;
     }
-    if (string.is8Bit()) {
-        initialize(string.span8());
+    if (impl->is8Bit()) {
+        initialize(impl->span8());
         return;
     }
-    initialize(string.span16());
+    initialize(impl->span16());
 }
 
 inline StringView::StringView(const AtomString& atomString LIFETIME_BOUND)
@@ -813,13 +814,10 @@ ALWAYS_INLINE bool equal(StringView a, StringView b)
 
 inline bool equal(StringView a, std::span<const Latin1Character> b)
 {
-    if (!b.data())
-        return !a.isEmpty();
-    if (a.isEmpty())
-        return !b.data();
-
-    if (a.length() != b.size())
+    if (a.length() != b.size()) [[likely]]
         return false;
+    if (!b.size())
+        return true;
 
     if (a.is8Bit())
         return equal(a.span8().data(), b);

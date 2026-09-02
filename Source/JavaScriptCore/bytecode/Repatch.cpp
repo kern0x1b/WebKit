@@ -202,8 +202,8 @@ void linkPolymorphicCall(VM& vm, JSCell* owner, CallFrame* callFrame, CallLinkIn
         JSCell* caseValue = nullptr;
         if (isClosureCall) {
             caseValue = variant.executable();
-            // FIXME: We could add a fast path for InternalFunction with closure call.
-            // https://bugs.webkit.org/show_bug.cgi?id=179311
+            if (!caseValue)
+                caseValue = variant.internalFunction();
             if (!caseValue)
                 continue;
         } else {

@@ -49,6 +49,7 @@ class Document;
 class Element;
 class FrameView;
 class IntersectionObserverEntry;
+class RenderBox;
 
 struct IntersectionObserverRegistration {
     WeakPtr<IntersectionObserver> observer;
@@ -145,8 +146,23 @@ private:
         bool observationChanged { false };
     };
 
+    // Everything about the root that does not depend on which target is being tested. It is the
+    // same for every target of one observer, so updateObservations() computes it once per pass
+    // instead of once per target.
+    struct IntersectionRootState {
+        CheckedPtr<RenderBox> renderer;
+        FloatRect bounds;
+        FloatRect boundsWithRootMargin;
+        // Filled in on first use: mapping the root bounds to absolute coordinates walks the
+        // root's ancestor chain and gives the same answer for every target.
+        std::optional<FloatRect> absoluteBounds;
+        std::optional<FloatRect> absoluteBoundsWithRootMargin;
+        bool canComputeIntersection { false };
+    };
+
     enum class ApplyRootMargin : bool { No, Yes };
-    IntersectionObservationState computeIntersectionState(const IntersectionObserverRegistration&, FrameView&, Element& target, ApplyRootMargin) const;
+    IntersectionRootState computeIntersectionRootState(FrameView&) const;
+    IntersectionObservationState computeIntersectionState(const IntersectionObserverRegistration&, FrameView&, Element& target, ApplyRootMargin, IntersectionRootState&) const;
 
     Type m_type { Type::Local };
 

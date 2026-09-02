@@ -26,6 +26,8 @@
 #include "config.h"
 #include "CallLinkStatus.h"
 
+#include "Options.h"
+
 #include "BytecodeStructs.h"
 #include "CallLinkInfo.h"
 #include "CodeBlock.h"
@@ -233,6 +235,7 @@ CallLinkStatus CallLinkStatus::computeFromCallLinkInfo(
     }
     
     result.m_couldTakeSlowPath = !!callLinkInfo.slowPathCount();
+
 
     return result;
 }

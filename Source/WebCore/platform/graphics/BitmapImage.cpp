@@ -100,6 +100,22 @@ ImageDrawResult BitmapImage::draw(GraphicsContext& context, const FloatRect& des
 
     auto scaleFactorForDrawing = context.scaleFactorForDrawing(destinationRect, adjustedSourceRect);
     auto sizeForDrawing = expandedIntSize(sourceSize * scaleFactorForDrawing);
+
+#if defined(WEBKIT_IOS6)
+    // The frame cache keys on this size and replaces the frame whenever a draw asks
+    // for a larger one, so a growing destination rect would re-decode every paint.
+    // Snap up to an eighth of the image so one frame serves a band of drawn sizes.
+    if (!sourceSize.isEmpty()) {
+        int quantum = std::max(1, sourceSize.maxDimension() / 8);
+        auto quantize = [quantum](int value, int limit) {
+            if (value >= limit)
+                return limit;
+            return std::min(limit, ((value + quantum - 1) / quantum) * quantum);
+        };
+        sizeForDrawing = { quantize(sizeForDrawing.width(), sourceSize.width()), quantize(sizeForDrawing.height(), sourceSize.height()) };
+    }
+#endif
+
     auto subsamplingLevel =  m_source->subsamplingLevelForScaleFactor(context, scaleFactorForDrawing, options.allowImageSubsampling());
     auto preferredDecodingDestination = m_source->preferredDecodingDestination(context, options);
 
@@ -123,8 +139,19 @@ ImageDrawResult BitmapImage::draw(GraphicsContext& context, const FloatRect& des
     else {
         // adjustedSourceRect is in the coordinates of the unsubsampled image, so map it to the subsampled image.
         auto imageSize = nativeImage->size();
+#if defined(WEBKIT_IOS6)
+        // Scaling a full-cover source rect lands a fraction of a pixel off the frame
+        // bounds, and GraphicsContextCG then saves state and clips on every draw.
+        if (imageSize != sourceSize) {
+            if (adjustedSourceRect == FloatRect { { }, FloatSize { sourceSize } })
+                adjustedSourceRect = FloatRect { { }, FloatSize { imageSize } };
+            else
+                adjustedSourceRect.scale(imageSize / sourceSize);
+        }
+#else
         if (imageSize != sourceSize)
             adjustedSourceRect.scale(imageSize / sourceSize);
+#endif
 
         auto orientation = options.orientation();
         if (orientation == ImageOrientation::Orientation::FromImage)

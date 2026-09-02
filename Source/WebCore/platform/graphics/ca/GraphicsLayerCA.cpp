@@ -1685,7 +1685,10 @@ bool GraphicsLayerCA::visibleRectChangeRequiresFlush(const FloatRect& clipRect) 
 
 TiledBacking* GraphicsLayerCA::tiledBacking() const
 {
-    return protect(m_layer)->tiledBacking();
+    // Called several times per layer per commit, and the layer is owned by this
+    // object for the whole of the call - the protective reference only bought a
+    // refcount pair each time.
+    return m_layer->tiledBacking();
 }
 
 TransformationMatrix GraphicsLayerCA::layerTransform(const FloatPoint& position, const TransformationMatrix* customTransform) const
@@ -1815,8 +1818,9 @@ GraphicsLayerCA::VisibleAndCoverageRects GraphicsLayerCA::computeVisibleAndCover
     auto boundsOrigin = m_boundsOrigin;
 #if PLATFORM(IOS_FAMILY)
     // In WK1, UIKit may be changing layer bounds behind our back in overflow-scroll layers, so use the layer's origin.
-    if (protect(m_layer)->type() == PlatformCALayer::Type::Cocoa)
-        boundsOrigin = protect(m_layer)->bounds().location();
+    // One protective reference for both queries: this runs for every layer of every commit.
+    if (RefPtr layer = m_layer; layer && layer->type() == PlatformCALayer::Type::Cocoa)
+        boundsOrigin = layer->bounds().location();
 #endif
 
     auto coverageRect = clipRectForSelf;

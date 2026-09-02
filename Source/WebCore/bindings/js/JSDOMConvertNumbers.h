@@ -70,11 +70,38 @@ template<> WEBCORE_EXPORT ConversionResult<IDLUnsignedLongLong> convertToInteger
 
 namespace Detail {
 
+template<typename IDL> ALWAYS_INLINE std::optional<typename IDL::ImplementationType> fastConvertBoxedInt32(JSC::JSValue value)
+{
+    using T = typename IDL::ImplementationType;
+    static_assert(std::is_integral_v<T>);
+
+    if (!value.isInt32()) [[unlikely]]
+        return std::nullopt;
+
+    int32_t boxed = value.asInt32();
+
+    if constexpr (std::is_signed_v<T>) {
+        if constexpr (sizeof(T) >= sizeof(int32_t))
+            return static_cast<T>(boxed);
+        else if (boxed >= static_cast<int32_t>(std::numeric_limits<T>::min()) && boxed <= static_cast<int32_t>(std::numeric_limits<T>::max()))
+            return static_cast<T>(boxed);
+    } else if (boxed >= 0) {
+        if constexpr (sizeof(T) >= sizeof(int32_t))
+            return static_cast<T>(boxed);
+        else if (static_cast<uint32_t>(boxed) <= static_cast<uint32_t>(std::numeric_limits<T>::max()))
+            return static_cast<T>(boxed);
+    }
+
+    return std::nullopt;
+}
+
 template<typename IDL> struct IntegerConverter : DefaultConverter<IDL> {
     using Result = ConversionResult<IDL>;
 
     static Result convert(JSC::JSGlobalObject& lexicalGlobalObject, JSC::JSValue value)
     {
+        if (auto fastResult = fastConvertBoxedInt32<IDL>(value)) [[likely]]
+            return *fastResult;
         return convertToInteger<IDL>(lexicalGlobalObject, value);
     }
 
@@ -130,6 +157,8 @@ template<typename IDL> struct Converter<IDLClampAdaptor<IDL>> : DefaultConverter
 
     static Result convert(JSC::JSGlobalObject& lexicalGlobalObject, JSC::JSValue value)
     {
+        if (auto fastResult = Detail::fastConvertBoxedInt32<IDL>(value)) [[likely]]
+            return *fastResult;
         return convertToIntegerClamp<IDL>(lexicalGlobalObject, value);
     }
 };
@@ -153,6 +182,8 @@ template<typename IDL> struct Converter<IDLEnforceRangeAdaptor<IDL>> : DefaultCo
 
     static Result convert(JSC::JSGlobalObject& lexicalGlobalObject, JSC::JSValue value)
     {
+        if (auto fastResult = Detail::fastConvertBoxedInt32<IDL>(value)) [[likely]]
+            return *fastResult;
         return convertToIntegerEnforceRange<IDL>(lexicalGlobalObject, value);
     }
 };
@@ -192,8 +223,13 @@ template<> struct Converter<IDLFloat> : DefaultConverter<IDLFloat> {
     {
         JSC::VM& vm = JSC::getVM(&lexicalGlobalObject);
         auto scope = DECLARE_THROW_SCOPE(vm);
-        double number = value.toNumber(&lexicalGlobalObject);
-        RETURN_IF_EXCEPTION(scope, Result::exception());
+        double number;
+        if (value.isNumber()) [[likely]]
+            number = value.asNumber();
+        else {
+            number = value.toNumber(&lexicalGlobalObject);
+            RETURN_IF_EXCEPTION(scope, Result::exception());
+        }
         if (!std::isfinite(number)) [[unlikely]] {
             throwNonFiniteTypeError(lexicalGlobalObject, scope);
             return Result::exception();
@@ -219,9 +255,13 @@ template<> struct Converter<IDLUnrestrictedFloat> : DefaultConverter<IDLUnrestri
         JSC::VM& vm = JSC::getVM(&lexicalGlobalObject);
         auto scope = DECLARE_THROW_SCOPE(vm);
 
-        double number = value.toNumber(&lexicalGlobalObject);
-
-        RETURN_IF_EXCEPTION(scope, Result::exception());
+        double number;
+        if (value.isNumber()) [[likely]]
+            number = value.asNumber();
+        else {
+            number = value.toNumber(&lexicalGlobalObject);
+            RETURN_IF_EXCEPTION(scope, Result::exception());
+        }
 
         if (number < std::numeric_limits<float>::lowest()) [[unlikely]]
             return -std::numeric_limits<float>::infinity();
@@ -248,9 +288,13 @@ template<> struct Converter<IDLDouble> : DefaultConverter<IDLDouble> {
         JSC::VM& vm = JSC::getVM(&lexicalGlobalObject);
         auto scope = DECLARE_THROW_SCOPE(vm);
 
-        double number = value.toNumber(&lexicalGlobalObject);
-
-        RETURN_IF_EXCEPTION(scope, Result::exception());
+        double number;
+        if (value.isNumber()) [[likely]]
+            number = value.asNumber();
+        else {
+            number = value.toNumber(&lexicalGlobalObject);
+            RETURN_IF_EXCEPTION(scope, Result::exception());
+        }
 
         if (!std::isfinite(number)) [[unlikely]] {
             throwNonFiniteTypeError(lexicalGlobalObject, scope);
@@ -282,9 +326,13 @@ template<> struct Converter<IDLUnrestrictedDouble> : DefaultConverter<IDLUnrestr
         JSC::VM& vm = JSC::getVM(&lexicalGlobalObject);
         auto scope = DECLARE_THROW_SCOPE(vm);
 
-        double number = value.toNumber(&lexicalGlobalObject);
-
-        RETURN_IF_EXCEPTION(scope, Result::exception());
+        double number;
+        if (value.isNumber()) [[likely]]
+            number = value.asNumber();
+        else {
+            number = value.toNumber(&lexicalGlobalObject);
+            RETURN_IF_EXCEPTION(scope, Result::exception());
+        }
 
         return number;
     }

@@ -100,15 +100,10 @@ unsigned g_webkitIOS6BoxGeometryCount;
 static constexpr unsigned needsLayoutSlots = 24;
 static void* needsLayoutCallers[needsLayoutSlots];
 static unsigned needsLayoutCounts[needsLayoutSlots];
-static bool needsLayoutRecording;
+bool g_webkitIOS6NeedsLayoutRecording;
 
 void recordNeedsLayoutCaller(void* caller)
 {
-    static int enabled = -1;
-    if (enabled < 0)
-        enabled = access("/tmp/native-layout-log", F_OK) == 0 ? 1 : 0;
-    if (!enabled || !needsLayoutRecording)
-        return;
     for (unsigned i = 0; i < needsLayoutSlots; i++) {
         if (needsLayoutCallers[i] == caller) {
             needsLayoutCounts[i]++;
@@ -352,7 +347,9 @@ void LocalFrameViewLayoutContext::performLayout(bool canDeferUpdateLayerPosition
         m_firstLayout = false;
     }
 
+#if !defined(WEBKIT_IOS6)
     Vector<FloatQuad> layoutAreas;
+#endif
     {
         TraceScope tracingScope(RenderTreeLayoutStart, RenderTreeLayoutEnd);
         SetForScope layoutPhase(m_layoutPhase, LayoutPhase::InRenderTreeLayout);
@@ -373,7 +370,6 @@ void LocalFrameViewLayoutContext::performLayout(bool canDeferUpdateLayerPosition
             logLayouts = !access("/tmp/native-layout-log", F_OK);
         MonotonicTime layoutStart = MonotonicTime::now();
         if (logLayouts) {
-            layoutStart = MonotonicTime::now();
             g_webkitIOS6BlocksLaidOut = 0;
             g_webkitIOS6BlocksForced = 0;
             g_webkitIOS6BlocksDirty = 0;
@@ -382,7 +378,7 @@ void LocalFrameViewLayoutContext::performLayout(bool canDeferUpdateLayerPosition
                 needsLayoutCallers[i] = nullptr;
                 needsLayoutCounts[i] = 0;
             }
-            needsLayoutRecording = true;
+            g_webkitIOS6NeedsLayoutRecording = true;
             g_webkitIOS6GridStretchHeight = 0;
             g_webkitIOS6GridStretchRequirement = 0;
             g_webkitIOS6GridStretchPercent = 0;
@@ -407,16 +403,16 @@ void LocalFrameViewLayoutContext::performLayout(bool canDeferUpdateLayerPosition
 #endif
         layoutRoot->layout();
 #if defined(WEBKIT_IOS6)
-        g_webkitIOS6LayoutMsTotal += (MonotonicTime::now() - layoutStart).milliseconds();
+        auto elapsed = (MonotonicTime::now() - layoutStart).milliseconds();
+        g_webkitIOS6LayoutMsTotal += elapsed;
         ++g_webkitIOS6LayoutCount;
         if (logLayouts) {
-            auto elapsed = (MonotonicTime::now() - layoutStart).milliseconds();
             bool wholeDocument = is<RenderView>(*layoutRoot);
             WTFLogAlways("[layout] %s %.1f ms, %u blocks (%u forced, %u self, %u via child), %u on entry, document %d px",
                 wholeDocument ? "whole document" : "subtree", elapsed, g_webkitIOS6BlocksLaidOut,
                 g_webkitIOS6BlocksForced, g_webkitIOS6BlocksDirty, g_webkitIOS6BlocksViaChild, g_webkitIOS6DirtyOnEntry,
                 renderView() ? renderView()->documentRect().height() : -1);
-            needsLayoutRecording = false;
+            g_webkitIOS6NeedsLayoutRecording = false;
             WTFLogAlways("[phase] inline %llu ms in %u calls, box geometry %llu ms in %u calls",
                 g_webkitIOS6InlineLayoutNs / 1000000, g_webkitIOS6InlineLayoutCount,
                 g_webkitIOS6BoxGeometryNs / 1000000, g_webkitIOS6BoxGeometryCount);
@@ -455,7 +451,9 @@ void LocalFrameViewLayoutContext::performLayout(bool canDeferUpdateLayerPosition
             }
         }
 #endif
+#if !defined(WEBKIT_IOS6)
         layoutRoot->absoluteQuads(layoutAreas);
+#endif
 
         clearSubtreeLayoutRoot();
         ASSERT(m_percentHeightIgnoreList.isEmptyIgnoringNullReferences());
@@ -489,7 +487,9 @@ void LocalFrameViewLayoutContext::performLayout(bool canDeferUpdateLayerPosition
         protect(view())->didLayout(layoutRoot, canDeferUpdateLayerPositions);
         runOrScheduleAsynchronousTasks(canDeferUpdateLayerPositions);
     }
+#if !defined(WEBKIT_IOS6)
     InspectorInstrumentation::didLayout(frame, *layoutRoot, layoutAreas);
+#endif
     DebugPageOverlays::didLayout(frame);
 }
 

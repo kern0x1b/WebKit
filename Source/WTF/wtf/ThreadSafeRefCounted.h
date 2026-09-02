@@ -73,12 +73,22 @@ protected:
     {
         m_refCountDebugger.willDeref(m_refCount.load(std::memory_order_relaxed));
 
+#if defined(WEBKIT_IOS6)
+        if (m_refCount.fetch_sub(1, std::memory_order_release) == 1) [[unlikely]] {
+            std::atomic_thread_fence(std::memory_order_acquire);
+            m_refCountDebugger.willDelete();
+
+            m_refCount.store(1, std::memory_order_relaxed);
+            return true;
+        }
+#else
         if (m_refCount.fetch_sub(1, std::memory_order_acq_rel) == 1) [[unlikely]] {
             m_refCountDebugger.willDelete();
 
             m_refCount.store(1, std::memory_order_relaxed);
             return true;
         }
+#endif
 
         return false;
     }

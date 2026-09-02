@@ -239,12 +239,11 @@ FiltrationResult AbstractValue::filter(
     
     if (isClear())
         return FiltrationOK;
-    
-    // FIXME: This could be optimized for the common case of m_type not
-    // having structures, array modes, or a specific value.
-    // https://bugs.webkit.org/show_bug.cgi?id=109663
-    
-    m_type &= other.speculationFromStructures() | admittedTypes;
+
+    if (!(m_type & SpecCell)) [[unlikely]] {
+        m_type &= admittedTypes;
+        return normalizeClarity(graph);
+    }
     m_arrayModes &= other.arrayModesFromStructures();
     m_structure.filter(other);
     

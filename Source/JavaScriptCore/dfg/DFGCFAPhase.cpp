@@ -138,6 +138,14 @@ public:
                     continue;
                 
                 block->intersectionOfCFAHasVisited &= block->cfaHasVisited;
+#if defined(WEBKIT_IOS6)
+                if (!block->isOSRTarget)
+                    continue;
+                if (block->intersectionOfPastValuesAtHead.size() != block->valuesAtHead.size()) {
+                    block->intersectionOfPastValuesAtHead = Operands<AbstractValue>(
+                        OperandsLike, block->valuesAtHead, AbstractValue::fullTop());
+                }
+#endif
                 for (unsigned i = block->intersectionOfPastValuesAtHead.size(); i--;) {
                     AbstractValue value = block->valuesAtHead[i];
                     // We need to guarantee that when we do an OSR entry, we validate the incoming

@@ -3818,7 +3818,8 @@ void LocalFrameView::scrollPositionChanged(const ScrollPosition& oldPosition, co
         static_cast<Frame&>(m_frame).loaderClient().broadcastFrameScrollPositionToOtherProcesses(newPosition);
 }
 
-void LocalFrameView::applyRecursivelyWithVisibleRect(NOESCAPE const Function<void(LocalFrameView& frameView, const IntRect& visibleRect)>& apply)
+template<typename ApplyFunction>
+void LocalFrameView::applyRecursivelyWithVisibleRect(NOESCAPE const ApplyFunction& apply)
 {
     IntRect windowClipRect = this->windowClipRect();
     auto visibleRect = windowToContents(windowClipRect);
@@ -5475,6 +5476,14 @@ bool LocalFrameView::shouldSuspendScrollAnimations() const
 
 void LocalFrameView::notifyAllFramesThatContentAreaWillPaint() const
 {
+#if defined(WEBKIT_IOS6)
+    // The only thing on the far end of contentAreaWillPaint() is the hook that
+    // flashes Mac's overlay scrollbars; every other ScrollbarsController leaves
+    // it as an empty virtual. Getting there once per rendering update walked
+    // every rendered subframe and every scrollable area of every one of them,
+    // and scrollbarsController() builds a controller for each area it is asked
+    // about. UIKit owns scrolling and scroll indicators on this port.
+#else
     notifyScrollableAreasThatContentAreaWillPaint();
 
     for (RefPtr child = m_frame->tree().firstRenderedChild(); child; child = child->tree().traverseNextRendered(m_frame.ptr())) {
@@ -5484,10 +5493,14 @@ void LocalFrameView::notifyAllFramesThatContentAreaWillPaint() const
         if (RefPtr frameView = localChild->view())
             frameView->notifyScrollableAreasThatContentAreaWillPaint();
     }
+#endif
 }
 
 void LocalFrameView::notifyScrollableAreasThatContentAreaWillPaint() const
 {
+#if defined(WEBKIT_IOS6)
+    // See notifyAllFramesThatContentAreaWillPaint().
+#else
     RefPtr page = m_frame->page();
     if (!page)
         return;
@@ -5503,6 +5516,7 @@ void LocalFrameView::notifyScrollableAreasThatContentAreaWillPaint() const
         if (!is<ScrollView>(scrollableArea))
             scrollableArea->contentAreaWillPaint();
     }
+#endif
 }
 
 void LocalFrameView::updateScrollCorner()
@@ -6930,6 +6944,9 @@ static Vector<Ref<Widget>> collectAndProtectWidgets(const HashSet<SingleThreadWe
 void LocalFrameView::updateWidgetPositions()
 {
     m_updateWidgetPositionsTimer.stop();
+    // Building the protecting vector allocates and takes a ref per widget; a feed has none.
+    if (m_widgetsInRenderTree.isEmpty())
+        return;
     // updateWidgetPosition() can possibly cause layout to be re-entered (via plug-ins running
     // scripts in response to NPP_SetWindow, for example), so we need to keep the Widgets
     // alive during enumeration.

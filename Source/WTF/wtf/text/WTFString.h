@@ -118,7 +118,7 @@ public:
 
     bool is8Bit() const { return !m_impl || m_impl->is8Bit(); }
 
-    unsigned sizeInBytes() const { return m_impl ? m_impl->length() * (is8Bit() ? sizeof(Latin1Character) : sizeof(char16_t)) : 0; }
+    unsigned sizeInBytes() const { return m_impl ? m_impl->length() * (m_impl->is8Bit() ? sizeof(Latin1Character) : sizeof(char16_t)) : 0; }
 
     WTF_EXPORT_PRIVATE CString ascii() const;
     WTF_EXPORT_PRIVATE CString latin1() const;

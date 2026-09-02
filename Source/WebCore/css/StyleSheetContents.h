@@ -70,6 +70,9 @@ public:
     const CSSNamespacePrefixMap& namespacePrefixMap() const { return m_namespacePrefixMap; }
 
     bool parseAuthorStyleSheet(const CachedCSSStyleSheet*, const SecurityOrigin*);
+#if defined(WEBKIT_IOS6)
+    bool parseAuthorStyleSheetInternal(const CachedCSSStyleSheet*, const SecurityOrigin*);
+#endif
     WEBCORE_EXPORT bool parseString(const String&);
 
     bool isCacheable() const;

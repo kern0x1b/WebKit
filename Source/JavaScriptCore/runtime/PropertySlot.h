@@ -386,23 +386,23 @@ private:
         } custom;
     } m_data;
 
-    unsigned m_attributes { 0 };
-    PropertyOffset m_offset { invalidOffset };
     JSValue m_thisValue;
+    unsigned m_attributes { 0 };
     JSObject* m_slotBase { nullptr };
     WatchpointSet* m_watchpointSet { nullptr };
     CacheabilityType m_cacheability { CachingDisallowed };
     PropertyType m_propertyType { TypeUnset };
-    InternalMethodType m_internalMethodType;
     AdditionalDataType m_additionalDataType { AdditionalDataType::None };
     bool m_isTaintedByOpaqueObject { false };
+    PropertyOffset m_offset { invalidOffset };
+    InternalMethodType m_internalMethodType;
 public:
     std::optional<DisallowVMEntry> disallowVMEntry;
 private:
     union {
         DOMAttributeAnnotation domAttribute;
         ModuleNamespaceSlot moduleNamespaceSlot;
-    } m_additionalData { { nullptr, nullptr } };
+    } m_additionalData;
 };
 
 ALWAYS_INLINE JSValue PropertySlot::getValue(JSGlobalObject* globalObject, PropertyName propertyName) const

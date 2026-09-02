@@ -515,7 +515,9 @@ public:
 
         auto linearSearchRanges = [ch](const Vector<CharacterRange>& ranges) {
             for (unsigned i = 0; i < ranges.size(); ++i) {
-                if ((ch >= ranges[i].begin) && (ch <= ranges[i].end))
+                if (ch < ranges[i].begin)
+                    return false;
+                if (ch <= ranges[i].end)
                     return true;
             }
 
@@ -551,40 +553,26 @@ public:
         if (characterClass->m_latin1Table && isLatin1(ch))
             return static_cast<bool>(characterClass->m_latin1Table->data[ch]);
 
-        const size_t thresholdForBinarySearch = 6;
+        constexpr size_t thresholdForBinarySearch = 6;
 
-        if (!isLatin1(ch)) {
-            if (characterClass->m_matches32.size()) {
-                if (characterClass->m_matches32.size() > thresholdForBinarySearch) {
-                    if (binarySearchMatches(characterClass->m_matches32))
-                        return true;
-                } else if (linearSearchMatches(characterClass->m_matches32))
-                    return true;
-            }
+        const bool latin1Char = isLatin1(ch);
+        const Vector<char32_t>& matches = latin1Char ? characterClass->m_matches8 : characterClass->m_matches32;
+        const Vector<CharacterRange>& ranges = latin1Char ? characterClass->m_ranges8 : characterClass->m_ranges32;
 
-            if (characterClass->m_ranges32.size()) {
-                if (characterClass->m_ranges32.size() > thresholdForBinarySearch) {
-                    if (binarySearchRanges(characterClass->m_ranges32))
-                        return true;
-                } else if (linearSearchRanges(characterClass->m_ranges32))
+        if (size_t matchesSize = matches.size()) {
+            if (matchesSize > thresholdForBinarySearch) {
+                if (binarySearchMatches(matches))
                     return true;
-            }
-        } else {
-            if (characterClass->m_matches8.size()) {
-                if (characterClass->m_matches8.size() > thresholdForBinarySearch) {
-                    if (binarySearchMatches(characterClass->m_matches8))
-                        return true;
-                } else if (linearSearchMatches(characterClass->m_matches8))
-                    return true;
-            }
+            } else if (linearSearchMatches(matches))
+                return true;
+        }
 
-            if (characterClass->m_ranges8.size()) {
-                if (characterClass->m_ranges8.size() > thresholdForBinarySearch) {
-                    if (binarySearchRanges(characterClass->m_ranges8))
-                        return true;
-                } else if (linearSearchRanges(characterClass->m_ranges8))
+        if (size_t rangesSize = ranges.size()) {
+            if (rangesSize > thresholdForBinarySearch) {
+                if (binarySearchRanges(ranges))
                     return true;
-            }
+            } else if (linearSearchRanges(ranges))
+                return true;
         }
 
         return false;
@@ -858,8 +846,10 @@ public:
                     return true;
                 }
 
-                for (unsigned matchAmount = 0; matchAmount < term.atom.quantityMaxCount; ++matchAmount) {
-                    if (!checkCharacterClass(term, term.inputPosition - matchAmount))
+                const unsigned quantityMaxCount = term.atom.quantityMaxCount;
+                const unsigned inputPosition = term.inputPosition;
+                for (unsigned matchAmount = 0; matchAmount < quantityMaxCount; ++matchAmount) {
+                    if (!checkCharacterClass(term, inputPosition - matchAmount))
                         return false;
                 }
                 return true;
@@ -900,9 +890,14 @@ public:
         case QuantifierType::Greedy: {
             unsigned position = input.getPos();
             unsigned matchAmount = 0;
+            CharacterClass* characterClass = term.atom.characterClass;
+            const bool invert = term.invert();
+            const unsigned quantityMaxCount = term.atom.quantityMaxCount;
             if (term.matchDirection() == Forward) {
-                while ((matchAmount < term.atom.quantityMaxCount) && input.checkInput(1)) {
-                    if (!checkCharacterClass(term, term.inputPosition + 1)) {
+                const unsigned negativeInputOffset = term.inputPosition + 1;
+                while ((matchAmount < quantityMaxCount) && input.checkInput(1)) {
+                    auto inputChar = input.readChecked(negativeInputOffset);
+                    if (inputChar == errorCodePoint || testCharacterClass(characterClass, static_cast<char32_t>(inputChar)) == invert) {
                         input.setPos(position);
                         break;
                     }
@@ -914,11 +909,13 @@ public:
             }
 
             // matchDirection = Backward
-            if (input.getPos() < term.inputPosition)
+            const unsigned negativeInputOffset = term.inputPosition;
+            if (input.getPos() < negativeInputOffset)
                 return false;
 
-            while ((matchAmount < term.atom.quantityMaxCount) && input.tryUncheckInput(1)) {
-                if (!checkCharacterClass(term, term.inputPosition)) {
+            while ((matchAmount < quantityMaxCount) && input.tryUncheckInput(1)) {
+                auto inputChar = input.tryReadBackward(negativeInputOffset);
+                if (inputChar == errorCodePoint || testCharacterClass(characterClass, static_cast<char32_t>(inputChar)) == invert) {
                     input.setPos(position);
                     break;
                 }
@@ -1832,8 +1829,12 @@ public:
 
                 unsigned position = input.getPos(); // May need to back out reading a surrogate pair.
 
-                for (unsigned matchAmount = 0; matchAmount < currentTerm().atom.quantityMaxCount; ++matchAmount) {
-                    if (!checkCharacter(currentTerm(), currentTerm().inputPosition - matchAmount)) {
+                auto& term = currentTerm();
+                const char32_t patternCharacter = term.atom.patternCharacter;
+                const unsigned quantityMaxCount = term.atom.quantityMaxCount;
+                const unsigned inputPosition = term.inputPosition;
+                for (unsigned matchAmount = 0; matchAmount < quantityMaxCount; ++matchAmount) {
+                    if (patternCharacter != static_cast<char32_t>(input.readChecked(inputPosition - matchAmount))) {
                         input.setPos(position);
                         BACKTRACK();
                     }
@@ -1859,8 +1860,11 @@ public:
 
                 unsigned position = input.getPos(); // May need to back out reading a surrogate pair.
 
-                for (unsigned matchAmount = 0; matchAmount < term.atom.quantityMaxCount; ++matchAmount) {
-                    if (!checkCharacter(term, term.inputPosition + matchAmount + 1 - term.atom.quantityMaxCount)) {
+                const char32_t patternCharacter = term.atom.patternCharacter;
+                const unsigned quantityMaxCount = term.atom.quantityMaxCount;
+                const unsigned inputPosition = term.inputPosition;
+                for (unsigned matchAmount = 0; matchAmount < quantityMaxCount; ++matchAmount) {
+                    if (patternCharacter != static_cast<char32_t>(input.tryReadBackward(inputPosition + matchAmount + 1 - quantityMaxCount))) {
                         input.setPos(position);
                         BACKTRACK();
                     }
@@ -1873,9 +1877,13 @@ public:
             BackTrackInfoPatternCharacter* backTrack = reinterpret_cast<BackTrackInfoPatternCharacter*>(context->frame + currentTerm().frameLocation);
             unsigned matchAmount = 0;
             unsigned position = input.getPos(); // May need to back out reading a surrogate pair.
-            if (currentTerm().matchDirection() == Forward) {
-                while ((matchAmount < currentTerm().atom.quantityMaxCount) && input.checkInput(1)) {
-                    if (!checkCharacter(currentTerm(), currentTerm().inputPosition + 1)) {
+            auto& term = currentTerm();
+            const char32_t patternCharacter = term.atom.patternCharacter;
+            const unsigned quantityMaxCount = term.atom.quantityMaxCount;
+            if (term.matchDirection() == Forward) {
+                const unsigned negativeInputOffset = term.inputPosition + 1;
+                while ((matchAmount < quantityMaxCount) && input.checkInput(1)) {
+                    if (patternCharacter != static_cast<char32_t>(input.readChecked(negativeInputOffset))) {
                         input.setPos(position);
                         break;
                     }
@@ -1883,12 +1891,12 @@ public:
                     position = input.getPos();
                 }
             } else {
-                auto& term = currentTerm();
-                if (input.getPos() < term.inputPosition)
+                const unsigned negativeInputOffset = term.inputPosition;
+                if (input.getPos() < negativeInputOffset)
                     BACKTRACK();
 
-                while ((matchAmount < term.atom.quantityMaxCount) && input.tryUncheckInput(1)) {
-                    if (!checkCharacter(currentTerm(), term.inputPosition)) {
+                while ((matchAmount < quantityMaxCount) && input.tryUncheckInput(1)) {
+                    if (patternCharacter != static_cast<char32_t>(input.tryReadBackward(negativeInputOffset))) {
                         input.setPos(position);
                         break;
                     }
@@ -1945,8 +1953,11 @@ public:
                 MATCH_NEXT();
             }
 
-            for (unsigned matchAmount = 0; matchAmount < currentTerm().atom.quantityMaxCount; ++matchAmount) {
-                if (!checkCasedCharacter(currentTerm(), currentTerm().inputPosition - matchAmount))
+            auto& casedTerm = currentTerm();
+            const unsigned casedQuantityMaxCount = casedTerm.atom.quantityMaxCount;
+            const unsigned casedInputPosition = casedTerm.inputPosition;
+            for (unsigned matchAmount = 0; matchAmount < casedQuantityMaxCount; ++matchAmount) {
+                if (!checkCasedCharacter(casedTerm, casedInputPosition - matchAmount))
                     BACKTRACK();
             }
             MATCH_NEXT();
@@ -1958,10 +1969,16 @@ public:
             // Case insensitive matching of unicode characters is handled as Type::CharacterClass.
             ASSERT(!isEitherUnicodeCompilation() || U_IS_BMP(currentTerm().atom.patternCharacter));
 
-            if (currentTerm().matchDirection() == Forward) {
+            auto& term = currentTerm();
+            const char32_t casedLo = term.atom.casedCharacter.lo;
+            const char32_t casedHi = term.atom.casedCharacter.hi;
+            const unsigned quantityMaxCount = term.atom.quantityMaxCount;
+            if (term.matchDirection() == Forward) {
+                const unsigned negativeInputOffset = term.inputPosition + 1;
                 unsigned matchAmount = 0;
-                while ((matchAmount < currentTerm().atom.quantityMaxCount) && input.checkInput(1)) {
-                    if (!checkCasedCharacter(currentTerm(), currentTerm().inputPosition + 1)) {
+                while ((matchAmount < quantityMaxCount) && input.checkInput(1)) {
+                    char32_t ch = input.readChecked(negativeInputOffset);
+                    if (casedLo != ch && casedHi != ch) {
                         input.uncheckInput(1);
                         break;
                     }
@@ -1971,15 +1988,16 @@ public:
 
                 MATCH_NEXT();
             } else {
-                auto& term = currentTerm();
+                const unsigned negativeInputOffset = term.inputPosition;
 
-                if (input.getPos() < term.inputPosition)
+                if (input.getPos() < negativeInputOffset)
                     BACKTRACK();
 
                 unsigned position = input.getPos();
                 unsigned matchAmount = 0;
-                while ((matchAmount < term.atom.quantityMaxCount) && input.tryUncheckInput(1)) {
-                    if (!checkCasedCharacter(term, term.inputPosition)) {
+                while ((matchAmount < quantityMaxCount) && input.tryUncheckInput(1)) {
+                    char32_t ch = input.tryReadBackward(negativeInputOffset);
+                    if (casedLo != ch && casedHi != ch) {
                         input.setPos(position);
                         break;
                     }
@@ -2230,10 +2248,12 @@ public:
 
         ConcurrentJSLocker locker(pattern->m_lock);
 
-        for (unsigned i = 0; i < pattern->m_body->m_numSubpatterns + 1; ++i)
+        const unsigned subpatternSlots = pattern->m_body->m_numSubpatterns + 1;
+        for (unsigned i = 0; i < subpatternSlots; ++i)
             output[i << 1] = offsetNoMatch;
 
-        for (unsigned i = pattern->m_offsetVectorBaseForNamedCaptures; i < pattern->m_offsetsSize; ++i)
+        const unsigned offsetsSize = pattern->m_offsetsSize;
+        for (unsigned i = pattern->m_offsetVectorBaseForNamedCaptures; i < offsetsSize; ++i)
             output[i] = 0;
 
         allocatorPool = pattern->m_allocator->startAllocator(Options::maxRegExpStackSize());

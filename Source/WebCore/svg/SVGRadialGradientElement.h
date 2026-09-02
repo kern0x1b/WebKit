@@ -23,6 +23,7 @@
 
 #include "SVGGradientElement.h"
 #include "SVGNames.h"
+#include <wtf/NeverDestroyed.h>
 #include <wtf/TZoneMalloc.h>
 
 namespace WebCore {
@@ -64,12 +65,32 @@ private:
     bool selfHasRelativeLengths() const override;
     bool supportsFocus() const final { return false; }
 
-    const Ref<SVGAnimatedLength> m_cx { SVGAnimatedLength::create(this, SVGLengthMode::Width, "50%"_s) };
-    const Ref<SVGAnimatedLength> m_cy { SVGAnimatedLength::create(this, SVGLengthMode::Height, "50%"_s) };
-    const Ref<SVGAnimatedLength> m_r { SVGAnimatedLength::create(this, SVGLengthMode::Other, "50%"_s) };
-    const Ref<SVGAnimatedLength> m_fx { SVGAnimatedLength::create(this, SVGLengthMode::Width, "50%"_s) };
-    const Ref<SVGAnimatedLength> m_fy { SVGAnimatedLength::create(this, SVGLengthMode::Height, "50%"_s) };
-    const Ref<SVGAnimatedLength> m_fr { SVGAnimatedLength::create(this, SVGLengthMode::Other, "0%"_s) };
+    static const SVGLengthValue& halfLength(SVGLengthMode mode)
+    {
+        if (mode == SVGLengthMode::Height) {
+            static NeverDestroyed<SVGLengthValue> height { SVGLengthMode::Height, "50%"_s };
+            return height.get();
+        }
+        if (mode == SVGLengthMode::Other) {
+            static NeverDestroyed<SVGLengthValue> other { SVGLengthMode::Other, "50%"_s };
+            return other.get();
+        }
+        static NeverDestroyed<SVGLengthValue> width { SVGLengthMode::Width, "50%"_s };
+        return width.get();
+    }
+
+    static const SVGLengthValue& zeroFocalRadius()
+    {
+        static NeverDestroyed<SVGLengthValue> other { SVGLengthMode::Other, "0%"_s };
+        return other.get();
+    }
+
+    const Ref<SVGAnimatedLength> m_cx { SVGAnimatedLength::create(this, halfLength(SVGLengthMode::Width)) };
+    const Ref<SVGAnimatedLength> m_cy { SVGAnimatedLength::create(this, halfLength(SVGLengthMode::Height)) };
+    const Ref<SVGAnimatedLength> m_r { SVGAnimatedLength::create(this, halfLength(SVGLengthMode::Other)) };
+    const Ref<SVGAnimatedLength> m_fx { SVGAnimatedLength::create(this, halfLength(SVGLengthMode::Width)) };
+    const Ref<SVGAnimatedLength> m_fy { SVGAnimatedLength::create(this, halfLength(SVGLengthMode::Height)) };
+    const Ref<SVGAnimatedLength> m_fr { SVGAnimatedLength::create(this, zeroFocalRadius()) };
 };
 
 } // namespace WebCore

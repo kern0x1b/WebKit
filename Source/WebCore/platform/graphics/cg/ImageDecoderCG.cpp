@@ -153,6 +153,19 @@ static RetainPtr<CFDictionaryRef> imageSourceOptions(SubsamplingLevel subsamplin
     if (subsamplingLevel == SubsamplingLevel::Default && decodingDestination == DecodingDestination::Base)
         return options;
 
+    if (decodingDestination == DecodingDestination::Base && subsamplingLevel > SubsamplingLevel::First && subsamplingLevel <= SubsamplingLevel::Last) {
+        static CFDictionaryRef subsampledOptions[static_cast<int>(SubsamplingLevel::Max)];
+        static std::once_flag initializeSubsampledOptionsOnce;
+        std::call_once(initializeSubsampledOptionsOnce, [] {
+            for (auto level = SubsamplingLevel::First; level <= SubsamplingLevel::Last; ++level) {
+                auto levelOptions = adoptCF(CFDictionaryCreateMutableCopy(nullptr, 0, options));
+                appendImageSourceOption(levelOptions.get(), level);
+                subsampledOptions[static_cast<int>(level)] = levelOptions.leakRef();
+            }
+        });
+        return subsampledOptions[static_cast<int>(subsamplingLevel)];
+    }
+
     auto extendedOptions = adoptCF(CFDictionaryCreateMutableCopy(nullptr, 0, options));
     appendImageSourceOption(extendedOptions.get(), subsamplingLevel);
     appendImageSourceOption(extendedOptions.get(), decodingDestination);
@@ -319,6 +332,34 @@ ImageDecoderCG::ImageDecoderCG(FragmentedSharedBuffer& data, AlphaOption, GammaA
         m_nativeDecoder = adoptCF(CGImageSourceCreateIncremental(nullptr));
 }
 
+RetainPtr<CFDictionaryRef> ImageDecoderCG::propertiesAtIndex(size_t index, SubsamplingLevel subsamplingLevel) const
+{
+    {
+        Locker locker { m_propertiesLock };
+        if (m_properties && m_propertiesIndex == index && m_propertiesSubsamplingLevel == subsamplingLevel)
+            return m_properties;
+    }
+
+    auto properties = adoptCF(CGImageSourceCopyPropertiesAtIndex(m_nativeDecoder.get(), index, imageSourceOptions(subsamplingLevel).get()));
+    if (!properties)
+        return nullptr;
+
+    {
+        Locker locker { m_propertiesLock };
+        m_properties = properties;
+        m_propertiesIndex = index;
+        m_propertiesSubsamplingLevel = subsamplingLevel;
+    }
+
+    return properties;
+}
+
+void ImageDecoderCG::clearCachedProperties() const
+{
+    Locker locker { m_propertiesLock };
+    m_properties = nullptr;
+}
+
 size_t ImageDecoderCG::bytesDecodedToDetermineProperties() const
 {
     // Measured by tracing malloc/calloc calls on Mac OS 10.6.6, x86_64.
@@ -380,7 +421,7 @@ EncodedDataStatus ImageDecoderCG::encodedDataStatus() const
         if (m_encodedDataStatus == EncodedDataStatus::SizeAvailable)
             break;
 
-        auto image0Properties = adoptCF(CGImageSourceCopyPropertiesAtIndex(m_nativeDecoder.get(), 0, imageSourceOptions().get()));
+        auto image0Properties = propertiesAtIndex(0);
         if (!image0Properties || !CFDictionaryContainsKey(image0Properties.get(), kCGImagePropertyPixelWidth) || !CFDictionaryContainsKey(image0Properties.get(), kCGImagePropertyPixelHeight)) {
             m_encodedDataStatus = EncodedDataStatus::TypeAvailable;
             break;
@@ -400,7 +441,8 @@ EncodedDataStatus ImageDecoderCG::encodedDataStatus() const
 
 bool ImageDecoderCG::hasHDRGainMap() const
 {
-#if HAVE(SUPPORT_HDR_DISPLAY)
+// Gain maps postdate this ImageIO, and the lookup is a whole-container metadata copy.
+#if HAVE(SUPPORT_HDR_DISPLAY) && !defined(WEBKIT_IOS6)
     auto properties = adoptCF(CGImageSourceCopyProperties(m_nativeDecoder.get(), imageSourceMetadataOptions().get()));
     if (!properties)
         return false;
@@ -487,7 +529,7 @@ RepetitionCount ImageDecoderCG::repetitionCount() const
 
 std::optional<IntPoint> ImageDecoderCG::hotSpot() const
 {
-    auto properties = adoptCF(CGImageSourceCopyPropertiesAtIndex(m_nativeDecoder.get(), 0, imageSourceOptions().get()));
+    auto properties = propertiesAtIndex(0);
     if (!properties)
         return std::nullopt;
     
@@ -506,48 +548,34 @@ std::optional<IntPoint> ImageDecoderCG::hotSpot() const
     return IntPoint(x, y);
 }
 
-bool ImageDecoderCG::hasAlpha() const
-{
-    String uti = this->uti();
-    
-    // Return false if there is no image type or the image type is JPEG, because
-    // JPEG does not support alpha transparency.
-    if (uti.isEmpty() || uti == "public.jpeg"_s)
-        return false;
-    
-    // FIXME: Could return false for other non-transparent image formats.
-    // FIXME: Could maybe return false for a GIF Frame if we have enough info in the GIF properties dictionary
-    // to determine whether or not a transparent color was defined.
-    return true;
-}
-
 IntSize ImageDecoderCG::frameSizeAtIndex(size_t index, SubsamplingLevel subsamplingLevel) const
 {
-    auto properties = adoptCF(CGImageSourceCopyPropertiesAtIndex(m_nativeDecoder.get(), index, imageSourceOptions(subsamplingLevel).get()));
+    auto properties = propertiesAtIndex(index, subsamplingLevel);
     return frameSizeFromProperties(properties.get());
 }
 
 FloatSize ImageDecoderCG::frameDensityAtIndex(size_t index) const
 {
-    RetainPtr properties = adoptCF(CGImageSourceCopyPropertiesAtIndex(m_nativeDecoder.get(), index, imageSourceOptions().get()));
+    RetainPtr properties = propertiesAtIndex(index);
     return frameDensityFromProperties(properties.get());
 }
 
 bool ImageDecoderCG::frameIsCompleteAtIndex(size_t index) const
 {
-    ASSERT(frameCount());
+    auto frameCount = this->frameCount();
+    ASSERT(frameCount);
     // CGImageSourceGetStatusAtIndex() changes the return status value from kCGImageStatusIncomplete
     // to kCGImageStatusComplete only if (index > 1 && index < frameCount() - 1). To get an accurate
     // result for the last frame (or the single frame of the static image) use CGImageSourceGetStatus()
     // instead for this frame.
-    if (index == frameCount() - 1)
+    if (index == frameCount - 1)
         return CGImageSourceGetStatus(m_nativeDecoder.get()) == kCGImageStatusComplete;
     return CGImageSourceGetStatusAtIndex(m_nativeDecoder.get(), index) == kCGImageStatusComplete;
 }
 
 ImageOrientation ImageDecoderCG::frameOrientationAtIndex(size_t index) const
 {
-    auto properties = adoptCF(CGImageSourceCopyPropertiesAtIndex(m_nativeDecoder.get(), index, imageSourceOptions().get()));
+    auto properties = propertiesAtIndex(index);
     if (!properties)
         return ImageOrientation::Orientation::None;
 
@@ -556,7 +584,7 @@ ImageOrientation ImageDecoderCG::frameOrientationAtIndex(size_t index) const
 
 std::optional<IntSize> ImageDecoderCG::frameDensityCorrectedSizeAtIndex(size_t index) const
 {
-    auto properties = adoptCF(CGImageSourceCopyPropertiesAtIndex(m_nativeDecoder.get(), index, imageSourceOptions().get()));
+    auto properties = propertiesAtIndex(index);
     if (!properties)
         return std::nullopt;
 
@@ -573,10 +601,18 @@ std::optional<IntSize> ImageDecoderCG::frameDensityCorrectedSizeAtIndex(size_t i
 Seconds ImageDecoderCG::frameDurationAtIndex(size_t index) const
 {
     RetainPtr<CFDictionaryRef> properties = nullptr;
-    RetainPtr<CFDictionaryRef> frameProperties = adoptCF(CGImageSourceCopyPropertiesAtIndex(m_nativeDecoder.get(), index, imageSourceOptions().get()));
+    RetainPtr<CFDictionaryRef> frameProperties = propertiesAtIndex(index);
     CFDictionaryRef animationProperties = animationPropertiesFromProperties(frameProperties.get());
 
-    if (frameProperties && !animationProperties) {
+#if defined(WEBKIT_IOS6)
+    // The container lookup below only ever holds delays for HEICS and AVIS, which are
+    // multi-frame by construction.
+    bool mayHaveContainerFrameInfo = frameCount() > 1;
+#else
+    constexpr bool mayHaveContainerFrameInfo = true;
+#endif
+
+    if (mayHaveContainerFrameInfo && frameProperties && !animationProperties) {
         properties = adoptCF(CGImageSourceCopyProperties(m_nativeDecoder.get(), imageSourceOptions().get()));
         animationProperties = animationPropertiesFromProperties(properties.get(), WebCoreCGImagePropertyAVISDictionary, index);
         if (!animationProperties)
@@ -610,7 +646,19 @@ bool ImageDecoderCG::frameHasAlphaAtIndex(size_t index) const
 
 bool ImageDecoderCG::fetchFrameMetaDataAtIndex(size_t index, SubsamplingLevel subsamplingLevel, const DecodingOptions& options, ImageFrame& frame) const
 {
-    auto properties = adoptCF(CGImageSourceCopyPropertiesAtIndex(m_nativeDecoder.get(), index, imageSourceOptions(subsamplingLevel).get()));
+#if defined(WEBKIT_IOS6)
+    // Everything below is a property of the encoded image, not of the reduction the
+    // frame was decoded at, and ImageFrame::size() is only read for the intrinsic
+    // size layout uses. One level keeps the properties cache warm across a decode and
+    // stops a query about one level discarding a frame decoded at another.
+    UNUSED_PARAM(options);
+    auto properties = propertiesAtIndex(index, SubsamplingLevel::Default);
+    if (!properties)
+        return false;
+
+    frame.m_size = frameSizeFromProperties(properties.get());
+#else
+    auto properties = propertiesAtIndex(index, subsamplingLevel);
     if (!properties)
         return false;
 
@@ -619,6 +667,7 @@ bool ImageDecoderCG::fetchFrameMetaDataAtIndex(size_t index, SubsamplingLevel su
         frame.m_size = frame.nativeImage(options.decodingDestination())->size();
     } else
         frame.m_size = frameSizeFromProperties(properties.get());
+#endif
 
     frame.m_density = frameDensityFromProperties(properties.get());
 
@@ -682,29 +731,17 @@ PlatformImagePtr ImageDecoderCG::createFrameImageAtIndex(size_t index, Subsampli
     ASSERT(decodingOptions.decodingMode() != DecodingMode::Auto);
 
     bool decodeForNativeSize = decodingOptions.decodingMode() == DecodingMode::Synchronous;
+    auto sizeForDrawing = decodingOptions.sizeForDrawing();
+    std::optional<IntSize> nativeSize;
 
 #if defined(WEBKIT_IOS6)
-    // A synchronous decode is what every image inside the viewport gets
-    // (RenderBoxModelObject::decodingModeForImageDraw returns Synchronous for
-    // isVisibleInViewport()), so on this port the images that are on screen are
-    // exactly the ones decoded at native size. The panel is 640x960 px and the
-    // process budget is about 122MB, so a 1080px-wide photo drawn into a
-    // 320pt column is 4.7MB of RGBA held to paint 1.6MB of it, and the surplus
-    // is resampled away again on every paint.
-    //
-    // Decode it at the size it will be drawn instead, which is what the
-    // asynchronous branch below already does on this same device for the images
-    // below the fold. This is not the subsampling lever: sizeForDrawing is exact
-    // rather than a power of two, so the frame is never smaller than the rect it
-    // is painted into and there is no softening. A later draw at a larger size
-    // re-decodes rather than reusing a small frame - the frame cache keys on it,
-    // see DecodingOptions::isCompatibleWith().
-    //
-    // Only when a drawing size is known and is actually smaller than the image:
-    // a synchronous decode with no sizeForDrawing (canvas, favicons) keeps the
-    // native-size entry point it has always used.
-    if (auto sizeForDrawing = decodingOptions.sizeForDrawing()) {
-        if (sizeForDrawing->unclampedArea() < frameSizeAtIndex(index, SubsamplingLevel::Default).unclampedArea())
+    // Every image inside the viewport is decoded synchronously, so on this port the
+    // images on screen are exactly the ones held at native size while being painted
+    // into a 320pt column. Decode at the size it will be drawn, as the asynchronous
+    // branch below already does for the images below the fold.
+    if (sizeForDrawing) {
+        nativeSize = frameSizeAtIndex(index, SubsamplingLevel::Default);
+        if (sizeForDrawing->unclampedArea() < nativeSize->unclampedArea())
             decodeForNativeSize = false;
     }
 #endif
@@ -714,10 +751,12 @@ PlatformImagePtr ImageDecoderCG::createFrameImageAtIndex(size_t index, Subsampli
         options = imageSourceOptions(subsamplingLevel, decodingOptions.decodingDestination());
         image = adoptCF(CGImageSourceCreateImageAtIndex(m_nativeDecoder.get(), index, options.get()));
     } else {
-        auto size = frameSizeAtIndex(index, SubsamplingLevel::Default);
+        if (!nativeSize)
+            nativeSize = frameSizeAtIndex(index, SubsamplingLevel::Default);
+        auto size = *nativeSize;
 
         // Don't consider the subsamplingLevel when comparing the image native size with sizeForDrawing.
-        if (auto sizeForDrawing = decodingOptions.sizeForDrawing()) {
+        if (sizeForDrawing) {
             // See which size is smaller: the image native size or the decodingSize.
             if (sizeForDrawing->unclampedArea() < size.unclampedArea())
                 size = *sizeForDrawing;
@@ -838,9 +877,15 @@ void ImageDecoderCG::setData(const FragmentedSharedBuffer& data, bool allDataRec
     // We use FragmentedSharedBuffer's ability to wrap itself inside CFData to get around this, ensuring that ImageIO is
     // really looking at the FragmentedSharedBuffer.
     CGImageSourceUpdateData(m_nativeDecoder.get(), contiguousData->createCFData().get(), allDataReceived);
-    
+
     m_uti = decodeUTI(contiguousData.get());
     m_isXBitmapImage = m_uti == "public.xbitmap-image"_s;
+
+    // JPEG does not support alpha transparency.
+    // FIXME: Could return false for other non-transparent image formats.
+    m_hasAlpha = !m_uti.isEmpty() && m_uti != "public.jpeg"_s;
+
+    clearCachedProperties();
 }
 
 bool ImageDecoderCG::canDecodeType(const String& mimeType)

@@ -61,7 +61,15 @@ public:
     // https://html.spec.whatwg.org/multipage/syntax.html#parsing-html-fragments
     void NODELETE updateStateFor(const AtomString& tagName);
 
+    // Same, but for a raw tokenizer tag name. Rejects the great majority of tag names on length
+    // and first letter alone, so the atom table is only consulted for plausible candidates.
+    void updateStateFor(std::span<const char16_t> tagName);
+
     void setForceNullCharacterReplacement(bool);
+
+    // A speculative pass that only cares about tags can ask for character token payloads to be
+    // dropped. Token types and boundaries, and therefore the state machine, are unaffected.
+    void setShouldDiscardCharacterData(bool);
 
     bool shouldAllowCDATA() const;
     void setShouldAllowCDATA(bool);
@@ -186,6 +194,7 @@ private:
     State m_state { DataState };
     bool m_forceNullCharacterReplacement { false };
     bool m_shouldAllowCDATA { false };
+    bool m_shouldDiscardCharacterData { false };
 
     mutable HTMLToken m_token;
 
@@ -292,6 +301,11 @@ inline size_t HTMLTokenizer::numberOfBufferedCharacters() const
 inline void HTMLTokenizer::setForceNullCharacterReplacement(bool value)
 {
     m_forceNullCharacterReplacement = value;
+}
+
+inline void HTMLTokenizer::setShouldDiscardCharacterData(bool value)
+{
+    m_shouldDiscardCharacterData = value;
 }
 
 inline bool HTMLTokenizer::shouldAllowCDATA() const

@@ -83,6 +83,9 @@ namespace WebCore {
 
 #if defined(WEBKIT_IOS6)
 extern "C" int g_webkitIOS6PendingDrawWork;
+// Raised when a _dispatchTileDidDraw: perform is in flight, lowered by
+// -[WebView _dispatchTileDidDraw:] when it runs. See drawLayer().
+extern "C" { int g_webkitIOS6TileDidDrawPending = 0; }
 #endif
 
 void LegacyTileCache::ref() const
@@ -122,10 +125,11 @@ CALayer* LegacyTileCache::hostLayer() const
 
 FloatRect LegacyTileCache::visibleRectInLayer(CALayer *layer) const
 {
-    if (m_overrideVisibleRect)
-        return [layer convertRect:m_overrideVisibleRect.value() fromLayer:hostLayer()];
-
-    return [layer convertRect:[m_window extendedVisibleRect] fromLayer:hostLayer()];
+    CALayer *host = [m_window hostLayer];
+    CGRect rect = m_overrideVisibleRect ? CGRect(m_overrideVisibleRect.value()) : [m_window extendedVisibleRect];
+    if (layer == host)
+        return rect;
+    return [layer convertRect:rect fromLayer:host];
 }
 
 bool LegacyTileCache::setOverrideVisibleRect(const FloatRect& rect)
@@ -424,7 +428,7 @@ void LegacyTileCache::finishedCreatingTiles(bool didCreateTiles, bool createMore
             m_zoomedInTileGrid->dropAllTiles();
         } else if (activeTileGrid() == m_zoomedInTileGrid.get()) {
             // Pass the minimum possible distance to consider all tiles, even visible ones.
-            m_zoomedOutTileGrid->dropDistantTiles(0, std::numeric_limits<double>::min());
+            m_zoomedOutTileGrid->dropDistantTiles(0, std::numeric_limits<double>::min(), m_zoomedOutTileGrid->visibleRect());
         }
     }
 
@@ -443,7 +447,11 @@ void LegacyTileCache::tileCreationTimerFired()
 
 void LegacyTileCache::createTilesInActiveGrid(SynchronousTileCreationMode mode)
 {
+#if defined(WEBKIT_IOS6)
+    if (MemoryPressureHandler::singleton().memoryPressureStatus() == SystemMemoryPressureStatus::Critical) {
+#else
     if (MemoryPressureHandler::singleton().isUnderMemoryPressure()) {
+#endif
         LOG(MemoryPressure, "Under memory pressure at: %s", __PRETTY_FUNCTION__);
         removeAllNonVisibleTilesInternal();
     }
@@ -577,18 +585,25 @@ void LegacyTileCache::drawReplacementImage(LegacyTileLayer* layer, CGContextRef 
     CGContextDrawImage(context, imageRect, image);
 }
 
-void LegacyTileCache::drawWindowContent(LegacyTileLayer* layer, CGContextRef context, CGRect dirtyRect, DrawingFlags drawingFlags)
+void LegacyTileCache::drawWindowContent(LegacyTileLayer* layer, CGContextRef context, CGRect dirtyRect, DrawingFlags drawingFlags, CGRect frame)
 {
-    CGRect frame = [layer frame];
-    FontAntialiasingStateSaver fontAntialiasingState(context, [m_window useOrientationDependentFontAntialiasing] && [layer isOpaque]);
-    fontAntialiasingState.setup([WAKWindow hasLandscapeOrientation]);
+    // +[WAKWindow hasLandscapeOrientation] calls out to the application's
+    // orientation provider; the saver only looks at it when the style is being
+    // overridden, so it is not asked for otherwise.
+    bool useOrientationDependentFontAntialiasing = [m_window useOrientationDependentFontAntialiasing] && [layer isOpaque];
+    FontAntialiasingStateSaver fontAntialiasingState(context, useOrientationDependentFontAntialiasing);
+    fontAntialiasingState.setup(useOrientationDependentFontAntialiasing && [WAKWindow hasLandscapeOrientation]);
 
     if (drawingFlags == DrawingFlags::Snapshotting)
         [m_window setIsInSnapshottingPaint:YES];
         
     CGSRegionObj drawRegion = (CGSRegionObj)[layer regionBeingDrawn];
     CGFloat contentsScale = [layer contentsScale];
-    
+
+    // hostLayer() is -[WAKWindow hostLayer]; both branches below need it, and
+    // the simple one used to ask for it again after drawLayer() already had.
+    CALayer *host = hostLayer();
+
     if (drawRegion && shouldRepaintInPieces(dirtyRect, drawRegion, contentsScale)) {
         // Use fine grained repaint rectangles to minimize the amount of painted pixels.
         CGSRegionEnumeratorObj enumerator = CGSRegionEnumerator(drawRegion);
@@ -600,13 +615,13 @@ void LegacyTileCache::drawWindowContent(LegacyTileLayer* layer, CGContextRef con
             adjustedSubRect.size.width /= contentsScale;
             adjustedSubRect.size.height /= contentsScale;
 
-            CGRect subRectInSuper = [hostLayer() convertRect:adjustedSubRect fromLayer:layer];
+            CGRect subRectInSuper = [host convertRect:adjustedSubRect fromLayer:layer];
             [m_window displayRect:subRectInSuper];
         }
         CGSReleaseRegionEnumerator(enumerator);
     } else {
         // Simple repaint
-        CGRect dirtyRectInSuper = [hostLayer() convertRect:dirtyRect fromLayer:layer];
+        CGRect dirtyRectInSuper = [host convertRect:dirtyRect fromLayer:layer];
 #if defined(WEBKIT_IOS6)
         if (([]() { static const bool logTilePaintOnce = getenv("WEBKIT_IOS6_LOG_PAINT") != nullptr; return logTilePaintOnce; }())) {
             fprintf(stderr, "[ios6 paint] tile %g,%g %gx%g dirty %g,%g %gx%g content view %s\n",
@@ -644,7 +659,7 @@ void LegacyTileCache::drawLayer(LegacyTileLayer* layer, CGContextRef context, Dr
     if (RetainPtr<CGImage> contentReplacementImage = this->contentReplacementImage())
         drawReplacementImage(layer, context, contentReplacementImage.get());
     else
-        drawWindowContent(layer, context, dirtyRect, drawingFlags);
+        drawWindowContent(layer, context, dirtyRect, drawingFlags, frame);
 
     ++layer.paintCount;
     if (m_tilePaintCountersVisible) {
@@ -679,7 +694,24 @@ void LegacyTileCache::drawLayer(LegacyTileLayer* layer, CGContextRef context, Dr
     }
 
     WAKView* view = [m_window contentView];
+#if defined(WEBKIT_IOS6)
+    // One outstanding "tiles drew" notification, not one per tile.
+    //
+    // -[WebView _dispatchTileDidDraw:] reports the first paint of a load and
+    // returns immediately on every call after it, but the delayed perform that
+    // carries it allocates a timer and wakes the run loop each time. On the web
+    // thread that wake is a whole extra turn of the loop, which means another
+    // acquire and release of the web lock plus an autorelease pool - paid once
+    // per tile, per drawing pass. The flag is lowered by the callback itself, so
+    // no notification is dropped: a pass that finds one already in flight is a
+    // pass whose notification has not been delivered yet.
+    if (view && !g_webkitIOS6TileDidDrawPending) {
+        g_webkitIOS6TileDidDrawPending = 1;
+        [view performSelector:@selector(_dispatchTileDidDraw:) withObject:layer afterDelay:0.0];
+    }
+#else
     [view performSelector:@selector(_dispatchTileDidDraw:) withObject:layer afterDelay:0.0];
+#endif
 }
 
 void LegacyTileCache::setNeedsDisplay()
@@ -698,6 +730,25 @@ void LegacyTileCache::setNeedsDisplayInRect(const IntRect& dirtyRect)
     g_webkitIOS6PendingDrawWork = 1;
     Locker locker { m_savedDisplayRectMutex };
     bool addedFirstRect = m_savedDisplayRects.isEmpty();
+#if defined(WEBKIT_IOS6)
+    // A repaint contained in one already queued invalidates exactly the same
+    // pixels of exactly the same tiles, so queueing it only makes
+    // flushSavedDisplayRects() walk the grid again for nothing. Pages that
+    // invalidate an element and then its parent do this constantly.
+    //
+    // The parent-then-element order is just as common, so the swallowing goes
+    // both ways: a rect that covers the one already queued replaces it instead
+    // of adding a second walk of the grid over the same pixels.
+    if (!addedFirstRect) {
+        IntRect& lastRect = m_savedDisplayRects.last();
+        if (lastRect.contains(dirtyRect))
+            return;
+        if (dirtyRect.contains(lastRect)) {
+            lastRect = dirtyRect;
+            return;
+        }
+    }
+#endif
     m_savedDisplayRects.append(dirtyRect);
     if (!addedFirstRect)
         return;

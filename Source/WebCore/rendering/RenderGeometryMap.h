@@ -81,6 +81,14 @@ public:
 
     FloatRect absoluteRect(const FloatRect& rect) const
     {
+        // Going through mapToContainer() here would build a four-point quad out of an
+        // axis-aligned rect and then take its bounding box again. Callers of this are in
+        // the compositing walk, where the mapping is a plain offset almost every time.
+        if (canMapWithOffsetOnly(nullptr)) {
+            FloatRect result = rect;
+            result.move(m_accumulatedOffset);
+            return result;
+        }
         return mapToContainer(rect, nullptr).boundingBox();
     }
 
@@ -116,6 +124,13 @@ private:
     bool hasNonUniformStep() const { return m_nonUniformStepsCount; }
     bool hasTransformStep() const { return m_transformedStepsCount; }
     bool hasFixedPositionStep() const { return m_fixedStepsCount; }
+
+    bool canMapWithOffsetOnly(const RenderLayerModelObject* container) const
+    {
+        if (m_nonUniformStepsCount | m_transformedStepsCount | m_fixedStepsCount)
+            return false;
+        return !container || (m_mapping.size() && container == m_mapping[0].m_renderer);
+    }
 
     typedef Vector<RenderGeometryMapStep, 32> RenderGeometryMapSteps;
 

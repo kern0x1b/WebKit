@@ -28,19 +28,3 @@
 
 #include <WebCore/JSDOMBinding.h>
 #include <WebCore/JSElement.h>
-
-namespace JSC {
-namespace JSCastingHelpers {
-
-template<>
-struct InheritsTraits<WebCore::JSElement> {
-    static constexpr std::optional<JSTypeRange> typeRange { JSTypeRange { static_cast<JSType>(WebCore::JSElementType), static_cast<JSType>(WebCore::JSElementType) } };
-    template<typename From>
-    static inline bool inherits(From* from)
-    {
-        return inheritsJSTypeImpl<WebCore::JSElement>(from, *typeRange);
-    }
-};
-
-} // namespace JSCastingHelpers
-} // namespace JSC

@@ -60,12 +60,16 @@ private:
     DisplayRefreshMonitorFactory* displayRefreshMonitorFactory() const final;
 
     bool NODELETE isScheduled() const;
+    bool isTimerActive() const;
     void startTimer(Seconds);
     void clearScheduled();
 
     void triggerRenderingUpdate();
 
     WeakRef<Page> m_page;
+    // Kept alive between frames: the scheduler arms this once per frame on the
+    // fallback path, and destroying it each time meant an allocation and a free
+    // per frame, plus a fresh ThreadTimerHeapItem for the timer heap.
     std::unique_ptr<Timer> m_refreshTimer;
     unsigned m_rescheduledRenderingUpdateCount { 0 };
     bool m_useTimer { false };

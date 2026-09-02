@@ -55,6 +55,7 @@ public:
     void cacheBytecode(const JSC::BytecodeCacheGenerator& generator) const final { m_bytecodeCache.store(generator); }
     void updateCache(const JSC::UnlinkedFunctionExecutable* executable, const JSC::SourceCode&, JSC::CodeSpecializationKind kind, const JSC::UnlinkedFunctionCodeBlock* codeBlock) const final { m_bytecodeCache.update(executable, kind, codeBlock); }
     void commitCachedBytecode() const final { m_bytecodeCache.commit(); }
+    bool wantsBytecodeCache() const final { return ScriptBytecodeCache::singleton().isEnabled(); }
 
     JSC::CodeBlockHash codeBlockHashConcurrently(int startOffset, int endOffset, JSC::CodeSpecializationKind kind) override
     {

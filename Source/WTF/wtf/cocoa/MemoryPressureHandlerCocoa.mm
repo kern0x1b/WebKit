@@ -106,7 +106,7 @@ static size_t processMemoryBudget()
 {
     static size_t budget = 0;
     if (!budget) {
-        budget = 200 * MB;
+        budget = 320 * MB;
         if (const char* override = getenv("WEBKIT_IOS6_MEMORY_BUDGET_MB")) {
             long value = strtol(override, nullptr, 10);
             if (value > 16 && value < 4096)

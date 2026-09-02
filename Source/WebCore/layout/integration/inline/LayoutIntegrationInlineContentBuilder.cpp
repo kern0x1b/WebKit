@@ -135,9 +135,9 @@ void InlineContentBuilder::adjustDisplayLines(InlineContent& inlineContent, size
     auto& boxes = inlineContent.displayContent().boxes;
 
     size_t boxIndex = !startIndex ? 0 : lines[startIndex - 1].lastBoxIndex() + 1;
-    CheckedRef rootBoxStyle = m_blockFlow.style();
-    auto isLeftToRightInlineDirection = rootBoxStyle->writingMode().deprecatedIsLeftToRightDirection();
-    auto isHorizontalWritingMode = rootBoxStyle->writingMode().isHorizontal();
+    auto& rootBoxStyle = m_blockFlow.style();
+    auto isLeftToRightInlineDirection = rootBoxStyle.writingMode().deprecatedIsLeftToRightDirection();
+    auto isHorizontalWritingMode = rootBoxStyle.writingMode().isHorizontal();
 
     auto blockScrollableOverflowRect = FloatRect { };
     auto blockInkOverflowRect = FloatRect { };
@@ -274,11 +274,11 @@ void InlineContentBuilder::computeIsFirstIsLastBoxAndBidiReorderingForInlineCont
             lastRootInlineBoxIndex = index;
             continue;
         }
-        CheckedRef layoutBox = displayBox.layoutBox();
+        auto& layoutBox = displayBox.layoutBox();
         if (is<Layout::InlineTextBox>(layoutBox) && displayBox.bidiLevel() != UBIDI_DEFAULT_LTR)
-            downcast<RenderText>(*layoutBox->rendererForIntegration()).setNeedsVisualReordering();
+            downcast<RenderText>(*layoutBox.rendererForIntegration()).setNeedsVisualReordering();
 
-        if (lastDisplayBoxForLayoutBoxIndexes.set(layoutBox.ptr(), index).isNewEntry)
+        if (lastDisplayBoxForLayoutBoxIndexes.set(&layoutBox, index).isNewEntry)
             displayBox.setIsFirstForLayoutBox();
     }
     for (auto index : lastDisplayBoxForLayoutBoxIndexes.values())

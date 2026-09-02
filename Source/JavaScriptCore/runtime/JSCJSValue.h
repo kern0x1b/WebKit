@@ -801,7 +801,11 @@ inline bool JSValue::isNull() const
 
 inline bool JSValue::isUndefinedOrNull() const
 {
+#if USE(JSVALUE32_64)
+    return (tag() & ~1) == UndefinedTag;
+#else
     return isUndefined() || isNull();
+#endif
 }
 
 inline bool JSValue::isCell() const
@@ -877,7 +881,11 @@ inline JSValue::JSValue(int32_t tag, int32_t payload)
 
 inline bool JSValue::isNumber() const
 {
+#if USE(JSVALUE32_64)
+    return static_cast<uint32_t>(tag() - LowestTag) > static_cast<uint32_t>(BooleanTag - LowestTag);
+#else
     return isInt32() || isDouble();
+#endif
 }
 
 inline bool JSValue::isBoolean() const

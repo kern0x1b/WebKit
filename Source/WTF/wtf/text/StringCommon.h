@@ -252,6 +252,68 @@ SUPPRESS_NODELETE ALWAYS_INLINE bool NODELETE equal(const char16_t* a, std::span
 #endif
     }
 }
+#elif defined(WEBKIT_IOS6) && !ASAN_ENABLED
+template<OneByteCharacterType CharacterType>
+SUPPRESS_NODELETE ALWAYS_INLINE bool NODELETE equal(const CharacterType* a, std::span<const CharacterType> b)
+{
+    ASSERT(b.size() <= std::numeric_limits<unsigned>::max());
+    unsigned length = b.size();
+
+    if (!length)
+        return true;
+    if (length == 1)
+        return *a == b.front();
+
+    switch (sizeof(unsigned) * CHAR_BIT - clz(length - 1)) {
+    case 0:
+        RELEASE_ASSERT_NOT_REACHED();
+    case 1:
+        return unalignedLoad<uint16_t>(a) == unalignedLoad<uint16_t>(b.data());
+    case 2:
+        return unalignedLoad<uint16_t>(a) == unalignedLoad<uint16_t>(b.data())
+            && unalignedLoad<uint16_t>(a + length - 2) == unalignedLoad<uint16_t>(b.data() + length - 2);
+    case 3:
+        return unalignedLoad<uint32_t>(a) == unalignedLoad<uint32_t>(b.data())
+            && unalignedLoad<uint32_t>(a + length - 4) == unalignedLoad<uint32_t>(b.data() + length - 4);
+    default:
+        if (unalignedLoad<uint32_t>(a) != unalignedLoad<uint32_t>(b.data()))
+            return false;
+        for (unsigned i = length % 4; i < length; i += 4) {
+            if (unalignedLoad<uint32_t>(a + i) != unalignedLoad<uint32_t>(b.data() + i))
+                return false;
+        }
+        return true;
+    }
+}
+
+SUPPRESS_NODELETE ALWAYS_INLINE bool NODELETE equal(const char16_t* a, std::span<const char16_t> b)
+{
+    ASSERT(b.size() <= std::numeric_limits<unsigned>::max());
+    unsigned length = b.size();
+
+    if (!length)
+        return true;
+    if (length == 1)
+        return *a == b.front();
+
+    switch (sizeof(unsigned) * CHAR_BIT - clz(length - 1)) {
+    case 0:
+        RELEASE_ASSERT_NOT_REACHED();
+    case 1:
+        return unalignedLoad<uint32_t>(a) == unalignedLoad<uint32_t>(b.data());
+    case 2:
+        return unalignedLoad<uint32_t>(a) == unalignedLoad<uint32_t>(b.data())
+            && unalignedLoad<uint32_t>(a + length - 2) == unalignedLoad<uint32_t>(b.data() + length - 2);
+    default:
+        if (unalignedLoad<uint32_t>(a) != unalignedLoad<uint32_t>(b.data()))
+            return false;
+        for (unsigned i = length % 2; i < length; i += 2) {
+            if (unalignedLoad<uint32_t>(a + i) != unalignedLoad<uint32_t>(b.data() + i))
+                return false;
+        }
+        return true;
+    }
+}
 #elif CPU(X86) && !ASAN_ENABLED
 template<OneByteCharacterType CharacterType>
 ALWAYS_INLINE bool NODELETE equal(const CharacterType* a, std::span<const CharacterType> b)
@@ -353,6 +415,27 @@ SUPPRESS_NODELETE ALWAYS_INLINE bool NODELETE equal(const Latin1Character* a, st
             return static_cast<uint32_t>((v32 | (v32 << 8)) & 0x00ff00ffUL);
         };
         return static_cast<unsigned>(read2(a) == unalignedLoad<uint32_t>(b.data())) & static_cast<unsigned>(read2(a + (length % 2)) == unalignedLoad<uint32_t>(b.data() + (length % 2)));
+    }
+    if (length == 1)
+        return *a == b.front();
+    return true;
+#elif defined(WEBKIT_IOS6) && !ASAN_ENABLED
+    ASSERT(b.size() <= std::numeric_limits<unsigned>::max());
+    unsigned length = b.size();
+
+    auto expand2 = [](const Latin1Character* p) ALWAYS_INLINE_LAMBDA -> uint32_t {
+        uint32_t v32 = unalignedLoad<uint16_t>(p);
+        return (v32 | (v32 << 8)) & 0x00FF00FFU;
+    };
+
+    if (length >= 2) {
+        if (expand2(a) != unalignedLoad<uint32_t>(b.data()))
+            return false;
+        for (unsigned i = length % 2; i < length; i += 2) {
+            if (expand2(a + i) != unalignedLoad<uint32_t>(b.data() + i))
+                return false;
+        }
+        return true;
     }
     if (length == 1)
         return *a == b.front();
@@ -1535,6 +1618,20 @@ inline void copyElements(std::span<uint16_t> destinationSpan, std::span<const ui
     // Handle remaining elements.
     while (destination != end)
         *destination++ = *source++;
+#elif defined(WEBKIT_IOS6)
+    size_t i = 0;
+    if (length >= 4) {
+        size_t wordEnd = length & ~static_cast<size_t>(3);
+        for (; i < wordEnd; i += 4) {
+            uint32_t packed = unalignedLoad<uint32_t>(source + i);
+            uint32_t low = packed & 0xFFFFU;
+            uint32_t high = packed >> 16;
+            unalignedStore<uint32_t>(destination + i, (low | (low << 8)) & 0x00FF00FFU);
+            unalignedStore<uint32_t>(destination + i + 2, (high | (high << 8)) & 0x00FF00FFU);
+        }
+    }
+    for (; i < length; ++i)
+        destination[i] = source[i];
 #else
     for (unsigned i = 0; i < length; ++i)
         destination[i] = source[i];

@@ -23,6 +23,7 @@
 
 #include "SVGGradientElement.h"
 #include "SVGNames.h"
+#include <wtf/NeverDestroyed.h>
 #include <wtf/TZoneMalloc.h>
 
 namespace WebCore {
@@ -60,10 +61,26 @@ private:
     bool selfHasRelativeLengths() const override;
     bool supportsFocus() const final { return false; }
 
-    const Ref<SVGAnimatedLength> m_x1 { SVGAnimatedLength::create(this, SVGLengthMode::Width, "0%"_s) };
-    const Ref<SVGAnimatedLength> m_y1 { SVGAnimatedLength::create(this, SVGLengthMode::Height, "0%"_s) };
-    const Ref<SVGAnimatedLength> m_x2 { SVGAnimatedLength::create(this, SVGLengthMode::Width, "100%"_s) };
-    const Ref<SVGAnimatedLength> m_y2 { SVGAnimatedLength::create(this, SVGLengthMode::Height, "0%"_s) };
+    static const SVGLengthValue& startLength(SVGLengthMode mode)
+    {
+        if (mode == SVGLengthMode::Height) {
+            static NeverDestroyed<SVGLengthValue> height { SVGLengthMode::Height, "0%"_s };
+            return height.get();
+        }
+        static NeverDestroyed<SVGLengthValue> width { SVGLengthMode::Width, "0%"_s };
+        return width.get();
+    }
+
+    static const SVGLengthValue& endLength()
+    {
+        static NeverDestroyed<SVGLengthValue> width { SVGLengthMode::Width, "100%"_s };
+        return width.get();
+    }
+
+    const Ref<SVGAnimatedLength> m_x1 { SVGAnimatedLength::create(this, startLength(SVGLengthMode::Width)) };
+    const Ref<SVGAnimatedLength> m_y1 { SVGAnimatedLength::create(this, startLength(SVGLengthMode::Height)) };
+    const Ref<SVGAnimatedLength> m_x2 { SVGAnimatedLength::create(this, endLength()) };
+    const Ref<SVGAnimatedLength> m_y2 { SVGAnimatedLength::create(this, startLength(SVGLengthMode::Height)) };
 };
 
 } // namespace WebCore

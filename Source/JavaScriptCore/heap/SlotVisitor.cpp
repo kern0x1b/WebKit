@@ -113,6 +113,9 @@ void SlotVisitor::didStartMarking()
         m_heapAnalyzer = heapProfiler->activeHeapAnalyzer();
 
     m_markingVersion = heap()->objectSpace().markingVersion();
+#if defined(WEBKIT_IOS6)
+    m_needsMarkingFence = m_heap.m_hasParallelMarkers;
+#endif
 }
 
 void SlotVisitor::reset()
@@ -367,9 +370,20 @@ ALWAYS_INLINE void SlotVisitor::visitChildren(const JSCell* cell)
     // black.
     
     cell->setCellState(CellState::PossiblyBlack);
-    
+
+#if defined(WEBKIT_IOS6)
+    // This fence pairs with the storeLoadFence in Heap::writeBarrierSlowPath: it stops us reading a
+    // stale field while a barrier on another thread reads a stale, not-yet-black cell state. On this
+    // CPU Options::useConcurrentGC() is forced off, so the world is stopped for the whole mark phase
+    // and the only other threads that can execute a barrier against a cell we are scanning are the
+    // helper markers. With no helper markers there is no second party, and this is a full dmb on
+    // armv7 - paid once per marked cell.
+    if (m_needsMarkingFence) [[likely]]
+        WTF::storeLoadFence();
+#else
     WTF::storeLoadFence();
-    
+#endif
+
     switch (cell->type()) {
     case StringType:
         JSString::visitChildren(const_cast<JSCell*>(cell), *this);
@@ -452,6 +466,13 @@ void SlotVisitor::donateKnownParallel(MarkStackArray& from, MarkStackArray& to)
 
 void SlotVisitor::donateKnownParallel()
 {
+    // With no helper markers there is nobody on the other end of the shared stacks, so every step
+    // below - two stack size loads, a tryLock on the shared m_markingMutex, and a broadcast on the
+    // marking condition variable - is pure overhead. drain() calls us directly on every rebalance
+    // interval, so this check has to live here and not only in donate().
+    if (!m_heap.m_hasParallelMarkers)
+        return;
+
     forEachMarkStack(
         [&] (MarkStackArray& stack) -> IterationStatus {
             donateKnownParallel(stack, correspondingGlobalStack(stack));
@@ -494,8 +515,14 @@ NEVER_INLINE void SlotVisitor::drain(MonotonicTime timeout)
     }
     
     Locker locker { m_rightToRun };
-    
-    while (!hasElapsed(timeout)) {
+
+    // Both of these are fixed for the whole drain. Reading the option out of its global on every
+    // rebalance interval, and calling into the out-of-line hasElapsed() when the caller passed the
+    // infinite timeout that a stop-the-world collector always passes, are both pure overhead.
+    const unsigned scansBetweenRebalance = Options::minimumNumberOfScansBetweenRebalance();
+    const bool neverTimesOut = timeout == MonotonicTime::infinity();
+
+    while (neverTimesOut || !hasElapsed(timeout)) {
         updateMutatorIsStopped(locker);
         IterationStatus status = forEachMarkStack(
             [&] (MarkStackArray& stack) -> IterationStatus {
@@ -510,7 +537,7 @@ NEVER_INLINE void SlotVisitor::drain(MonotonicTime timeout)
                 // because each cell would be likely placed in a random place. We perform software prefetching onto
                 // one next cell while accessing the current cell to make memory fetching in flight while handling
                 // the current cell.
-                unsigned countdown = Options::minimumNumberOfScansBetweenRebalance();
+                unsigned countdown = scansBetweenRebalance;
                 auto popAndPrefetch = [&] ALWAYS_INLINE_LAMBDA -> const JSCell* {
                     if (!countdown || !stack.canRemoveLast())
                         return nullptr;
@@ -558,9 +585,11 @@ size_t SlotVisitor::performIncrementOfDraining(size_t bytesRequested)
         return bytesVisited() >= bytesRequested;
     };
     
+    const unsigned scansBetweenRebalance = Options::minimumNumberOfScansBetweenRebalance();
+
     {
         Locker locker { m_rightToRun };
-        
+
         while (!isDone()) {
             updateMutatorIsStopped(locker);
             IterationStatus status = forEachMarkStack(
@@ -569,10 +598,10 @@ size_t SlotVisitor::performIncrementOfDraining(size_t bytesRequested)
                         return IterationStatus::Continue;
 
                     stack.refill();
-                    
+
                     m_isFirstVisit = (&stack == &m_collectorStack);
 
-                    unsigned countdown = Options::minimumNumberOfScansBetweenRebalance();
+                    unsigned countdown = scansBetweenRebalance;
                     auto popAndPrefetch = [&] ALWAYS_INLINE_LAMBDA -> const JSCell* {
                         if (!countdown || !stack.canRemoveLast() || isDone())
                             return nullptr;
@@ -670,7 +699,12 @@ NEVER_INLINE SlotVisitor::SharedDrainResult SlotVisitor::drainFromShared(SharedD
                     // - WebCore never releases access. But WebCore has a runloop. The runloop will check
                     //   if we reached termination.
                     // So, this tells the runloop that it's got things to do.
+#if defined(WEBKIT_IOS6)
+                    if (!m_heap.worldIsStopped())
+                        m_heap.m_stopIfNecessaryTimer->scheduleSoon();
+#else
                     m_heap.m_stopIfNecessaryTimer->scheduleSoon();
+#endif
                 }
 
                 auto isReady = [&] () -> bool {
@@ -736,7 +770,7 @@ SlotVisitor::SharedDrainResult SlotVisitor::drainInParallelPassively(MonotonicTi
     
     ASSERT(Options::numberOfGCMarkers());
     
-    if (Options::numberOfGCMarkers() == 1
+    if (!m_heap.m_hasParallelMarkers
         || (m_heap.m_worldState.load() & Heap::mutatorWaitingBit)
         || !m_heap.hasHeapAccess()
         || m_heap.worldIsStopped()) {
@@ -790,9 +824,6 @@ void SlotVisitor::donate()
         dataLog("FATAL: Attempting to donate when not in parallel mode.\n");
         RELEASE_ASSERT_NOT_REACHED();
     }
-    
-    if (Options::numberOfGCMarkers() == 1)
-        return;
     
     donateKnownParallel();
 }

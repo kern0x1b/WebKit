@@ -171,11 +171,10 @@ SelectorDataList::SelectorDataList(const CSSSelectorList& selectorList)
         m_matchType = CompilableMultipleSelectorMatch;
 }
 
-inline bool SelectorDataList::selectorMatches(const SelectorData& selectorData, Element& element, const ContainerNode& rootNode, Style::SelectorMatchingState* selectorMatchingState) const
+inline bool SelectorDataList::selectorMatches(const SelectorChecker& selectorChecker, const SelectorData& selectorData, Element& element, const ContainerNode* scope, Style::SelectorMatchingState* selectorMatchingState) const
 {
-    SelectorChecker selectorChecker(element.document());
     SelectorChecker::CheckingContext selectorCheckingContext(SelectorChecker::Mode::QueryingRules);
-    selectorCheckingContext.scope = rootNode.isDocumentNode() ? nullptr : &rootNode;
+    selectorCheckingContext.scope = scope;
     // Providing SelectorMatchingState allows cross-element optimizations like caching for :has() matches.
     selectorCheckingContext.selectorMatchingState = selectorMatchingState;
 
@@ -184,8 +183,11 @@ inline bool SelectorDataList::selectorMatches(const SelectorData& selectorData, 
 
 bool SelectorDataList::matches(Element& targetElement) const
 {
+    SelectorChecker selectorChecker(targetElement.document());
+    const ContainerNode* scope = targetElement.isDocumentNode() ? nullptr : &targetElement;
+
     for (auto& selector : m_selectors) {
-        if (selectorMatches(selector, targetElement, targetElement))
+        if (selectorMatches(selectorChecker, selector, targetElement, scope))
             return true;
     }
     return false;
@@ -194,10 +196,12 @@ bool SelectorDataList::matches(Element& targetElement) const
 RefPtr<Element> SelectorDataList::closest(Element& targetElement) const
 {
     Style::SelectorMatchingState selectorMatchingState;
+    SelectorChecker selectorChecker(targetElement.document());
+    const ContainerNode* scope = targetElement.isDocumentNode() ? nullptr : &targetElement;
 
     for (Ref currentElement : lineageOfType<Element>(targetElement)) {
         for (auto& selector : m_selectors) {
-            if (selectorMatches(selector, currentElement, targetElement, &selectorMatchingState))
+            if (selectorMatches(selectorChecker, selector, currentElement, scope, &selectorMatchingState))
                 return currentElement;
         }
     }
@@ -240,12 +244,14 @@ ALWAYS_INLINE void SelectorDataList::executeFastPathForIdSelector(const Containe
     ASSERT(idSelector);
 
     const AtomString& idToMatch = idSelector->value();
+    SelectorChecker selectorChecker(rootNode.document());
+    const ContainerNode* scope = rootNode.isDocumentNode() ? nullptr : &rootNode;
     if (rootNode.treeScope().containsMultipleElementsWithId(idToMatch)) [[unlikely]] {
         auto* elements = protect(rootNode.treeScope())->getAllElementsById(idToMatch);
         ASSERT(elements);
         bool rootNodeIsTreeScopeRoot = rootNode.isTreeScope();
         for (auto& element : *elements) {
-            if ((rootNodeIsTreeScopeRoot || element->isDescendantOf(rootNode)) && selectorMatches(selectorData, protect(element), rootNode)) {
+            if ((rootNodeIsTreeScopeRoot || element->isDescendantOf(rootNode)) && selectorMatches(selectorChecker, selectorData, protect(element), scope)) {
                 appendOutputForElement(output, protect(element));
                 if constexpr (std::is_same_v<OutputType, Element*>)
                     return;
@@ -257,7 +263,7 @@ ALWAYS_INLINE void SelectorDataList::executeFastPathForIdSelector(const Containe
     RefPtr element = protect(rootNode.treeScope())->getElementById(idToMatch);
     if (!element || !(rootNode.isTreeScope() || element->isDescendantOf(rootNode)))
         return;
-    if (selectorMatches(selectorData, *element, rootNode))
+    if (selectorMatches(selectorChecker, selectorData, *element, scope))
         appendOutputForElement(output, *element);
 }
 
@@ -298,9 +304,9 @@ static Ref<ContainerNode> filterRootById(ContainerNode& rootNode, const CSSSelec
     return rootNode;
 }
 
-static ALWAYS_INLINE bool NODELETE localNameMatches(const Element& element, const AtomString& localName, const AtomString& lowercaseLocalName)
+static ALWAYS_INLINE bool NODELETE localNameMatches(const Element& element, const AtomString& localName, const AtomString& lowercaseLocalName, bool documentIsHTML)
 {
-    if (element.isHTMLElement() && element.document().isHTMLDocument())
+    if (documentIsHTML && element.isHTMLElement())
         return element.localName() == lowercaseLocalName;
     return element.localName() == localName;
 
@@ -328,8 +334,9 @@ static inline void elementsForLocalName(const ContainerNode& rootNode, const Ato
             }
         }
     } else {
+        bool documentIsHTML = rootNode.document().isHTMLDocument();
         for (Ref element : descendantsOfType<Element>(const_cast<ContainerNode&>(rootNode))) {
-            if (localNameMatches(element, localName, lowercaseLocalName)) {
+            if (localNameMatches(element, localName, lowercaseLocalName, documentIsHTML)) {
                 appendOutputForElement(output, element);
                 if constexpr (std::is_same_v<OutputType, Element*>)
                 return;
@@ -370,8 +377,9 @@ ALWAYS_INLINE void SelectorDataList::executeSingleTagNameSelectorData(const Cont
         }
     } else {
         // Fallback: NamespaceURI is set, selectorLocalName may be starAtom().
+        bool documentIsHTML = rootNode.document().isHTMLDocument();
         for (Ref element : descendantsOfType<Element>(const_cast<ContainerNode&>(rootNode))) {
-            if (element->namespaceURI() == selectorNamespaceURI && localNameMatches(element, selectorLocalName, selectorLowercaseLocalName)) {
+            if (element->namespaceURI() == selectorNamespaceURI && localNameMatches(element, selectorLocalName, selectorLowercaseLocalName, documentIsHTML)) {
                 appendOutputForElement(output, element);
                 if constexpr (std::is_same_v<OutputType, Element*>)
                     return;
@@ -459,9 +467,11 @@ ALWAYS_INLINE void SelectorDataList::executeSingleSelectorData(const ContainerNo
     ASSERT(m_selectors.size() == 1);
 
     Style::SelectorMatchingState selectorMatchingState;
+    SelectorChecker selectorChecker(rootNode.document());
+    const ContainerNode* scope = rootNode.isDocumentNode() ? nullptr : &rootNode;
 
     for (Ref element : descendantsOfType<Element>(const_cast<ContainerNode&>(searchRootNode))) {
-        if (selectorMatches(selectorData, element, rootNode, &selectorMatchingState)) {
+        if (selectorMatches(selectorChecker, selectorData, element, scope, &selectorMatchingState)) {
             appendOutputForElement(output, element);
             if constexpr (std::is_same_v<OutputType, Element*>)
                 return;
@@ -473,10 +483,12 @@ template<typename OutputType>
 ALWAYS_INLINE void SelectorDataList::executeSingleMultiSelectorData(const ContainerNode& rootNode, OutputType& output) const
 {
     Style::SelectorMatchingState selectorMatchingState;
+    SelectorChecker selectorChecker(rootNode.document());
+    const ContainerNode* scope = rootNode.isDocumentNode() ? nullptr : &rootNode;
 
     for (Ref element : descendantsOfType<Element>(const_cast<ContainerNode&>(rootNode))) {
         for (auto& selector : m_selectors) {
-            if (selectorMatches(selector, element, rootNode, &selectorMatchingState)) {
+            if (selectorMatches(selectorChecker, selector, element, scope, &selectorMatchingState)) {
                 appendOutputForElement(output, element);
                 if constexpr (std::is_same_v<OutputType, Element*>)
                     return;

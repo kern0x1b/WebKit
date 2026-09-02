@@ -39,7 +39,11 @@ class VM;
 class NumericStrings {
 public:
     static const size_t cacheSize = 1024;
+#if defined(WEBKIT_IOS6)
+    static const size_t doubleCacheSize = 1024;
+#else
     static const size_t doubleCacheSize = 4096;
+#endif
 
     template<typename T>
     struct CacheEntry {
@@ -140,6 +144,12 @@ public:
 
     const StringWithJSString* smallIntCache() LIFETIME_BOUND { return m_smallIntCache.data(); }
     const CacheEntryWithJSString<int>* intCache() LIFETIME_BOUND { return m_intCache.data(); }
+
+    StringWithJSString& smallIntCacheEntry(unsigned i) LIFETIME_BOUND
+    {
+        ASSERT(i < cacheSize);
+        return m_smallIntCache[i];
+    }
 
     void initializeSmallIntCache(VM&);
 

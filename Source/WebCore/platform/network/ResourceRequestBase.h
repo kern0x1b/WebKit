@@ -329,10 +329,12 @@ protected:
     String m_initiatorIdentifier;
     RefPtr<FormData> m_httpBody;
     std::optional<int> m_inspectorInitiatorNodeIdentifier;
+    mutable String m_cachePartition;
     mutable bool m_resourceRequestUpdated : 1;
     mutable bool m_platformRequestUpdated : 1;
     mutable bool m_resourceRequestBodyUpdated : 1;
     mutable bool m_platformRequestBodyUpdated : 1;
+    mutable bool m_cachePartitionComputed : 1 { false };
     bool m_shouldBlockThirdPartyStorage : 1 { true };
     bool m_hiddenFromInspector : 1;
 

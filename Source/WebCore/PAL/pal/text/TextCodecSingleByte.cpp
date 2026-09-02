@@ -253,9 +253,25 @@ static const SingleByteDecodeTable& NODELETE tableForDecoding(TextCodecSingleByt
 // https://encoding.spec.whatwg.org/#single-byte-encoder
 static Vector<uint8_t> encode(const SingleByteEncodeTable& table, StringView string, Function<void(char32_t, Vector<uint8_t>&)>&& unencodableHandler)
 {
-    // FIXME: Consider adding an ASCII fast path like the one in TextCodecLatin1::decode.
     Vector<uint8_t> result;
     result.reserveInitialCapacity(string.length());
+    if (string.is8Bit()) {
+        auto span = string.span8();
+        for (size_t i = 0; i < span.size(); ++i) {
+            uint8_t c = span[i];
+            if (isASCII(c)) {
+                result.append(c);
+                continue;
+            }
+            auto byte = findFirstInSortedPairs(table, c);
+            if (!byte) {
+                unencodableHandler(c, result);
+                continue;
+            }
+            result.append(*byte);
+        }
+        return result;
+    }
     for (auto codePoint : string.codePoints()) {
         if (isASCII(codePoint)) {
             result.append(codePoint);

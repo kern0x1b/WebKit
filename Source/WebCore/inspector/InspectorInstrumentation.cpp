@@ -1344,6 +1344,7 @@ void InspectorInstrumentation::didHandleMemoryPressureImpl(InstrumentingAgents& 
 }
 #endif
 
+#if !defined(WEBKIT_IOS6)
 bool InspectorInstrumentation::consoleAgentEnabled(ScriptExecutionContext* scriptExecutionContext)
 {
     FAST_RETURN_IF_NO_FRONTENDS(false);
@@ -1361,6 +1362,7 @@ bool InspectorInstrumentation::timelineAgentTracking(ScriptExecutionContext* scr
         return agents->trackingTimelineAgent();
     return false;
 }
+#endif
 
 void InspectorInstrumentation::didRequestAnimationFrameImpl(InstrumentingAgents& instrumentingAgents, int callbackId, ScriptExecutionContext& scriptExecutionContext)
 {

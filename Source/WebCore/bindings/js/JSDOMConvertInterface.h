@@ -68,7 +68,7 @@ template<typename T> struct Converter<IDLInterface<T>> : DefaultConverter<IDLInt
         auto& vm = JSC::getVM(&lexicalGlobalObject);
         auto scope = DECLARE_THROW_SCOPE(vm);
 
-        RefPtr object = JSToWrappedOverloader<T>::toWrapped(lexicalGlobalObject, value);
+        auto object = JSToWrappedOverloader<T>::toWrapped(lexicalGlobalObject, value);
         if (!object) [[unlikely]] {
             exceptionThrower(lexicalGlobalObject, scope);
             return Result::exception();
@@ -85,19 +85,19 @@ template<typename T> struct JSConverter<IDLInterface<T>> {
     template<std::derived_from<T> U>
     static JSC::JSValue convert(JSC::JSGlobalObject& lexicalGlobalObject, JSDOMGlobalObject& globalObject, U& value)
     {
-        return toJS(&lexicalGlobalObject, &globalObject, Ref<T>(value));
+        return toJS(&lexicalGlobalObject, &globalObject, static_cast<T&>(value));
     }
 
     template<std::derived_from<T> U>
     static JSC::JSValue convert(JSC::JSGlobalObject& lexicalGlobalObject, JSDOMGlobalObject& globalObject, const U& value)
     {
-        return toJS(&lexicalGlobalObject, &globalObject, Ref<T>(const_cast<U&>(value)));
+        return toJS(&lexicalGlobalObject, &globalObject, static_cast<T&>(const_cast<U&>(value)));
     }
 
     template<std::derived_from<T> U>
     static JSC::JSValue convert(JSC::JSGlobalObject& lexicalGlobalObject, JSDOMGlobalObject& globalObject, std::reference_wrapper<U> value)
     {
-        return toJS(&lexicalGlobalObject, &globalObject, Ref<T>(value.get()));
+        return toJS(&lexicalGlobalObject, &globalObject, static_cast<T&>(value.get()));
     }
 
     template<std::derived_from<T> U>

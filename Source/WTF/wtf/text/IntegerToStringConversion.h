@@ -36,15 +36,103 @@ enum PositiveOrNegativeNumber { PositiveNumber, NegativeNumber };
 
 template<typename> struct IntegerToStringConversionTrait;
 
+// thresholds[k] is 10^k - 1, so "value > thresholds[k]" is "value has more than k digits".
+// The last entry is saturated to the widest representable value, which makes the comparison
+// always false and removes the bounds test on the one index that cannot need a correction.
+inline constexpr uint32_t decimalDigitThresholds32[11] = {
+    0, 9, 99, 999, 9999, 99999, 999999, 9999999, 99999999, 999999999, UINT32_MAX
+};
+
+inline constexpr uint64_t decimalDigitThresholds64[20] = {
+    0, 9, 99, 999, 9999, 99999, 999999, 9999999, 99999999, 999999999,
+    9999999999ULL, 99999999999ULL, 999999999999ULL, 9999999999999ULL, 99999999999999ULL,
+    999999999999999ULL, 9999999999999999ULL, 99999999999999999ULL, 999999999999999999ULL,
+    9999999999999999999ULL
+};
+
+// One count-leading-zeros plus one table compare, instead of one division per digit.
+// 1233/4096 underestimates log10(2) by less than 5e-6, so over the 64 bit positions the
+// estimate is never more than one digit short and the single compare below fixes it.
+template<typename UnsignedIntegerType>
+constexpr unsigned decimalDigitCount(UnsignedIntegerType number)
+{
+    if constexpr (sizeof(UnsignedIntegerType) <= sizeof(uint32_t)) {
+        uint32_t value = static_cast<uint32_t>(number);
+        unsigned significantBits = 32 - clz(static_cast<uint32_t>(value | 1));
+        unsigned estimate = ((significantBits - 1) * 1233) >> 12;
+        return estimate + 1 + (value > decimalDigitThresholds32[estimate + 1]);
+    } else {
+        uint64_t value = static_cast<uint64_t>(number);
+        unsigned significantBits = 64 - clz(static_cast<uint64_t>(value | 1));
+        unsigned estimate = ((significantBits - 1) * 1233) >> 12;
+        return estimate + 1 + (value > decimalDigitThresholds64[estimate + 1]);
+    }
+}
+
+inline constexpr Latin1Character decimalDigitPairs[200] = {
+    '0','0','0','1','0','2','0','3','0','4','0','5','0','6','0','7','0','8','0','9',
+    '1','0','1','1','1','2','1','3','1','4','1','5','1','6','1','7','1','8','1','9',
+    '2','0','2','1','2','2','2','3','2','4','2','5','2','6','2','7','2','8','2','9',
+    '3','0','3','1','3','2','3','3','3','4','3','5','3','6','3','7','3','8','3','9',
+    '4','0','4','1','4','2','4','3','4','4','4','5','4','6','4','7','4','8','4','9',
+    '5','0','5','1','5','2','5','3','5','4','5','5','5','6','5','7','5','8','5','9',
+    '6','0','6','1','6','2','6','3','6','4','6','5','6','6','6','7','6','8','6','9',
+    '7','0','7','1','7','2','7','3','7','4','7','5','7','6','7','7','7','8','7','9',
+    '8','0','8','1','8','2','8','3','8','4','8','5','8','6','8','7','8','8','8','9',
+    '9','0','9','1','9','2','9','3','9','4','9','5','9','6','9','7','9','8','9','9'
+};
+
+// Two digits per division by 100 instead of one per division by 10. A Cortex-A9 has no
+// integer divide, so each of these is a multiply-high plus shift emitted by the compiler.
+template<typename CharacterType>
+constexpr size_t writeDecimalDigitsBackward32(uint32_t number, std::span<CharacterType> destination, size_t index)
+{
+    while (number >= 100) {
+        unsigned pair = (number % 100) * 2;
+        number /= 100;
+        destination[--index] = static_cast<CharacterType>(decimalDigitPairs[pair + 1]);
+        destination[--index] = static_cast<CharacterType>(decimalDigitPairs[pair]);
+    }
+    if (number >= 10) {
+        unsigned pair = number * 2;
+        destination[--index] = static_cast<CharacterType>(decimalDigitPairs[pair + 1]);
+        destination[--index] = static_cast<CharacterType>(decimalDigitPairs[pair]);
+        return index;
+    }
+    destination[--index] = static_cast<CharacterType>('0' + number);
+    return index;
+}
+
+template<typename CharacterType>
+constexpr size_t writeEightDecimalDigitsBackward(uint32_t number, std::span<CharacterType> destination, size_t index)
+{
+    for (unsigned i = 0; i < 4; ++i) {
+        unsigned pair = (number % 100) * 2;
+        number /= 100;
+        destination[--index] = static_cast<CharacterType>(decimalDigitPairs[pair + 1]);
+        destination[--index] = static_cast<CharacterType>(decimalDigitPairs[pair]);
+    }
+    return index;
+}
+
+template<typename CharacterType, typename UnsignedIntegerType>
+constexpr size_t writeDecimalDigitsBackward(UnsignedIntegerType number, std::span<CharacterType> destination, size_t index)
+{
+    if constexpr (sizeof(UnsignedIntegerType) > sizeof(uint32_t)) {
+        // At most two of these run: (2^64 - 1) / 10^16 is 1844, which fits in 32 bits.
+        while (number > static_cast<UnsignedIntegerType>(UINT32_MAX)) {
+            index = writeEightDecimalDigitsBackward(static_cast<uint32_t>(number % 100000000ULL), destination, index);
+            number /= 100000000ULL;
+        }
+    }
+    return writeDecimalDigitsBackward32(static_cast<uint32_t>(number), destination, index);
+}
+
 template<typename T, typename UnsignedIntegerType, PositiveOrNegativeNumber NumberType, typename AdditionalArgumentType>
 static typename IntegerToStringConversionTrait<T>::ReturnType numberToStringImpl(UnsignedIntegerType number, AdditionalArgumentType additionalArgument)
 {
     std::array<Latin1Character, sizeof(UnsignedIntegerType) * 3 + 1> buffer;
-    auto index = buffer.size();
-    do {
-        buffer[--index] = static_cast<Latin1Character>((number % 10) + '0');
-        number /= 10;
-    } while (number);
+    auto index = writeDecimalDigitsBackward(number, std::span<Latin1Character> { buffer }, buffer.size());
 
     if (NumberType == NegativeNumber)
         buffer[--index] = '-';
@@ -70,18 +158,16 @@ template<typename CharacterType, typename UnsignedIntegerType, PositiveOrNegativ
 static void writeIntegerToBufferImpl(UnsignedIntegerType number, std::span<CharacterType> destination)
 {
     static_assert(!std::is_same_v<bool, std::remove_cv_t<UnsignedIntegerType>>, "'bool' not supported");
-    std::array<Latin1Character, sizeof(UnsignedIntegerType) * 3 + 1> buffer;
-    auto index = buffer.size();
-    do {
-        buffer[--index] = static_cast<Latin1Character>((number % 10) + '0');
-        number /= 10;
-    } while (number);
+    // The digit count is exact, so the digits can be filled in place from the back and the
+    // scratch buffer plus its copy-out loop disappear.
+    size_t index = decimalDigitCount(number);
+    if (NumberType == NegativeNumber)
+        ++index;
+
+    index = writeDecimalDigitsBackward(number, destination, index);
 
     if (NumberType == NegativeNumber)
-        buffer[--index] = '-';
-    
-    for (size_t i = 0; i < buffer.size() - index; ++i)
-        destination[i] = static_cast<CharacterType>(buffer[index + i]);
+        destination[--index] = '-';
 }
 
 template<typename CharacterType, typename IntegerType>
@@ -101,12 +187,7 @@ inline void writeIntegerToBuffer(IntegerType integer, std::span<CharacterType> d
 template<typename UnsignedIntegerType, PositiveOrNegativeNumber NumberType>
 constexpr unsigned lengthOfIntegerAsStringImpl(UnsignedIntegerType number)
 {
-    unsigned length = 0;
-
-    do {
-        ++length;
-        number /= 10;
-    } while (number);
+    unsigned length = decimalDigitCount(number);
 
     if (NumberType == NegativeNumber)
         ++length;
