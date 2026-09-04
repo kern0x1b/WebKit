@@ -601,7 +601,7 @@ void Scope::updateActiveStyleSheets(UpdateType updateType)
         bool report;
         MonotonicTime startedAt;
         UpdateType type;
-        RebuildTimer(bool r, UpdateType t) : report(r), startedAt(MonotonicTime::now()), type(t) { }
+        RebuildTimer(bool r, UpdateType t) : report(r), startedAt(r ? MonotonicTime::now() : MonotonicTime()), type(t) { }
         ~RebuildTimer()
         {
             if (!report)

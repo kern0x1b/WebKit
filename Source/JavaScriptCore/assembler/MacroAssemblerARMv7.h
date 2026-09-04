@@ -643,21 +643,31 @@ public:
 
     void mul32(RegisterID src, RegisterID dest)
     {
-        RegisterID scratch = getCachedDataTempRegisterIDAndInvalidate();
-        m_assembler.smull(dest, scratch, dest, src);
+        m_assembler.mul(dest, dest, src);
     }
 
     void mul32(RegisterID left, RegisterID right, RegisterID dest)
     {
-        RegisterID scratch = getCachedDataTempRegisterIDAndInvalidate();
-        m_assembler.smull(dest, scratch, left, right);
+        m_assembler.mul(dest, left, right);
     }
 
     void mul32(TrustedImm32 imm, RegisterID src, RegisterID dest)
     {
+        if (!imm.m_value) {
+            move(TrustedImm32(0), dest);
+            return;
+        }
+        if (imm.m_value == 1) {
+            move(src, dest);
+            return;
+        }
+        if (imm.m_value > 0 && hasOneBitSet(imm.m_value)) {
+            lshift32(src, TrustedImm32(getLSBSet(imm.m_value)), dest);
+            return;
+        }
         move(imm, dataTempRegister);
         cachedDataTempRegister().invalidate();
-        m_assembler.smull(dest, dataTempRegister, src, dataTempRegister);
+        m_assembler.mul(dest, src, dataTempRegister);
     }
 
     void uMull32(RegisterID left, RegisterID right, RegisterID destHi, RegisterID destLo)

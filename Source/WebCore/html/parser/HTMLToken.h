@@ -159,7 +159,15 @@ const HTMLToken::Attribute* findAttribute(const Vector<HTMLToken::Attribute>&, S
 inline void HTMLToken::clear()
 {
     m_type = Type::Uninitialized;
+#if defined(WEBKIT_IOS6)
+    static constexpr size_t maxRetainedDataCapacity = 4096;
+    if (m_data.capacity() <= maxRetainedDataCapacity)
+        m_data.shrink(0);
+    else
+        m_data.clear();
+#else
     m_data.clear();
+#endif
     m_data8BitCheck = 0;
 }
 
@@ -270,7 +278,11 @@ inline void HTMLToken::beginStartTag(Latin1Character character)
     ASSERT(m_type == Type::Uninitialized);
     m_type = Type::StartTag;
     m_selfClosing = false;
+#if defined(WEBKIT_IOS6)
+    m_attributes.shrink(0);
+#else
     m_attributes.clear();
+#endif
 
 #if ASSERT_ENABLED
     m_currentAttribute = nullptr;
@@ -284,7 +296,11 @@ inline void HTMLToken::beginEndTag(Latin1Character character)
     ASSERT(m_type == Type::Uninitialized);
     m_type = Type::EndTag;
     m_selfClosing = false;
+#if defined(WEBKIT_IOS6)
+    m_attributes.shrink(0);
+#else
     m_attributes.clear();
+#endif
 
 #if ASSERT_ENABLED
     m_currentAttribute = nullptr;
@@ -298,7 +314,11 @@ inline void HTMLToken::beginEndTag(const Vector<Latin1Character, 32>& characters
     ASSERT(m_type == Type::Uninitialized);
     m_type = Type::EndTag;
     m_selfClosing = false;
+#if defined(WEBKIT_IOS6)
+    m_attributes.shrink(0);
+#else
     m_attributes.clear();
+#endif
 
 #if ASSERT_ENABLED
     m_currentAttribute = nullptr;

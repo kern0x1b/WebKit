@@ -46,7 +46,12 @@ public:
     bool isNotNull() const { return m_deepPosition.isNotNull(); }
     bool isOrphan() const { return m_deepPosition.isOrphan(); }
 
+#if defined(WEBKIT_IOS6)
+    const Position& deepEquivalent() const & { return m_deepPosition; }
+    Position deepEquivalent() const && { return m_deepPosition; }
+#else
     Position deepEquivalent() const { return m_deepPosition; }
+#endif
     Affinity affinity() const { return m_affinity; }
     AllowUserSelectNone allowUserSelectNone() const { return m_allowUserSelectNone; }
 

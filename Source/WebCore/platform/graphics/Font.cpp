@@ -438,9 +438,15 @@ const GlyphPage* Font::glyphPage(unsigned pageNumber) const
     if (isDirectMapped && (m_directMappedGlyphPagesFilled & (1u << pageNumber)))
         return m_directMappedGlyphPages[pageNumber];
 
-    auto* page = m_glyphPages.ensure(pageNumber, [&] {
+    auto addResult = m_glyphPages.ensure(pageNumber, [&] {
         return createAndFillGlyphPage(pageNumber, *this);
-    }).iterator->value.get();
+    });
+    auto* page = addResult.iterator->value.get();
+
+#if USE(CORE_TEXT) && defined(WEBKIT_IOS6) && !ENABLE(OPENTYPE_VERTICAL)
+    if (addResult.isNewEntry && page)
+        prewarmGlyphAdvances(*page);
+#endif
 
     if (isDirectMapped) {
         m_directMappedGlyphPages[pageNumber] = page;

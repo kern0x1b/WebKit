@@ -110,6 +110,23 @@ void AnimationTimelinesController::updateAnimationsAndSendEvents(ReducedResoluti
     std::optional<FramesPerSecond> defaultTimelineFrameRate;
     // This will hold the frame rate used for this timeline until now.
     std::optional<FramesPerSecond> previousTimelineFrameRate;
+#if defined(WEBKIT_IOS6)
+    bool didQueryTimelineFrameRates = false;
+    auto queryTimelineFrameRates = [&] {
+        if (didQueryTimelineFrameRates)
+            return;
+        didQueryTimelineFrameRates = true;
+        if (RefPtr page = m_document->page()) {
+            defaultTimelineFrameRate = page->preferredRenderingUpdateFramesPerSecond({ Page::PreferredRenderingUpdateOption::IncludeThrottlingReasons });
+            previousTimelineFrameRate = page->preferredRenderingUpdateFramesPerSecond({
+                Page::PreferredRenderingUpdateOption::IncludeThrottlingReasons,
+                Page::PreferredRenderingUpdateOption::IncludeAnimationsFrameRate
+            });
+        }
+    };
+    if (!m_frameRateAligner.isEmpty())
+        queryTimelineFrameRates();
+#else
     if (RefPtr page = m_document->page()) {
         defaultTimelineFrameRate = page->preferredRenderingUpdateFramesPerSecond({ Page::PreferredRenderingUpdateOption::IncludeThrottlingReasons });
         previousTimelineFrameRate = page->preferredRenderingUpdateFramesPerSecond({
@@ -117,6 +134,7 @@ void AnimationTimelinesController::updateAnimationsAndSendEvents(ReducedResoluti
             Page::PreferredRenderingUpdateOption::IncludeAnimationsFrameRate
         });
     }
+#endif
 
     LOG_WITH_STREAM(Animations, stream << "AnimationTimelinesController::updateAnimationsAndSendEvents for time " << timestamp);
 
@@ -154,6 +172,9 @@ void AnimationTimelinesController::updateAnimationsAndSendEvents(ReducedResoluti
             continue;
 
         timelinesToUpdate.append(timeline.copyRef());
+#if defined(WEBKIT_IOS6)
+        queryTimelineFrameRates();
+#endif
 
         // https://drafts.csswg.org/scroll-animations-1/#event-loop
         if (RefPtr scrollTimeline = dynamicDowncast<ScrollTimeline>(timeline))

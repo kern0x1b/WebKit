@@ -124,6 +124,18 @@ ALWAYS_INLINE void SlotVisitor::appendHidden(const WriteBarrierBase<T, Traits>& 
     appendHiddenUnbarriered(slot.get());
 }
 
+#if defined(WEBKIT_IOS6)
+ALWAYS_INLINE void SlotVisitor::append(const WriteBarrierBase<Unknown, RawValueTraits<Unknown>>& slot)
+{
+    appendUnbarriered(webkitIOS6GCUncontendedMarkEnabled() ? *slot.slot() : slot.get());
+}
+
+ALWAYS_INLINE void SlotVisitor::appendHidden(const WriteBarrierBase<Unknown, RawValueTraits<Unknown>>& slot)
+{
+    appendHiddenUnbarriered(webkitIOS6GCUncontendedMarkEnabled() ? *slot.slot() : slot.get());
+}
+#endif
+
 ALWAYS_INLINE void SlotVisitor::append(const WriteBarrierStructureID& slot)
 {
     appendUnbarriered(reinterpret_cast<JSCell*>(slot.get()));

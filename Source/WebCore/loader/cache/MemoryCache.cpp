@@ -42,6 +42,7 @@
 #include "WorkerThread.h"
 #include <pal/Logging.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <wtf/MathExtras.h>
 #include <wtf/NeverDestroyed.h>
 #include <wtf/SetForScope.h>
@@ -209,14 +210,48 @@ CachedResource* MemoryCache::resourceForRequestImpl(const ResourceRequest& reque
     return resources.get(key);
 }
 
-unsigned MemoryCache::deadCapacity() const 
+unsigned MemoryCache::deadCapacity() const
 {
+#if defined(WEBKIT_IOS6)
+    // m_liveSize counts the encoded bytes of every image still in the document, and
+    // an endless feed puts that over any total capacity within a screen or two. The
+    // upstream formula then reports a dead capacity of zero forever, so a resource is
+    // evicted the moment its element goes away and has to come back over a link that
+    // moves 392 KB/s. Give dead resources their own budget instead.
+    return std::max(m_minDeadCapacity, m_maxDeadCapacity);
+#else
     // Dead resource capacity is whatever space is not occupied by live resources, bounded by an independent minimum and maximum.
     unsigned capacity = m_capacity - std::min(m_liveSize, m_capacity); // Start with available capacity.
     capacity = std::max(capacity, m_minDeadCapacity); // Make sure it's above the minimum.
     capacity = std::min(capacity, m_maxDeadCapacity); // Make sure it's below the maximum.
     return capacity;
+#endif
 }
+
+#if defined(WEBKIT_IOS6)
+
+unsigned MemoryCache::liveDecodedCapacity()
+{
+    static const unsigned capacity = [] -> unsigned {
+        if (const char* override = getenv("WEBKIT_IOS6_LIVE_DECODED_KB")) {
+            int value = atoi(override);
+            if (value >= 0 && value <= 128 * 1024)
+                return static_cast<unsigned>(value) * 1024;
+        }
+        return 6 * 1024 * 1024;
+    }();
+    return capacity;
+}
+
+unsigned MemoryCache::liveDecodedSize() const
+{
+    unsigned size = 0;
+    for (auto& resource : m_liveDecodedResources)
+        size += resource.decodedSize();
+    return size;
+}
+
+#endif
 
 unsigned MemoryCache::liveCapacity() const 
 { 
@@ -227,9 +262,19 @@ unsigned MemoryCache::liveCapacity() const
 void MemoryCache::pruneLiveResources(bool shouldDestroyDecodedDataForAllLiveResources)
 {
     RELEASE_ASSERT(isMainThread());
+#if defined(WEBKIT_IOS6)
+    // Only decoded data can be released here, so budget only decoded data. Measured
+    // against m_liveSize the budget is always exceeded and every paint throws away
+    // every frame older than a second, which the very next paint decodes again on
+    // the web thread.
+    unsigned capacity = shouldDestroyDecodedDataForAllLiveResources ? 0 : liveDecodedCapacity();
+    if (capacity && liveDecodedSize() <= capacity)
+        return;
+#else
     unsigned capacity = shouldDestroyDecodedDataForAllLiveResources ? 0 : liveCapacity();
     if (capacity && m_liveSize <= capacity)
         return;
+#endif
 
     unsigned targetSize = static_cast<unsigned>(capacity * cTargetPrunePercentage); // Cut by a percentage to avoid immediately pruning again.
 
@@ -425,6 +470,19 @@ void MemoryCache::setCapacities(unsigned minDeadBytes, unsigned maxDeadBytes, un
     m_minDeadCapacity = minDeadBytes;
     m_maxDeadCapacity = maxDeadBytes;
     m_capacity = totalBytes;
+#if defined(WEBKIT_IOS6)
+    static const unsigned deadCapacityOverride = [] -> unsigned {
+        if (const char* override = getenv("WEBKIT_IOS6_DEAD_CACHE_KB")) {
+            int value = atoi(override);
+            if (value >= 0 && value <= 128 * 1024)
+                return static_cast<unsigned>(value) * 1024;
+        }
+        return 4 * 1024 * 1024;
+    }();
+    m_maxDeadCapacity = deadCapacityOverride;
+    m_minDeadCapacity = std::min(m_minDeadCapacity, m_maxDeadCapacity);
+    m_capacity = std::max(m_capacity, m_maxDeadCapacity);
+#endif
     prune();
 }
 
@@ -788,7 +846,11 @@ void MemoryCache::evictResources(PAL::SessionID sessionID)
 
 bool MemoryCache::needsPruning() const
 {
+#if defined(WEBKIT_IOS6)
+    return m_deadSize > deadCapacity() || liveDecodedSize() > liveDecodedCapacity();
+#else
     return m_liveSize + m_deadSize > m_capacity || m_deadSize > m_maxDeadCapacity;
+#endif
 }
 
 void MemoryCache::prune()
@@ -804,10 +866,19 @@ void MemoryCache::prune()
 void MemoryCache::pruneSoon()
 {
     RELEASE_ASSERT(isMainThread());
+#if defined(WEBKIT_IOS6)
+    // Every drawn image reaches here through didAccessDecodedData(), and needsPruning()
+    // now walks the live decoded list. The timer check answers without walking anything.
+    if (m_pruneTimer.isActive())
+        return;
+    if (!needsPruning())
+        return;
+#else
     if (!needsPruning())
         return;
     if (m_pruneTimer.isActive())
         return;
+#endif
     m_pruneTimer.startOneShot(0_s);
 }
 

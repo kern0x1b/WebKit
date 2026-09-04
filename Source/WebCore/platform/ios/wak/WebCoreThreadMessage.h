@@ -58,6 +58,10 @@ WEBCORE_EXPORT void WebThreadRunOnMainThread(void (^)(void));
 // Asynchronous from web thread to main thread, but synchronous when called on the main thread.
 WEBCORE_EXPORT void WebThreadCallDelegateAsync(NSInvocation *invocation);
 
+#if defined(WEBKIT_IOS6)
+WEBCORE_EXPORT void WebThreadCallDelegateDeferred(NSInvocation *invocation);
+#endif
+
 // Asynchronous from web thread to main thread, but synchronous when called on the main thread.
 WEBCORE_EXPORT void WebThreadPostNotification(NSString *name, id object, id userInfo);
 

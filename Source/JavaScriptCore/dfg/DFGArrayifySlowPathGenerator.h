@@ -138,7 +138,7 @@ private:
     GPRReg m_structureGPR;
     OSRExitJumpPlaceholder m_badPropertyJump;
     OSRExitJumpPlaceholder m_badIndexingTypeJump;
-    Vector<SilentRegisterSavePlan, 2> m_plans;
+    Vector<SilentRegisterSavePlan, silentRegisterSavePlanInlineCapacity> m_plans;
 };
 
 } } // namespace JSC::DFG

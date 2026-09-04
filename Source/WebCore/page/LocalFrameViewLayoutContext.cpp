@@ -101,6 +101,7 @@ static constexpr unsigned needsLayoutSlots = 24;
 static void* needsLayoutCallers[needsLayoutSlots];
 static unsigned needsLayoutCounts[needsLayoutSlots];
 bool g_webkitIOS6NeedsLayoutRecording;
+bool g_webkitIOS6LayoutCounters;
 
 void recordNeedsLayoutCaller(void* caller)
 {
@@ -368,8 +369,9 @@ void LocalFrameViewLayoutContext::performLayout(bool canDeferUpdateLayerPosition
         static int logLayouts = -1;
         if (logLayouts < 0)
             logLayouts = !access("/tmp/native-layout-log", F_OK);
-        MonotonicTime layoutStart = MonotonicTime::now();
+        MonotonicTime layoutStart = logLayouts ? MonotonicTime::now() : MonotonicTime();
         if (logLayouts) {
+            g_webkitIOS6LayoutCounters = true;
             g_webkitIOS6BlocksLaidOut = 0;
             g_webkitIOS6BlocksForced = 0;
             g_webkitIOS6BlocksDirty = 0;
@@ -403,10 +405,10 @@ void LocalFrameViewLayoutContext::performLayout(bool canDeferUpdateLayerPosition
 #endif
         layoutRoot->layout();
 #if defined(WEBKIT_IOS6)
-        auto elapsed = (MonotonicTime::now() - layoutStart).milliseconds();
-        g_webkitIOS6LayoutMsTotal += elapsed;
-        ++g_webkitIOS6LayoutCount;
         if (logLayouts) {
+            auto elapsed = (MonotonicTime::now() - layoutStart).milliseconds();
+            g_webkitIOS6LayoutMsTotal += elapsed;
+            ++g_webkitIOS6LayoutCount;
             bool wholeDocument = is<RenderView>(*layoutRoot);
             WTFLogAlways("[layout] %s %.1f ms, %u blocks (%u forced, %u self, %u via child), %u on entry, document %d px",
                 wholeDocument ? "whole document" : "subtree", elapsed, g_webkitIOS6BlocksLaidOut,

@@ -129,6 +129,20 @@ auto Blending<LineWidth>::blend(const LineWidth& a, const LineWidth& b, const St
 
 // MARK: - Evaluation
 
+#if defined(WEBKIT_IOS6)
+
+float evaluateNonZeroLineWidth(const LineWidth& value, ZoomFactor zoom, float deviceScaleFactor)
+{
+    return snapLengthAsBorderWidth(evaluate<float>(value.value, zoom), deviceScaleFactor);
+}
+
+LayoutUnit evaluateNonZeroLineWidthAsLayoutUnit(const LineWidth& value, ZoomFactor zoom, float deviceScaleFactor)
+{
+    return LayoutUnit { snapLengthAsBorderWidth(evaluate<float>(value.value, zoom), deviceScaleFactor) };
+}
+
+#else
+
 auto Evaluation<LineWidth, float>::operator()(const LineWidth& value, ZoomFactor zoom, float deviceScaleFactor) -> float
 {
     return snapLengthAsBorderWidth(evaluate<float>(value.value, zoom), deviceScaleFactor);
@@ -139,6 +153,8 @@ auto Evaluation<LineWidth, LayoutUnit>::operator()(const LineWidth& value, ZoomF
     // NOTE: Using `evaluate<float>`, not `evaluate<LayoutUnit>`, as snapLengthAsBorderWidth takes a `float`.
     return LayoutUnit { snapLengthAsBorderWidth(evaluate<float>(value.value, zoom), deviceScaleFactor) };
 }
+
+#endif
 
 auto Evaluation<LineWidthBox, FloatBoxExtent>::operator()(const LineWidthBox& value, ZoomFactor zoom, float deviceScaleFactor) -> FloatBoxExtent
 {

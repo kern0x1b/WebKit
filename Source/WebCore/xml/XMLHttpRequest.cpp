@@ -1079,15 +1079,35 @@ void XMLHttpRequest::didReceiveData(const SharedBuffer& buffer)
     if (readyState() < HEADERS_RECEIVED)
         changeState(HEADERS_RECEIVED);
 
+    bool useDecoder = shouldDecodeResponse(responseType());
+
+#if defined(WEBKIT_IOS6)
+    if (useDecoder && !m_decoder) {
+        if (!m_mimeTypeOverride.isEmpty())
+            m_responseEncoding = extractCharsetFromMediaType(m_mimeTypeOverride).toString();
+        if (m_responseEncoding.isEmpty())
+            m_responseEncoding = m_response.textEncodingName();
+
+        m_decoder = createDecoder();
+    }
+
+    if (useDecoder && m_responseBuilder.length() && m_responseBuilder.capacity() == m_responseBuilder.length()) {
+        long long announcedLength = m_response.expectedContentLength();
+        if (announcedLength > 16 * 1024) {
+            unsigned reservation = static_cast<unsigned>(std::min<long long>(announcedLength, 1024 * 1024));
+            if (reservation > m_responseBuilder.length())
+                m_responseBuilder.reserveCapacity(reservation);
+        }
+    }
+#else
     if (!m_mimeTypeOverride.isEmpty())
         m_responseEncoding = extractCharsetFromMediaType(m_mimeTypeOverride).toString();
     if (m_responseEncoding.isEmpty())
         m_responseEncoding = m_response.textEncodingName();
 
-    bool useDecoder = shouldDecodeResponse(responseType());
-
     if (useDecoder && !m_decoder)
         m_decoder = createDecoder();
+#endif
 
     if (buffer.isEmpty())
         return;

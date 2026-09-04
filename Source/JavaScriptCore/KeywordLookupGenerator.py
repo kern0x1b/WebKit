@@ -172,6 +172,36 @@ class Trie:
             if itemCount == len(self.keys):
                 print(str + "}")
 
+    def printRootAsSwitchC(self, typeName, indent):
+        str = makePadding(indent)
+        seen = {}
+        for k, trie in self.keys:
+            if k[0] in seen:
+                raise Exception("duplicate first character %s at trie root" % k[0])
+            seen[k[0]] = True
+        print(str + "switch (code[0]) {")
+        for k, trie in self.keys:
+            print(str + "case '%s': {" % k[0])
+            if len(k) == 1:
+                trie.printSubTreeAsC(typeName, indent + 4)
+            else:
+                test = [("'%s'" % c) for c in k]
+                print(str + "    if (compareCharacters(code, " + ", ".join(test) + ")) {")
+                trie.printSubTreeAsC(typeName, indent + 8)
+                print(str + "    }")
+            print(str + "    break;")
+            print(str + "}")
+        print(str + "default:")
+        print(str + "    break;")
+        print(str + "}")
+
+    def printDispatchAsC(self, typeName, indent):
+        print("#if defined(WEBKIT_IOS6)")
+        self.printRootAsSwitchC(typeName, indent)
+        print("#else")
+        self.printSubTreeAsC(typeName, indent)
+        print("#endif")
+
     def maxLength(self):
         max = len(self.fullPrefix)
         for (_, trie) in self.keys:
@@ -196,7 +226,7 @@ class Trie:
         print("    ASSERT(m_codeEnd - m_code >= maxTokenLength);")
         print("")
         print("    const char16_t* code = m_code;")
-        self.printSubTreeAsC("UCHAR", 4)
+        self.printDispatchAsC("UCHAR", 4)
         print("    return IDENT;")
         print("}")
         print("")
@@ -206,7 +236,7 @@ class Trie:
         print("    ASSERT(m_codeEnd - m_code >= maxTokenLength);")
         print("")
         print("    const Latin1Character* code = m_code;")
-        self.printSubTreeAsC("CHAR", 4)
+        self.printDispatchAsC("CHAR", 4)
         print("    return IDENT;")
         print("}")
         print("")

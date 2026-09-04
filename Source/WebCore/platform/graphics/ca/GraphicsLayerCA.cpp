@@ -4853,7 +4853,15 @@ bool GraphicsLayerCA::requiresTiledLayer(float pageScaleFactor) const
         return false;
 
     // FIXME: catch zero-size height or width here (or earlier)?
-#if PLATFORM(IOS_FAMILY)
+#if defined(WEBKIT_IOS6) && PLATFORM(IOS_FAMILY)
+    float scaledWidth = m_size.width() * pageScaleFactor;
+    float scaledHeight = m_size.height() * pageScaleFactor;
+    if (!(scaledWidth > cMaxPixelDimensionLowMemory) && !(scaledHeight > cMaxPixelDimensionLowMemory))
+        return false;
+    if (scaledWidth > cMaxPixelDimension || scaledHeight > cMaxPixelDimension)
+        return true;
+    return systemMemoryLevel() < cMemoryLevelToUseSmallerPixelDimension;
+#elif PLATFORM(IOS_FAMILY)
     int maxPixelDimension = systemMemoryLevel() < cMemoryLevelToUseSmallerPixelDimension ? cMaxPixelDimensionLowMemory : cMaxPixelDimension;
     return m_size.width() * pageScaleFactor > maxPixelDimension || m_size.height() * pageScaleFactor > maxPixelDimension;
 #else

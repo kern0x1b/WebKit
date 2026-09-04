@@ -3372,8 +3372,19 @@ JSC_DEFINE_JIT_OPERATION(operationEnumeratorNextUpdatePropertyName, JSString*, (
     auto scope = DECLARE_THROW_SCOPE(vm);
 
     if (modeNumber == JSPropertyNameEnumerator::IndexedMode) {
-        if (index < enumerator->indexedLength())
+        if (index < enumerator->indexedLength()) {
+#if defined(WEBKIT_IOS6)
+            if (index < NumericStrings::cacheSize) [[likely]] {
+                auto& entry = vm.numericStrings.smallIntCacheEntry(index);
+                if (entry.jsString) [[likely]]
+                    OPERATION_RETURN(scope, entry.jsString);
+                JSString* name = jsString(vm, Identifier::from(vm, index).releaseImpl());
+                entry.jsString = name;
+                OPERATION_RETURN(scope, name);
+            }
+#endif
             OPERATION_RETURN(scope, jsString(vm, Identifier::from(vm, index).releaseImpl()));
+        }
         OPERATION_RETURN(scope, vm.smallStrings.sentinelString());
     }
 

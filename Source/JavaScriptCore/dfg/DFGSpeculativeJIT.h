@@ -2155,7 +2155,7 @@ public:
         unsigned streamIndex;
     };
     Vector<SlowPathLambda> m_slowPathLambdas;
-    Vector<SilentRegisterSavePlan> m_plans;
+    Vector<SilentRegisterSavePlan, silentRegisterSavePlanInlineCapacity> m_plans;
     bool m_underSilentSpill { false };
     std::optional<unsigned> m_outOfLineStreamIndex;
 };

@@ -124,24 +124,32 @@ struct SameSizeAsRenderBox : public RenderBoxModelObject {
     LayoutBoxExtent marginBox;
     LayoutUnit preferredLogicalWidths[2];
     void* pointers[1];
+#if defined(WEBKIT_IOS6)
+    LayoutUnit sizeOverrides[4];
+    uint8_t sizeOverrideFlags;
+#endif
 };
 
 static_assert(sizeof(RenderBox) == sizeof(SameSizeAsRenderBox), "RenderBox should stay small");
 
 using namespace HTMLNames;
 
+#if !defined(WEBKIT_IOS6)
 using OverrideSizeMap = SingleThreadWeakHashMap<const RenderBox, LayoutUnit>;
 static OverrideSizeMap* gOverridingLogicalHeightMap = nullptr;
 static OverrideSizeMap* gOverridingLogicalWidthMap = nullptr;
+#endif
 
 using OverridingPreferredSizeMap = SingleThreadWeakHashMap<const RenderBox, Style::PreferredSize>;
 static OverridingPreferredSizeMap* gOverridingLogicalHeightMapForFlexBasisComputation = nullptr;
 static OverridingPreferredSizeMap* gOverridingLogicalWidthMapForFlexBasisComputation = nullptr;
 
+#if !defined(WEBKIT_IOS6)
 // FIXME: We should store these based on physical direction.
 using OverrideOptionalSizeMap = SingleThreadWeakHashMap<const RenderBox, RenderBox::GridAreaSize>;
 static OverrideOptionalSizeMap* gGridAreaContentLogicalHeightMap = nullptr;
 static OverrideOptionalSizeMap* gGridAreaContentLogicalWidthMap = nullptr;
+#endif
 
 // Size of border belt for autoscroll. When mouse pointer in border belt,
 // autoscroll is started.
@@ -858,6 +866,10 @@ LayoutUnit RenderBox::constrainLogicalHeightByMinMax(LayoutUnit logicalHeight, s
             // percentage treated as 0 during intrinsic size contributions.
             return adjustBorderBoxLogicalHeightForBoxSizing(Style::evaluateMinimum<LayoutUnit>(logicalMinHeight, 0_lu, styleToUse.usedZoomForLength()));
         }
+#if defined(WEBKIT_IOS6)
+        if (logicalMinHeight.isAuto() && !is<RenderReplaced>(*this) && !(intrinsicContentHeight && isFlexItem()))
+            return adjustBorderBoxLogicalHeightForBoxSizing(0_lu);
+#endif
         return computeLogicalHeightUsing(logicalMinHeight, intrinsicContentHeight);
     }();
     auto maxHeight = computedLogicalMaxHeight.value_or(LayoutUnit::max());
@@ -1440,6 +1452,8 @@ LayoutUnit RenderBox::maxContentLogicalWidthContribution() const
     return m_maxContentLogicalWidthContribution;
 }
 
+#if !defined(WEBKIT_IOS6)
+
 void RenderBox::setOverridingBorderBoxLogicalHeight(LayoutUnit height)
 {
     if (!gOverridingLogicalHeightMap)
@@ -1490,6 +1504,8 @@ std::optional<LayoutUnit> RenderBox::overridingBorderBoxLogicalHeight() const
     return { };
 }
 
+#endif // !defined(WEBKIT_IOS6)
+
 std::optional<RenderBox::GridAreaSize> RenderBox::gridAreaContentWidth(WritingMode writingMode) const
 {
     if (writingMode.isHorizontal())
@@ -1503,6 +1519,8 @@ std::optional<RenderBox::GridAreaSize> RenderBox::gridAreaContentHeight(WritingM
         return gridAreaContentLogicalHeight();
     return gridAreaContentLogicalWidth();
 }
+
+#if !defined(WEBKIT_IOS6)
 
 std::optional<RenderBox::GridAreaSize> RenderBox::gridAreaContentLogicalWidth() const
 {
@@ -1549,8 +1567,14 @@ void RenderBox::clearGridAreaContentLogicalHeight()
         gGridAreaContentLogicalHeightMap->remove(*this);
 }
 
+#endif // !defined(WEBKIT_IOS6)
+
 std::optional<Style::PreferredSize> RenderBox::overridingLogicalHeightForFlexBasisComputation() const
 {
+#if defined(WEBKIT_IOS6)
+    if (!(m_ios6SizeOverrideFlags & Ios6HasFlexBasisLogicalHeight))
+        return { };
+#endif
     if (!gOverridingLogicalHeightMapForFlexBasisComputation)
         return { };
     if (auto result = gOverridingLogicalHeightMapForFlexBasisComputation->find(*this); result != gOverridingLogicalHeightMapForFlexBasisComputation->end())
@@ -1563,16 +1587,28 @@ void RenderBox::setOverridingBorderBoxLogicalHeightForFlexBasisComputation(const
     if (!gOverridingLogicalHeightMapForFlexBasisComputation)
         gOverridingLogicalHeightMapForFlexBasisComputation = new OverridingPreferredSizeMap();
     gOverridingLogicalHeightMapForFlexBasisComputation->set(*this, logicalHeight);
+#if defined(WEBKIT_IOS6)
+    m_ios6SizeOverrideFlags |= Ios6HasFlexBasisLogicalHeight;
+#endif
 }
 
 void RenderBox::clearOverridingLogicalHeightForFlexBasisComputation()
 {
+#if defined(WEBKIT_IOS6)
+    if (!(m_ios6SizeOverrideFlags & Ios6HasFlexBasisLogicalHeight))
+        return;
+    m_ios6SizeOverrideFlags &= ~Ios6HasFlexBasisLogicalHeight;
+#endif
     if (gOverridingLogicalHeightMapForFlexBasisComputation)
         gOverridingLogicalHeightMapForFlexBasisComputation->remove(*this);
 }
 
 std::optional<Style::PreferredSize> RenderBox::overridingLogicalWidthForFlexBasisComputation() const
 {
+#if defined(WEBKIT_IOS6)
+    if (!(m_ios6SizeOverrideFlags & Ios6HasFlexBasisLogicalWidth))
+        return { };
+#endif
     if (!gOverridingLogicalWidthMapForFlexBasisComputation)
         return { };
     if (auto result = gOverridingLogicalWidthMapForFlexBasisComputation->find(*this); result != gOverridingLogicalWidthMapForFlexBasisComputation->end())
@@ -1585,10 +1621,18 @@ void RenderBox::setOverridingBorderBoxLogicalWidthForFlexBasisComputation(const 
     if (!gOverridingLogicalWidthMapForFlexBasisComputation)
         gOverridingLogicalWidthMapForFlexBasisComputation = new OverridingPreferredSizeMap();
     gOverridingLogicalWidthMapForFlexBasisComputation->set(*this, logicalWidth);
+#if defined(WEBKIT_IOS6)
+    m_ios6SizeOverrideFlags |= Ios6HasFlexBasisLogicalWidth;
+#endif
 }
 
 void RenderBox::clearOverridingLogicalWidthForFlexBasisComputation()
 {
+#if defined(WEBKIT_IOS6)
+    if (!(m_ios6SizeOverrideFlags & Ios6HasFlexBasisLogicalWidth))
+        return;
+    m_ios6SizeOverrideFlags &= ~Ios6HasFlexBasisLogicalWidth;
+#endif
     if (gOverridingLogicalWidthMapForFlexBasisComputation)
         gOverridingLogicalWidthMapForFlexBasisComputation->remove(*this);
 }
@@ -2448,6 +2492,12 @@ LayoutUnit RenderBox::shrinkLogicalWidthToAvoidFloats(LayoutUnit childMarginStar
 
 LayoutUnit RenderBox::containingBlockLogicalWidthForContent() const
 {
+#if defined(WEBKIT_IOS6)
+    if (!isOutOfFlowPositioned() && isGridItem()) {
+        if (auto gridAreaContentLogicalWidth = this->gridAreaContentLogicalWidth())
+            return gridAreaContentLogicalWidth->value_or(0_lu);
+    }
+#endif
     SUPPRESS_UNCHECKED_LOCAL auto* containingBlock = this->containingBlock();
     if (!containingBlock) {
         // Should not be called on detached renderer (e.g. during initial style setting).
@@ -4244,10 +4294,20 @@ void RenderBox::computeBlockDirectionMargins(const RenderBlock& containingBlock,
             return 0_lu;
         }
 
+#if defined(WEBKIT_IOS6)
+        auto&& margin = marginSideInBlockDirection == Style::MarginTrimSide::BlockStart
+            ? style().marginBefore(containingBlock.writingMode())
+            : style().marginAfter(containingBlock.writingMode());
+        LayoutUnit availableSpace;
+        if (margin.isPercentOrCalculated()) [[unlikely]]
+            availableSpace = containingBlockLogicalWidthForContent();
+        return Style::evaluateMinimum<LayoutUnit>(margin, availableSpace, style().usedZoomForLength());
+#else
         auto availableSpace = containingBlockLogicalWidthForContent();
         return marginSideInBlockDirection == Style::MarginTrimSide::BlockStart
             ? Style::evaluateMinimum<LayoutUnit>(style().marginBefore(containingBlock.writingMode()), availableSpace, style().usedZoomForLength())
             : Style::evaluateMinimum<LayoutUnit>(style().marginAfter(containingBlock.writingMode()), availableSpace, style().usedZoomForLength());
+#endif
     };
 
     marginBefore = constrainBlockMarginInAvailableSpaceOrTrim(Style::MarginTrimSide::BlockStart);

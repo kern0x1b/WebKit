@@ -634,7 +634,11 @@ static inline JSValue jsTestDOMJIT_anyAttrGetter(JSGlobalObject& lexicalGlobalOb
 
 JSC_DEFINE_CUSTOM_GETTER(jsTestDOMJIT_anyAttr, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
 {
+#if defined(WEBKIT_IOS6)
+    return IDLAttribute<JSTestDOMJIT>::get<jsTestDOMJIT_anyAttrGetter, CastedThisErrorBehavior::Assert>(*lexicalGlobalObject, thisValue, attributeName);
+#else
     return IDLAttribute<JSTestDOMJIT>::get<jsTestDOMJIT_anyAttrGetter>(*lexicalGlobalObject, thisValue, attributeName);
+#endif
 }
 
 static inline JSValue jsTestDOMJIT_booleanAttrGetter(JSGlobalObject& lexicalGlobalObject, JSTestDOMJIT& thisObject)
@@ -647,7 +651,11 @@ static inline JSValue jsTestDOMJIT_booleanAttrGetter(JSGlobalObject& lexicalGlob
 
 JSC_DEFINE_CUSTOM_GETTER(jsTestDOMJIT_booleanAttr, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
 {
+#if defined(WEBKIT_IOS6)
+    return IDLAttribute<JSTestDOMJIT>::get<jsTestDOMJIT_booleanAttrGetter, CastedThisErrorBehavior::Assert>(*lexicalGlobalObject, thisValue, attributeName);
+#else
     return IDLAttribute<JSTestDOMJIT>::get<jsTestDOMJIT_booleanAttrGetter>(*lexicalGlobalObject, thisValue, attributeName);
+#endif
 }
 
 static inline JSValue jsTestDOMJIT_byteAttrGetter(JSGlobalObject& lexicalGlobalObject, JSTestDOMJIT& thisObject)
@@ -660,7 +668,11 @@ static inline JSValue jsTestDOMJIT_byteAttrGetter(JSGlobalObject& lexicalGlobalO
 
 JSC_DEFINE_CUSTOM_GETTER(jsTestDOMJIT_byteAttr, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
 {
+#if defined(WEBKIT_IOS6)
+    return IDLAttribute<JSTestDOMJIT>::get<jsTestDOMJIT_byteAttrGetter, CastedThisErrorBehavior::Assert>(*lexicalGlobalObject, thisValue, attributeName);
+#else
     return IDLAttribute<JSTestDOMJIT>::get<jsTestDOMJIT_byteAttrGetter>(*lexicalGlobalObject, thisValue, attributeName);
+#endif
 }
 
 static inline JSValue jsTestDOMJIT_octetAttrGetter(JSGlobalObject& lexicalGlobalObject, JSTestDOMJIT& thisObject)
@@ -673,7 +685,11 @@ static inline JSValue jsTestDOMJIT_octetAttrGetter(JSGlobalObject& lexicalGlobal
 
 JSC_DEFINE_CUSTOM_GETTER(jsTestDOMJIT_octetAttr, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
 {
+#if defined(WEBKIT_IOS6)
+    return IDLAttribute<JSTestDOMJIT>::get<jsTestDOMJIT_octetAttrGetter, CastedThisErrorBehavior::Assert>(*lexicalGlobalObject, thisValue, attributeName);
+#else
     return IDLAttribute<JSTestDOMJIT>::get<jsTestDOMJIT_octetAttrGetter>(*lexicalGlobalObject, thisValue, attributeName);
+#endif
 }
 
 static inline JSValue jsTestDOMJIT_shortAttrGetter(JSGlobalObject& lexicalGlobalObject, JSTestDOMJIT& thisObject)
@@ -686,7 +702,11 @@ static inline JSValue jsTestDOMJIT_shortAttrGetter(JSGlobalObject& lexicalGlobal
 
 JSC_DEFINE_CUSTOM_GETTER(jsTestDOMJIT_shortAttr, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
 {
+#if defined(WEBKIT_IOS6)
+    return IDLAttribute<JSTestDOMJIT>::get<jsTestDOMJIT_shortAttrGetter, CastedThisErrorBehavior::Assert>(*lexicalGlobalObject, thisValue, attributeName);
+#else
     return IDLAttribute<JSTestDOMJIT>::get<jsTestDOMJIT_shortAttrGetter>(*lexicalGlobalObject, thisValue, attributeName);
+#endif
 }
 
 static inline JSValue jsTestDOMJIT_unsignedShortAttrGetter(JSGlobalObject& lexicalGlobalObject, JSTestDOMJIT& thisObject)
@@ -699,7 +719,11 @@ static inline JSValue jsTestDOMJIT_unsignedShortAttrGetter(JSGlobalObject& lexic
 
 JSC_DEFINE_CUSTOM_GETTER(jsTestDOMJIT_unsignedShortAttr, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
 {
+#if defined(WEBKIT_IOS6)
+    return IDLAttribute<JSTestDOMJIT>::get<jsTestDOMJIT_unsignedShortAttrGetter, CastedThisErrorBehavior::Assert>(*lexicalGlobalObject, thisValue, attributeName);
+#else
     return IDLAttribute<JSTestDOMJIT>::get<jsTestDOMJIT_unsignedShortAttrGetter>(*lexicalGlobalObject, thisValue, attributeName);
+#endif
 }
 
 static inline JSValue jsTestDOMJIT_longAttrGetter(JSGlobalObject& lexicalGlobalObject, JSTestDOMJIT& thisObject)
@@ -712,7 +736,11 @@ static inline JSValue jsTestDOMJIT_longAttrGetter(JSGlobalObject& lexicalGlobalO
 
 JSC_DEFINE_CUSTOM_GETTER(jsTestDOMJIT_longAttr, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
 {
+#if defined(WEBKIT_IOS6)
+    return IDLAttribute<JSTestDOMJIT>::get<jsTestDOMJIT_longAttrGetter, CastedThisErrorBehavior::Assert>(*lexicalGlobalObject, thisValue, attributeName);
+#else
     return IDLAttribute<JSTestDOMJIT>::get<jsTestDOMJIT_longAttrGetter>(*lexicalGlobalObject, thisValue, attributeName);
+#endif
 }
 
 static inline JSValue jsTestDOMJIT_unsignedLongAttrGetter(JSGlobalObject& lexicalGlobalObject, JSTestDOMJIT& thisObject)
@@ -725,7 +753,11 @@ static inline JSValue jsTestDOMJIT_unsignedLongAttrGetter(JSGlobalObject& lexica
 
 JSC_DEFINE_CUSTOM_GETTER(jsTestDOMJIT_unsignedLongAttr, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
 {
+#if defined(WEBKIT_IOS6)
+    return IDLAttribute<JSTestDOMJIT>::get<jsTestDOMJIT_unsignedLongAttrGetter, CastedThisErrorBehavior::Assert>(*lexicalGlobalObject, thisValue, attributeName);
+#else
     return IDLAttribute<JSTestDOMJIT>::get<jsTestDOMJIT_unsignedLongAttrGetter>(*lexicalGlobalObject, thisValue, attributeName);
+#endif
 }
 
 static inline JSValue jsTestDOMJIT_longLongAttrGetter(JSGlobalObject& lexicalGlobalObject, JSTestDOMJIT& thisObject)
@@ -738,7 +770,11 @@ static inline JSValue jsTestDOMJIT_longLongAttrGetter(JSGlobalObject& lexicalGlo
 
 JSC_DEFINE_CUSTOM_GETTER(jsTestDOMJIT_longLongAttr, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
 {
+#if defined(WEBKIT_IOS6)
+    return IDLAttribute<JSTestDOMJIT>::get<jsTestDOMJIT_longLongAttrGetter, CastedThisErrorBehavior::Assert>(*lexicalGlobalObject, thisValue, attributeName);
+#else
     return IDLAttribute<JSTestDOMJIT>::get<jsTestDOMJIT_longLongAttrGetter>(*lexicalGlobalObject, thisValue, attributeName);
+#endif
 }
 
 static inline JSValue jsTestDOMJIT_unsignedLongLongAttrGetter(JSGlobalObject& lexicalGlobalObject, JSTestDOMJIT& thisObject)
@@ -751,7 +787,11 @@ static inline JSValue jsTestDOMJIT_unsignedLongLongAttrGetter(JSGlobalObject& le
 
 JSC_DEFINE_CUSTOM_GETTER(jsTestDOMJIT_unsignedLongLongAttr, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
 {
+#if defined(WEBKIT_IOS6)
+    return IDLAttribute<JSTestDOMJIT>::get<jsTestDOMJIT_unsignedLongLongAttrGetter, CastedThisErrorBehavior::Assert>(*lexicalGlobalObject, thisValue, attributeName);
+#else
     return IDLAttribute<JSTestDOMJIT>::get<jsTestDOMJIT_unsignedLongLongAttrGetter>(*lexicalGlobalObject, thisValue, attributeName);
+#endif
 }
 
 static inline JSValue jsTestDOMJIT_floatAttrGetter(JSGlobalObject& lexicalGlobalObject, JSTestDOMJIT& thisObject)
@@ -764,7 +804,11 @@ static inline JSValue jsTestDOMJIT_floatAttrGetter(JSGlobalObject& lexicalGlobal
 
 JSC_DEFINE_CUSTOM_GETTER(jsTestDOMJIT_floatAttr, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
 {
+#if defined(WEBKIT_IOS6)
+    return IDLAttribute<JSTestDOMJIT>::get<jsTestDOMJIT_floatAttrGetter, CastedThisErrorBehavior::Assert>(*lexicalGlobalObject, thisValue, attributeName);
+#else
     return IDLAttribute<JSTestDOMJIT>::get<jsTestDOMJIT_floatAttrGetter>(*lexicalGlobalObject, thisValue, attributeName);
+#endif
 }
 
 static inline JSValue jsTestDOMJIT_unrestrictedFloatAttrGetter(JSGlobalObject& lexicalGlobalObject, JSTestDOMJIT& thisObject)
@@ -777,7 +821,11 @@ static inline JSValue jsTestDOMJIT_unrestrictedFloatAttrGetter(JSGlobalObject& l
 
 JSC_DEFINE_CUSTOM_GETTER(jsTestDOMJIT_unrestrictedFloatAttr, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
 {
+#if defined(WEBKIT_IOS6)
+    return IDLAttribute<JSTestDOMJIT>::get<jsTestDOMJIT_unrestrictedFloatAttrGetter, CastedThisErrorBehavior::Assert>(*lexicalGlobalObject, thisValue, attributeName);
+#else
     return IDLAttribute<JSTestDOMJIT>::get<jsTestDOMJIT_unrestrictedFloatAttrGetter>(*lexicalGlobalObject, thisValue, attributeName);
+#endif
 }
 
 static inline JSValue jsTestDOMJIT_doubleAttrGetter(JSGlobalObject& lexicalGlobalObject, JSTestDOMJIT& thisObject)
@@ -790,7 +838,11 @@ static inline JSValue jsTestDOMJIT_doubleAttrGetter(JSGlobalObject& lexicalGloba
 
 JSC_DEFINE_CUSTOM_GETTER(jsTestDOMJIT_doubleAttr, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
 {
+#if defined(WEBKIT_IOS6)
+    return IDLAttribute<JSTestDOMJIT>::get<jsTestDOMJIT_doubleAttrGetter, CastedThisErrorBehavior::Assert>(*lexicalGlobalObject, thisValue, attributeName);
+#else
     return IDLAttribute<JSTestDOMJIT>::get<jsTestDOMJIT_doubleAttrGetter>(*lexicalGlobalObject, thisValue, attributeName);
+#endif
 }
 
 static inline JSValue jsTestDOMJIT_unrestrictedDoubleAttrGetter(JSGlobalObject& lexicalGlobalObject, JSTestDOMJIT& thisObject)
@@ -803,7 +855,11 @@ static inline JSValue jsTestDOMJIT_unrestrictedDoubleAttrGetter(JSGlobalObject& 
 
 JSC_DEFINE_CUSTOM_GETTER(jsTestDOMJIT_unrestrictedDoubleAttr, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
 {
+#if defined(WEBKIT_IOS6)
+    return IDLAttribute<JSTestDOMJIT>::get<jsTestDOMJIT_unrestrictedDoubleAttrGetter, CastedThisErrorBehavior::Assert>(*lexicalGlobalObject, thisValue, attributeName);
+#else
     return IDLAttribute<JSTestDOMJIT>::get<jsTestDOMJIT_unrestrictedDoubleAttrGetter>(*lexicalGlobalObject, thisValue, attributeName);
+#endif
 }
 
 static inline JSValue jsTestDOMJIT_domStringAttrGetter(JSGlobalObject& lexicalGlobalObject, JSTestDOMJIT& thisObject)
@@ -816,7 +872,11 @@ static inline JSValue jsTestDOMJIT_domStringAttrGetter(JSGlobalObject& lexicalGl
 
 JSC_DEFINE_CUSTOM_GETTER(jsTestDOMJIT_domStringAttr, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
 {
+#if defined(WEBKIT_IOS6)
+    return IDLAttribute<JSTestDOMJIT>::get<jsTestDOMJIT_domStringAttrGetter, CastedThisErrorBehavior::Assert>(*lexicalGlobalObject, thisValue, attributeName);
+#else
     return IDLAttribute<JSTestDOMJIT>::get<jsTestDOMJIT_domStringAttrGetter>(*lexicalGlobalObject, thisValue, attributeName);
+#endif
 }
 
 static inline JSValue jsTestDOMJIT_byteStringAttrGetter(JSGlobalObject& lexicalGlobalObject, JSTestDOMJIT& thisObject)
@@ -829,7 +889,11 @@ static inline JSValue jsTestDOMJIT_byteStringAttrGetter(JSGlobalObject& lexicalG
 
 JSC_DEFINE_CUSTOM_GETTER(jsTestDOMJIT_byteStringAttr, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
 {
+#if defined(WEBKIT_IOS6)
+    return IDLAttribute<JSTestDOMJIT>::get<jsTestDOMJIT_byteStringAttrGetter, CastedThisErrorBehavior::Assert>(*lexicalGlobalObject, thisValue, attributeName);
+#else
     return IDLAttribute<JSTestDOMJIT>::get<jsTestDOMJIT_byteStringAttrGetter>(*lexicalGlobalObject, thisValue, attributeName);
+#endif
 }
 
 static inline JSValue jsTestDOMJIT_usvStringAttrGetter(JSGlobalObject& lexicalGlobalObject, JSTestDOMJIT& thisObject)
@@ -842,7 +906,11 @@ static inline JSValue jsTestDOMJIT_usvStringAttrGetter(JSGlobalObject& lexicalGl
 
 JSC_DEFINE_CUSTOM_GETTER(jsTestDOMJIT_usvStringAttr, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
 {
+#if defined(WEBKIT_IOS6)
+    return IDLAttribute<JSTestDOMJIT>::get<jsTestDOMJIT_usvStringAttrGetter, CastedThisErrorBehavior::Assert>(*lexicalGlobalObject, thisValue, attributeName);
+#else
     return IDLAttribute<JSTestDOMJIT>::get<jsTestDOMJIT_usvStringAttrGetter>(*lexicalGlobalObject, thisValue, attributeName);
+#endif
 }
 
 static inline JSValue jsTestDOMJIT_nodeAttrGetter(JSGlobalObject& lexicalGlobalObject, JSTestDOMJIT& thisObject)
@@ -855,7 +923,11 @@ static inline JSValue jsTestDOMJIT_nodeAttrGetter(JSGlobalObject& lexicalGlobalO
 
 JSC_DEFINE_CUSTOM_GETTER(jsTestDOMJIT_nodeAttr, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
 {
+#if defined(WEBKIT_IOS6)
+    return IDLAttribute<JSTestDOMJIT>::get<jsTestDOMJIT_nodeAttrGetter, CastedThisErrorBehavior::Assert>(*lexicalGlobalObject, thisValue, attributeName);
+#else
     return IDLAttribute<JSTestDOMJIT>::get<jsTestDOMJIT_nodeAttrGetter>(*lexicalGlobalObject, thisValue, attributeName);
+#endif
 }
 
 static inline JSValue jsTestDOMJIT_booleanNullableAttrGetter(JSGlobalObject& lexicalGlobalObject, JSTestDOMJIT& thisObject)
@@ -868,7 +940,11 @@ static inline JSValue jsTestDOMJIT_booleanNullableAttrGetter(JSGlobalObject& lex
 
 JSC_DEFINE_CUSTOM_GETTER(jsTestDOMJIT_booleanNullableAttr, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
 {
+#if defined(WEBKIT_IOS6)
+    return IDLAttribute<JSTestDOMJIT>::get<jsTestDOMJIT_booleanNullableAttrGetter, CastedThisErrorBehavior::Assert>(*lexicalGlobalObject, thisValue, attributeName);
+#else
     return IDLAttribute<JSTestDOMJIT>::get<jsTestDOMJIT_booleanNullableAttrGetter>(*lexicalGlobalObject, thisValue, attributeName);
+#endif
 }
 
 static inline JSValue jsTestDOMJIT_byteNullableAttrGetter(JSGlobalObject& lexicalGlobalObject, JSTestDOMJIT& thisObject)
@@ -881,7 +957,11 @@ static inline JSValue jsTestDOMJIT_byteNullableAttrGetter(JSGlobalObject& lexica
 
 JSC_DEFINE_CUSTOM_GETTER(jsTestDOMJIT_byteNullableAttr, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
 {
+#if defined(WEBKIT_IOS6)
+    return IDLAttribute<JSTestDOMJIT>::get<jsTestDOMJIT_byteNullableAttrGetter, CastedThisErrorBehavior::Assert>(*lexicalGlobalObject, thisValue, attributeName);
+#else
     return IDLAttribute<JSTestDOMJIT>::get<jsTestDOMJIT_byteNullableAttrGetter>(*lexicalGlobalObject, thisValue, attributeName);
+#endif
 }
 
 static inline JSValue jsTestDOMJIT_octetNullableAttrGetter(JSGlobalObject& lexicalGlobalObject, JSTestDOMJIT& thisObject)
@@ -894,7 +974,11 @@ static inline JSValue jsTestDOMJIT_octetNullableAttrGetter(JSGlobalObject& lexic
 
 JSC_DEFINE_CUSTOM_GETTER(jsTestDOMJIT_octetNullableAttr, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
 {
+#if defined(WEBKIT_IOS6)
+    return IDLAttribute<JSTestDOMJIT>::get<jsTestDOMJIT_octetNullableAttrGetter, CastedThisErrorBehavior::Assert>(*lexicalGlobalObject, thisValue, attributeName);
+#else
     return IDLAttribute<JSTestDOMJIT>::get<jsTestDOMJIT_octetNullableAttrGetter>(*lexicalGlobalObject, thisValue, attributeName);
+#endif
 }
 
 static inline JSValue jsTestDOMJIT_shortNullableAttrGetter(JSGlobalObject& lexicalGlobalObject, JSTestDOMJIT& thisObject)
@@ -907,7 +991,11 @@ static inline JSValue jsTestDOMJIT_shortNullableAttrGetter(JSGlobalObject& lexic
 
 JSC_DEFINE_CUSTOM_GETTER(jsTestDOMJIT_shortNullableAttr, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
 {
+#if defined(WEBKIT_IOS6)
+    return IDLAttribute<JSTestDOMJIT>::get<jsTestDOMJIT_shortNullableAttrGetter, CastedThisErrorBehavior::Assert>(*lexicalGlobalObject, thisValue, attributeName);
+#else
     return IDLAttribute<JSTestDOMJIT>::get<jsTestDOMJIT_shortNullableAttrGetter>(*lexicalGlobalObject, thisValue, attributeName);
+#endif
 }
 
 static inline JSValue jsTestDOMJIT_unsignedShortNullableAttrGetter(JSGlobalObject& lexicalGlobalObject, JSTestDOMJIT& thisObject)
@@ -920,7 +1008,11 @@ static inline JSValue jsTestDOMJIT_unsignedShortNullableAttrGetter(JSGlobalObjec
 
 JSC_DEFINE_CUSTOM_GETTER(jsTestDOMJIT_unsignedShortNullableAttr, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
 {
+#if defined(WEBKIT_IOS6)
+    return IDLAttribute<JSTestDOMJIT>::get<jsTestDOMJIT_unsignedShortNullableAttrGetter, CastedThisErrorBehavior::Assert>(*lexicalGlobalObject, thisValue, attributeName);
+#else
     return IDLAttribute<JSTestDOMJIT>::get<jsTestDOMJIT_unsignedShortNullableAttrGetter>(*lexicalGlobalObject, thisValue, attributeName);
+#endif
 }
 
 static inline JSValue jsTestDOMJIT_longNullableAttrGetter(JSGlobalObject& lexicalGlobalObject, JSTestDOMJIT& thisObject)
@@ -933,7 +1025,11 @@ static inline JSValue jsTestDOMJIT_longNullableAttrGetter(JSGlobalObject& lexica
 
 JSC_DEFINE_CUSTOM_GETTER(jsTestDOMJIT_longNullableAttr, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
 {
+#if defined(WEBKIT_IOS6)
+    return IDLAttribute<JSTestDOMJIT>::get<jsTestDOMJIT_longNullableAttrGetter, CastedThisErrorBehavior::Assert>(*lexicalGlobalObject, thisValue, attributeName);
+#else
     return IDLAttribute<JSTestDOMJIT>::get<jsTestDOMJIT_longNullableAttrGetter>(*lexicalGlobalObject, thisValue, attributeName);
+#endif
 }
 
 static inline JSValue jsTestDOMJIT_unsignedLongNullableAttrGetter(JSGlobalObject& lexicalGlobalObject, JSTestDOMJIT& thisObject)
@@ -946,7 +1042,11 @@ static inline JSValue jsTestDOMJIT_unsignedLongNullableAttrGetter(JSGlobalObject
 
 JSC_DEFINE_CUSTOM_GETTER(jsTestDOMJIT_unsignedLongNullableAttr, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
 {
+#if defined(WEBKIT_IOS6)
+    return IDLAttribute<JSTestDOMJIT>::get<jsTestDOMJIT_unsignedLongNullableAttrGetter, CastedThisErrorBehavior::Assert>(*lexicalGlobalObject, thisValue, attributeName);
+#else
     return IDLAttribute<JSTestDOMJIT>::get<jsTestDOMJIT_unsignedLongNullableAttrGetter>(*lexicalGlobalObject, thisValue, attributeName);
+#endif
 }
 
 static inline JSValue jsTestDOMJIT_longLongNullableAttrGetter(JSGlobalObject& lexicalGlobalObject, JSTestDOMJIT& thisObject)
@@ -959,7 +1059,11 @@ static inline JSValue jsTestDOMJIT_longLongNullableAttrGetter(JSGlobalObject& le
 
 JSC_DEFINE_CUSTOM_GETTER(jsTestDOMJIT_longLongNullableAttr, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
 {
+#if defined(WEBKIT_IOS6)
+    return IDLAttribute<JSTestDOMJIT>::get<jsTestDOMJIT_longLongNullableAttrGetter, CastedThisErrorBehavior::Assert>(*lexicalGlobalObject, thisValue, attributeName);
+#else
     return IDLAttribute<JSTestDOMJIT>::get<jsTestDOMJIT_longLongNullableAttrGetter>(*lexicalGlobalObject, thisValue, attributeName);
+#endif
 }
 
 static inline JSValue jsTestDOMJIT_unsignedLongLongNullableAttrGetter(JSGlobalObject& lexicalGlobalObject, JSTestDOMJIT& thisObject)
@@ -972,7 +1076,11 @@ static inline JSValue jsTestDOMJIT_unsignedLongLongNullableAttrGetter(JSGlobalOb
 
 JSC_DEFINE_CUSTOM_GETTER(jsTestDOMJIT_unsignedLongLongNullableAttr, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
 {
+#if defined(WEBKIT_IOS6)
+    return IDLAttribute<JSTestDOMJIT>::get<jsTestDOMJIT_unsignedLongLongNullableAttrGetter, CastedThisErrorBehavior::Assert>(*lexicalGlobalObject, thisValue, attributeName);
+#else
     return IDLAttribute<JSTestDOMJIT>::get<jsTestDOMJIT_unsignedLongLongNullableAttrGetter>(*lexicalGlobalObject, thisValue, attributeName);
+#endif
 }
 
 static inline JSValue jsTestDOMJIT_floatNullableAttrGetter(JSGlobalObject& lexicalGlobalObject, JSTestDOMJIT& thisObject)
@@ -985,7 +1093,11 @@ static inline JSValue jsTestDOMJIT_floatNullableAttrGetter(JSGlobalObject& lexic
 
 JSC_DEFINE_CUSTOM_GETTER(jsTestDOMJIT_floatNullableAttr, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
 {
+#if defined(WEBKIT_IOS6)
+    return IDLAttribute<JSTestDOMJIT>::get<jsTestDOMJIT_floatNullableAttrGetter, CastedThisErrorBehavior::Assert>(*lexicalGlobalObject, thisValue, attributeName);
+#else
     return IDLAttribute<JSTestDOMJIT>::get<jsTestDOMJIT_floatNullableAttrGetter>(*lexicalGlobalObject, thisValue, attributeName);
+#endif
 }
 
 static inline JSValue jsTestDOMJIT_unrestrictedFloatNullableAttrGetter(JSGlobalObject& lexicalGlobalObject, JSTestDOMJIT& thisObject)
@@ -998,7 +1110,11 @@ static inline JSValue jsTestDOMJIT_unrestrictedFloatNullableAttrGetter(JSGlobalO
 
 JSC_DEFINE_CUSTOM_GETTER(jsTestDOMJIT_unrestrictedFloatNullableAttr, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
 {
+#if defined(WEBKIT_IOS6)
+    return IDLAttribute<JSTestDOMJIT>::get<jsTestDOMJIT_unrestrictedFloatNullableAttrGetter, CastedThisErrorBehavior::Assert>(*lexicalGlobalObject, thisValue, attributeName);
+#else
     return IDLAttribute<JSTestDOMJIT>::get<jsTestDOMJIT_unrestrictedFloatNullableAttrGetter>(*lexicalGlobalObject, thisValue, attributeName);
+#endif
 }
 
 static inline JSValue jsTestDOMJIT_doubleNullableAttrGetter(JSGlobalObject& lexicalGlobalObject, JSTestDOMJIT& thisObject)
@@ -1011,7 +1127,11 @@ static inline JSValue jsTestDOMJIT_doubleNullableAttrGetter(JSGlobalObject& lexi
 
 JSC_DEFINE_CUSTOM_GETTER(jsTestDOMJIT_doubleNullableAttr, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
 {
+#if defined(WEBKIT_IOS6)
+    return IDLAttribute<JSTestDOMJIT>::get<jsTestDOMJIT_doubleNullableAttrGetter, CastedThisErrorBehavior::Assert>(*lexicalGlobalObject, thisValue, attributeName);
+#else
     return IDLAttribute<JSTestDOMJIT>::get<jsTestDOMJIT_doubleNullableAttrGetter>(*lexicalGlobalObject, thisValue, attributeName);
+#endif
 }
 
 static inline JSValue jsTestDOMJIT_unrestrictedDoubleNullableAttrGetter(JSGlobalObject& lexicalGlobalObject, JSTestDOMJIT& thisObject)
@@ -1024,7 +1144,11 @@ static inline JSValue jsTestDOMJIT_unrestrictedDoubleNullableAttrGetter(JSGlobal
 
 JSC_DEFINE_CUSTOM_GETTER(jsTestDOMJIT_unrestrictedDoubleNullableAttr, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
 {
+#if defined(WEBKIT_IOS6)
+    return IDLAttribute<JSTestDOMJIT>::get<jsTestDOMJIT_unrestrictedDoubleNullableAttrGetter, CastedThisErrorBehavior::Assert>(*lexicalGlobalObject, thisValue, attributeName);
+#else
     return IDLAttribute<JSTestDOMJIT>::get<jsTestDOMJIT_unrestrictedDoubleNullableAttrGetter>(*lexicalGlobalObject, thisValue, attributeName);
+#endif
 }
 
 static inline JSValue jsTestDOMJIT_domStringNullableAttrGetter(JSGlobalObject& lexicalGlobalObject, JSTestDOMJIT& thisObject)
@@ -1037,7 +1161,11 @@ static inline JSValue jsTestDOMJIT_domStringNullableAttrGetter(JSGlobalObject& l
 
 JSC_DEFINE_CUSTOM_GETTER(jsTestDOMJIT_domStringNullableAttr, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
 {
+#if defined(WEBKIT_IOS6)
+    return IDLAttribute<JSTestDOMJIT>::get<jsTestDOMJIT_domStringNullableAttrGetter, CastedThisErrorBehavior::Assert>(*lexicalGlobalObject, thisValue, attributeName);
+#else
     return IDLAttribute<JSTestDOMJIT>::get<jsTestDOMJIT_domStringNullableAttrGetter>(*lexicalGlobalObject, thisValue, attributeName);
+#endif
 }
 
 static inline JSValue jsTestDOMJIT_byteStringNullableAttrGetter(JSGlobalObject& lexicalGlobalObject, JSTestDOMJIT& thisObject)
@@ -1050,7 +1178,11 @@ static inline JSValue jsTestDOMJIT_byteStringNullableAttrGetter(JSGlobalObject& 
 
 JSC_DEFINE_CUSTOM_GETTER(jsTestDOMJIT_byteStringNullableAttr, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
 {
+#if defined(WEBKIT_IOS6)
+    return IDLAttribute<JSTestDOMJIT>::get<jsTestDOMJIT_byteStringNullableAttrGetter, CastedThisErrorBehavior::Assert>(*lexicalGlobalObject, thisValue, attributeName);
+#else
     return IDLAttribute<JSTestDOMJIT>::get<jsTestDOMJIT_byteStringNullableAttrGetter>(*lexicalGlobalObject, thisValue, attributeName);
+#endif
 }
 
 static inline JSValue jsTestDOMJIT_usvStringNullableAttrGetter(JSGlobalObject& lexicalGlobalObject, JSTestDOMJIT& thisObject)
@@ -1063,7 +1195,11 @@ static inline JSValue jsTestDOMJIT_usvStringNullableAttrGetter(JSGlobalObject& l
 
 JSC_DEFINE_CUSTOM_GETTER(jsTestDOMJIT_usvStringNullableAttr, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
 {
+#if defined(WEBKIT_IOS6)
+    return IDLAttribute<JSTestDOMJIT>::get<jsTestDOMJIT_usvStringNullableAttrGetter, CastedThisErrorBehavior::Assert>(*lexicalGlobalObject, thisValue, attributeName);
+#else
     return IDLAttribute<JSTestDOMJIT>::get<jsTestDOMJIT_usvStringNullableAttrGetter>(*lexicalGlobalObject, thisValue, attributeName);
+#endif
 }
 
 static inline JSValue jsTestDOMJIT_nodeNullableAttrGetter(JSGlobalObject& lexicalGlobalObject, JSTestDOMJIT& thisObject)
@@ -1076,7 +1212,11 @@ static inline JSValue jsTestDOMJIT_nodeNullableAttrGetter(JSGlobalObject& lexica
 
 JSC_DEFINE_CUSTOM_GETTER(jsTestDOMJIT_nodeNullableAttr, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))
 {
+#if defined(WEBKIT_IOS6)
+    return IDLAttribute<JSTestDOMJIT>::get<jsTestDOMJIT_nodeNullableAttrGetter, CastedThisErrorBehavior::Assert>(*lexicalGlobalObject, thisValue, attributeName);
+#else
     return IDLAttribute<JSTestDOMJIT>::get<jsTestDOMJIT_nodeNullableAttrGetter>(*lexicalGlobalObject, thisValue, attributeName);
+#endif
 }
 
 static inline JSC::EncodedJSValue jsTestDOMJITPrototypeFunction_getAttributeBody(JSC::JSGlobalObject* lexicalGlobalObject, JSC::CallFrame* callFrame, typename IDLOperation<JSTestDOMJIT>::ClassParameter castedThis)

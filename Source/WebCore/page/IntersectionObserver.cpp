@@ -256,6 +256,9 @@ void IntersectionObserver::observe(Element& target)
     target.ensureIntersectionObserverData().registrations.append({ *this, std::nullopt });
     bool hadObservationTargets = hasObservationTargets();
     m_observationTargets.add(target);
+#if defined(WEBKIT_IOS6)
+    m_observationTargetsSnapshotIsStale = true;
+#endif
 
     // Per the specification, we should dispatch at least one observation for the target. For this reason, we make sure to keep the
     // target alive until this first observation. This, in turn, will keep the IntersectionObserver's JS wrapper alive via
@@ -275,6 +278,9 @@ void IntersectionObserver::unobserve(Element& target)
 
     bool removed = m_observationTargets.remove(&target);
     ASSERT_UNUSED(removed, removed);
+#if defined(WEBKIT_IOS6)
+    m_observationTargetsSnapshotIsStale = true;
+#endif
     m_targetsWaitingForFirstObservation.removeFirstMatching([&](auto& pendingTarget) { return pendingTarget.ptr() == &target; });
 
     if (!hasObservationTargets()) {
@@ -303,6 +309,9 @@ auto IntersectionObserver::takeRecords() -> TakenRecords
 void IntersectionObserver::targetDestroyed(Element& target)
 {
     m_observationTargets.remove(target);
+#if defined(WEBKIT_IOS6)
+    m_observationTargetsSnapshotIsStale = true;
+#endif
     m_targetsWaitingForFirstObservation.removeFirstMatching([&](auto& pendingTarget) { return pendingTarget.ptr() == &target; });
     if (!hasObservationTargets()) {
         if (RefPtr document = trackingDocument())
@@ -329,6 +338,10 @@ void IntersectionObserver::removeAllTargets()
         ASSERT_UNUSED(removed, removed);
     }
     m_observationTargets.clear();
+#if defined(WEBKIT_IOS6)
+    m_observationTargetsSnapshot.clear();
+    m_observationTargetsSnapshotIsStale = true;
+#endif
     m_targetsWaitingForFirstObservation.clear();
 }
 
@@ -620,6 +633,11 @@ auto IntersectionObserver::computeIntersectionState(const IntersectionObserverRe
     ASSERT_IMPLIES(applyRootMargin == ApplyRootMargin::Yes, rootRenderer);
     intersectionState.rootBounds = applyRootMargin == ApplyRootMargin::Yes ? rootState.boundsWithRootMargin : rootState.bounds;
 
+#if defined(WEBKIT_IOS6)
+    if (targetRenderer->isSkippedContent() && !isFirstObservation && !*registration.previousThresholdIndex)
+        return intersectionState;
+#endif
+
     auto localTargetBounds = [&]() -> LayoutRect {
         if (CheckedPtr renderBox = dynamicDowncast<RenderBox>(*targetRenderer))
             return renderBox->borderBoundingBox();
@@ -762,9 +780,20 @@ auto IntersectionObserver::updateObservations(const Frame& hostFrame) -> NeedNot
     // them, every frame; a vector of the same weak pointers is one allocation, and none at all
     // for the inline capacity. Null entries are skipped exactly as the set's iterator skipped
     // them, so a target that dies during the loop is still passed over.
+#if defined(WEBKIT_IOS6)
+    if (m_observationTargetsSnapshotIsStale) {
+        m_observationTargetsSnapshot.shrink(0);
+        m_observationTargetsSnapshot.reserveCapacity(m_observationTargets.computeSize());
+        for (auto& target : m_observationTargets)
+            m_observationTargetsSnapshot.append(target);
+        m_observationTargetsSnapshotIsStale = false;
+    }
+    auto& observationTargets = m_observationTargetsSnapshot;
+#else
     Vector<WeakPtr<Element, WeakPtrImplWithEventTargetData>, 16> observationTargets;
     for (auto& target : m_observationTargets)
         observationTargets.append(target);
+#endif
 
     auto rootState = computeIntersectionRootState(*hostFrameView);
 
@@ -776,8 +805,12 @@ auto IntersectionObserver::updateObservations(const Frame& hostFrame) -> NeedNot
 
     for (auto& weakTarget : observationTargets) {
         RefPtr protectedTarget = weakTarget.get();
-        if (!protectedTarget)
+        if (!protectedTarget) {
+#if defined(WEBKIT_IOS6)
+            m_observationTargetsSnapshotIsStale = true;
+#endif
             continue;
+        }
         Ref target = protectedTarget.releaseNonNull();
 
         // Per HTML spec, "update the rendering" step (which includes "run the update intersection

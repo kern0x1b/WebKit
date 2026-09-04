@@ -42,10 +42,12 @@
 #include "PropertyNameArray.h"
 #include "ProxyObject.h"
 #include "ResourceExhaustion.h"
+#include "SlotVisitor.h"
 #include "TopExceptionScope.h"
 #include "TypeError.h"
 #include "VMInlines.h"
 #include "VMTrapsInlines.h"
+#include <stdlib.h>
 #include <wtf/Assertions.h>
 #include <wtf/text/MakeString.h>
 
@@ -58,6 +60,21 @@ namespace JSC {
 // This value is capped by the constant FIRST_VECTOR_GROW defined in
 // ArrayConventions.h.
 static unsigned lastArraySize = 0;
+
+#if defined(WEBKIT_IOS6)
+static unsigned speculativeIndexedNameReserve()
+{
+    static const unsigned reserve = [] -> unsigned {
+        if (const char* override = getenv("WEBKIT_IOS6_INDEXED_NAME_RESERVE")) {
+            int value = atoi(override);
+            if (value > 0)
+                return static_cast<unsigned>(value);
+        }
+        return 1024;
+    }();
+    return reserve;
+}
+#endif
 
 STATIC_ASSERT_IS_TRIVIALLY_DESTRUCTIBLE(JSObject);
 STATIC_ASSERT_IS_TRIVIALLY_DESTRUCTIBLE(JSObjectWithButterfly);
@@ -147,8 +164,12 @@ ALWAYS_INLINE Structure* JSObjectWithButterfly::visitButterflyImpl(Visitor& visi
     if (visitor.mutatorIsStopped()) {
         butterfly = this->butterfly();
         structure = this->structure();
+#if defined(WEBKIT_IOS6)
+        if (butterfly && webkitIOS6GCButterflyPrefetchEnabled()) [[likely]]
+            __builtin_prefetch(butterfly);
+#endif
         maxOffset = structure->maxOffset();
-        
+
         markAuxiliaryAndVisitOutOfLineProperties(visitor, butterfly, structure, maxOffset);
         visitElements(structure->indexingMode());
 
@@ -2761,7 +2782,11 @@ void JSObject::getOwnIndexedPropertyNames(JSGlobalObject*, PropertyNameArrayBuil
         case ALL_CONTIGUOUS_INDEXING_TYPES: {
             Butterfly* butterfly = object->butterfly();
             unsigned usedLength = butterfly->publicLength();
+#if defined(WEBKIT_IOS6)
+            propertyNames.reserveCapacity(propertyNames.size() + std::min(usedLength, speculativeIndexedNameReserve()));
+#else
             propertyNames.reserveCapacity(propertyNames.size() + usedLength);
+#endif
             const WriteBarrier<Unknown>* data = butterfly->contiguous().data();
             for (unsigned i = 0; i < usedLength; ++i) {
                 if (!loadElementUnordered(data[i]))
@@ -2774,7 +2799,11 @@ void JSObject::getOwnIndexedPropertyNames(JSGlobalObject*, PropertyNameArrayBuil
         case ALL_DOUBLE_INDEXING_TYPES: {
             Butterfly* butterfly = object->butterfly();
             unsigned usedLength = butterfly->publicLength();
+#if defined(WEBKIT_IOS6)
+            propertyNames.reserveCapacity(propertyNames.size() + std::min(usedLength, speculativeIndexedNameReserve()));
+#else
             propertyNames.reserveCapacity(propertyNames.size() + usedLength);
+#endif
             const double* data = butterfly->contiguousDouble().data();
             for (unsigned i = 0; i < usedLength; ++i) {
                 double value = data[i];
@@ -2789,7 +2818,11 @@ void JSObject::getOwnIndexedPropertyNames(JSGlobalObject*, PropertyNameArrayBuil
             ArrayStorage* storage = object->butterfly()->arrayStorage();
             
             unsigned usedVectorLength = std::min(storage->length(), storage->vectorLength());
+#if defined(WEBKIT_IOS6)
+            propertyNames.reserveCapacity(propertyNames.size() + std::min(storage->m_numValuesInVector, speculativeIndexedNameReserve()));
+#else
             propertyNames.reserveCapacity(propertyNames.size() + usedVectorLength);
+#endif
             for (unsigned i = 0; i < usedVectorLength; ++i) {
                 if (storage->m_vector[i])
                     propertyNames.add(i);

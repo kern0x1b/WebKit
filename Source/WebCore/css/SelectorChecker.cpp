@@ -822,6 +822,32 @@ static inline bool NODELETE tagMatches(const Element& element, const CSSSelector
     return namespaceURI == starAtom() || namespaceURI == element.namespaceURI();
 }
 
+#if defined(WEBKIT_IOS6)
+bool SelectorChecker::matchesSimpleCompound(const CSSSelector& selector, const Element& element) const
+{
+    for (const CSSSelector* component = &selector; component; component = component->precedingInComplexSelector()) {
+        switch (component->match()) {
+        case CSSSelector::Match::Class:
+            if (!element.hasClassName(component->value()))
+                return false;
+            break;
+        case CSSSelector::Match::Id:
+            if (element.idForStyleResolution() != component->value())
+                return false;
+            break;
+        case CSSSelector::Match::Tag:
+            if (!tagMatches(element, *component, m_documentIsHTML))
+                return false;
+            break;
+        default:
+            ASSERT_NOT_REACHED();
+            return false;
+        }
+    }
+    return true;
+}
+#endif
+
 bool SelectorChecker::checkOne(CheckingContext& checkingContext, LocalContext& context, MatchType& matchType) const
 {
     const Element& element = *context.element;

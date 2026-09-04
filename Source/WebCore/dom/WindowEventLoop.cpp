@@ -256,6 +256,15 @@ void WindowEventLoop::didReachTimeToRun()
     Ref protectedThis { *this }; // Executing tasks may remove the last reference to this WindowEventLoop.
     auto deadline = ApproximateTime::now() + ThreadTimers::maxDurationOfFiringTimers;
     run(commonVM(), deadline);
+#if defined(WEBKIT_IOS6)
+    if (m_timer.isActive() && !ios6HasQueuedTasks()) {
+        SUPPRESS_UNCOUNTED_LOCAL auto& queue = microtaskQueue();
+        if (queue.ios6HasNoQueuedWork()) {
+            m_timer.stop();
+            queue.setIsScheduledToRun(false);
+        }
+    }
+#endif
     opportunisticallyRunIdleCallbacks(deadline.approximate<MonotonicTime>());
 }
 

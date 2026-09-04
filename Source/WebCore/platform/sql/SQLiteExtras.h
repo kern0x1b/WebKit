@@ -25,6 +25,7 @@
 
 #pragma once
 
+#include <limits>
 #include <span>
 #include <sqlite3.h>
 #include <wtf/Platform.h>
@@ -36,8 +37,12 @@ namespace WebCore {
 
 inline int sqliteBindBlob(sqlite3_stmt* statement, int index, std::span<const uint8_t> data, void(*destructor)(void*) = SQLITE_TRANSIENT)
 {
+#if defined(WEBKIT_IOS6)
+    if (data.size() > static_cast<size_t>(std::numeric_limits<int>::max()))
+        return SQLITE_TOOBIG;
+    return sqlite3_bind_blob(statement, index, data.data(), static_cast<int>(data.size()), destructor); // NOLINT
+#elif PLATFORM(PLAYSTATION)
     // sqlite3_bind_blob64() symbol is undefined on the PlayStation port.
-#if PLATFORM(PLAYSTATION)
     return sqlite3_bind_blob(statement, index, data.data(), data.size(), destructor); // NOLINT
 #else
     return sqlite3_bind_blob64(statement, index, data.data(), data.size(), destructor); // NOLINT

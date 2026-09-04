@@ -1317,9 +1317,11 @@ void Document::invalidateQuerySelectorAllResults(Node& startingNode)
 {
     if (m_querySelectorAllResults.isEmptyIgnoringNullReferences())
         return;
-    for (RefPtr currentNode = startingNode; currentNode; currentNode = currentNode->parentNode()) {
-        if (!currentNode->hasValidQuerySelectorAllResults())
+    RefPtr<Node> protectedNode;
+    for (SUPPRESS_UNCOUNTED_LOCAL Node* currentNode = &startingNode; currentNode; currentNode = currentNode->parentNode()) {
+        if (!currentNode->hasValidQuerySelectorAllResults()) [[likely]]
             continue;
+        protectedNode = currentNode;
         m_querySelectorAllResults.remove(*currentNode);
         currentNode->setHasValidQuerySelectorAllResults(false);
     }
@@ -1329,9 +1331,11 @@ void Document::invalidateQuerySelectorAllResultsForClassAttributeChange(Node& st
 {
     if (m_querySelectorAllResults.isEmptyIgnoringNullReferences())
         return;
-    for (RefPtr currentNode = startingNode; currentNode; currentNode = currentNode->parentNode()) {
-        if (!currentNode->hasValidQuerySelectorAllResults())
+    RefPtr<Node> protectedNode;
+    for (SUPPRESS_UNCOUNTED_LOCAL Node* currentNode = &startingNode; currentNode; currentNode = currentNode->parentNode()) {
+        if (!currentNode->hasValidQuerySelectorAllResults()) [[likely]]
             continue;
+        protectedNode = currentNode;
         auto it = m_querySelectorAllResults.find(*currentNode);
         ASSERT(it != m_querySelectorAllResults.end());
         if (it == m_querySelectorAllResults.end())
@@ -2862,8 +2866,10 @@ void Document::updateRenderTree(std::unique_ptr<Style::Update> styleUpdate)
 void Document::resolveStyle(ResolveStyleType type)
 {
 #if defined(WEBKIT_IOS6)
-    extern unsigned g_webkitIOS6StyleResolves;
-    ++g_webkitIOS6StyleResolves;
+    if (g_webkitIOS6LayoutCounters) [[unlikely]] {
+        extern unsigned g_webkitIOS6StyleResolves;
+        ++g_webkitIOS6StyleResolves;
+    }
 #endif
     ScriptDisallowedScope::InMainThread scriptDisallowedScope;
 
@@ -6973,7 +6979,7 @@ void Document::moveNodeIteratorsToNewDocument(Node& node, Document& newDocument)
 void Document::updateRangesAfterChildrenChanged(ContainerNode& container)
 {
     for (auto& range : m_ranges)
-        Ref { range.get() }->nodeChildrenChanged(container);
+        range.get().nodeChildrenChanged(container);
 }
 
 void Document::nodeChildrenWillBeRemoved(ContainerNode& container)
@@ -7016,7 +7022,7 @@ void Document::nodeWillBeRemoved(Node& node)
         nodeIterator->nodeWillBeRemoved(node);
 
     for (auto& range : m_ranges)
-        Ref { range.get() }->nodeWillBeRemoved(node);
+        range.get().nodeWillBeRemoved(node);
 
     if (RefPtr frame = this->frame()) {
         frame->eventHandler().nodeWillBeRemoved(node);
@@ -7076,8 +7082,8 @@ void Document::adjustFocusNavigationNodeOnNodeRemoval(Node& node, NodeRemoval no
 
 void Document::textInserted(Node& text, unsigned offset, unsigned length)
 {
-    for (Ref range : m_ranges)
-        range->textInserted(text, offset, length);
+    for (auto& range : m_ranges)
+        range.get().textInserted(text, offset, length);
 
     if (!m_markers)
         return;
@@ -7093,8 +7099,8 @@ void Document::textInserted(Node& text, unsigned offset, unsigned length)
 
 void Document::textRemoved(Node& text, unsigned offset, unsigned length)
 {
-    for (Ref range : m_ranges)
-        range->textRemoved(text, offset, length);
+    for (auto& range : m_ranges)
+        range.get().textRemoved(text, offset, length);
 
     if (!m_markers)
         return;

@@ -54,6 +54,28 @@ static inline Ref<Blob> blobFromData(ScriptExecutionContext* context, Vector<uin
     return Blob::create(context, WTF::move(data), Blob::normalizedContentType(contentType));
 }
 
+#if defined(WEBKIT_IOS6)
+static String fetchBodyConsumerTextFromUTF8(std::span<const uint8_t> data)
+{
+    static constexpr std::array<uint8_t, 3> fetchBodyConsumerByteOrderMarkUTF8 { 0xEF, 0xBB, 0xBF };
+
+    auto decoder = TextResourceDecoder::create("text/plain"_s, "UTF-8"_s);
+    if (!spanHasPrefix(data, std::span<const uint8_t> { fetchBodyConsumerByteOrderMarkUTF8 }))
+        decoder->decode(std::span<const uint8_t> { fetchBodyConsumerByteOrderMarkUTF8 });
+
+    String decoded = decoder->decode(data);
+    String trailing = decoder->flush();
+    if (trailing.isEmpty() && !decoded.isEmpty())
+        return decoded;
+    return tryMakeString(decoded, trailing);
+}
+#else
+static String fetchBodyConsumerTextFromUTF8(std::span<const uint8_t> data)
+{
+    return TextResourceDecoder::textFromUTF8(data);
+}
+#endif
+
 // https://mimesniff.spec.whatwg.org/#http-quoted-string-token-code-point
 static bool NODELETE isHTTPQuotedStringTokenCodePoint(char16_t c)
 {
@@ -258,10 +280,10 @@ static void resolveWithTypeAndData(Ref<DeferredPromise>&& promise, FetchBodyCons
         fulfillPromiseWithUint8ArrayFromSpan(WTF::move(promise), data);
         return;
     case FetchBodyConsumer::Type::JSON:
-        fulfillPromiseWithJSON(WTF::move(promise), TextResourceDecoder::textFromUTF8(data));
+        fulfillPromiseWithJSON(WTF::move(promise), fetchBodyConsumerTextFromUTF8(data));
         return;
     case FetchBodyConsumer::Type::Text:
-        promise->resolve<IDLDOMString>(TextResourceDecoder::textFromUTF8(data));
+        promise->resolve<IDLDOMString>(fetchBodyConsumerTextFromUTF8(data));
         return;
     case FetchBodyConsumer::Type::FormData:
         if (auto formData = FetchBodyConsumer::packageFormData(context.get(), contentType, data))
@@ -520,7 +542,7 @@ String FetchBodyConsumer::takeAsText()
         return String();
 
     auto buffer = m_buffer.takeBufferAsContiguous();
-    auto text = TextResourceDecoder::textFromUTF8(buffer->span());
+    auto text = fetchBodyConsumerTextFromUTF8(buffer->span());
     return text;
 }
 

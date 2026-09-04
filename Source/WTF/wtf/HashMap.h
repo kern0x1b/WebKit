@@ -226,6 +226,26 @@ public:
     template<SmartPtr K = KeyType> bool remove(std::add_const_t<typename GetPtrHelper<K>::UnderlyingType>*);
     template<SmartPtr K = KeyType> MappedTakeType take(std::add_const_t<typename GetPtrHelper<K>::UnderlyingType>*);
 
+#if defined(WEBKIT_IOS6)
+    // find/contains/get/remove already take the raw pointer, but add/ensure did not, so an
+    // insert through a smart-pointer key had to materialise a temporary and pay a ref plus a
+    // deref even when the key was already present. The pointer is non-const here because,
+    // unlike a lookup, the key really is stored.
+    template<typename P, typename V, SmartPtr K = KeyType>
+        requires std::same_as<std::remove_cv_t<P>, typename GetPtrHelper<K>::UnderlyingType*>
+    AddResult add(P key, V&& value) LIFETIME_BOUND
+    {
+        return inlineAdd(key, std::forward<V>(value));
+    }
+
+    template<typename P, SmartPtr K = KeyType>
+        requires std::same_as<std::remove_cv_t<P>, typename GetPtrHelper<K>::UnderlyingType*>
+    AddResult ensure(P key, NOESCAPE const Invocable<MappedType()> auto& functor) LIFETIME_BOUND
+    {
+        return inlineEnsure(key, functor);
+    }
+#endif
+
     // Overloads for smart pointer keys that take the raw reference type as the parameter.
     template<SmartPtr K = KeyType> iterator find(std::add_const_t<typename GetPtrHelper<K>::UnderlyingType>& ref) LIFETIME_BOUND { return find(&ref); }
     template<SmartPtr K = KeyType> const_iterator find(std::add_const_t<typename GetPtrHelper<K>::UnderlyingType>& ref) const LIFETIME_BOUND { return find(&ref); }

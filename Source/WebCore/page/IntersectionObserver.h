@@ -173,6 +173,10 @@ private:
     Vector<double> m_thresholds;
     const Ref<IntersectionObserverCallback> m_callback;
     WeakListHashSet<Element, WeakPtrImplWithEventTargetData> m_observationTargets;
+#if defined(WEBKIT_IOS6)
+    Vector<WeakPtr<Element, WeakPtrImplWithEventTargetData>> m_observationTargetsSnapshot;
+    bool m_observationTargetsSnapshotIsStale { true };
+#endif
     Vector<GCReachableRef<Element>> m_pendingTargets;
     Vector<Ref<IntersectionObserverEntry>> m_queuedEntries;
     Vector<GCReachableRef<Element>> m_targetsWaitingForFirstObservation;

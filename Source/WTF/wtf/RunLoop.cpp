@@ -133,7 +133,7 @@ void RunLoop::performWork()
         while (!m_currentIteration.isEmpty())
             m_nextIteration.prepend(m_currentIteration.takeLast());
 
-        m_currentIteration = std::exchange(m_nextIteration, { });
+        m_currentIteration.swap(m_nextIteration);
     }
 
     while (!m_currentIteration.isEmpty()) {

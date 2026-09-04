@@ -39,9 +39,28 @@ namespace WebCore {
 
 static const Seconds capacityDecayTime { 5_s };
 
+#if defined(WEBKIT_IOS6)
+static unsigned legacyTileLayerPoolDefaultCapacity()
+{
+    static const unsigned capacity = [] -> unsigned {
+        if (const char* override = getenv("WEBKIT_IOS6_TILE_LAYER_POOL_MB")) {
+            int value = atoi(override);
+            if (value >= 0 && value <= 64)
+                return static_cast<unsigned>(value) * 1024 * 1024;
+        }
+        return 12 * 1024 * 1024;
+    }();
+    return capacity;
+}
+#endif
+
 LegacyTileLayerPool::LegacyTileLayerPool()
     : m_totalBytes(0)
+#if defined(WEBKIT_IOS6)
+    , m_capacity(legacyTileLayerPoolDefaultCapacity())
+#else
     , m_capacity(0)
+#endif
     , m_needsPrune(false)
 {
 }

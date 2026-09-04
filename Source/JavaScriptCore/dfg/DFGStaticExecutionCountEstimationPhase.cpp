@@ -52,9 +52,16 @@ public:
             if (!block)
                 continue;
 
+#if defined(WEBKIT_IOS6)
+            static constexpr double powersOfTen[] = { 1e0, 1e1, 1e2, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9 };
+            unsigned loopDepth = m_graph.m_cpsNaturalLoops->loopDepth(block);
+            block->executionCount = loopDepth < (sizeof(powersOfTen) / sizeof(powersOfTen[0])) ? powersOfTen[loopDepth] : pow(10, loopDepth);
+#else
             block->executionCount = pow(10, m_graph.m_cpsNaturalLoops->loopDepth(block));
+#endif
         }
-        
+
+#if ENABLE(FTL_JIT)
         // Estimate branch weights based on execution counts. This isn't quite correct. It'll
         // assume that each block's conditional successor only has that block as its
         // predecessor.
@@ -89,15 +96,18 @@ public:
                 break;
             }
         }
-        
+#endif // ENABLE(FTL_JIT)
+
         return true;
     }
 
 private:
+#if ENABLE(FTL_JIT)
     void NODELETE applyCounts(BranchTarget& target)
     {
         target.count = target.block->executionCount;
     }
+#endif
 };
 
 bool performStaticExecutionCountEstimation(Graph& graph)

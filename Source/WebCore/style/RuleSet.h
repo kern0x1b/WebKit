@@ -133,6 +133,8 @@ public:
     unsigned ruleCount() const { return m_ruleCount; }
 
     bool hasAttributeRules() const { return !m_attributeLocalNameRules.isEmpty(); }
+    bool hasClassRules() const { return !m_classRules.isEmpty(); }
+    bool hasIdRules() const { return !m_idRules.isEmpty(); }
     bool hasUserAgentPartRules() const { return !m_userAgentPartRules.isEmpty(); }
     bool hasHostPseudoClassRulesMatchingInShadowTree() const { return m_hasHostPseudoClassRulesMatchingInShadowTree; }
     bool hasHostOrScopePseudoClassRulesInUniversalBucket() const { return m_hasHostOrScopePseudoClassRulesInUniversalBucket; }

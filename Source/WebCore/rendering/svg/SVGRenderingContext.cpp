@@ -56,6 +56,19 @@ static inline bool NODELETE isRenderingMaskImage(const RenderObject& object)
     return object.view().frameView().paintBehavior().contains(PaintBehavior::RenderingSVGClipOrMask);
 }
 
+#if defined(WEBKIT_IOS6)
+static inline bool NODELETE svgRenderingContextNeedsNoPreparation(const RenderElement& renderer, const Style::ComputedStyle& style)
+{
+    return !renderer.hasCachedSVGResource()
+        && style.opacity().isOpaque()
+        && style.blendMode() == BlendMode::Normal
+        && style.isolation() == Isolation::Auto
+        && !style.hasPositionedMask()
+        && !WTF::holdsAlternative<Style::BasicShapePath>(style.clipPath())
+        && !WTF::holdsAlternative<Style::BoxPath>(style.clipPath());
+}
+#endif
+
 SVGRenderingContext::SVGRenderingContext(SVGRenderingContext&& other)
     : m_renderer { other.m_renderer }
     , m_paintInfo { other.m_paintInfo }
@@ -109,6 +122,13 @@ void SVGRenderingContext::prepareToRenderSVGContent(RenderElement& renderer, Pai
     }
 
     auto& style = m_renderer->style();
+
+#if defined(WEBKIT_IOS6)
+    if (svgRenderingContextNeedsNoPreparation(renderer, style)) {
+        m_renderingFlags |= RenderingPrepared;
+        return;
+    }
+#endif
 
     // Setup transparency layers before setting up SVG resources!
     bool isRenderingMask = isRenderingMaskImage(*m_renderer);

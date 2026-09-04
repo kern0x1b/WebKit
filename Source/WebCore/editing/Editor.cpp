@@ -1444,8 +1444,16 @@ bool Editor::insertTextWithoutSendingTextEvent(const String& text, bool selectIn
 
     // FIXME: Should pass false to updateMarkersForWordsAffectedByEditing() to not remove markers if
     // a leading or trailing no-break space is being inserted. See <https://webkit.org/b/212098>.
+#if defined(WEBKIT_IOS6)
+    CheckedPtr markersBeforeTyping = document().markersIfExists();
+    if (markersBeforeTyping && markersBeforeTyping->hasMarkers()) {
+        bool isStartOfNewWord = deprecatedIsSpaceOrNewline(selection.visibleStart().characterBefore());
+        updateMarkersForWordsAffectedByEditing(deprecatedIsSpaceOrNewline(text[0]) || isStartOfNewWord);
+    }
+#else
     bool isStartOfNewWord = deprecatedIsSpaceOrNewline(selection.visibleStart().characterBefore());
     updateMarkersForWordsAffectedByEditing(deprecatedIsSpaceOrNewline(text[0]) || isStartOfNewWord);
+#endif
 
     bool shouldConsiderApplyingAutocorrection = false;
     if (text == " "_s || text == "\t"_s)
@@ -2577,7 +2585,11 @@ void Editor::setComposition(const String& text, const Vector<CompositionUnderlin
     if (document->selection().isNone())
         return;
 
+#if defined(WEBKIT_IOS6)
+    String originalText = (!m_compositionNode && !text.isEmpty()) ? selectedText() : String();
+#else
     String originalText = selectedText();
+#endif
     bool isStartingToRecomposeExistingRange = !text.isEmpty() && selectionStart < selectionEnd && !hasComposition();
     if (isStartingToRecomposeExistingRange) {
         // We pass TypingCommand::TextCompositionType::Final here to indicate that we are removing composition text that has been finalized.

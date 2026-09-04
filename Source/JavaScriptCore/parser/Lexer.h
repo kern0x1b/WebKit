@@ -375,6 +375,24 @@ ALWAYS_INLINE JSTokenType Lexer<T>::lexExpectIdentifier(JSToken* tokenRecord, Op
         ASSERT(ptr == end);
         goto slowCase;
     }
+#if defined(WEBKIT_IOS6)
+    if (!WTF::isASCIIAlpha(*ptr) && *ptr != '_' && *ptr != '$')
+        goto slowCase;
+    ++ptr;
+    while (ptr < end) {
+        if (!WTF::isASCIIAlphanumeric(*ptr) && *ptr != '_' && *ptr != '$')
+            break;
+        ++ptr;
+    }
+
+    // Here's the shift
+    if (ptr < end) {
+        if ((!WTF::isASCII(*ptr)) || (*ptr == '\\'))
+            goto slowCase;
+        m_current = *ptr;
+    } else
+        m_current = 0;
+#else
     if (!WTF::isASCIIAlpha(*ptr))
         goto slowCase;
     ++ptr;
@@ -391,6 +409,7 @@ ALWAYS_INLINE JSTokenType Lexer<T>::lexExpectIdentifier(JSToken* tokenRecord, Op
         m_current = *ptr;
     } else
         m_current = 0;
+#endif
 
     m_code = ptr;
     ASSERT(currentOffset() >= currentLineStartOffset());

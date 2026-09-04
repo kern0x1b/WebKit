@@ -283,6 +283,13 @@ bool PropertyCascade::addMatch(const MatchedProperties& matchedProperties, Origi
     auto propertyAllowlist = matchedProperties.allowlistType;
     bool hasImportantProperties = false;
 
+    // Both halves of this are fixed for the whole declaration block, but the predicate below
+    // re-tested them for every property of every block matched by every element. An author sheet
+    // carries no allowlist and includes every normal property type, so on the common path the whole
+    // predicate collapses to a constant decided once per block.
+    const bool includeEveryProperty = propertyAllowlist == PropertyAllowlist::None
+        && m_includedProperties.types.containsAll(normalPropertyTypes());
+
     for (auto current : matchedProperties.properties.get()) {
         if (current.isImportant())
             hasImportantProperties = true;
@@ -292,6 +299,8 @@ bool PropertyCascade::addMatch(const MatchedProperties& matchedProperties, Origi
         auto propertyID = cascadeAliasProperty(current.id());
 
         auto shouldIncludeProperty = [&] {
+            if (includeEveryProperty)
+                return true;
 #if ENABLE(VIDEO)
             if (propertyAllowlist == PropertyAllowlist::Cue && !isValidCueStyleProperty(propertyID))
                 return false;
@@ -439,7 +448,7 @@ void PropertyCascade::addImportantMatches(Origin origin)
         CascadeLayerPriority layerPriority;
         FromStyleAttribute fromStyleAttribute;
     };
-    Vector<ImportantMatch> importantMatches;
+    Vector<ImportantMatch, 8> importantMatches;
     bool hasMatchesFromOtherScopesOrLayers = false;
 
     auto& matchedDeclarations = declarationsForOrigin(m_matchResult, origin);

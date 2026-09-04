@@ -272,6 +272,10 @@ ExceptionOr<bool> EventTarget::dispatchEventForBindings(Event& event)
     return event.legacyReturnValue();
 }
 
+#if defined(WEBKIT_IOS6)
+static inline bool hasListenerForPhase(const EventListenerVector&, EventTarget::EventInvokePhase);
+#endif
+
 void EventTarget::dispatchEvent(Event& event)
 {
     // FIXME: We should always use EventDispatcher.
@@ -284,8 +288,20 @@ void EventTarget::dispatchEvent(Event& event)
     event.setEventPhase(Event::AT_TARGET);
     event.resetBeforeDispatch();
     event.setEventPath(eventPath);
+#if defined(WEBKIT_IOS6)
+    auto* data = eventTargetData();
+    auto* listenersVector = data ? data->eventListenerMap.findInline(event.type()) : nullptr;
+    if (listenersVector && !hasListenerForPhase(*listenersVector, EventInvokePhase::Capturing)) {
+        if (hasListenerForPhase(*listenersVector, EventInvokePhase::Bubbling))
+            innerInvokeEventListeners(event, *listenersVector, EventInvokePhase::Bubbling);
+    } else {
+        fireEventListeners(event, EventInvokePhase::Capturing);
+        fireEventListeners(event, EventInvokePhase::Bubbling);
+    }
+#else
     fireEventListeners(event, EventInvokePhase::Capturing);
     fireEventListeners(event, EventInvokePhase::Bubbling);
+#endif
     event.resetAfterDispatch();
 }
 

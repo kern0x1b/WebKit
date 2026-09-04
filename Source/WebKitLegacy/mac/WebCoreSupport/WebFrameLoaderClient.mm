@@ -528,8 +528,13 @@ void WebFrameLoaderClient::dispatchDidFinishLoading(WebCore::DocumentLoader* loa
 #endif
 
     if (implementations->didFinishLoadingFromDataSourceFunc) {
-        if (id resource = [webView _objectForIdentifier:identifier])
+        if (id resource = [webView _objectForIdentifier:identifier]) {
+#if defined(WEBKIT_IOS6)
+            CallResourceLoadDelegateDeferred(webView, @selector(webView:resource:didFinishLoadingFromDataSource:), resource, dataSource(loader));
+#else
             CallResourceLoadDelegate(implementations->didFinishLoadingFromDataSourceFunc, webView, @selector(webView:resource:didFinishLoadingFromDataSource:), resource, dataSource(loader));
+#endif
+        }
     }
 
     [webView _removeObjectForIdentifier:identifier];
@@ -549,8 +554,13 @@ void WebFrameLoaderClient::dispatchDidFailLoading(WebCore::DocumentLoader* loade
     } else
 #endif
     if (implementations->didFailLoadingWithErrorFromDataSourceFunc) {
-        if (id resource = [webView _objectForIdentifier:identifier])
+        if (id resource = [webView _objectForIdentifier:identifier]) {
+#if defined(WEBKIT_IOS6)
+            CallResourceLoadDelegateDeferred(webView, @selector(webView:resource:didFailLoadingWithError:fromDataSource:), resource, (NSError *)error, dataSource(loader));
+#else
             CallResourceLoadDelegate(implementations->didFailLoadingWithErrorFromDataSourceFunc, webView, @selector(webView:resource:didFailLoadingWithError:fromDataSource:), resource, (NSError *)error, dataSource(loader));
+#endif
+        }
     }
 
     [webView _removeObjectForIdentifier:identifier];

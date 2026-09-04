@@ -751,12 +751,12 @@ template<typename StyleType, typename Result, typename T1, typename T2> concept 
 };
 
 template<typename Result> struct EvaluationInvoker {
-    template<typename StyleType> Result operator()(const StyleType& value) const
+    template<typename StyleType> ALWAYS_INLINE Result operator()(const StyleType& value) const
     {
         return Evaluation<StyleType, Result> { }(value);
     }
 
-    template<typename StyleType, typename T1> Result operator()(const StyleType& value, T1&& t1) const
+    template<typename StyleType, typename T1> ALWAYS_INLINE Result operator()(const StyleType& value, T1&& t1) const
     {
         if constexpr (HasTwoParameterEvaluate<StyleType, Result, T1>)
             return Evaluation<StyleType, Result> { }(value, std::forward<T1>(t1));
@@ -764,7 +764,7 @@ template<typename Result> struct EvaluationInvoker {
             return operator()(value);
     }
 
-    template<typename StyleType, typename T1, typename T2> Result operator()(const StyleType& value, T1&& t1, T2&& t2) const
+    template<typename StyleType, typename T1, typename T2> ALWAYS_INLINE Result operator()(const StyleType& value, T1&& t1, T2&& t2) const
     {
         if constexpr (HasThreeParameterEvaluate<StyleType, Result, T1, T2>)
             return Evaluation<StyleType, Result> { }(value, std::forward<T1>(t1), std::forward<T2>(t2));
@@ -784,7 +784,7 @@ template<VariantLike StyleType, typename Result> struct Evaluation<StyleType, Re
 
 // Specialization for `TupleLike` (wrapper).
 template<TupleLike StyleType, typename Result> requires (std::tuple_size_v<StyleType> == 1) struct Evaluation<StyleType, Result> {
-    template<typename... Rest> Result operator()(const StyleType& value, Rest&&... rest)
+    template<typename... Rest> ALWAYS_INLINE Result operator()(const StyleType& value, Rest&&... rest)
     {
         return evaluate<Result>(get<0>(value), std::forward<Rest>(rest)...);
     }

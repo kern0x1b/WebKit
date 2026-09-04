@@ -34,6 +34,7 @@
 #include "ImageFrameAnimator.h"
 #include "ImageObserver.h"
 #include "Logging.h"
+#include <stdlib.h>
 
 namespace WebCore {
 
@@ -349,7 +350,23 @@ DecodingDestination BitmapImageSource::preferredDecodingDestination(GraphicsCont
 bool BitmapImageSource::isLargeForDecoding() const
 {
     auto sizeInBytes = size(ImageOrientation::Orientation::None).unclampedArea() * sizeof(uint32_t);
+#if defined(WEBKIT_IOS6)
+    // This is the only thing that lets an image be decoded off the web thread, and at
+    // 500 KB it excludes everything up to about 350 square. A feed is full of images
+    // that size, and each one is a decode inside a tile paint. Only a true icon is
+    // cheap enough that hopping threads for it is not worth it.
+    static const size_t asynchronousDecodingThreshold = [] -> size_t {
+        if (const char* override = getenv("WEBKIT_IOS6_ASYNC_DECODE_MIN_KB")) {
+            int value = atoi(override);
+            if (value > 0 && value <= 64 * 1024)
+                return static_cast<size_t>(value) * KB;
+        }
+        return 64 * KB;
+    }();
+    return sizeInBytes > (isAnimated() ? 100 * KB : asynchronousDecodingThreshold);
+#else
     return sizeInBytes > (isAnimated() ? 100 * KB : 500 * KB);
+#endif
 }
 
 bool BitmapImageSource::isDecodingWorkQueueIdle() const

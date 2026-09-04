@@ -576,10 +576,14 @@ void Lexer<T>::setCode(const SourceCode& source, ParserArena* arena)
     m_sourceURLDirective = String();
     m_sourceMappingURLDirective = String();
     
+#if defined(WEBKIT_IOS6)
+    m_buffer8.reserveInitialCapacity(initialReadBufferCapacity);
+#else
     m_buffer8.reserveInitialCapacity(initialReadBufferCapacity);
     m_buffer16.reserveInitialCapacity(initialReadBufferCapacity);
     m_bufferForRawTemplateString16.reserveInitialCapacity(initialReadBufferCapacity);
-    
+#endif
+
     if (m_code < m_codeEnd) [[likely]]
         m_current = *m_code;
     else

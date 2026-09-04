@@ -529,7 +529,6 @@ static bool NODELETE forInBy(AccessCase::AccessType type)
     return false;
 }
 
-#if CPU(ADDRESS64)
 static bool NODELETE isStateless(AccessCase::AccessType type)
 {
     switch (type) {
@@ -679,7 +678,6 @@ static bool NODELETE isStateless(AccessCase::AccessType type)
 
     return false;
 }
-#endif
 
 #if !CPU(ADDRESS64)
 // ios6/armv7: JSC_FOR_EACH_COMMON_THUNK in jit/JITThunks.h is a backslash-continued macro
@@ -8506,7 +8504,460 @@ MacroAssemblerCodeRef<JITThunkPtrTag> deleteByValWithSymbolDeleteNonConfigurable
 MacroAssemblerCodeRef<JITThunkPtrTag> deleteByValWithSymbolDeleteMissHandler(VM&) { return { }; }
 MacroAssemblerCodeRef<JITThunkPtrTag> checkPrivateBrandHandler(VM&) { return { }; }
 MacroAssemblerCodeRef<JITThunkPtrTag> setPrivateBrandHandler(VM&) { return { }; }
-AccessGenerationResult InlineCacheCompiler::compileHandler(const GCSafeConcurrentJSLocker&, Vector<AccessCase*, 16>&&, CodeBlock*, AccessCase&) { return { }; }
+
+static bool NODELETE canGenerateHandlerWithoutAddress64(AccessCase::AccessType type)
+{
+    switch (type) {
+    case AccessCase::Load:
+    case AccessCase::GetGetter:
+    case AccessCase::Miss:
+    case AccessCase::Replace:
+    case AccessCase::Transition:
+    case AccessCase::InHit:
+    case AccessCase::InMiss:
+    case AccessCase::ArrayLength:
+    case AccessCase::StringLength:
+    case AccessCase::DirectArgumentsLength:
+    case AccessCase::ScopedArgumentsLength:
+    case AccessCase::RegExpLastIndexLoad:
+    case AccessCase::RegExpLastIndexStore:
+    case AccessCase::IndexedNoIndexingMiss:
+    case AccessCase::IndexedNoIndexingInMiss:
+    case AccessCase::IndexedUndefinedKeyLoad:
+    case AccessCase::IndexedUndefinedKeyMiss:
+    case AccessCase::IndexedUndefinedKeyReplace:
+    case AccessCase::IndexedUndefinedKeyTransition:
+    case AccessCase::IndexedNullKeyLoad:
+    case AccessCase::IndexedNullKeyMiss:
+    case AccessCase::IndexedNullKeyReplace:
+    case AccessCase::IndexedNullKeyTransition:
+    case AccessCase::IndexedTrueKeyLoad:
+    case AccessCase::IndexedTrueKeyMiss:
+    case AccessCase::IndexedTrueKeyReplace:
+    case AccessCase::IndexedTrueKeyTransition:
+    case AccessCase::IndexedFalseKeyLoad:
+    case AccessCase::IndexedFalseKeyMiss:
+    case AccessCase::IndexedFalseKeyReplace:
+    case AccessCase::IndexedFalseKeyTransition:
+    case AccessCase::IndexedInt32Load:
+    case AccessCase::IndexedDoubleLoad:
+    case AccessCase::IndexedContiguousLoad:
+    case AccessCase::IndexedArrayStorageLoad:
+    case AccessCase::IndexedInt32Store:
+    case AccessCase::IndexedDoubleStore:
+    case AccessCase::IndexedContiguousStore:
+    case AccessCase::IndexedArrayStorageStore:
+    case AccessCase::IndexedInt32InHit:
+    case AccessCase::IndexedDoubleInHit:
+    case AccessCase::IndexedContiguousInHit:
+    case AccessCase::IndexedArrayStorageInHit:
+    case AccessCase::IndexedScopedArgumentsLoad:
+    case AccessCase::IndexedScopedArgumentsInHit:
+    case AccessCase::IndexedDirectArgumentsLoad:
+    case AccessCase::IndexedDirectArgumentsInHit:
+    case AccessCase::IndexedStringLoad:
+    case AccessCase::IndexedStringInHit:
+    case AccessCase::IndexedTypedArrayInt8Load:
+    case AccessCase::IndexedTypedArrayUint8Load:
+    case AccessCase::IndexedTypedArrayUint8ClampedLoad:
+    case AccessCase::IndexedTypedArrayInt16Load:
+    case AccessCase::IndexedTypedArrayUint16Load:
+    case AccessCase::IndexedTypedArrayInt32Load:
+    case AccessCase::IndexedTypedArrayUint32Load:
+    case AccessCase::IndexedTypedArrayFloat32Load:
+    case AccessCase::IndexedTypedArrayFloat64Load:
+    case AccessCase::IndexedResizableTypedArrayInt8Load:
+    case AccessCase::IndexedResizableTypedArrayUint8Load:
+    case AccessCase::IndexedResizableTypedArrayUint8ClampedLoad:
+    case AccessCase::IndexedResizableTypedArrayInt16Load:
+    case AccessCase::IndexedResizableTypedArrayUint16Load:
+    case AccessCase::IndexedResizableTypedArrayInt32Load:
+    case AccessCase::IndexedResizableTypedArrayUint32Load:
+    case AccessCase::IndexedResizableTypedArrayFloat32Load:
+    case AccessCase::IndexedResizableTypedArrayFloat64Load:
+    case AccessCase::IndexedTypedArrayInt8Store:
+    case AccessCase::IndexedTypedArrayUint8Store:
+    case AccessCase::IndexedTypedArrayUint8ClampedStore:
+    case AccessCase::IndexedTypedArrayInt16Store:
+    case AccessCase::IndexedTypedArrayUint16Store:
+    case AccessCase::IndexedTypedArrayInt32Store:
+    case AccessCase::IndexedTypedArrayUint32Store:
+    case AccessCase::IndexedTypedArrayFloat32Store:
+    case AccessCase::IndexedTypedArrayFloat64Store:
+    case AccessCase::IndexedResizableTypedArrayInt8Store:
+    case AccessCase::IndexedResizableTypedArrayUint8Store:
+    case AccessCase::IndexedResizableTypedArrayUint8ClampedStore:
+    case AccessCase::IndexedResizableTypedArrayInt16Store:
+    case AccessCase::IndexedResizableTypedArrayUint16Store:
+    case AccessCase::IndexedResizableTypedArrayInt32Store:
+    case AccessCase::IndexedResizableTypedArrayUint32Store:
+    case AccessCase::IndexedResizableTypedArrayFloat32Store:
+    case AccessCase::IndexedResizableTypedArrayFloat64Store:
+    case AccessCase::IndexedTypedArrayInt8In:
+    case AccessCase::IndexedTypedArrayUint8In:
+    case AccessCase::IndexedTypedArrayUint8ClampedIn:
+    case AccessCase::IndexedTypedArrayInt16In:
+    case AccessCase::IndexedTypedArrayUint16In:
+    case AccessCase::IndexedTypedArrayInt32In:
+    case AccessCase::IndexedTypedArrayUint32In:
+    case AccessCase::IndexedTypedArrayFloat32In:
+    case AccessCase::IndexedTypedArrayFloat64In:
+    case AccessCase::IndexedResizableTypedArrayInt8In:
+    case AccessCase::IndexedResizableTypedArrayUint8In:
+    case AccessCase::IndexedResizableTypedArrayUint8ClampedIn:
+    case AccessCase::IndexedResizableTypedArrayInt16In:
+    case AccessCase::IndexedResizableTypedArrayUint16In:
+    case AccessCase::IndexedResizableTypedArrayInt32In:
+    case AccessCase::IndexedResizableTypedArrayUint32In:
+    case AccessCase::IndexedResizableTypedArrayFloat32In:
+    case AccessCase::IndexedResizableTypedArrayFloat64In:
+        return true;
+    default:
+        return false;
+    }
+}
+
+AccessGenerationResult InlineCacheCompiler::compileOneAccessCaseHandler(const Vector<AccessCase*, 16>& poly, CodeBlock* codeBlock, AccessCase& accessCase, Vector<WatchpointSet*, 8>&& additionalWatchpointSets)
+{
+    ASSERT(useHandlerIC());
+
+    VM& vm = this->vm();
+
+    auto connectWatchpointSets = [&](PolymorphicAccessJITStubRoutine& stub, Vector<ObjectPropertyCondition, 64>&& watchedConditions, Vector<WatchpointSet*, 8>&& additionalWatchpointSets) {
+        for (auto& condition : watchedConditions)
+            ensureReferenceAndInstallWatchpoint(vm, &stub, condition);
+
+        for (WatchpointSet* set : additionalWatchpointSets)
+            ensureReferenceAndAddWatchpoint(vm, *set, &stub);
+    };
+
+    auto finishPreCompiledCodeGeneration = [&](Ref<PolymorphicAccessJITStubRoutine>&& stub) {
+        std::unique_ptr<PropertyInlineCacheClearingWatchpoint> watchpoint;
+        if (!stub->watchpoints().isEmpty()) {
+            watchpoint = makeUnique<PropertyInlineCacheClearingWatchpoint>(codeBlock, m_propertyCache);
+            stub->watchpointSet().add(watchpoint.get());
+        }
+
+        auto handler = InlineCacheHandler::createPreCompiled(InlineCacheCompiler::generateSlowPathHandler(vm, m_propertyCache.accessType), codeBlock, m_propertyCache, WTF::move(stub), WTF::move(watchpoint), accessCase, CacheType::Unset);
+        handler->setAccessCase(Ref { accessCase });
+
+        AccessGenerationResult::Kind resultKind;
+        if (poly.size() >= Options::maxAccessVariantListSize())
+            resultKind = AccessGenerationResult::GeneratedFinalCode;
+        else
+            resultKind = AccessGenerationResult::GeneratedNewCode;
+
+        return AccessGenerationResult(resultKind, WTF::move(handler));
+    };
+
+    auto finishCodeGeneration = [&](Ref<PolymorphicAccessJITStubRoutine>&& stub) {
+        std::unique_ptr<PropertyInlineCacheClearingWatchpoint> watchpoint;
+        if (!stub->watchpoints().isEmpty()) {
+            watchpoint = makeUnique<PropertyInlineCacheClearingWatchpoint>(codeBlock, m_propertyCache);
+            stub->watchpointSet().add(watchpoint.get());
+        }
+
+        auto handler = InlineCacheHandler::create(InlineCacheCompiler::generateSlowPathHandler(vm, m_propertyCache.accessType), codeBlock, m_propertyCache, Ref { stub }, WTF::move(watchpoint), 0);
+        ASSERT(!stub->cases().isEmpty());
+        handler->setAccessCase(Ref { stub->cases().first() });
+
+        AccessGenerationResult::Kind resultKind;
+        if (poly.size() >= Options::maxAccessVariantListSize())
+            resultKind = AccessGenerationResult::GeneratedFinalCode;
+        else
+            resultKind = AccessGenerationResult::GeneratedNewCode;
+
+        return AccessGenerationResult(resultKind, WTF::move(handler));
+    };
+
+    std::optional<SharedJITStubSet::StatelessCacheKey> statelessType;
+    if (isStateless(accessCase.m_type)) {
+        statelessType = std::tuple { SharedJITStubSet::propertyCacheKey(m_propertyCache), accessCase.m_type };
+        if (auto stub = vm.m_sharedJITStubs->getStatelessStub(statelessType.value()))
+            return finishPreCompiledCodeGeneration(stub.releaseNonNull());
+    } else {
+        SharedJITStubSet::Searcher searcher {
+            SharedJITStubSet::propertyCacheKey(m_propertyCache),
+            Ref { accessCase }
+        };
+        if (auto stub = vm.m_sharedJITStubs->find(searcher)) {
+            if (stub->isStillValid())
+                return finishCodeGeneration(stub.releaseNonNull());
+            vm.m_sharedJITStubs->remove(stub.get());
+        }
+    }
+
+    auto allocator = makeDefaultScratchAllocator();
+    m_allocator = &allocator;
+    m_scratchGPR = allocator.allocateScratchGPR();
+    if (needsScratchFPR(accessCase.m_type))
+        m_scratchFPR = allocator.allocateScratchFPR();
+
+    Vector<JSCell*> cellsToMark;
+
+    CCallHelpers jit(codeBlock);
+    m_jit = &jit;
+
+    emitDataICPrologue(*m_jit);
+    traceHandler(jit, ICEvent::CompiledHandler, " ", m_propertyCache.accessType, ": ", accessCase.m_type);
+
+    m_preservedReusedRegisterState = allocator.preserveReusedRegistersByPushing(jit, ScratchRegisterAllocator::ExtraStackSpace::NoExtraSpace);
+
+    CCallHelpers::JumpList fallThrough;
+    if (!JSC::hasConstantIdentifier(m_propertyCache.accessType)) {
+        if (accessCase.requiresInt32PropertyCheck()) {
+            CCallHelpers::JumpList notInt32;
+            if (!m_propertyCache.propertyIsInt32)
+                notInt32.append(jit.branchIfNotInt32(m_propertyCache.propertyTagGPR()));
+            m_failAndRepatch.append(notInt32);
+        } else if (accessCase.requiresIdentifierNameMatch() && !accessCase.uid()->isSymbol()) {
+            CCallHelpers::JumpList notString;
+            GPRReg propertyGPR = m_propertyCache.propertyGPR();
+            if (!m_propertyCache.propertyIsString) {
+                notString.append(jit.branchIfNotCell(m_propertyCache.propertyTagGPR()));
+                notString.append(jit.branchIfNotString(propertyGPR));
+            }
+            jit.loadPtr(MacroAssembler::Address(propertyGPR, JSString::offsetOfValue()), m_scratchGPR);
+            m_failAndRepatch.append(jit.branchIfRopeStringImpl(m_scratchGPR));
+            m_failAndRepatch.append(notString);
+        } else if (accessCase.requiresIdentifierNameMatch() && accessCase.uid()->isSymbol()) {
+            CCallHelpers::JumpList notSymbol;
+            if (!m_propertyCache.propertyIsSymbol) {
+                notSymbol.append(jit.branchIfNotCell(m_propertyCache.propertyTagGPR()));
+                notSymbol.append(jit.branchIfNotSymbol(m_propertyCache.propertyGPR()));
+            }
+            m_failAndRepatch.append(notSymbol);
+        }
+    }
+
+    generateWithGuard(0, accessCase, fallThrough);
+    m_failAndRepatch.append(fallThrough);
+
+    if (!m_failAndIgnore.empty()) {
+        m_failAndIgnore.link(&jit);
+        JIT_COMMENT(jit, "failAndIgnore");
+        jit.add8(CCallHelpers::TrustedImm32(1), CCallHelpers::Address(m_propertyCache.m_propertyCacheGPR, PropertyInlineCache::offsetOfCountdown()));
+    }
+
+    m_failAndRepatch.link(&jit);
+    if (allocator.didReuseRegisters())
+        restoreScratch();
+
+    InlineCacheCompiler::emitDataICJumpNextHandler(jit);
+
+    LinkBuffer linkBuffer(jit, codeBlock, LinkBuffer::Profile::InlineCache, JITCompilationCanFail);
+    if (linkBuffer.didFailToAllocate())
+        return AccessGenerationResult::GaveUp;
+
+    ASSERT(m_success.empty());
+
+    auto keys = FixedVector<Ref<AccessCase>> { Ref { accessCase } };
+
+    MacroAssemblerCodeRef<JITStubRoutinePtrTag> code = FINALIZE_CODE_FOR(codeBlock, linkBuffer, JITStubRoutinePtrTag, categoryName(m_propertyCache.accessType), "%s", toCString("Access stub handler for ", *codeBlock, " ", m_propertyCache.codeOrigin, ": ", listDump(keys)).data());
+
+    if (statelessType) {
+        auto stub = createPreCompiledICJITStubRoutine(WTF::move(code), vm, codeBlock);
+        connectWatchpointSets(stub.get(), WTF::move(m_conditions), WTF::move(additionalWatchpointSets));
+        vm.m_sharedJITStubs->setStatelessStub(statelessType.value(), Ref { stub });
+        return finishPreCompiledCodeGeneration(WTF::move(stub));
+    }
+
+    FixedVector<StructureID> weakStructures(WTF::move(m_weakStructures));
+    auto stub = createICJITStubRoutine(WTF::move(code), WTF::move(keys), WTF::move(weakStructures), vm, nullptr, false, cellsToMark, { }, nullptr, { });
+    connectWatchpointSets(stub.get(), WTF::move(m_conditions), WTF::move(additionalWatchpointSets));
+
+    vm.m_sharedJITStubs->add(SharedJITStubSet::Hash::Key(SharedJITStubSet::propertyCacheKey(m_propertyCache), stub.ptr()));
+    stub->addedToSharedJITStubSet();
+
+    return finishCodeGeneration(WTF::move(stub));
+}
+
+AccessGenerationResult InlineCacheCompiler::compileHandler(const GCSafeConcurrentJSLocker&, Vector<AccessCase*, 16>&& poly, CodeBlock* codeBlock, AccessCase& accessCase)
+{
+    SuperSamplerScope superSamplerScope(false);
+
+    if (!accessCase.couldStillSucceed())
+        return AccessGenerationResult::MadeNoChanges;
+
+    auto additionalWatchpointSets = collectAdditionalWatchpoints(vm(), accessCase);
+    for (auto* set : additionalWatchpointSets) {
+        if (!set->isStillValid())
+            return AccessGenerationResult::MadeNoChanges;
+    }
+
+    for (auto& alreadyListedCase : poly) {
+        if (alreadyListedCase != &accessCase) {
+            if (alreadyListedCase->canReplace(accessCase))
+                return AccessGenerationResult::MadeNoChanges;
+        }
+    }
+
+    if (!m_propertyCache.isHandlerIC())
+        return AccessGenerationResult::MadeNoChanges;
+
+    VM& vm = this->vm();
+    auto& handlerIC = downcast<HandlerPropertyInlineCache>(m_propertyCache);
+
+    auto tryInlinedHandler = [&]() -> AccessGenerationResult {
+        if (handlerIC.m_inlinedHandler)
+            return AccessGenerationResult::MadeNoChanges;
+
+        CacheType preconfiguredCacheType = m_propertyCache.preconfiguredCacheType;
+        switch (preconfiguredCacheType) {
+        case CacheType::GetByIdSelf:
+        case CacheType::GetByIdPrototype:
+        case CacheType::PutByIdReplace:
+        case CacheType::InByIdSelf:
+            break;
+        default:
+            return AccessGenerationResult::MadeNoChanges;
+        }
+
+        if (accessCase.viaGlobalProxy() || accessCase.usesPolyProto())
+            return AccessGenerationResult::MadeNoChanges;
+
+        if (!accessCase.structure())
+            return AccessGenerationResult::MadeNoChanges;
+
+        if (!isValidOffset(accessCase.offset()))
+            return AccessGenerationResult::MadeNoChanges;
+
+        Vector<ObjectPropertyCondition, 64> watchedConditions;
+        Vector<ObjectPropertyCondition, 64> checkingConditions;
+        bool connectAdditionalWatchpointSets = false;
+        CacheType cacheType = CacheType::Unset;
+        bool watchPropertyForReplacements = false;
+
+        switch (m_propertyCache.accessType) {
+        case AccessType::GetById:
+        case AccessType::GetByIdDirect:
+        case AccessType::GetPrivateNameById: {
+            if (accessCase.m_type != AccessCase::Load)
+                return AccessGenerationResult::MadeNoChanges;
+            collectConditions(accessCase, watchedConditions, checkingConditions);
+            if (!checkingConditions.isEmpty())
+                return AccessGenerationResult::MadeNoChanges;
+            cacheType = accessCase.tryGetAlternateBase() ? CacheType::GetByIdPrototype : CacheType::GetByIdSelf;
+            connectAdditionalWatchpointSets = true;
+            watchPropertyForReplacements = true;
+            break;
+        }
+
+        case AccessType::PutByIdDirectStrict:
+        case AccessType::PutByIdStrict:
+        case AccessType::PutByIdSloppy:
+        case AccessType::PutByIdDirectSloppy:
+        case AccessType::DefinePrivateNameById:
+        case AccessType::SetPrivateNameById: {
+            if (accessCase.m_type != AccessCase::Replace)
+                return AccessGenerationResult::MadeNoChanges;
+            if (!accessCase.conditionSet().isEmpty())
+                return AccessGenerationResult::MadeNoChanges;
+            cacheType = CacheType::PutByIdReplace;
+            break;
+        }
+
+        case AccessType::InById: {
+            if (accessCase.m_type != AccessCase::InHit)
+                return AccessGenerationResult::MadeNoChanges;
+            collectConditions(accessCase, watchedConditions, checkingConditions);
+            if (!checkingConditions.isEmpty())
+                return AccessGenerationResult::MadeNoChanges;
+            cacheType = CacheType::InByIdSelf;
+            connectAdditionalWatchpointSets = true;
+            break;
+        }
+
+        default:
+            return AccessGenerationResult::MadeNoChanges;
+        }
+
+        if (cacheType != preconfiguredCacheType)
+            return AccessGenerationResult::MadeNoChanges;
+
+        if (watchPropertyForReplacements) {
+            Structure* currStructure = accessCase.structure();
+            if (auto* object = accessCase.tryGetAlternateBase())
+                currStructure = object->structure();
+            currStructure->startWatchingPropertyForReplacements(vm, accessCase.offset());
+        }
+
+        auto code = InlineCacheCompiler::generateSlowPathCode(vm, m_propertyCache.accessType).retagged<JITStubRoutinePtrTag>();
+        auto stub = createPreCompiledICJITStubRoutine(code, vm, codeBlock);
+
+        for (auto& condition : watchedConditions)
+            ensureReferenceAndInstallWatchpoint(vm, stub.ptr(), condition);
+        if (connectAdditionalWatchpointSets) {
+            for (WatchpointSet* set : additionalWatchpointSets)
+                ensureReferenceAndAddWatchpoint(vm, *set, stub.ptr());
+        }
+
+        std::unique_ptr<PropertyInlineCacheClearingWatchpoint> watchpoint;
+        if (!stub->watchpoints().isEmpty()) {
+            watchpoint = makeUnique<PropertyInlineCacheClearingWatchpoint>(codeBlock, m_propertyCache);
+            stub->watchpointSet().add(watchpoint.get());
+        }
+
+        auto handler = InlineCacheHandler::createPreCompiled(InlineCacheCompiler::generateSlowPathHandler(vm, m_propertyCache.accessType), codeBlock, m_propertyCache, WTF::move(stub), WTF::move(watchpoint), accessCase, cacheType);
+        handler->setAccessCase(Ref { accessCase });
+
+        return AccessGenerationResult(AccessGenerationResult::GeneratedNewCode, WTF::move(handler));
+    };
+
+    auto inlinedResult = tryInlinedHandler();
+    if (!inlinedResult.madeNoChanges())
+        return inlinedResult;
+
+    if (accessCase.viaGlobalProxy() || accessCase.usesPolyProto())
+        return AccessGenerationResult::MadeNoChanges;
+
+    if (!canGenerateHandlerWithoutAddress64(accessCase.m_type))
+        return AccessGenerationResult::MadeNoChanges;
+
+    if (accessCase.doesCalls(vm))
+        return AccessGenerationResult::MadeNoChanges;
+
+    // ios6/armv7: makeDefaultScratchAllocator() locks every operand the handler is entered
+    // with, and on a 32-bit target each JSValue operand costs two of the ten allocatable
+    // GPRs. The deepest access case below nests a second allocator and takes three scratch
+    // GPRs in total; ScratchRegisterAllocator::allocateScratch() calls CRASH() rather than
+    // failing when nothing is left, so the room has to be counted before any code is
+    // emitted. PutByVal leaves exactly one register free and never passes this.
+    {
+        RegisterSet locked;
+        auto lockGPR = [&](GPRReg reg) {
+            if (reg != InvalidGPRReg)
+                locked.add(reg, IgnoreVectors);
+        };
+        auto lockJSR = [&](JSValueRegs regs) {
+            lockGPR(regs.tagGPR());
+            lockGPR(regs.payloadGPR());
+        };
+        lockJSR(m_propertyCache.baseRegs());
+        lockJSR(m_propertyCache.valueRegs());
+        lockGPR(m_propertyCache.m_extraGPR);
+        lockGPR(m_propertyCache.m_extra2GPR);
+        lockGPR(m_propertyCache.m_extraTagGPR);
+        lockGPR(m_propertyCache.m_extra2TagGPR);
+        lockGPR(m_propertyCache.m_propertyCacheGPR);
+        lockGPR(m_propertyCache.m_arrayProfileGPR);
+        lockGPR(GPRInfo::handlerGPR);
+
+        unsigned available = 0;
+        for (unsigned i = 0; i < GPRInfo::numberOfRegisters; ++i) {
+            if (!locked.contains(GPRInfo::toRegister(i), IgnoreVectors))
+                ++available;
+        }
+        if (available < 3)
+            return AccessGenerationResult::MadeNoChanges;
+    }
+
+    poly.append(&accessCase);
+
+    Vector<WatchpointSet*, 8> connectedWatchpointSets;
+    connectedWatchpointSets.appendVector(additionalWatchpointSets);
+    return compileOneAccessCaseHandler(poly, codeBlock, accessCase, WTF::move(connectedWatchpointSets));
+}
 #endif
 
 PolymorphicAccess::PolymorphicAccess() = default;

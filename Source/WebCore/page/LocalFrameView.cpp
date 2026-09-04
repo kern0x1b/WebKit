@@ -162,6 +162,11 @@
 #define FRAME_ID m_frame->frameID().toUInt64()
 #define FRAMEVIEW_RELEASE_LOG(channel, fmt, ...) RELEASE_LOG_FORWARDABLE(channel, fmt, PAGE_ID, FRAME_ID, m_frame->isMainFrame(), ##__VA_ARGS__)
 
+#if defined(WEBKIT_IOS6)
+extern "C" int g_webkitIOS6PendingDrawWork;
+extern "C" unsigned g_webkitIOS6PaintsRefusedForLayout;
+#endif
+
 namespace WebCore {
 
 using namespace HTMLNames;
@@ -5907,6 +5912,13 @@ void LocalFrameView::paintContents(GraphicsContext& context, const IntRect& dirt
         return;
     }
 
+#if defined(WEBKIT_IOS6)
+    if (!layoutContext().inPaintableState() || needsLayout()) {
+        ++g_webkitIOS6PaintsRefusedForLayout;
+        g_webkitIOS6PendingDrawWork = 1;
+        return;
+    }
+#else
     if (!layoutContext().inPaintableState())
         return;
 
@@ -5915,6 +5927,7 @@ void LocalFrameView::paintContents(GraphicsContext& context, const IntRect& dirt
         FRAMEVIEW_RELEASE_LOG(Layout, LocalFrameViewNotPaintingLayoutNeeded);
         return;
     }
+#endif
 
     PaintingState paintingState;
     willPaintContents(context, dirtyRect, paintingState, regionContext);

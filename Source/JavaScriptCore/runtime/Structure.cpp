@@ -34,6 +34,9 @@
 #include "PropertyNameArray.h"
 #include "PropertyTable.h"
 #include "WebAssemblyGCStructure.h"
+#include <atomic>
+#include <cstdio>
+#include <stdlib.h>
 #include <wtf/CommaPrinter.h>
 #include <wtf/NeverDestroyed.h>
 #include <wtf/RefPtr.h>
@@ -282,6 +285,56 @@ Structure::Structure(VM& vm, JSGlobalObject* globalObject, JSValue prototype, co
 }
 
 const ClassInfo Structure::s_info = { "Structure"_s, nullptr, nullptr, nullptr, CREATE_METHOD_TABLE(Structure) };
+
+#if defined(WEBKIT_IOS6)
+// ios6/armv7: the fallback here used to read s_maxTransitionLength (128, the eval-context
+// cap) instead of s_maxTransitionLengthForNonEvalPutById (512, what upstream's #else branch
+// in shouldDoCacheableDictionaryTransitionForAdd() actually uses for PutById). With no
+// WEBKIT_IOS6_MAX_PUT_BY_ID_TRANSITIONS override set, that made every ordinary `obj.x = y`
+// property add - by far the most common transition context - hit the give-up-and-convert-
+// to-dictionary threshold 4x sooner than upstream default, on every build, undocumented.
+// Once a structure is converted, every future property access on that object skips inline
+// caching for good. Restored to match the upstream default; the env var still overrides it
+// for A/B, unchanged.
+int Structure::maxTransitionLengthForNonEvalPutById()
+{
+    static const int limit = [] -> int {
+        if (const char* override = getenv("WEBKIT_IOS6_MAX_PUT_BY_ID_TRANSITIONS")) {
+            int value = atoi(override);
+            if (value > 0)
+                return value;
+        }
+        return s_maxTransitionLengthForNonEvalPutById;
+    }();
+    return limit;
+}
+
+// Counts, for the whole session, how many times addNewPropertyTransition() below converted
+// a structure to an uncacheable dictionary because it exceeded the transition cap above -
+// the answer to "how often does the PutById cap above actually bite". Off unless
+// WEBKIT_IOS6_DICTIONARY_TRANSITION_LOG names a file, in which case one line is appended per
+// conversion with a running total and whether it came through the PutById context this fix
+// touches.
+void Structure::logCacheableDictionaryTransitionForAdd(PropertyName propertyName, PutPropertySlot::Context context)
+{
+    static const char* path = [] () -> const char* {
+        const char* value = getenv("WEBKIT_IOS6_DICTIONARY_TRANSITION_LOG");
+        return (value && value[0]) ? value : nullptr;
+    }();
+    if (!path)
+        return;
+    static std::atomic<uint64_t> count { 0 };
+    uint64_t total = count.fetch_add(1, std::memory_order_relaxed) + 1;
+    if (FILE* file = fopen(path, "a")) {
+        auto* uid = propertyName.uid();
+        fprintf(file, "dictionary-transition #%llu context=%s property=%s\n",
+            static_cast<unsigned long long>(total),
+            context == PutPropertySlot::PutById ? "PutById" : "other",
+            uid ? uid->utf8().data() : "<null>");
+        fclose(file);
+    }
+}
+#endif
 
 Structure::Structure(VM& vm, CreatingEarlyCellTag)
     : JSCell(CreatingEarlyCell)
@@ -557,6 +610,9 @@ Structure* Structure::addNewPropertyTransition(VM& vm, Structure* structure, Pro
     
     if (structure->shouldDoCacheableDictionaryTransitionForAdd(context)) {
         ASSERT(!isCopyOnWrite(structure->indexingMode()));
+#if defined(WEBKIT_IOS6)
+        logCacheableDictionaryTransitionForAdd(propertyName, context);
+#endif
         Structure* transition = toCacheableDictionaryTransition(vm, structure, deferred);
         ASSERT(structure != transition);
         offset = transition->add(vm, propertyName, attributes);

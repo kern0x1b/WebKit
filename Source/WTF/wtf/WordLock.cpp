@@ -26,7 +26,9 @@
 #include "config.h"
 #include <wtf/WordLock.h>
 
+#include <algorithm>
 #include <condition_variable>
+#include <cstdlib>
 #include <mutex>
 #include <wtf/Threading.h>
 
@@ -59,16 +61,50 @@ struct ThreadData {
 
 } // anonymous namespace
 
+#if defined(WEBKIT_IOS6)
+static unsigned wordLockPolicy(const char* name, unsigned defaultValue, unsigned minimum)
+{
+    const char* text = std::getenv(name);
+    if (!text || !text[0])
+        return defaultValue;
+    char* end = nullptr;
+    unsigned long parsed = std::strtoul(text, &end, 10);
+    if (end == text || parsed > 4096)
+        return defaultValue;
+    return std::max<unsigned>(minimum, static_cast<unsigned>(parsed));
+}
+
+// Two in-order cores at 800 MHz: this lock guards a ParkingLot bucket whose critical sections
+// are a few linked-list stores, and the generic policy calls Thread::yield() on each of its 40
+// spins -- on Darwin that is a thread_switch trap with SWITCH_OPTION_DEPRESS, so it both traps
+// and depresses this thread's priority. Poll with the cheap YIELD hint and park early, as
+// LockAlgorithm already does for WTF::Lock here.
+static const unsigned wordLockSpinLimit = wordLockPolicy("WEBKIT_WORDLOCK_SPIN_LIMIT", 16, 0);
+static const unsigned wordLockNopCount = wordLockPolicy("WEBKIT_WORDLOCK_NOP_COUNT", 8, 0);
+static const unsigned wordLockYieldInterval = wordLockPolicy("WEBKIT_WORDLOCK_YIELD_INTERVAL", 8, 1);
+#endif
+
 NEVER_INLINE void WordLock::lockSlow()
 {
     unsigned spinCount = 0;
 
+#if defined(WEBKIT_IOS6)
+    const unsigned spinLimit = wordLockSpinLimit;
+    unsigned spinsSinceYield = 0;
+#else
     // This magic number turns out to be optimal based on past JikesRVM experiments.
     const unsigned spinLimit = 40;
-    
+#endif
+
     for (;;) {
+#if defined(WEBKIT_IOS6)
+        // The seq_cst load costs a dmb ish per spin. No pointer is derived from this read;
+        // the compare-exchange below re-validates it and carries the acquire.
+        uintptr_t currentWordValue = m_word.load(std::memory_order_relaxed);
+#else
         uintptr_t currentWordValue = m_word.load();
-        
+#endif
+
         if (!(currentWordValue & isLockedBit)) {
             // It's not possible for someone to hold the queue lock while the lock itself is no longer
             // held, since we will only attempt to acquire the queue lock when the lock is held and
@@ -83,7 +119,16 @@ NEVER_INLINE void WordLock::lockSlow()
         // If there is no queue and we haven't spun too much, we can just try to spin around again.
         if (!(currentWordValue & ~queueHeadMask) && spinCount < spinLimit) {
             spinCount++;
+#if defined(WEBKIT_IOS6)
+            if (++spinsSinceYield >= wordLockYieldInterval) {
+                spinsSinceYield = 0;
+                Thread::yield();
+            }
+            for (unsigned i = 0; i < wordLockNopCount; ++i)
+                __asm__ volatile("yield");
+#else
             Thread::yield();
+#endif
             continue;
         }
 

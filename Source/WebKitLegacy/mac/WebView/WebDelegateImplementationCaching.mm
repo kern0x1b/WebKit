@@ -1282,6 +1282,50 @@ id CallFrameLoadDelegateInWebThread(IMP implementation, WebView *self, SEL selec
 }
 #endif // PLATFORM(IOS_FAMILY)
 
+#if defined(WEBKIT_IOS6)
+static NSInvocation *DeferredResourceInvocation(WebView *self, SEL selector)
+{
+    id delegate = [self _resourceLoadDelegateForwarder];
+    if (!delegate)
+        return nil;
+    NSInvocation *invocation = WebThreadMakeNSInvocation(delegate, selector);
+    if (!invocation)
+        return nil;
+    [invocation setArgument:&self atIndex:2];
+    return invocation;
+}
+
+void CallResourceLoadDelegateDeferred(WebView *self, SEL selector, id object1, id object2)
+{
+    NSInvocation *invocation = DeferredResourceInvocation(self, selector);
+    if (!invocation)
+        return;
+    [invocation setArgument:&object1 atIndex:3];
+    [invocation setArgument:&object2 atIndex:4];
+    @try {
+        WebThreadCallDelegateDeferred(invocation);
+    } @catch(id exception) {
+        ReportDiscardedDelegateException(selector, exception);
+    }
+}
+
+void CallResourceLoadDelegateDeferred(WebView *self, SEL selector, id object1, id object2, id object3)
+{
+    NSInvocation *invocation = DeferredResourceInvocation(self, selector);
+    if (!invocation)
+        return;
+    [invocation setArgument:&object1 atIndex:3];
+    [invocation setArgument:&object2 atIndex:4];
+    [invocation setArgument:&object3 atIndex:5];
+    @try {
+        WebThreadCallDelegateDeferred(invocation);
+    } @catch(id exception) {
+        ReportDiscardedDelegateException(selector, exception);
+    }
+}
+
+#endif
+
 BOOL CallResourceLoadDelegateReturningBoolean(BOOL result, IMP implementation, WebView *self, SEL selector, id object1)
 {
     @try {

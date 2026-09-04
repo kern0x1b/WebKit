@@ -42,6 +42,7 @@
 #include <wtf/FlipBytes.h>
 #include <wtf/TZoneMallocInlines.h>
 #include <wtf/cf/TypeCastsCF.h>
+#include <wtf/cf/VectorCF.h>
 
 #include "CoreVideoSoftLink.h"
 #include "MediaAccessibilitySoftLink.h"
@@ -320,8 +321,21 @@ static std::optional<IntSize> densityCorrectedSizeFromProperties(CFDictionaryRef
 ImageDecoderCG::ImageDecoderCG(FragmentedSharedBuffer& data, AlphaOption, GammaAndColorProfileOption)
 {
     RetainPtr<CFStringRef> utiHint;
+#if defined(WEBKIT_IOS6)
+    // The type is named by the first few bytes, but makeContiguous() here copies the
+    // whole body, and this constructor runs again every time the decoder is dropped
+    // under memory pressure and rebuilt from a complete image.
+    if (data.size() >= 32) {
+        std::array<uint8_t, 512> header;
+        auto headerSpan = std::span<uint8_t> { header }.first(std::min<size_t>(header.size(), data.size()));
+        data.copyTo(headerSpan, 0);
+        auto headerData = toCFData(headerSpan);
+        utiHint = CGImageSourceGetTypeWithData(headerData.get(), nullptr, nullptr);
+    }
+#else
     if (data.size() >= 32)
         utiHint = CGImageSourceGetTypeWithData(data.makeContiguous()->createCFData().get(), nullptr, nullptr);
+#endif
 
     if (utiHint) {
         const void* key = kCGImageSourceTypeIdentifierHint;

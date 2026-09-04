@@ -34,12 +34,21 @@
 
 namespace WebCore {
 
+#if defined(WEBKIT_IOS6)
+inline Document& RenderObject::document() const { return m_node->document(); }
+
+inline bool RenderObject::isDocumentElementRenderer() const
+{
+    return document().documentElement() == m_node;
+}
+#else
 inline Document& RenderObject::document() const { return m_node.get().document(); }
 
 inline bool RenderObject::isDocumentElementRenderer() const
 {
     return document().documentElement() == m_node.ptr();
 }
+#endif
 
 inline RenderView& RenderObject::view() const LIFETIME_BOUND
 {

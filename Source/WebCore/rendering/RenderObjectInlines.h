@@ -101,10 +101,11 @@ inline void RenderObject::setNeedsLayout(MarkingBehavior markParents)
     // wrong fixes, so this records the return address of every clean-to-dirty
     // transition and the top few are symbolised offline against the unstripped
     // build. Off unless the flag file is present, and the check is cached.
-    WebCore::recordNeedsLayoutCaller(__builtin_return_address(0));
+    if (WebCore::g_webkitIOS6NeedsLayoutRecording) [[unlikely]]
+        WebCore::recordNeedsLayoutCaller(__builtin_return_address(0));
 #endif
     if (markParents == MarkingBehavior::MarkContainingBlockChain)
-        scheduleLayout(CheckedPtr { markContainingBlocksForLayout() });
+        scheduleLayout(markContainingBlocksForLayout());
     if (hasLayer())
         setLayerNeedsFullRepaint();
 }

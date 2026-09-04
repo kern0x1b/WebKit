@@ -6937,7 +6937,7 @@ void SpeculativeJIT::compile(Node* node)
         Jump overflowedCounter = branchAdd32(PositiveOrZero, TrustedImm32(Options::ftlTierUpCounterIncrementForLoop()), Address(GPRInfo::jitDataRegister, JITData::offsetOfTierUpCounter()));
         Label toNextOperation = label();
 
-        Vector<SilentRegisterSavePlan> savePlans;
+        Vector<SilentRegisterSavePlan, silentRegisterSavePlanInlineCapacity> savePlans;
         silentSpillAllRegistersImpl(false, savePlans, tempGPR);
 
         unsigned streamIndex = m_stream.size();
@@ -8892,7 +8892,7 @@ void SpeculativeJIT::compileCreateClonedArguments(Node* node)
 
         mutatorFence(vm());
 
-        Vector<SilentRegisterSavePlan> savePlans;
+        Vector<SilentRegisterSavePlan, silentRegisterSavePlanInlineCapacity> savePlans;
         silentSpillAllRegistersImpl(false, savePlans, resultGPR);
         auto doneFromSlowPath = label();
         addSlowPathGeneratorLambda([=, this, savePlans = WTF::move(savePlans), slowCases = WTF::move(slowCases)] () {
@@ -9085,7 +9085,7 @@ void SpeculativeJIT::compileMapIteratorNext(Node* node)
     auto doneLabel = label();
 
     if (!slowCases.empty()) {
-        Vector<SilentRegisterSavePlan> savePlans;
+        Vector<SilentRegisterSavePlan, silentRegisterSavePlanInlineCapacity> savePlans;
         silentSpillAllRegistersImpl(false, savePlans, newStorageGPR, newEntryGPR);
 
         addSlowPathGeneratorLambda([=, this, slowCases = WTF::move(slowCases), savePlans = WTF::move(savePlans)] () mutable {
@@ -9152,7 +9152,7 @@ void SpeculativeJIT::compileStringIteratorNext(Node* node)
 
     doneCases.link(this);
 
-    Vector<SilentRegisterSavePlan> savePlans;
+    Vector<SilentRegisterSavePlan, silentRegisterSavePlanInlineCapacity> savePlans;
     silentSpillAllRegistersImpl(false, savePlans, resultValueGPR, resultPositionGPR);
     Label doneOperationCall = label();
     addSlowPathGeneratorLambda([=, this, savePlans = WTF::move(savePlans), slowCases = WTF::move(slowCases)]() mutable {

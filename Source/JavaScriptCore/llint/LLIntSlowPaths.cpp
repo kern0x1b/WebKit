@@ -1113,8 +1113,8 @@ LLINT_SLOW_PATH_DECL(slow_path_put_by_id)
         
         if (newStructure->propertyAccessesAreCacheable() && baseCell == slot.base()) {
             if (slot.type() == PutPropertySlot::NewProperty) {
-                GCSafeConcurrentJSLocker locker(codeBlock->m_lock, vm);
                 if (!newStructure->isDictionary() && newStructure->previousID()->outOfLineCapacity() == newStructure->outOfLineCapacity() && newStructure->previousID() == oldStructure) {
+                    GCSafeConcurrentJSLocker locker(codeBlock->m_lock, vm);
                     ASSERT(oldStructure->transitionWatchpointSetHasBeenInvalidated());
 
                     bool sawPolyProto = false;

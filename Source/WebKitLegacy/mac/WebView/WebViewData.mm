@@ -133,6 +133,9 @@ int pluginDatabaseClientCount = 0;
     pendingFixedPositionLayoutRect = CGRectNull;
 #if defined(WEBKIT_IOS6)
     lastAppliedFixedPositionLayoutRect = CGRectNull;
+    pendingLayoutViewportRect = CGRectNull;
+    layoutViewportRectUpdateScheduled = false;
+    preferencesChangedSweepScheduled = NO;
 #endif
 #endif
 

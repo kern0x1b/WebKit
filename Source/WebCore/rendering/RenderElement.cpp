@@ -596,8 +596,10 @@ void RenderElement::setStyle(Style::ComputedStyle&& style, Style::DifferenceResu
     // How much of the tree the engine restyles between layouts. A layout that
     // reports ten thousand dirty blocks is either a restyle of everything or a
     // dirtying of everything; this separates the two.
-    extern unsigned g_webkitIOS6StylesSet;
-    ++g_webkitIOS6StylesSet;
+    if (g_webkitIOS6LayoutCounters) [[unlikely]] {
+        extern unsigned g_webkitIOS6StylesSet;
+        ++g_webkitIOS6StylesSet;
+    }
 #endif
     // FIXME: Should change RenderView so it can use initializeStyle too.
     // If we do that, we can assert m_hasInitializedStyle unconditionally,

@@ -187,10 +187,26 @@ TextShapingResult FontCascade::layoutText(CodePath codePathToUse, const TextRun&
     return layoutSimpleText(run, from, to, forTextEmphasis);
 }
 
+#if defined(WEBKIT_IOS6)
+TextShapingResult FontCascade::layoutText(const TextRun& run, unsigned from, unsigned to, ForTextEmphasis forTextEmphasis) const
+{
+    if (RefPtr fonts = this->fonts()) {
+        if (auto* cached = fonts->getOrCreateCachedShapedText(run, *this, from, to, forTextEmphasis))
+            return cached->textShapingResult;
+    }
+
+    return layoutText(codePath(run, from, to), run, from, to, forTextEmphasis);
+}
+#endif
+
 FloatSize FontCascade::drawText(GraphicsContext& context, const TextRun& run, const FloatPoint& point, unsigned from, std::optional<unsigned> to, CustomFontNotReadyAction customFontNotReadyAction) const
 {
     unsigned destination = to.value_or(run.length());
+#if defined(WEBKIT_IOS6)
+    auto glyphBuffer = layoutText(run, from, destination).glyphBuffer;
+#else
     auto glyphBuffer = layoutText(codePath(run, from, to), run, from, destination).glyphBuffer;
+#endif
     glyphBuffer.flatten();
 
     if (glyphBuffer.isEmpty())
@@ -223,12 +239,16 @@ RefPtr<const DisplayList::DisplayList> FontCascade::displayListForTextRun(Graphi
     ASSERT(!context.paintingDisabled());
     unsigned destination = to.value_or(run.length());
 
+#if defined(WEBKIT_IOS6)
+    auto glyphBuffer = layoutText(run, from, destination).glyphBuffer;
+#else
     // FIXME: Use the fast code path once it handles partial runs with kerning and ligatures. See http://webkit.org/b/100050
     CodePath codePathToUse = codePath(run);
     if (codePathToUse != CodePath::Complex && !canHandleRunAsSimpleText(run, from, destination))
         codePathToUse = CodePath::Complex;
 
     auto glyphBuffer = layoutText(codePathToUse, run, from, destination).glyphBuffer;
+#endif
     glyphBuffer.flatten();
 
     return displayListForGlyphBuffer(context, glyphBuffer, customFontNotReadyAction);
@@ -283,7 +303,7 @@ float FontCascade::widthOfTextRange(const TextRun& run, unsigned from, unsigned 
     float totalWidth = 0;
 
     if (shouldUseComplexTextController(codePath(run))) {
-        ComplexTextController complexIterator(*this, run);
+        ComplexTextController complexIterator(*this, run, false, nullptr, false, false);
         complexIterator.advance(from, nullptr, GlyphIterationStyle::IncludePartialGlyphs, nullptr);
         offsetBeforeRange = complexIterator.runWidthSoFar();
         complexIterator.advance(to, nullptr, GlyphIterationStyle::IncludePartialGlyphs, nullptr);
@@ -382,7 +402,7 @@ float FontCascade::width(const TextRun& run, SingleThreadWeakHashSet<const Font>
 float FontCascade::width(CodePath codePathToUse, const TextRun& run, SingleThreadWeakHashSet<const Font>* fallbackFonts, GlyphOverflow* glyphOverflow) const
 {
     if (shouldUseComplexTextController(codePathToUse)) {
-        ComplexTextController controller(*this, run, true, fallbackFonts);
+        ComplexTextController controller(*this, run, true, fallbackFonts, false, static_cast<bool>(glyphOverflow));
         if (glyphOverflow) {
             glyphOverflow->top = std::max<double>(glyphOverflow->top, -controller.minGlyphBoundingBoxY() - (glyphOverflow->computeBounds ? 0 : metricsOfPrimaryFont().ascent()));
             glyphOverflow->bottom = std::max<double>(glyphOverflow->bottom, controller.maxGlyphBoundingBoxY() - (glyphOverflow->computeBounds ? 0 : metricsOfPrimaryFont().descent()));
@@ -623,7 +643,7 @@ Vector<LayoutRect> FontCascade::characterSelectionRectsForText(const TextRun& ru
     bool rtl = run.rtl();
 
     // FIXME: We could further optimize this by using the simple text codepath when applicable.
-    ComplexTextController controller(*this, run);
+    ComplexTextController controller(*this, run, false, nullptr, false, false);
     controller.advance(from);
 
     return Vector<LayoutRect>(to - from, [&](size_t i) {
@@ -790,22 +810,19 @@ FontCascade::CodePath FontCascade::characterRangeCodePath(std::span<const char16
     // list of ranges.
     size_t size = span.size();
 
-    // Every early exit below needs a code point >= U+02E5, and so does the zero-width
-    // joiner. A max-reduction, which vectorizes, settles the whole run in one pass for
-    // Latin text - the reason this path is reached at all is usually a stray non-Latin1
-    // character elsewhere in the string - instead of walking the ladder of range
-    // comparisons per character.
-    char16_t highest = 0;
-    for (size_t i = 0; i < size; ++i) {
-        if (span[i] > highest)
-            highest = span[i];
-    }
-    if (highest < 0x2E5)
+    // Every exit below needs a code point >= U+02E5, the zero-width joiner is above it and
+    // nothing below it can set previousCharacterIsEmojiGroupCandidate, so the leading
+    // stretch under U+02E5 leaves the loop state untouched and the ladder can start after
+    // it. A run entirely under U+02E5 - the Latin case - settles in that one scan.
+    size_t start = 0;
+    while (start < size && span[start] < 0x2E5)
+        ++start;
+    if (start == size)
         return CodePath::Simple;
 
     CodePath result = CodePath::Simple;
     bool previousCharacterIsEmojiGroupCandidate = false;
-    for (size_t i = 0; i < size; ++i) {
+    for (size_t i = start; i < size; ++i) {
         auto c = span[i];
         if (c == zeroWidthJoiner && previousCharacterIsEmojiGroupCandidate)
             return CodePath::Complex;
@@ -1580,7 +1597,7 @@ TextShapingResult FontCascade::layoutComplexText(const TextRun& run, unsigned fr
 {
     TextShapingResult result;
 
-    ComplexTextController controller(*this, run, false, 0, forTextEmphasis == ForTextEmphasis::Yes);
+    ComplexTextController controller(*this, run, false, 0, forTextEmphasis == ForTextEmphasis::Yes, false);
     GlyphBuffer glyphBufferForStartingIndex;
     controller.advance(from, &glyphBufferForStartingIndex);
     float widthBeforeSegment = controller.runWidthSoFar();
@@ -1739,7 +1756,7 @@ void FontCascade::adjustSelectionRectForSimpleText(const TextRun& run, LayoutRec
 
 void FontCascade::adjustSelectionRectForComplexText(const TextRun& run, LayoutRect& selectionRect, unsigned from, unsigned to) const
 {
-    ComplexTextController controller(*this, run);
+    ComplexTextController controller(*this, run, false, nullptr, false, false);
     controller.advance(from);
     float beforeWidth = controller.runWidthSoFar();
     controller.advance(to);
@@ -1811,7 +1828,7 @@ int FontCascade::offsetForPositionForSimpleText(const TextRun& run, float x, boo
 
 int FontCascade::offsetForPositionForComplexText(const TextRun& run, float x, bool includePartialGlyphs) const
 {
-    ComplexTextController controller(*this, run);
+    ComplexTextController controller(*this, run, false, nullptr, false, false);
     return controller.offsetForPosition(x, includePartialGlyphs);
 }
 
@@ -1961,7 +1978,11 @@ Vector<FloatSegment> FontCascade::lineSegmentsForIntersectionsWithRect(const Tex
     if (isLoadingCustomFonts())
         return result;
 
+#if defined(WEBKIT_IOS6)
+    auto glyphBuffer = layoutText(run, 0, run.length()).glyphBuffer;
+#else
     auto glyphBuffer = layoutText(codePath(run), run, 0, run.length()).glyphBuffer;
+#endif
     if (!glyphBuffer.size())
         return result;
 

@@ -196,7 +196,14 @@ public:
                 }
                 isNewEntry = descendants->appendOrMoveToLast(outOfFlowDescendant).isNewEntry;
             };
+#if defined(WEBKIT_IOS6)
+            if (descendants->contains(outOfFlowDescendant))
+                isNewEntry = false;
+            else
+                ensureLayoutDependentBoxPosition();
+#else
             ensureLayoutDependentBoxPosition();
+#endif
         }
 
         if (!isNewEntry) {

@@ -456,6 +456,12 @@ void GraphicsContext::drawVideoFrame(const VideoFrame& frame, const FloatRect& d
 
 void GraphicsContext::clipRoundedRect(const FloatRoundedRect& rect)
 {
+#if defined(WEBKIT_IOS6)
+    if (!rect.hasNonZeroRadii()) {
+        clip(rect.rect());
+        return;
+    }
+#endif
     Path path;
     path.addRoundedRect(rect);
     clipPath(path);

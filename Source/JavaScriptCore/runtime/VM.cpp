@@ -2038,13 +2038,27 @@ void VM::performOpportunisticallyScheduledTasks(ApproximateTime deadline, Option
         if (timeSinceLastGC > minimumDelayBeforeOpportunisticEdenGC && heap.totalBytesAllocatedThisCycle() && heap.m_bytesAllocatedBeforeLastEdenCollect) {
             auto estimatedGCDuration = (heap.lastEdenGCLength() * heap.totalBytesAllocatedThisCycle()) / heap.m_bytesAllocatedBeforeLastEdenCollect;
             if (estimatedGCDuration + extraDurationToAvoidExceedingDeadlineDuringEdenGC < remainingTime) {
-                dataLogLnIf(verbose, "[OPPORTUNISTIC TASK] EDEN: ", timeSinceFinishingLastFullGC, " ", timeSinceLastGC, " ", heap.m_shouldDoOpportunisticFullCollection, " ", heap.m_totalBytesVisitedAfterLastFullCollect, " ", heap.totalBytesAllocatedThisCycle(), " ", heap.m_bytesAllocatedBeforeLastEdenCollect, " ", heap.m_lastGCEndTime, " ", heap.m_currentGCStartTime, " ", (heap.lastFullGCLength() * heap.m_totalBytesVisited) / heap.m_totalBytesVisitedAfterLastFullCollect, " ", remainingTime, " ", (heap.lastEdenGCLength() * heap.totalBytesAllocatedThisCycle()) / heap.m_bytesAllocatedBeforeLastEdenCollect, " signpost:(", JSC::activeJSGlobalObjectSignpostIntervalCount.load(), ")");
-                heap.collectSync(CollectionScope::Eden);
-                return;
+#if defined(WEBKIT_IOS6)
+                if (!heap.consumeEdenAllocationFloorSkip(0)) {
+                    heap.noteOpportunisticEdenCollection();
+#endif
+                    dataLogLnIf(verbose, "[OPPORTUNISTIC TASK] EDEN: ", timeSinceFinishingLastFullGC, " ", timeSinceLastGC, " ", heap.m_shouldDoOpportunisticFullCollection, " ", heap.m_totalBytesVisitedAfterLastFullCollect, " ", heap.totalBytesAllocatedThisCycle(), " ", heap.m_bytesAllocatedBeforeLastEdenCollect, " ", heap.m_lastGCEndTime, " ", heap.m_currentGCStartTime, " ", (heap.lastFullGCLength() * heap.m_totalBytesVisited) / heap.m_totalBytesVisitedAfterLastFullCollect, " ", remainingTime, " ", (heap.lastEdenGCLength() * heap.totalBytesAllocatedThisCycle()) / heap.m_bytesAllocatedBeforeLastEdenCollect, " signpost:(", JSC::activeJSGlobalObjectSignpostIntervalCount.load(), ")");
+                    heap.collectSync(CollectionScope::Eden);
+                    return;
+#if defined(WEBKIT_IOS6)
+                }
+#endif
             } else if (estimatedGCDuration < 2 * remainingTime) {
                 if (heap.totalBytesAllocatedThisCycle() * 2 > heap.m_minBytesPerCycle) {
-                    heap.collectAsync(CollectionScope::Eden);
-                    return;
+#if defined(WEBKIT_IOS6)
+                    if (!heap.consumeEdenAllocationFloorSkip(0)) {
+                        heap.noteOpportunisticEdenCollection();
+#endif
+                        heap.collectAsync(CollectionScope::Eden);
+                        return;
+#if defined(WEBKIT_IOS6)
+                    }
+#endif
                 }
             }
         }

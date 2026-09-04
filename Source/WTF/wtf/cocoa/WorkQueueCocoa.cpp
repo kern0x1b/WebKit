@@ -49,9 +49,24 @@ template<typename T> static void dispatchWorkItem(void* dispatchContext)
     delete item;
 }
 
+#if defined(WEBKIT_IOS6)
+// USE(SYSTEM_MALLOC) on this port, so the DispatchWorkItem box is a second libsystem_malloc
+// round trip on top of the one the Function's callable wrapper already paid for. The wrapper
+// is itself a heap object with the right lifetime, so hand it to dispatch directly.
+static void dispatchLeakedFunction(void* dispatchContext)
+{
+    auto function = adopt(static_cast<Function<void()>::Impl*>(dispatchContext));
+    function();
+}
+#endif
+
 void WorkQueueBase::dispatch(Function<void()>&& function)
 {
+#if defined(WEBKIT_IOS6)
+    dispatch_async_f(m_dispatchQueue.get(), function.leak(), dispatchLeakedFunction);
+#else
     dispatch_async_f(m_dispatchQueue.get(), new DispatchWorkItem { WTF::move(function) }, dispatchWorkItem<DispatchWorkItem>);
+#endif
 }
 
 void WorkQueueBase::dispatchWithQOS(Function<void()>&& function, QOS qos)
@@ -66,12 +81,20 @@ void WorkQueueBase::dispatchWithQOS(Function<void()>&& function, QOS qos)
 
 void WorkQueueBase::dispatchAfter(Seconds duration, Function<void()>&& function)
 {
+#if defined(WEBKIT_IOS6)
+    dispatch_after_f(dispatch_time(DISPATCH_TIME_NOW, duration.nanosecondsAs<int64_t>()), m_dispatchQueue.get(), function.leak(), dispatchLeakedFunction);
+#else
     dispatch_after_f(dispatch_time(DISPATCH_TIME_NOW, duration.nanosecondsAs<int64_t>()), m_dispatchQueue.get(), new DispatchWorkItem { WTF::move(function) }, dispatchWorkItem<DispatchWorkItem>);
+#endif
 }
 
 void WorkQueueBase::dispatchSync(Function<void()>&& function)
 {
+#if defined(WEBKIT_IOS6)
+    dispatch_sync_f(m_dispatchQueue.get(), function.leak(), dispatchLeakedFunction);
+#else
     dispatch_sync_f(m_dispatchQueue.get(), new Function<void()> { WTF::move(function) }, dispatchWorkItem<Function<void()>>);
+#endif
 }
 
 WorkQueueBase::WorkQueueBase(OSObjectPtr<dispatch_queue_t>&& dispatchQueue)

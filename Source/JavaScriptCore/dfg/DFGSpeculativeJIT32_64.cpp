@@ -5749,7 +5749,7 @@ void SpeculativeJIT::compileStringIteratorNext(Node* node)
 
     doneCases.link(this);
 
-    Vector<SilentRegisterSavePlan> savePlans;
+    Vector<SilentRegisterSavePlan, silentRegisterSavePlanInlineCapacity> savePlans;
     silentSpillAllRegistersImpl(false, savePlans, resultValueGPR, resultPositionGPR);
     Label doneOperationCall = label();
     addSlowPathGeneratorLambda([=, this, savePlans = WTF::move(savePlans), slowCases = WTF::move(slowCases)]() mutable {

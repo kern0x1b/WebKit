@@ -240,8 +240,69 @@ void EventPath::retargetTouchList(EventContext::TouchListType type, const TouchL
         retargetTouch(type, *list->item(i));
 }
 
+#if defined(WEBKIT_IOS6)
+
+static bool ios6TouchListStaysInScope(const TouchList* list, const TreeScope& scope)
+{
+    for (unsigned i = 0, length = list ? list->length() : 0; i < length; ++i) {
+        auto* target = dynamicDowncast<Node>(list->item(i)->target());
+        if (!target || &target->treeScope() != &scope || !target->isConnected())
+            return false;
+    }
+    return true;
+}
+
+bool EventPath::ios6ShareTouchListsAcrossPath(const TouchEvent& event)
+{
+    if (m_path.isEmpty())
+        return true;
+
+    auto* firstNode = m_path[0].node();
+    if (!firstNode || !firstNode->isConnected())
+        return false;
+
+    SUPPRESS_UNCOUNTED_LOCAL TreeScope& scope = firstNode->treeScope();
+    for (auto& context : m_path) {
+        auto* node = context.node();
+        if (!node || &node->treeScope() != &scope)
+            return false;
+    }
+
+    if (!ios6TouchListStaysInScope(event.touches(), scope)
+        || !ios6TouchListStaysInScope(event.targetTouches(), scope)
+        || !ios6TouchListStaysInScope(event.changedTouches(), scope))
+        return false;
+
+    auto listOrEmpty = [](TouchList* list) -> Ref<TouchList> {
+        if (list)
+            return *list;
+        return TouchList::create();
+    };
+
+    Ref<TouchList> touches = listOrEmpty(event.touches());
+    Ref<TouchList> targetTouches = listOrEmpty(event.targetTouches());
+    Ref<TouchList> changedTouches = listOrEmpty(event.changedTouches());
+
+    for (auto& context : m_path) {
+        if (context.isTouchEventContext())
+            context.ios6AdoptTouchLists(touches.get(), targetTouches.get(), changedTouches.get());
+    }
+    return true;
+}
+
+#endif
+
 void EventPath::retargetTouchLists(const TouchEvent& event)
 {
+#if defined(WEBKIT_IOS6)
+    if (ios6ShareTouchListsAcrossPath(event))
+        return;
+
+    for (auto& context : m_path) {
+        if (context.isTouchEventContext())
+            context.ios6EnsureTouchLists();
+    }
+#endif
     retargetTouchList(EventContext::TouchListType::Touches, event.touches());
     retargetTouchList(EventContext::TouchListType::TargetTouches, event.targetTouches());
     retargetTouchList(EventContext::TouchListType::ChangedTouches, event.changedTouches());

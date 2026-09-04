@@ -69,7 +69,8 @@ public:
                 {
                     unsigned numSuccessors = block->numSuccessors();
                     if (!numSuccessors) {
-                        m_currentFlags = Operands<NodeFlags>(OperandsLike, m_graph.block(0)->variablesAtHead);
+                        if (m_currentFlags.size() != m_graph.block(0)->variablesAtHead.size())
+                            m_currentFlags = Operands<NodeFlags>(OperandsLike, m_graph.block(0)->variablesAtHead);
                         m_currentFlags.fill(0);
                     } else {
                         m_currentFlags = m_flagsAtHead[block->successor(0)];

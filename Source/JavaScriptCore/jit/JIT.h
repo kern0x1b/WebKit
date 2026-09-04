@@ -929,6 +929,16 @@ namespace JSC {
         bool m_canBeOptimized;
         bool m_shouldEmitProfiling;
 
+#if defined(WEBKIT_IOS6)
+        // Set in compileAndLinkWithoutFinalizing() when this CodeBlock was refused DFG
+        // compilation solely because its bytecodeCost() exceeds
+        // Options::maximumOptimizationCandidateBytecodeCost(), and WEBKIT_IOS6_OPT_CEILING_LOG
+        // instrumentation is active. Points at a persistent per-CodeBlock counter that
+        // emit_op_enter() bumps on every call, so the refused block's call count can be read
+        // back out of process at any time. Null (the default) costs nothing at emission time.
+        uint32_t* m_costCeilingCounterSlot { nullptr };
+#endif
+
         CodeBlock* const m_profiledCodeBlock { nullptr };
         UnlinkedCodeBlock* const m_unlinkedCodeBlock { nullptr };
 

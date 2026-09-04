@@ -942,6 +942,20 @@ RefPtr<Text> CompositeEditCommand::textNodeForRebalance(const Position& position
 // FIXME: Doesn't go into text nodes that contribute adjacent text (siblings, cousins, etc).
 void CompositeEditCommand::rebalanceWhitespaceAt(const Position& position)
 {
+#if defined(WEBKIT_IOS6)
+    if (position.anchorType() != Position::PositionIsOffsetInAnchor)
+        return;
+
+    RefPtr rebalanceCandidate = dynamicDowncast<Text>(position.containerNode());
+    if (!rebalanceCandidate || !rebalanceCandidate->length())
+        return;
+
+    int rebalanceOffset = position.deprecatedEditingOffset();
+    String rebalanceText = rebalanceCandidate->data();
+    if (!deprecatedIsEditingWhitespace(rebalanceText[rebalanceOffset]) && (rebalanceOffset < 1 || !deprecatedIsEditingWhitespace(rebalanceText[rebalanceOffset - 1])))
+        return;
+#endif
+
     auto textNode = textNodeForRebalance(position);
     if (!textNode)
         return;
@@ -1745,12 +1759,21 @@ Position CompositeEditCommand::positionAvoidingSpecialElementBoundary(const Posi
     if (original.isNull())
         return original;
         
+#if defined(WEBKIT_IOS6)
+    RefPtr enclosingAnchor { enclosingAnchorElement(original) };
+    if (!enclosingAnchor)
+        return original;
+
+    VisiblePosition visiblePos(original);
+    Position result = original;
+#else
     VisiblePosition visiblePos(original);
     RefPtr enclosingAnchor { enclosingAnchorElement(original) };
     Position result = original;
 
     if (!enclosingAnchor)
         return result;
+#endif
 
     // Don't avoid block level anchors, because that would insert content into the wrong paragraph.
     if (enclosingAnchor && !isBlock(*enclosingAnchor)) {

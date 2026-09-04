@@ -102,6 +102,19 @@ inline bool validationEnabled()
 }
 #endif
 
+#if defined(WEBKIT_IOS6)
+struct PipelineTuning {
+    unsigned preciseLocalCSEBlockLimit;
+    bool typeCheckHoisting;
+    bool staticExecutionCountEstimation;
+    bool localCSE;
+    bool strengthReduction;
+    bool varargsForwarding;
+};
+
+const PipelineTuning& pipelineTuning();
+#endif
+
 inline bool constexpr enableInt52()
 {
 #if USE(JSVALUE64)

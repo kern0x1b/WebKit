@@ -36,12 +36,41 @@
 #include "SVGPoint.h"
 #include "Settings.h"
 #include "StyleComputedStyle+GettersInlines.h"
+#include <algorithm>
+#include <cstdlib>
 #include <wtf/TZoneMallocInlines.h>
 #include <wtf/text/MakeString.h>
 
 namespace WebCore {
 
 WTF_MAKE_TZONE_ALLOCATED_IMPL(SVGPathElement);
+
+static uint64_t svgPathSegListCacheMaxSizeInBytes()
+{
+    static const uint64_t maxSize = [] -> uint64_t {
+        if (const char* override = getenv("WEBKIT_IOS6_SVG_PATH_CACHE_KB")) {
+            int parsed = atoi(override);
+            if (parsed > 0)
+                return static_cast<uint64_t>(parsed) * 1024;
+        }
+        return 150 * 1024;
+    }();
+    return maxSize;
+}
+
+static uint64_t svgPathSegListCacheMaxItemSizeInBytes()
+{
+    static const uint64_t maxItemSize = [] -> uint64_t {
+        uint64_t requested = 5 * 1024;
+        if (const char* override = getenv("WEBKIT_IOS6_SVG_PATH_CACHE_ITEM_KB")) {
+            int parsed = atoi(override);
+            if (parsed > 0)
+                requested = static_cast<uint64_t>(parsed) * 1024;
+        }
+        return std::min(requested, svgPathSegListCacheMaxSizeInBytes());
+    }();
+    return maxItemSize;
+}
 
 class PathSegListCache {
 public:
@@ -57,8 +86,6 @@ private:
 
     HashMap<AtomString, DataRef<SVGPathByteStream::Data>> m_cache;
     uint64_t m_sizeInBytes { 0 };
-    static constexpr uint64_t maxItemSizeInBytes = 5 * 1024; // 5 Kb.
-    static constexpr uint64_t maxCacheSizeInBytes = 150 * 1024; // 150 Kb.
 };
 
 PathSegListCache& PathSegListCache::singleton()
@@ -75,11 +102,11 @@ std::optional<DataRef<SVGPathByteStream::Data>> PathSegListCache::get(const Atom
 void PathSegListCache::add(const AtomString& attributeValue, DataRef<SVGPathByteStream::Data> data)
 {
     size_t newDataSize = data->size();
-    if (newDataSize > maxItemSizeInBytes) [[unlikely]]
+    if (newDataSize > svgPathSegListCacheMaxItemSizeInBytes()) [[unlikely]]
         return;
 
     m_sizeInBytes += newDataSize;
-    while (m_sizeInBytes > maxCacheSizeInBytes) {
+    while (m_sizeInBytes > svgPathSegListCacheMaxSizeInBytes()) {
         ASSERT(!m_cache.isEmpty());
         auto iteratorToRemove = m_cache.random();
         ASSERT(iteratorToRemove != m_cache.end());

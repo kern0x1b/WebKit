@@ -33,7 +33,7 @@ WEBCORE_EXPORT JSC::JSValue createWrapper(JSDOMGlobalObject&, Ref<NodeList>&&);
 
 ALWAYS_INLINE JSC::JSValue toJS(JSC::JSGlobalObject*, JSDOMGlobalObject* globalObject, NodeList& nodeList)
 {
-    if (auto wrapper = getCachedWrapper(globalObject->world(), nodeList))
+    if (auto wrapper = getCachedWrapper(*globalObject, nodeList))
         return wrapper;
     return createWrapper(*globalObject, nodeList);
 }

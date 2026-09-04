@@ -1541,7 +1541,10 @@ inline Expected<std::invoke_result_t<Func, std::span<const char8_t>>, UTF8Conver
     if (productOverflows<size_t>(characters.size(), 2) || !isValidCapacityForVector<char8_t>(characters.size() * 2)) [[unlikely]]
         return makeUnexpected(UTF8ConversionError::OutOfMemory);
 
-#if CPU(ARM64)
+#if CPU(ARM64) || (defined(WEBKIT_IOS6) && CPU(LITTLE_ENDIAN))
+    // An all-ASCII Latin-1 string is already valid UTF-8. Taking this branch skips a
+    // 2x-sized buffer (heap-allocated past 1024 bytes) and a full conversion pass, which is
+    // what every URL, header and attribute value paid for on the way out.
     if (auto* firstNonASCII = find8NonASCII(characters)) {
         size_t prefixLength = firstNonASCII - characters.data();
         size_t remainingLength = characters.size() - prefixLength;

@@ -221,6 +221,7 @@
 #include "WorkerOrWorkletScriptController.h"
 #include <JavaScriptCore/VM.h>
 #include <ranges>
+#include <stdlib.h>
 #include <wtf/Borrow.h>
 #include <wtf/FileSystem.h>
 #include <wtf/StdLibExtras.h>
@@ -2893,6 +2894,23 @@ void Page::timelineControllerMaximumAnimationFrameRateDidChange(AnimationTimelin
     chrome().client().renderingUpdateFramesPerSecondChanged();
 }
 
+#if defined(WEBKIT_IOS6)
+static FramesPerSecond pageIOS6RenderingUpdateFrameRateCap()
+{
+    static const FramesPerSecond cap = [] -> FramesPerSecond {
+        if (const char* override = getenv("WEBKIT_IOS6_RENDERING_UPDATE_FPS")) {
+            int parsed = atoi(override);
+            if (parsed > 0 && parsed <= FullSpeedFramesPerSecond)
+                return static_cast<FramesPerSecond>(parsed);
+            if (parsed <= 0)
+                return FullSpeedFramesPerSecond;
+        }
+        return 30;
+    }();
+    return cap;
+}
+#endif
+
 std::optional<FramesPerSecond> Page::preferredRenderingUpdateFramesPerSecond(OptionSet<PreferredRenderingUpdateOption> flags) const
 {
     // Unless the call site specifies an explicit set of options, this method will account for both
@@ -2905,6 +2923,14 @@ std::optional<FramesPerSecond> Page::preferredRenderingUpdateFramesPerSecond(Opt
         throttlingReasons = { };
 
     auto frameRate = preferredFramesPerSecond(throttlingReasons, m_displayNominalFramesPerSecond, settings().preferPageRenderingUpdatesNear60FPSEnabled());
+#if defined(WEBKIT_IOS6)
+    auto capped = [] (std::optional<FramesPerSecond> rate) {
+        if (rate && *rate > pageIOS6RenderingUpdateFrameRateCap())
+            rate = pageIOS6RenderingUpdateFrameRateCap();
+        return rate;
+    };
+    frameRate = capped(frameRate);
+#endif
     if (!flags.contains(PreferredRenderingUpdateOption::IncludeAnimationsFrameRate))
         return frameRate;
 
@@ -2914,6 +2940,20 @@ std::optional<FramesPerSecond> Page::preferredRenderingUpdateFramesPerSecond(Opt
     if (isThrottled)
         return frameRate;
 
+#if defined(WEBKIT_IOS6)
+    Vector<Ref<Document>, 8> documents;
+    collectDocuments(mainFrame(), documents);
+    for (auto& document : documents) {
+        if (CheckedPtr timelinesController = document->timelinesController()) {
+            if (auto timelinePreferredFrameRate = timelinesController->maximumAnimationFrameRate()) {
+                if (!frameRate || *frameRate < *timelinePreferredFrameRate)
+                    frameRate = *timelinePreferredFrameRate;
+            }
+        }
+    }
+
+    return capped(frameRate);
+#else
     forEachDocument([&] (Document& document) {
         if (CheckedPtr timelinesController = document.timelinesController()) {
             if (auto timelinePreferredFrameRate = timelinesController->maximumAnimationFrameRate()) {
@@ -2924,11 +2964,18 @@ std::optional<FramesPerSecond> Page::preferredRenderingUpdateFramesPerSecond(Opt
     });
 
     return frameRate;
+#endif
 }
 
 Seconds Page::preferredRenderingUpdateInterval() const
 {
-    return preferredFrameInterval(m_throttlingReasons, m_displayNominalFramesPerSecond, settings().preferPageRenderingUpdatesNear60FPSEnabled());
+    auto interval = preferredFrameInterval(m_throttlingReasons, m_displayNominalFramesPerSecond, settings().preferPageRenderingUpdatesNear60FPSEnabled());
+#if defined(WEBKIT_IOS6)
+    static const Seconds cappedInterval { 1.0 / pageIOS6RenderingUpdateFrameRateCap() };
+    if (interval < cappedInterval)
+        return cappedInterval;
+#endif
+    return interval;
 }
 
 void Page::setIsVisuallyIdleInternal(bool isVisuallyIdle)

@@ -29,10 +29,31 @@
 #include "JSCInlines.h"
 #include "VisitCounter.h"
 #include <wtf/TZoneMallocInlines.h>
+#if defined(WEBKIT_IOS6)
+#include <atomic>
+#include <cstring>
+#include <wtf/MonotonicTime.h>
+#endif
 
 namespace JSC {
 
 static constexpr bool verboseMarkingConstraint = false;
+
+#if defined(WEBKIT_IOS6)
+namespace {
+std::atomic<uint64_t> ios6WeakOutputConstraintNanoseconds { 0 };
+
+ALWAYS_INLINE bool ios6IsWeakOrOutputConstraint(const char* abbreviatedName)
+{
+    return !strcmp(abbreviatedName, "Ws") || !strcmp(abbreviatedName, "O");
+}
+} // namespace
+
+uint64_t ios6TakeWeakOutputConstraintNanoseconds()
+{
+    return ios6WeakOutputConstraintNanoseconds.exchange(0, std::memory_order_relaxed);
+}
+#endif
 
 WTF_MAKE_TZONE_ALLOCATED_IMPL(MarkingConstraint);
 
@@ -56,7 +77,17 @@ void MarkingConstraint::execute(SlotVisitor& visitor)
 {
     ASSERT(!visitor.heap()->isMarkingForGCVerifier());
     VisitCounter visitCounter(visitor);
+#if defined(WEBKIT_IOS6)
+    bool ios6IsWeakOutput = ios6IsWeakOrOutputConstraint(abbreviatedName());
+    MonotonicTime ios6Start = ios6IsWeakOutput ? MonotonicTime::now() : MonotonicTime();
+#endif
     executeImpl(visitor);
+#if defined(WEBKIT_IOS6)
+    if (ios6IsWeakOutput) {
+        uint64_t ios6Elapsed = static_cast<uint64_t>((MonotonicTime::now() - ios6Start).nanoseconds());
+        ios6WeakOutputConstraintNanoseconds.fetch_add(ios6Elapsed, std::memory_order_relaxed);
+    }
+#endif
     m_lastVisitCount += visitCounter.visitCount();
     if (verboseMarkingConstraint && visitCounter.visitCount())
         dataLog("(", abbreviatedName(), " visited ", visitCounter.visitCount(), " in execute)");
@@ -93,7 +124,17 @@ void MarkingConstraint::doParallelWork(SlotVisitor& visitor, SharedTask<void(Slo
 {
     ASSERT(!visitor.heap()->isMarkingForGCVerifier());
     VisitCounter visitCounter(visitor);
+#if defined(WEBKIT_IOS6)
+    bool ios6IsWeakOutput = ios6IsWeakOrOutputConstraint(abbreviatedName());
+    MonotonicTime ios6Start = ios6IsWeakOutput ? MonotonicTime::now() : MonotonicTime();
+#endif
     task.run(visitor);
+#if defined(WEBKIT_IOS6)
+    if (ios6IsWeakOutput) {
+        uint64_t ios6Elapsed = static_cast<uint64_t>((MonotonicTime::now() - ios6Start).nanoseconds());
+        ios6WeakOutputConstraintNanoseconds.fetch_add(ios6Elapsed, std::memory_order_relaxed);
+    }
+#endif
     if (verboseMarkingConstraint && visitCounter.visitCount())
         dataLog("(", abbreviatedName(), " visited ", visitCounter.visitCount(), " in doParallelWork)");
     {

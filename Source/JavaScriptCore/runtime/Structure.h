@@ -207,6 +207,11 @@ public:
     static constexpr int s_maxTransitionLengthForNonEvalPutById = 512;
     static constexpr int s_maxTransitionLengthForRemove = 4096; // Picked from benchmarking measurement.
 
+#if defined(WEBKIT_IOS6)
+    JS_EXPORT_PRIVATE static int maxTransitionLengthForNonEvalPutById();
+    static void logCacheableDictionaryTransitionForAdd(PropertyName, PutPropertySlot::Context);
+#endif
+
     using SeenProperties = TinyBloomFilter<CompactPtr<UniquedStringImpl>::StorageType>;
 
     enum PolyProtoTag { PolyProto };
@@ -249,11 +254,17 @@ public:
 
     inline bool shouldDoCacheableDictionaryTransitionForAdd(PutPropertySlot::Context context)
     {
+#if defined(WEBKIT_IOS6)
+        int maxTransitionLength = s_maxTransitionLength;
+        if (context == PutPropertySlot::PutById)
+            maxTransitionLength = maxTransitionLengthForNonEvalPutById();
+#else
         int maxTransitionLength;
         if (context == PutPropertySlot::PutById)
             maxTransitionLength = s_maxTransitionLengthForNonEvalPutById;
         else
             maxTransitionLength = s_maxTransitionLength;
+#endif
         return transitionCountEstimate() > maxTransitionLength;
     }
 

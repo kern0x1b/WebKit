@@ -31,6 +31,9 @@
 #include <wtf/AutomaticThread.h>
 #include <wtf/Platform.h>
 #include <wtf/SequesteredAutomaticThread.h>
+#if defined(WEBKIT_IOS6)
+#include <wtf/Deque.h>
+#endif
 
 namespace JSC {
 
@@ -63,6 +66,17 @@ public:
 private:
     PollResult poll(const AbstractLocker&) final;
     WorkResult work() final;
+
+#if defined(WEBKIT_IOS6)
+    // Dequeue-time reordering for the DFG tier's queue - see JITWorklist.h's Tier enum and
+    // JITWorklist::m_queues. Only called from poll(), which already holds
+    // m_worklist.m_lock for the whole call (that's the point of AutomaticThread's poll/work
+    // split), so this and everything it calls assume that lock is held. Returns null only if
+    // the queue became empty as a result of eviction (see the .cpp for what "eviction" means
+    // here) - never as the upstream "thread should stop" sentinel, which only ever comes from
+    // queue.takeFirst() in poll() itself.
+    RefPtr<JITPlan> selectAndRemoveBestDFGPlan(Deque<RefPtr<JITPlan>>&);
+#endif
 
     void threadDidStart() final;
 

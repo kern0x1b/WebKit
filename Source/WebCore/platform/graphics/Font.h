@@ -205,6 +205,10 @@ public:
 
     const GlyphPage* glyphPage(unsigned pageNumber) const;
 
+#if USE(CORE_TEXT) && defined(WEBKIT_IOS6) && !ENABLE(OPENTYPE_VERTICAL)
+    void prewarmGlyphAdvances(const GlyphPage&) const;
+#endif
+
     void determinePitch();
     PitchType pitch() const { return m_treatAsFixedPitch ? PitchType::Fixed : PitchType::Variable; }
     bool canTakeFixedPitchFastContentMeasuring() const { return m_canTakeFixedPitchFastContentMeasuring; }

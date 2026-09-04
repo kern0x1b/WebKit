@@ -131,7 +131,11 @@ public:
 
     static constexpr uintptr_t isRopeInPointer = 0x1;
 
+#if defined(WEBKIT_IOS6)
+    static constexpr unsigned maxLengthForOnStackResolve = 512;
+#else
     static constexpr unsigned maxLengthForOnStackResolve = 2048;
+#endif
 
     template<typename CharacterType>
     inline void resolveToBuffer(std::span<CharacterType>);

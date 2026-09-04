@@ -91,6 +91,8 @@ static constexpr unsigned s_holdOffMultiplier = 20;
 #endif
 
 #if defined(WEBKIT_IOS6)
+static const Seconds s_criticalPressureRepeatInterval { 60_s };
+
 // Percentage of system memory still free, as jetsam itself accounts for it.
 // LegacyTileCache reads the same sysctl to size its tile budget.
 static int systemMemoryFreeLevel()
@@ -159,9 +161,14 @@ void MemoryPressureHandler::install()
             SystemMemoryPressureStatus status = gradeMemoryPressure(previous);
             setMemoryPressureStatus(status);
 
-            if (status == SystemMemoryPressureStatus::Critical)
-                respondToMemoryPressure(Critical::Yes);
-            else if (status == SystemMemoryPressureStatus::Warning && previous != SystemMemoryPressureStatus::Warning)
+            if (status == SystemMemoryPressureStatus::Critical) {
+                static std::optional<MonotonicTime> lastCriticalResponse;
+                auto now = MonotonicTime::now();
+                if (!lastCriticalResponse || now - *lastCriticalResponse >= s_criticalPressureRepeatInterval) {
+                    lastCriticalResponse = now;
+                    respondToMemoryPressure(Critical::Yes);
+                }
+            } else if (status == SystemMemoryPressureStatus::Warning && previous != SystemMemoryPressureStatus::Warning)
                 respondToMemoryPressure(Critical::No);
 
             if (m_shouldLogMemoryMemoryPressureEvents)

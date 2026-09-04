@@ -161,7 +161,11 @@ RenderObject::RenderObject(Type type, Node& node, OptionSet<TypeFlag> typeFlags,
 #if ASSERT_ENABLED
     , m_setNeedsLayoutForbidden(false)
 #endif
+#if defined(WEBKIT_IOS6)
+    , m_node(&node)
+#else
     , m_node(node)
+#endif
     , m_typeFlags(node.isDocumentNode() ? (typeFlags | TypeFlag::IsAnonymous) : typeFlags)
     , m_type(type)
     , m_typeSpecificFlags(typeSpecificFlags)
@@ -597,7 +601,7 @@ RenderElement* RenderObject::markContainingBlocksForLayout(RenderElement* layout
     if (is<RenderView>(*this))
         return downcast<RenderElement>(this);
 
-    CheckedPtr ancestor = container();
+    RenderElement* ancestor = container();
 
     bool simplifiedNormalFlowLayout = needsSimplifiedNormalFlowLayout() && !selfNeedsLayout() && !normalChildNeedsLayout();
     bool hasOutOfFlowPosition = isOutOfFlowPositioned();
@@ -608,7 +612,7 @@ RenderElement* RenderObject::markContainingBlocksForLayout(RenderElement* layout
 
         // Don't mark the outermost object of an unrooted subtree. That object will be
         // marked when the subtree is added to the document.
-        CheckedPtr container = ancestor->container();
+        RenderElement* container = ancestor->container();
         if (!container && !ancestor->isRenderView()) {
             // Internal render tree shuffle.
             return { };
@@ -644,13 +648,13 @@ RenderElement* RenderObject::markContainingBlocksForLayout(RenderElement* layout
             if (ancestor == layoutRoot)
                 return layoutRoot;
         } else if (isLayoutBoundary(*ancestor))
-            return ancestor.unsafeGet();
+            return ancestor;
 
-        if (auto* renderGrid = dynamicDowncast<RenderGrid>(container.get()); renderGrid && renderGrid->isExtrinsicallySized())
+        if (auto* renderGrid = dynamicDowncast<RenderGrid>(container); renderGrid && renderGrid->isExtrinsicallySized())
             simplifiedNormalFlowLayout = true;
 
         hasOutOfFlowPosition = ancestor->isOutOfFlowPositioned();
-        ancestor = WTF::move(container);
+        ancestor = container;
     }
     return { };
 }
@@ -684,15 +688,15 @@ void RenderObject::invalidateContainerContentLogicalWidths(const RenderBlock* an
 {
     // In order to avoid pathological behavior when inlines are deeply nested, we do include them
     // in the chain that we mark dirty (even though they're kind of irrelevant).
-    CheckedPtr ancestor = isRenderTableCell() ? containingBlock() : container();
+    RenderElement* ancestor = isRenderTableCell() ? containingBlock() : container();
     while (ancestor) {
-        if (ancestor.get() == ancestorUpdateBoundary)
+        if (ancestor == ancestorUpdateBoundary)
             break;
         if (ancestor->hasInvalidContentLogicalWidths() && (!ancestor->hasRareData() || !ancestor->rareData().contentLogicalWidthsInvalidationIsMarkOnlyThis))
             break;
         // Don't invalidate the outermost object of an unrooted subtree. That object will be
         // invalidated when the subtree is added to the document.
-        CheckedPtr container = ancestor->isRenderTableCell() ? ancestor->containingBlock() : ancestor->container();
+        RenderElement* container = ancestor->isRenderTableCell() ? ancestor->containingBlock() : ancestor->container();
         if (!container && !ancestor->isRenderView())
             break;
 
@@ -702,7 +706,7 @@ void RenderObject::invalidateContainerContentLogicalWidths(const RenderBlock* an
             // We can optimize this case and not go up any further.
             break;
         }
-        ancestor = WTF::move(container);
+        ancestor = container;
     }
 }
 

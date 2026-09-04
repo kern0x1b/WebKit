@@ -367,6 +367,23 @@ public:
     JS_EXPORT_PRIVATE void setFullActivityCallback(RefPtr<GCActivityCallback>&&);
     JS_EXPORT_PRIVATE void setEdenActivityCallback(RefPtr<GCActivityCallback>&&);
     JS_EXPORT_PRIVATE void disableStopIfNecessaryTimer();
+#if defined(WEBKIT_IOS6)
+    // EdenGCActivityCallback::doCollection calls Heap::collect(Async, CollectionScope::Eden)
+    // directly - it never goes through collectIfNecessaryOrDefer, so shouldRequestGC's eden
+    // alloc floor never sees these requests. Recorded here purely so the per-collection log
+    // line can say which of the two paths produced a given eden collection.
+    void noteEdenActivityCallbackFired() { m_edenCollectionRequestedByTimer = true; }
+    void noteOpportunisticEdenCollection() { m_edenCollectionRequestedByOpportunisticTask = true; }
+    bool consumeEdenAllocationFloorSkip(size_t bytesAllowedThisCycle);
+    // GCActivityCallback::scheduleTimer can only ever shorten the timer's delay (see its
+    // comment), so a caller that wants to make it wait longer cannot express that as a plain
+    // relative reschedule - if didAllocate has already driven the delay below what we ask for,
+    // the request is silently dropped. Rescheduling to the time remaining until a fixed
+    // deadline sidesteps this: that value only ever shrinks as real time passes, so every
+    // repeated call within the same skip episode is guaranteed to be honored.
+    Seconds edenAllocationFloorSkipRemaining() const;
+    static double edenFloorRescheduleSeconds();
+#endif
 
     JS_EXPORT_PRIVATE void setGarbageCollectionTimerEnabled(bool);
     JS_EXPORT_PRIVATE void scheduleOpportunisticFullCollection();
@@ -792,6 +809,9 @@ private:
     double projectedGCRateLimitingValue(MonotonicTime);
     void updateAllocationLimits();
     void didFinishCollection();
+#if defined(WEBKIT_IOS6)
+    void reportCodeBlockTiers();
+#endif
     void resumeCompilerThreads();
     void gatherExtraHeapData(HeapProfiler&);
     void removeDeadHeapSnapshotNodes(HeapProfiler&);
@@ -802,6 +822,9 @@ private:
     bool sweepNextLogicallyEmptyWeakBlock();
 
     bool shouldDoFullCollection();
+#if defined(WEBKIT_IOS6)
+    bool suppressPromotionToFull();
+#endif
 
     inline void incrementDeferralDepth();
     inline void decrementDeferralDepth();
@@ -863,6 +886,23 @@ private:
 
     size_t m_nonOversizedBytesAllocatedThisCycle { 0 };
     size_t m_bytesAbandonedSinceLastFullCollect { 0 };
+#if defined(WEBKIT_IOS6)
+    unsigned m_edenCollectionsSinceLastFullCollect { 0 };
+    bool m_fullCollectionSuppressionActive { false };
+    MonotonicTime m_fullCollectionSuppressionStartTime;
+    Seconds m_gcPhaseBeginTime;
+    Seconds m_gcPhaseMarkTime;
+    Seconds m_gcPhaseConstraintTime;
+    Seconds m_gcPhaseFinalizeTime;
+    Seconds m_gcPhaseSweepTime;
+    Seconds m_gcPhaseEndTime;
+    bool m_edenAllocFloorSkipPending { false };
+    MonotonicTime m_edenAllocFloorSkipDeadline;
+    unsigned m_edenAllocFloorConsecutiveSkips { 0 };
+    uint64_t m_edenAllocFloorTotalSkips { 0 };
+    bool m_edenCollectionRequestedByTimer { false };
+    bool m_edenCollectionRequestedByOpportunisticTask { false };
+#endif
     size_t m_maxEdenSize;
     size_t m_maxEdenSizeWhenCritical;
     size_t m_maxHeapSize;
@@ -1044,6 +1084,11 @@ private:
 #if USE(MEMORY_FOOTPRINT_API)
     unsigned m_percentAvailableMemoryCachedCallCount { 0 };
     bool m_overCriticalMemoryThreshold { false };
+#endif
+#if defined(WEBKIT_IOS6)
+    // Second, higher band. overCriticalMemoryThreshold() refreshes both at once; this one is only
+    // read after that call has returned true, and stays false where there is no footprint API.
+    bool m_overHardMemoryThreshold { false };
 #endif
 
     bool m_parallelMarkersShouldExit { false };

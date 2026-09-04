@@ -458,6 +458,18 @@ private:
     {
     }
 
+#if defined(WEBKIT_IOS6)
+    ALWAYS_INLINE PrimitiveDataEvaluationKind evaluationKind() const
+    {
+        static_assert(indexForDimension == static_cast<uint8_t>(PrimitiveDataEvaluationKind::Fixed));
+        static_assert(indexForPercentage == static_cast<uint8_t>(PrimitiveDataEvaluationKind::Percentage));
+        static_assert(indexForCalc == static_cast<uint8_t>(PrimitiveDataEvaluationKind::Calculation));
+
+        auto opaqueType = m_value.type();
+        RELEASE_ASSERT(opaqueType <= maxIndex);
+        return static_cast<PrimitiveDataEvaluationKind>(opaqueType);
+    }
+#else
     PrimitiveDataEvaluationKind evaluationKind() const
     {
         auto opaqueType = m_value.type();
@@ -471,6 +483,7 @@ private:
 
         RELEASE_ASSERT_NOT_REACHED();
     }
+#endif
 
     Representation m_value;
 };

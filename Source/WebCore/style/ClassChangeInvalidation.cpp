@@ -56,12 +56,49 @@ static ClassChangeVector computeClassChanges(const SpaceSplitString& oldClasses,
 {
     unsigned oldSize = oldClasses.size();
 
+#if defined(WEBKIT_IOS6)
+    // SpaceSplitStringData is interned by the whole attribute string, so two identical class lists
+    // share one allocation and this is a single pointer compare. Frameworks that re-render by
+    // reassigning the same className hit it on nearly every mutation, and it skips the quadratic
+    // diff plus the ancestor rule-feature walk below.
+    if (oldClasses == newClasses)
+        return { };
+#endif
+
     if (!oldSize)
         return collectClasses(newClasses, ClassChangeType::Add);
     if (newClasses.isEmpty())
         return collectClasses(oldClasses, ClassChangeType::Remove);
 
     ClassChangeVector changedClasses;
+
+#if defined(WEBKIT_IOS6)
+    // BitVector holds only 31 bits inline on a 32-bit target and heap-allocates past that. Machine
+    // generated atomic CSS routinely puts more classes than that on one element, so the diff below
+    // was calling fastCalloc on every class mutation. Duplicate class tokens are preserved by
+    // SpaceSplitString, so the inner loop still may not stop at the first match.
+    if (oldSize <= 64) [[likely]] {
+        uint64_t remainingClassBits = 0;
+        for (auto& newClass : newClasses) {
+            bool foundFromBoth = false;
+            for (unsigned i = 0; i < oldSize; ++i) {
+                if (newClass == oldClasses[i]) {
+                    remainingClassBits |= (static_cast<uint64_t>(1) << i);
+                    foundFromBoth = true;
+                }
+            }
+            if (foundFromBoth)
+                continue;
+            changedClasses.append({ newClass.impl(), ClassChangeType::Add });
+        }
+        for (unsigned i = 0; i < oldSize; ++i) {
+            if (remainingClassBits & (static_cast<uint64_t>(1) << i))
+                continue;
+            changedClasses.append({ oldClasses[i].impl(), ClassChangeType::Remove });
+        }
+        return changedClasses;
+    }
+#endif
 
     BitVector remainingClassBits;
     remainingClassBits.ensureSize(oldSize);
@@ -91,6 +128,13 @@ static ClassChangeVector computeClassChanges(const SpaceSplitString& oldClasses,
 void ClassChangeInvalidation::computeInvalidation(const SpaceSplitString& oldClasses, const SpaceSplitString& newClasses)
 {
     auto classChanges = computeClassChanges(oldClasses, newClasses);
+
+#if defined(WEBKIT_IOS6)
+    // Everything below iterates classChanges, so with nothing changed the whole body is a no-op
+    // that still walked the ancestor rule features and reached two style resolvers.
+    if (classChanges.isEmpty())
+        return;
+#endif
 
     bool shouldInvalidateCurrent = false;
     bool mayAffectStyleInShadowTree = false;

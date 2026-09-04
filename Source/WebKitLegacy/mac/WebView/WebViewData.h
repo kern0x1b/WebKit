@@ -251,6 +251,12 @@ class WebSelectionServiceController;
 #if defined(WEBKIT_IOS6)
     // The last rectangle actually handed to the engine; see -_flushCompositingChanges.
     CGRect lastAppliedFixedPositionLayoutRect;
+
+    WTF::Lock pendingLayoutViewportRectMutex;
+    CGRect pendingLayoutViewportRect;
+    bool layoutViewportRectUpdateScheduled;
+
+    BOOL preferencesChangedSweepScheduled;
 #endif
 #endif
     

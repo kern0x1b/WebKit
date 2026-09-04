@@ -123,6 +123,42 @@ template<typename CharacterType>
 SUPPRESS_NODELETE inline bool NODELETE charactersAreAllASCII(std::span<const CharacterType> span)
 {
 WTF_ALLOW_UNSAFE_BUFFER_USAGE_BEGIN
+#if defined(WEBKIT_IOS6)
+    // SIMD::isNonZero() bottoms out in simde_vmaxvq_u8(), which simde only implements
+    // natively when SIMDE_ARCH_AARCH64 is set. On armv7 it spills the vector to the
+    // stack and runs a scalar reduction per block, so the vector path here is slower
+    // than scalar. A 32-bit word carries four Latin-1 units or two UTF-16 units and
+    // the same "any high bit set" test collapses to one AND per word.
+    constexpr size_t stride = sizeof(uint32_t) / sizeof(CharacterType);
+    static_assert(sizeof(CharacterType) == 1 || sizeof(CharacterType) == 2);
+    constexpr uint32_t nonASCIIMask = sizeof(CharacterType) == 1 ? 0x80808080U : 0xFF80FF80U;
+
+    const auto* characters = span.data();
+    size_t length = span.size();
+    const auto* end = characters + length;
+    const auto* wordEnd = characters + (length & ~(stride - 1));
+
+    while (static_cast<size_t>(wordEnd - characters) >= 4 * stride) {
+        uint32_t accumulated = unalignedLoad<uint32_t>(characters);
+        accumulated |= unalignedLoad<uint32_t>(characters + stride);
+        accumulated |= unalignedLoad<uint32_t>(characters + 2 * stride);
+        accumulated |= unalignedLoad<uint32_t>(characters + 3 * stride);
+        if (accumulated & nonASCIIMask)
+            return false;
+        characters += 4 * stride;
+    }
+    while (characters < wordEnd) {
+        if (unalignedLoad<uint32_t>(characters) & nonASCIIMask)
+            return false;
+        characters += stride;
+    }
+    while (characters < end) {
+        if (!isASCII(*characters++))
+            return false;
+    }
+WTF_ALLOW_UNSAFE_BUFFER_USAGE_END
+    return true;
+#else
     using UnsignedType = SameSizeUnsignedInteger<CharacterType>;
     constexpr size_t simdStride = SIMD::stride<UnsignedType>;
     constexpr size_t chunkSize = 8 * simdStride;
@@ -168,6 +204,7 @@ WTF_ALLOW_UNSAFE_BUFFER_USAGE_BEGIN
     }
 WTF_ALLOW_UNSAFE_BUFFER_USAGE_END
     return true;
+#endif
 }
 
 ALWAYS_INLINE constexpr bool charactersAreAllLatin1(std::span<const Latin1Character>)
@@ -184,6 +221,31 @@ inline constexpr bool charactersAreAllLatin1(std::span<const char16_t> span)
         }
     } else {
         WTF_ALLOW_UNSAFE_BUFFER_USAGE_BEGIN
+#if defined(WEBKIT_IOS6)
+        // Same reason as charactersAreAllASCII: the horizontal reduction behind
+        // SIMD::isNonZero() is emulated here. One 32-bit word holds two UTF-16 units
+        // and 0xFF00FF00 answers "either unit above Latin-1" in a single AND.
+        const auto* characters = span.data();
+        const auto* end = characters + span.size();
+        const auto* wordEnd = characters + (span.size() & ~static_cast<size_t>(1));
+
+        while (static_cast<size_t>(wordEnd - characters) >= 8) {
+            uint32_t accumulated = unalignedLoad<uint32_t>(characters);
+            accumulated |= unalignedLoad<uint32_t>(characters + 2);
+            accumulated |= unalignedLoad<uint32_t>(characters + 4);
+            accumulated |= unalignedLoad<uint32_t>(characters + 6);
+            if (accumulated & 0xFF00FF00U)
+                return false;
+            characters += 8;
+        }
+        while (characters < wordEnd) {
+            if (unalignedLoad<uint32_t>(characters) & 0xFF00FF00U)
+                return false;
+            characters += 2;
+        }
+        if (characters < end && !isLatin1(*characters))
+            return false;
+#else
         constexpr size_t simdStride = SIMD::stride<uint16_t>;
 
         const auto* characters = span.data();
@@ -202,6 +264,7 @@ inline constexpr bool charactersAreAllLatin1(std::span<const char16_t> span)
             if (!isLatin1(*characters++))
                 return false;
         }
+#endif
         WTF_ALLOW_UNSAFE_BUFFER_USAGE_END
     }
     return true;

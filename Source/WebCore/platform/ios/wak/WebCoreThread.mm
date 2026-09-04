@@ -25,7 +25,9 @@
 
 #import "config.h"
 #import "WebCoreThread.h"
+#include <atomic>
 #include <execinfo.h>
+#include <sched.h>
 #include <unistd.h>
 
 #if PLATFORM(IOS_FAMILY)
@@ -180,6 +182,10 @@ static unsigned sMainThreadModalCount;
 
 WEBCORE_EXPORT volatile bool webThreadShouldYield;
 
+#if defined(WEBKIT_IOS6)
+static std::atomic<int> webCoreThreadIOS6LockWaiters { 0 };
+#endif
+
 static void WebCoreObjCDeallocOnWebThreadImpl(id self, SEL _cmd);
 static void WebCoreObjCDeallocWithWebThreadLock(Class cls);
 static void WebCoreObjCDeallocWithWebThreadLockImpl(id self, SEL _cmd);
@@ -189,6 +195,36 @@ static RetainPtr<NSMutableArray>& sAsyncDelegates()
     static NeverDestroyed<RetainPtr<NSMutableArray>> asyncDelegates;
     return asyncDelegates;
 }
+
+#if defined(WEBKIT_IOS6)
+static std::atomic<unsigned> sDeferredDelegateCount { 0 };
+
+static RetainPtr<NSMutableArray>& sDeferredDelegates()
+{
+    static NeverDestroyed<RetainPtr<NSMutableArray>> deferredDelegates;
+    if (!deferredDelegates.get())
+        deferredDelegates.get() = adoptNS([[NSMutableArray alloc] init]);
+    return deferredDelegates;
+}
+
+static std::atomic<bool> sDeferredDelegateFlushScheduled { false };
+
+static RetainPtr<NSArray> TakeDeferredDelegates()
+{
+    if (![sDeferredDelegates() count])
+        return nullptr;
+    RetainPtr<NSArray> deferred = adoptNS([sDeferredDelegates() copy]);
+    [sDeferredDelegates() removeAllObjects];
+    sDeferredDelegateCount.store(0);
+    return deferred;
+}
+
+static void InvokeDeferredDelegates(NSArray *deferred)
+{
+    for (NSInvocation *invocation in deferred)
+        [invocation invoke];
+}
+#endif
 
 static RetainPtr<NSRunLoop>& webThreadNSRunLoop()
 {
@@ -236,6 +272,10 @@ static void HandleDelegateSource(void*)
             NSLog(@"notification receive: %@", argument0);
         } else
             NSLog(@"delegate receive: %@", NSStringFromSelector([delegateInvocation() selector]));
+#endif
+
+#if defined(WEBKIT_IOS6)
+        InvokeDeferredDelegates(TakeDeferredDelegates().get());
 #endif
 
         SendMessage(WTF::move(delegateInvocation()));
@@ -355,10 +395,46 @@ static void SendDelegateMessage(RetainPtr<NSInvocation>&& invocation)
             } @catch (id) { }
             WTFLogAlways("[delegate] %.0f ms in %s %s", blocked * 1000, name, detail);
         }
-        if (now - lastReport > 5.0) {
-            lastReport = now;
-            WTFLogAlways("[delegate] %u messages, %.0f ms blocked in total, slowest %.0f ms",
-                messageCount, blockedTotal * 1000, slowest * 1000);
+        {
+            struct Entry {
+                SEL selector;
+                unsigned count;
+                double total;
+                double slowest;
+            };
+            static Entry entries[192];
+            static unsigned entryCount;
+            SEL selector = nullptr;
+            @try {
+                selector = [sentInvocation selector];
+            } @catch (id) { }
+            Entry* entry = nullptr;
+            for (unsigned i = 0; i < entryCount; ++i) {
+                if (entries[i].selector == selector) {
+                    entry = &entries[i];
+                    break;
+                }
+            }
+            if (!entry && entryCount < std::size(entries)) {
+                entry = &entries[entryCount++];
+                entry->selector = selector;
+            }
+            if (entry) {
+                entry->count++;
+                entry->total += blocked;
+                if (blocked > entry->slowest)
+                    entry->slowest = blocked;
+            }
+            if (now - lastReport > 5.0) {
+                lastReport = now;
+                for (unsigned i = 0; i < entryCount; ++i) {
+                    WTFLogAlways("[delegate-histogram] x%u %.0f ms total, slowest %.0f ms, %s",
+                        entries[i].count, entries[i].total * 1000, entries[i].slowest * 1000,
+                        entries[i].selector ? sel_getName(entries[i].selector) : "(unknown)");
+                }
+                WTFLogAlways("[delegate] %u messages, %.0f ms blocked in total, slowest %.0f ms",
+                    messageCount, blockedTotal * 1000, slowest * 1000);
+            }
         }
     }
 #endif
@@ -536,6 +612,27 @@ void WebThreadCallDelegateAsync(NSInvocation* invocation)
         WebThreadCallDelegate(invocation);
 }
 
+#if defined(WEBKIT_IOS6)
+void WebThreadCallDelegateDeferred(NSInvocation* invocation)
+{
+    ASSERT(invocation);
+    static int blockOnDeferredDelegates = -1;
+    if (blockOnDeferredDelegates < 0)
+        blockOnDeferredDelegates = access("/tmp/native-block-deferred-delegates", F_OK) == 0 ? 1 : 0;
+    if (blockOnDeferredDelegates || !WebThreadIsCurrent()) {
+        WebThreadCallDelegate(invocation);
+        return;
+    }
+    [invocation retainArguments];
+    {
+        Locker locker { delegateLock };
+        [sDeferredDelegates() addObject:invocation];
+        sDeferredDelegateCount.store([sDeferredDelegates() count]);
+    }
+    WebThreadYieldIfAsked();
+}
+#endif
+
 // Note: despite the name, returns an autoreleased object.
 NSInvocation* WebThreadMakeNSInvocation(id target, SEL selector)
 {
@@ -620,9 +717,29 @@ bool WebThreadYieldIfAsked(void)
 {
     if (!WebThreadIsCurrent() || !webThreadShouldYield || !isWebThreadLocked)
         return false;
+
+    static int yieldEnabled = -1;
+    if (yieldEnabled < 0)
+        yieldEnabled = access("/tmp/native-no-yield", F_OK) != 0 ? 1 : 0;
+    if (!yieldEnabled)
+        return false;
+
     _WebThreadUnlock();
     isWebThreadLocked = NO;
-    sched_yield();
+
+    if (webCoreThreadIOS6LockWaiters.load(std::memory_order_relaxed) > 0) {
+        CFAbsoluteTime giveUpAt = CFAbsoluteTimeGetCurrent() + 0.001;
+        unsigned spins = 0;
+        while (webCoreThreadIOS6LockWaiters.load(std::memory_order_relaxed) > 0) {
+            sched_yield();
+            if (!(++spins & 15) && CFAbsoluteTimeGetCurrent() > giveUpAt)
+                break;
+        }
+        if (webCoreThreadIOS6LockWaiters.load(std::memory_order_relaxed) > 0)
+            webThreadShouldYield = true;
+    } else
+        sched_yield();
+
     _WebThreadLock();
     isWebThreadLocked = YES;
     return true;
@@ -715,6 +832,20 @@ static void WebRunLoopUnlockInternal(AutoreleasePoolOperation poolOperation)
         [asyncDelegates removeAllObjects];
     }
 
+#if defined(WEBKIT_IOS6)
+    if (sDeferredDelegateCount.load() && !sDeferredDelegateFlushScheduled.exchange(true)) {
+        RunLoop::mainSingleton().dispatch([] {
+            sDeferredDelegateFlushScheduled.store(false);
+            RetainPtr<NSArray> deferred;
+            {
+                Locker locker { delegateLock };
+                deferred = TakeDeferredDelegates();
+            }
+            InvokeDeferredDelegates(deferred.get());
+        });
+    }
+#endif
+
     if (poolOperation == PushOrPopAutoreleasePool && !perCalloutAutoreleasepoolEnabled)
         objc_autoreleasePoolPop(autoreleasePoolMark);
 
@@ -729,8 +860,12 @@ static void WebRunLoopLock(CFRunLoopObserverRef, CFRunLoopActivity activity, voi
 
     // If the WebThread is locked by the main thread then we want to
     // grab the lock ourselves when the main thread releases the lock.
-    if (isWebThreadLocked && !mainThreadLockCount)
+    if (isWebThreadLocked && !mainThreadLockCount) {
+#if defined(WEBKIT_IOS6)
+        WebThreadYieldIfAsked();
+#endif
         return;
+    }
     WebRunLoopLockInternal(PushOrPopAutoreleasePool);
 }
 
@@ -949,11 +1084,17 @@ static void _WebThreadLock()
         recordWaits = access("/tmp/native-weblock-on", F_OK) == 0 ? 1 : 0;
 
     CFAbsoluteTime askedAt = (onMainThread && recordWaits) ? CFAbsoluteTimeGetCurrent() : 0;
+
+    if (onMainThread)
+        webCoreThreadIOS6LockWaiters.fetch_add(1, std::memory_order_relaxed);
 #endif
 
     webLock.lock();
 
 #if defined(WEBKIT_IOS6)
+    if (onMainThread)
+        webCoreThreadIOS6LockWaiters.fetch_sub(1, std::memory_order_relaxed);
+
     if (askedAt) {
         double waited = CFAbsoluteTimeGetCurrent() - askedAt;
 

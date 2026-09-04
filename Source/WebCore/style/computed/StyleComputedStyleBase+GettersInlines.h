@@ -322,6 +322,17 @@ inline float ComputedStyleBase::deviceScaleFactor() const
     return m_inheritedRareData->deviceScaleFactor;
 }
 
+#if defined(WEBKIT_IOS6)
+
+ALWAYS_INLINE ZoomFactor ComputedStyleBase::usedZoomForLength() const
+{
+    if (!inheritedFlags().isZoomed)
+        return ZoomFactor(1.0f);
+    return usedZoomForLengthWhenZoomed();
+}
+
+#else
+
 inline ZoomFactor ComputedStyleBase::usedZoomForLength() const
 {
     static constexpr ZoomFactor unzoomed(1.0f);
@@ -336,6 +347,8 @@ inline ZoomFactor ComputedStyleBase::usedZoomForLength() const
 
     return unzoomed;
 }
+
+#endif
 
 // MARK: - Fonts
 

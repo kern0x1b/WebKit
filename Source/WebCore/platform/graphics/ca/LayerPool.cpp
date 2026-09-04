@@ -30,14 +30,51 @@
 #include <wtf/NeverDestroyed.h>
 #include <wtf/TZoneMallocInlines.h>
 
+#if defined(WEBKIT_IOS6)
+#include <stdlib.h>
+#endif
+
 namespace WebCore {
 
 WTF_MAKE_TZONE_ALLOCATED_IMPL(LayerPool);
 
 static constexpr Seconds capacityDecayTime { 5_s };
 
+#if defined(WEBKIT_IOS6)
+// This is one process-wide pool of retained CALayer backing stores, kept around purely so a
+// same-sized layer created moments later can reuse one instead of allocating fresh - including
+// the fixed top/bottom bars' own layers across scroll/compositing updates. A same-day attempt to
+// shrink this from upstream's 48 MB to 6 MB measured cleanly on-device but caused visible bar
+// jitter under real physical use once the pool was actually starved during real navigation - the
+// "just a smaller bet on reuse paying off" framing undercounted how often reuse actually pays off
+// for these specific layers. Reverted to upstream's 48 MB; see WEBKIT_IOS6_LAYER_POOL_KB below to
+// experiment again, but only with a live physical soak, not a short device-verification pass.
+static unsigned maximumLayerPoolBytes()
+{
+    static unsigned value = [] -> unsigned {
+        if (const char* override = getenv("WEBKIT_IOS6_LAYER_POOL_KB")) {
+            int parsed = atoi(override);
+            if (parsed >= 0 && parsed <= 128 * 1024)
+                return static_cast<unsigned>(parsed) * 1024;
+        }
+        // Reverted 2026-09-04: 6 MB caused visible fixed-bar jitter during real
+        // physical use (bars are exactly the layers this pool exists to let
+        // reuse their backing store across scroll/compositing updates) -
+        // shrinking it 8x meant far more allocate-instead-of-reuse churn than
+        // the earlier "just a smaller bet" framing accounted for. Back to
+        // upstream's 48 MB until this is revisited with real evidence.
+        return 48 * 1024 * 1024;
+    }();
+    return value;
+}
+#endif
+
 LayerPool::LayerPool()
+#if defined(WEBKIT_IOS6)
+    : m_maxBytesForPool(maximumLayerPoolBytes())
+#else
     : m_maxBytesForPool(48 * 1024 * 1024)
+#endif
     , m_pruneTimer(*this, &LayerPool::pruneTimerFired)
 {
     RELEASE_ASSERT(isMainThread());

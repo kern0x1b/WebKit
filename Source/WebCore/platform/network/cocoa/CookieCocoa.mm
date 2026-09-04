@@ -116,7 +116,9 @@ Cookie::Cookie(NSHTTPCookie *cookie)
     , value { cookie.value }
     , domain { cookie.domain }
     , path { cookie.path }
+#if !defined(WEBKIT_IOS6)
     , partitionKey { cookie._storagePartition }
+#endif
     , created { cookieCreated(cookie) }
     , expires { cookieExpiry(cookie) }
     , httpOnly { static_cast<bool>(cookie.HTTPOnly) }
@@ -126,7 +128,20 @@ Cookie::Cookie(NSHTTPCookie *cookie)
     , commentURL { cookie.commentURL }
     , ports { portVectorFromList(retainPtr(cookie.portList).get()) }
 {
+#if defined(WEBKIT_IOS6)
+    // Neither -_storagePartition nor -sameSitePolicy exists on NSHTTPCookie on
+    // this Foundation: this CFNetwork has no storage partitions and no SameSite,
+    // so neither value is recorded anywhere in the jar and there is nothing to
+    // read. Leave partitionKey null and ask for the policy of an absent policy,
+    // which is SameSitePolicy::None - exactly what upstream reports for a cookie
+    // that carries no SameSite attribute, so no caller sees a state it does not
+    // already handle. Without this, every NSHTTPCookie -> Cookie conversion
+    // raised and WebKit swallowed it, which silently emptied getRawCookies (the
+    // Inspector's cookie table) and cookiesForDOMAsVector (cookieStore.get).
+    sameSite = coreSameSitePolicy(nil);
+#else
     sameSite = coreSameSitePolicy(cookie.sameSitePolicy);
+#endif
 }
 
 RetainPtr<NSHTTPCookie> Cookie::createNSHTTPCookie() const

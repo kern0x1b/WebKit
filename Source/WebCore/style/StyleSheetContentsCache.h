@@ -54,6 +54,9 @@ private:
     StyleSheetContentsCache();
 
     HashMap<Key, Ref<StyleSheetContents>> m_cache;
+#if defined(WEBKIT_IOS6)
+    size_t m_retainedSourceBytes { 0 };
+#endif
 };
 
 }

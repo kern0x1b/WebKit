@@ -97,6 +97,19 @@ public:
     const Style::GridTrackSize& NODELETE cachedTrackSize() const LIFETIME_BOUND;
     void setCachedTrackSize(const Style::GridTrackSize&);
 
+#if defined(WEBKIT_IOS6)
+    void resetForSizingRun()
+    {
+        m_baseSize = 0_lu;
+        m_growthLimit = 0_lu;
+        m_plannedSize = 0_lu;
+        m_tempSize = 0_lu;
+        m_growthLimitCap = std::nullopt;
+        m_infinitelyGrowable = false;
+        m_cachedTrackSize = std::nullopt;
+    }
+#endif
+
 private:
     bool isGrowthLimitBiggerThanBaseSize() const { return growthLimitIsInfinite() || m_growthLimit >= std::max(m_baseSize, 0_lu); }
 
@@ -288,6 +301,22 @@ private:
 
     bool isDirectionInMasonryDirection() const;
 
+#if defined(WEBKIT_IOS6)
+    static constexpr size_t maximumRetiredTrackCount = 16;
+    void retireTrack(UniqueRef<GridTrack>&& track)
+    {
+        if (m_ios6RetiredTracks.size() >= maximumRetiredTrackCount)
+            return;
+        track->resetForSizingRun();
+        m_ios6RetiredTracks.append(WTF::move(track));
+    }
+    void retireTracks(Vector<UniqueRef<GridTrack>>& trackList)
+    {
+        while (!trackList.isEmpty())
+            retireTrack(trackList.takeLast());
+    }
+#endif
+
     // Data.
     bool wasSetup() const { return !!m_strategy; }
     bool m_needsSetup { true };
@@ -303,6 +332,9 @@ private:
     // writing modes.
     Vector<UniqueRef<GridTrack>> m_columns;
     Vector<UniqueRef<GridTrack>> m_rows;
+#if defined(WEBKIT_IOS6)
+    Vector<UniqueRef<GridTrack>> m_ios6RetiredTracks;
+#endif
     Vector<unsigned> m_contentSizedTracksIndex;
     Vector<unsigned> m_flexibleSizedTracksIndex;
     Vector<unsigned> m_autoSizedTracksForStretchIndex;
@@ -313,7 +345,13 @@ private:
     Grid& m_grid;
 
     const RenderGrid* m_renderGrid;
+#if defined(WEBKIT_IOS6)
+    std::unique_ptr<GridTrackSizingAlgorithmStrategy> m_ios6IndefiniteSizeStrategy;
+    std::unique_ptr<GridTrackSizingAlgorithmStrategy> m_ios6DefiniteSizeStrategy;
+    GridTrackSizingAlgorithmStrategy* m_strategy { nullptr };
+#else
     std::unique_ptr<GridTrackSizingAlgorithmStrategy> m_strategy;
+#endif
 
     // The track sizing algorithm is used for both layout and intrinsic size
     // computation. We're normally just interested in intrinsic inline sizes

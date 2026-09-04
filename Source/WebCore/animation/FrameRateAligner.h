@@ -48,6 +48,10 @@ public:
     std::optional<Seconds> timeUntilNextUpdateForFrameRate(FramesPerSecond, ReducedResolutionSeconds) const;
     std::optional<FramesPerSecond> maximumFrameRate() const;
 
+#if defined(WEBKIT_IOS6)
+    bool isEmpty() const { return m_frameRates.isEmpty(); }
+#endif
+
 private:
     struct FrameRateData {
         ReducedResolutionSeconds firstUpdateTime;

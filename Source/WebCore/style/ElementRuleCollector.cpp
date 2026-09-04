@@ -60,11 +60,23 @@
 #if ENABLE(VIDEO)
 #include "UserAgentParts.h"
 #endif
+#include <cstdlib>
 #include <ranges>
 #include <wtf/SetForScope.h>
 
 namespace WebCore {
 namespace Style {
+
+#if defined(WEBKIT_IOS6)
+static bool NODELETE elementRuleCollectorCompoundFastPathEnabled()
+{
+    static const bool enabled = [] {
+        const char* value = getenv("WEBKIT_IOS6_COMPOUND_FAST_PATH");
+        return !value || value[0] != '0';
+    }();
+    return enabled;
+}
+#endif
 
 static const StyleProperties& leftToRightDeclaration()
 {
@@ -112,11 +124,17 @@ ElementRuleCollector::ElementRuleCollector(const Element& element, const ScopeRu
     , m_userAgentMediaQueryStyle(ruleSets.userAgentMediaQueryStyle())
     , m_dynamicViewTransitionsStyle(ruleSets.dynamicViewTransitionsStyle())
     , m_selectorMatchingState(selectorMatchingState)
+#if defined(WEBKIT_IOS6)
+    , m_selectorChecker(element.document())
+#endif
 #if ENABLE(CSS_SELECTOR_JIT)
     , m_cssSelectorJITEnabled(element.document().settings().cssSelectorJITCompilerEnabled())
 #endif
     , m_isForLink(element.isLink())
     , m_isHTMLElement(element.isHTMLElement())
+#if defined(WEBKIT_IOS6)
+    , m_compoundFastPathEnabled(elementRuleCollectorCompoundFastPathEnabled())
+#endif
     , m_mode(mode)
 {
     ASSERT(!m_selectorMatchingState || m_selectorMatchingState->selectorFilter.parentStackIsConsistent(element.parentNode()));
@@ -130,11 +148,17 @@ ElementRuleCollector::ElementRuleCollector(const Element& element, const RuleSet
     , m_authorStyle(authorStyle)
 #endif
     , m_selectorMatchingState(selectorMatchingState)
+#if defined(WEBKIT_IOS6)
+    , m_selectorChecker(element.document())
+#endif
 #if ENABLE(CSS_SELECTOR_JIT)
     , m_cssSelectorJITEnabled(element.document().settings().cssSelectorJITCompilerEnabled())
 #endif
     , m_isForLink(element.isLink())
     , m_isHTMLElement(element.isHTMLElement())
+#if defined(WEBKIT_IOS6)
+    , m_compoundFastPathEnabled(elementRuleCollectorCompoundFastPathEnabled())
+#endif
     , m_mode(mode)
 {
     ASSERT(!m_selectorMatchingState || m_selectorMatchingState->selectorFilter.parentStackIsConsistent(element.parentNode()));
@@ -161,7 +185,7 @@ const Vector<Ref<const StyleRule>>& ElementRuleCollector::matchedRuleList() cons
 inline void ElementRuleCollector::addMatchedRule(const RuleData& ruleData, unsigned specificity, unsigned scopingRootDistance, const MatchRequest& matchRequest)
 {
     auto cascadeLayerPriority = matchRequest.ruleSet.cascadeLayerPriorityFor(ruleData);
-    m_matchedRules.append({ &ruleData, specificity, scopingRootDistance, matchRequest.styleScopeOrdinal, cascadeLayerPriority });
+    m_matchedRules.append({ &ruleData, specificity, scopingRootDistance, ruleData.position(), matchRequest.styleScopeOrdinal, cascadeLayerPriority });
 }
 
 void ElementRuleCollector::clearMatchedRules()
@@ -252,10 +276,12 @@ void ElementRuleCollector::collectMatchingRules(const MatchRequest& matchRequest
 
     // We need to collect the rules for id, class, tag, and everything else into a buffer and
     // then sort the buffer.
-    auto& id = element.idForStyleResolution();
-    if (!id.isNull())
-        collectMatchingRulesForList(ruleSet.idRules(id), matchRequest);
-    if (element.hasClass()) {
+    if (ruleSet.hasIdRules()) {
+        auto& id = element.idForStyleResolution();
+        if (!id.isNull())
+            collectMatchingRulesForList(ruleSet.idRules(id), matchRequest);
+    }
+    if (ruleSet.hasClassRules() && element.hasClass()) {
         for (auto& className : element.classNames())
             collectMatchingRulesForList(ruleSet.classRules(className), matchRequest);
     }
@@ -612,6 +638,16 @@ inline bool ElementRuleCollector::ruleMatches(const RuleData& ruleData, unsigned
         return true;
     }
 
+#if defined(WEBKIT_IOS6)
+    if (ruleData.isSimpleCompound() && m_compoundFastPathEnabled && !m_pseudoElementRequest && !scopingRoot && styleScopeOrdinal == ScopeOrdinal::Element) {
+        auto& selector = ruleData.selector();
+        if (!m_selectorChecker.matchesSimpleCompound(selector, element()))
+            return false;
+        specificity = selector.computeSpecificity();
+        return true;
+    }
+#endif
+
 #if ENABLE(CSS_SELECTOR_JIT)
     auto& compiledSelector = ruleData.compiledSelector();
     const bool compilerEnabled = m_cssSelectorJITEnabled;
@@ -659,8 +695,12 @@ inline bool ElementRuleCollector::ruleMatches(const RuleData& ruleData, unsigned
     {
         auto& selector = ruleData.selector();
         // Slow path.
+#if defined(WEBKIT_IOS6)
+        selectorMatches = m_selectorChecker.match(selector, element(), context);
+#else
         SelectorChecker selectorChecker(element().document());
         selectorMatches = selectorChecker.match(selector, element(), context);
+#endif
         if (selectorMatches)
             specificity = selector.computeSpecificity();
     }
@@ -944,7 +984,7 @@ static inline bool NODELETE compareRules(const MatchedRule& r1, const MatchedRul
     if (r1.scopingRootDistance != r2.scopingRootDistance)
         return r2.scopingRootDistance < r1.scopingRootDistance;
 
-    return r1.ruleData->position() < r2.ruleData->position();
+    return r1.position < r2.position;
 }
 
 void ElementRuleCollector::sortMatchedRules()

@@ -26,6 +26,7 @@
 #include "config.h"
 #include <wtf/ParkingLot.h>
 
+#include <bit>
 #include <wtf/DataLog.h>
 #include <wtf/FixedVector.h>
 #include <wtf/HashFunctions.h>
@@ -217,7 +218,13 @@ struct Hashtable {
     WTF_DEPRECATED_MAKE_STRUCT_FAST_ALLOCATED(Hashtable);
 
     Hashtable(unsigned size)
+#if defined(WEBKIT_IOS6)
+        // Cortex-A9 has no integer divide: a runtime "% data.size()" is a call to
+        // __aeabi_uidivmod on every park and every unpark. A power-of-two spine masks instead.
+        : data(std::bit_ceil(size))
+#else
         : data(size)
+#endif
     {
         ASSERT(size >= 1);
 
@@ -239,6 +246,15 @@ struct Hashtable {
             Locker locker(hashtablesLock);
             hashtables->removeFirst(this);
         }
+    }
+
+    unsigned indexFor(unsigned hash) const
+    {
+#if defined(WEBKIT_IOS6)
+        return hash & (static_cast<unsigned>(data.size()) - 1);
+#else
+        return hash % data.size();
+#endif
     }
 
     FixedVector<Atomic<Bucket*>> data;
@@ -387,7 +403,7 @@ void ensureHashtableSize(unsigned numThreads)
         if (verbose)
             dataLogForCurrentThread(": rehashing thread data ", RawPointer(threadData), " with address = ", RawPointer(threadData->address), "\n");
         unsigned hash = hashAddress(threadData->address);
-        unsigned index = hash % newHashtable->data.size();
+        unsigned index = newHashtable->indexFor(hash);
         if (verbose)
             dataLogForCurrentThread(": index = ", index, "\n");
         Bucket* bucket = newHashtable->data[index].load();
@@ -466,7 +482,7 @@ bool enqueue(const void* address, NOESCAPE const Functor& functor)
 
     for (;;) {
         Hashtable* myHashtable = ensureHashtable();
-        unsigned index = hash % myHashtable->data.size();
+        unsigned index = myHashtable->indexFor(hash);
         Atomic<Bucket*>& bucketPointer = myHashtable->data[index];
         Bucket* bucket;
         for (;;) {
@@ -518,7 +534,7 @@ bool dequeue(
 
     for (;;) {
         Hashtable* myHashtable = ensureHashtable();
-        unsigned index = hash % myHashtable->data.size();
+        unsigned index = myHashtable->indexFor(hash);
         Atomic<Bucket*>& bucketPointer = myHashtable->data[index];
         Bucket* bucket = bucketPointer.load();
         if (!bucket) {

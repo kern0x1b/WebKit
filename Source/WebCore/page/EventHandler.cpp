@@ -5462,9 +5462,37 @@ static HitTestResult hitTestResultInFrame(LocalFrame* frame, const LayoutPoint& 
     return result;
 }
 
+#if defined(WEBKIT_IOS6)
+// Finger-to-handler latency, end to end. event.timestamp() is the WebEvent's own
+// timestamp, stamped in app/main.m's touchEvent() at the point UIKit's touchesBegan:
+// handed the touch to app code - the earliest moment on this side of the glass.
+// touchHandleEntry is stamped here, before the hit test, on whichever thread and
+// whichever moment this function actually got to run - so touchHandleEntry minus
+// the WebEvent timestamp is exactly the time a touch spent queued on WebThreadRun's
+// runQueue plus whatever the web thread's run loop was doing (JS, layout, GC) before
+// it reached the point of taking WebRunLoopLock and running the queue. See
+// project_legacy_webkit_uikit_takes_web_lock: that lock is the same one this waits on.
+static FILE* touchLatencyLog()
+{
+    static FILE* file = [] () -> FILE* {
+        const char* path = getenv("WEBKIT_IOS6_TOUCH_LATENCY_LOG");
+        if (!path || !path[0])
+            return nullptr;
+        FILE* opened = fopen(path, "a");
+        if (opened)
+            setvbuf(opened, nullptr, _IOLBF, 0);
+        return opened;
+    }();
+    return file;
+}
+#endif
+
 Expected<bool, RemoteFrameGeometryTransformer> EventHandler::handleTouchEvent(const PlatformTouchEvent& event)
 {
     Ref frame = m_frame.get();
+#if defined(WEBKIT_IOS6)
+    MonotonicTime touchHandleEntry = MonotonicTime::now();
+#endif
 
     // First build up the lists to use for the 'touches', 'targetTouches' and 'changedTouches' attributes
     // in the JS event. See https://www.sitepen.com/blog/touching-and-gesturing-on-the-iphone/
@@ -5687,6 +5715,18 @@ Expected<bool, RemoteFrameGeometryTransformer> EventHandler::handleTouchEvent(co
             Ref<TouchEvent> touchEvent = TouchEvent::create(effectiveTouches.get(), targetTouches.get(), changedTouches[state].m_touches.get(),
                 stateName, downcast<Node>(*target).document().windowProxy(), { }, event.modifiers());
             target->dispatchEvent(touchEvent);
+#if defined(WEBKIT_IOS6)
+            if (state == PlatformTouchPoint::TouchPressed) {
+                if (FILE* log = touchLatencyLog()) {
+                    MonotonicTime dispatchDone = MonotonicTime::now();
+                    fprintf(log, "%.3f touchstart capture->entry=%.1fms entry->dispatched=%.1fms capture->dispatched=%.1fms\n",
+                        dispatchDone.secondsSinceEpoch().value(),
+                        (touchHandleEntry - event.timestamp()).milliseconds(),
+                        (dispatchDone - touchHandleEntry).milliseconds(),
+                        (dispatchDone - event.timestamp()).milliseconds());
+                }
+            }
+#endif
             swallowedEvent = swallowedEvent || touchEvent->defaultPrevented() || touchEvent->defaultHandled();
         }
     }

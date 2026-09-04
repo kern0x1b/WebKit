@@ -26,7 +26,12 @@
 #include "config.h"
 #include "FastMallocAlignedMemoryAllocator.h"
 
+#include "MarkedBlock.h"
 #include <wtf/FastMalloc.h>
+
+#if defined(WEBKIT_IOS6)
+#include "Ios6BlockReservationPool.h"
+#endif
 
 namespace JSC {
 
@@ -43,6 +48,14 @@ void* FastMallocAlignedMemoryAllocator::tryAllocateAlignedMemory(size_t alignmen
 {
 #if ENABLE(MALLOC_HEAP_BREAKDOWN)
     return m_heap.memalign(alignment, size, true);
+#elif defined(WEBKIT_IOS6)
+    // MarkedBlock is the only caller of tryAllocateAlignedMemory (MarkedBlock.cpp), always
+    // with alignment == size == MarkedBlock::blockSize. Route that traffic through the pool
+    // shared with GigacageAlignedMemoryAllocator and StructureAlignedMemoryAllocator; fall
+    // back to the plain allocator for anything else this allocator might ever be asked for.
+    if (alignment == MarkedBlock::blockSize && size == MarkedBlock::blockSize)
+        return Ios6BlockReservationPool::singleton().tryAllocateBlock();
+    return tryFastCompactAlignedMalloc(alignment, size);
 #else
     return tryFastCompactAlignedMalloc(alignment, size);
 #endif
@@ -53,6 +66,8 @@ void FastMallocAlignedMemoryAllocator::freeAlignedMemory(void* basePtr)
 {
 #if ENABLE(MALLOC_HEAP_BREAKDOWN)
     return m_heap.free(basePtr);
+#elif defined(WEBKIT_IOS6)
+    Ios6BlockReservationPool::singleton().freeBlock(basePtr);
 #else
     fastFree(basePtr);
 #endif

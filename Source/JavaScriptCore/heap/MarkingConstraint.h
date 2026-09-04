@@ -42,6 +42,10 @@ class MarkingConstraintSet;
 class AbstractSlotVisitor;
 class SlotVisitor;
 
+#if defined(WEBKIT_IOS6)
+uint64_t ios6TakeWeakOutputConstraintNanoseconds();
+#endif
+
 class MarkingConstraint {
     WTF_MAKE_NONCOPYABLE(MarkingConstraint);
     WTF_MAKE_TZONE_ALLOCATED(MarkingConstraint);

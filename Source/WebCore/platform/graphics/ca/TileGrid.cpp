@@ -422,6 +422,7 @@ void TileGrid::revalidateTiles(OptionSet<ValidationPolicyFlag> validationPolicy)
 
     // Move tiles newly outside the coverage rect into the cohort map.
     const IntRect gridBounds = gridBoundsInTileCoords();
+    const bool aggressivelyRetainTiles = m_controller->shouldAggressivelyRetainTiles();
     for (auto& entry : m_tiles) {
         TileInfo& tileInfo = entry.value;
         TileIndex tileIndex = entry.key;
@@ -444,7 +445,7 @@ void TileGrid::revalidateTiles(OptionSet<ValidationPolicyFlag> validationPolicy)
                 ++tilesInCohort;
                 m_controller->willRemoveTile(*this, tileIndex);
                 tileLayer->removeFromSuperlayer();
-            } else if (m_controller->shouldAggressivelyRetainTiles() && tileLayer->superlayer()) {
+            } else if (aggressivelyRetainTiles && tileLayer->superlayer()) {
                 // Aggressive tile retention means we'll never remove cohorts, but we need to make sure they're unparented.
                 // We can't immediately unparent cohorts comprised of secondary tiles that never touch the primary coverage rect,
                 // because that would defeat the usefulness of prepopulateRect(); instead, age prepopulated tiles out as if they were being removed.
@@ -468,7 +469,7 @@ void TileGrid::revalidateTiles(OptionSet<ValidationPolicyFlag> validationPolicy)
     if (needsDelayedTileRevalidation)
         m_controller->scheduleTileRevalidation(minimumRevalidationTimerDuration);
 
-    if (!m_controller->shouldAggressivelyRetainTiles()) {
+    if (!aggressivelyRetainTiles) {
         if (m_controller->shouldTemporarilyRetainTileCohorts())
             scheduleCohortRemoval();
         else if (tilesInCohort) {

@@ -43,6 +43,7 @@ struct MatchedRule {
     const RuleData* ruleData { nullptr };
     unsigned specificity { 0 };
     unsigned scopingRootDistance { 0 };
+    unsigned position { 0 };
     ScopeOrdinal styleScopeOrdinal;
     CascadeLayerPriority cascadeLayerPriority;
 };
@@ -145,6 +146,9 @@ private:
     RefPtr<const RuleSet> m_dynamicViewTransitionsStyle;
 #endif
     SelectorMatchingState* m_selectorMatchingState;
+#if defined(WEBKIT_IOS6)
+    SelectorChecker m_selectorChecker;
+#endif
 #if ENABLE(CSS_SELECTOR_JIT)
     const bool m_cssSelectorJITEnabled;
 #endif
@@ -155,6 +159,9 @@ private:
     // ruleMatches() runs once per rule in every bucket the element hashes into and re-read this
     // through the Ref and the node flags word every time; it cannot change while we collect.
     const bool m_isHTMLElement { false };
+#if defined(WEBKIT_IOS6)
+    const bool m_compoundFastPathEnabled { false };
+#endif
     std::optional<PseudoElementRequest> m_pseudoElementRequest { };
     const SelectorChecker::Mode m_mode { SelectorChecker::Mode::ResolvingStyle };
 

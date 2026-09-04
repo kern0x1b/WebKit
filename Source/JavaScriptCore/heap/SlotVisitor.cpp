@@ -261,16 +261,33 @@ ALWAYS_INLINE void SlotVisitor::setMarkedAndAppendToMarkStack(ContainerType& con
 {
     if (container.testAndSetMarked(cell, dependency))
         return;
-    
+
     ASSERT(cell->structure());
-    
+
     // Indicate that the object is grey and that:
     // In case of concurrent GC: it's the first time it is grey in this GC cycle.
     // In case of eden collection: it's a new object that became grey rather than an old remembered object.
     cell->setCellState(CellState::PossiblyGrey);
-    
+
     appendToMarkStack(container, cell);
 }
+
+#if defined(WEBKIT_IOS6)
+void SlotVisitor::setMarkedAndAppendToMarkStack(MarkedBlock& block, JSCell* cell, Dependency dependency)
+{
+    bool alreadyMarked = (!m_needsMarkingFence && webkitIOS6GCUncontendedMarkEnabled())
+        ? block.testAndSetMarkedUncontended(cell, dependency)
+        : block.testAndSetMarked(cell, dependency);
+    if (alreadyMarked)
+        return;
+
+    ASSERT(cell->structure());
+
+    cell->setCellState(CellState::PossiblyGrey);
+
+    appendToMarkStack(block, cell);
+}
+#endif
 
 void SlotVisitor::appendToMarkStack(JSCell* cell)
 {
@@ -507,6 +524,58 @@ void SlotVisitor::optimizeForStoppedMutator()
     m_canOptimizeForStoppedMutator = true;
 }
 
+#if defined(WEBKIT_IOS6)
+static unsigned NODELETE envUnsigned(const char* name, unsigned defaultValue)
+{
+    const char* text = getenv(name);
+    if (!text || !text[0])
+        return defaultValue;
+    char* end = nullptr;
+    long value = strtol(text, &end, 10);
+    if (end == text || value < 0)
+        return defaultValue;
+    return static_cast<unsigned>(value);
+}
+
+static constexpr unsigned ios6MaxMarkPipelineDepth = 16;
+
+static unsigned webkitIOS6GCMarkPipelineDepth()
+{
+    static const unsigned depth = std::min(envUnsigned("WEBKIT_IOS6_GC_MARK_PIPELINE_DEPTH", 0), ios6MaxMarkPipelineDepth);
+    return depth;
+}
+
+template<typename ShouldStop, typename OnVisit>
+ALWAYS_INLINE static void drainMarkStackPipelined(MarkStackArray& stack, unsigned depth, const ShouldStop& shouldStop, const OnVisit& onVisit)
+{
+    const JSCell* queue[ios6MaxMarkPipelineDepth];
+    unsigned head = 0;
+    unsigned count = 0;
+
+    auto pushOne = [&] ALWAYS_INLINE_LAMBDA -> bool {
+        if (count == depth || shouldStop() || !stack.canRemoveLast())
+            return false;
+        queue[(head + count) % ios6MaxMarkPipelineDepth] = stack.popAndPrefetch();
+        ++count;
+        return true;
+    };
+
+    while (pushOne()) { }
+
+    while (count) {
+        if (count > 1 && webkitIOS6GCStructurePrefetchEnabled()) [[likely]] {
+            const JSCell* upcoming = queue[(head + 1) % ios6MaxMarkPipelineDepth];
+            __builtin_prefetch(upcoming->structureID().tryDecode());
+        }
+        const JSCell* cell = queue[head];
+        head = (head + 1) % ios6MaxMarkPipelineDepth;
+        --count;
+        pushOne();
+        onVisit(cell);
+    }
+}
+#endif
+
 NEVER_INLINE void SlotVisitor::drain(MonotonicTime timeout)
 {
     if (!m_isInParallelMode) {
@@ -538,6 +607,21 @@ NEVER_INLINE void SlotVisitor::drain(MonotonicTime timeout)
                 // one next cell while accessing the current cell to make memory fetching in flight while handling
                 // the current cell.
                 unsigned countdown = scansBetweenRebalance;
+#if defined(WEBKIT_IOS6)
+                if (unsigned pipelineDepth = webkitIOS6GCMarkPipelineDepth()) {
+                    drainMarkStackPipelined(stack, pipelineDepth,
+                        [&] ALWAYS_INLINE_LAMBDA -> bool {
+                            if (!countdown)
+                                return true;
+                            --countdown;
+                            return false;
+                        },
+                        [&] (const JSCell* cell) ALWAYS_INLINE_LAMBDA {
+                            visitChildren(cell);
+                        });
+                    return IterationStatus::Done;
+                }
+#endif
                 auto popAndPrefetch = [&] ALWAYS_INLINE_LAMBDA -> const JSCell* {
                     if (!countdown || !stack.canRemoveLast())
                         return nullptr;
@@ -546,6 +630,10 @@ NEVER_INLINE void SlotVisitor::drain(MonotonicTime timeout)
                 };
                 for (const JSCell* next = popAndPrefetch(); next;) {
                     const JSCell* cell = next;
+#if defined(WEBKIT_IOS6)
+                    if (webkitIOS6GCStructurePrefetchEnabled()) [[likely]]
+                        __builtin_prefetch(cell->structureID().tryDecode());
+#endif
                     next = popAndPrefetch();
                     visitChildren(cell);
                 }
@@ -554,7 +642,7 @@ NEVER_INLINE void SlotVisitor::drain(MonotonicTime timeout)
         propagateExternalMemoryVisitedIfNecessary();
         if (status == IterationStatus::Continue)
             break;
-        
+
         m_rightToRun.safepoint();
         donateKnownParallel();
     }
@@ -602,6 +690,22 @@ size_t SlotVisitor::performIncrementOfDraining(size_t bytesRequested)
                     m_isFirstVisit = (&stack == &m_collectorStack);
 
                     unsigned countdown = scansBetweenRebalance;
+#if defined(WEBKIT_IOS6)
+                    if (unsigned pipelineDepth = webkitIOS6GCMarkPipelineDepth()) {
+                        drainMarkStackPipelined(stack, pipelineDepth,
+                            [&] ALWAYS_INLINE_LAMBDA -> bool {
+                                if (!countdown || isDone())
+                                    return true;
+                                --countdown;
+                                return false;
+                            },
+                            [&] (const JSCell* cell) ALWAYS_INLINE_LAMBDA {
+                                cellBytesVisited += cell->cellSize();
+                                visitChildren(cell);
+                            });
+                        return IterationStatus::Done;
+                    }
+#endif
                     auto popAndPrefetch = [&] ALWAYS_INLINE_LAMBDA -> const JSCell* {
                         if (!countdown || !stack.canRemoveLast() || isDone())
                             return nullptr;
@@ -610,6 +714,10 @@ size_t SlotVisitor::performIncrementOfDraining(size_t bytesRequested)
                     };
                     for (const JSCell* next = popAndPrefetch(); next;) {
                         const JSCell* cell = next;
+#if defined(WEBKIT_IOS6)
+                        if (webkitIOS6GCStructurePrefetchEnabled()) [[likely]]
+                            __builtin_prefetch(cell->structureID().tryDecode());
+#endif
                         next = popAndPrefetch();
                         cellBytesVisited += cell->cellSize();
                         visitChildren(cell);

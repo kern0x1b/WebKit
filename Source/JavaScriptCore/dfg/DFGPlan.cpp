@@ -142,6 +142,14 @@ Plan::Plan(CodeBlock* passedCodeBlock, CodeBlock* profiledDFGCodeBlock,
         , m_identifiers(m_codeBlock)
         , m_transitions(m_codeBlock)
 {
+#if defined(WEBKIT_IOS6)
+    // A valid osrEntryBytecodeIndex means operationOptimize() (JITOperations.cpp) called us
+    // from a loop back-edge check, not from op_enter's call-count trigger - i.e. this code was
+    // provably running, mid-loop, at the instant this plan was created. See
+    // JITPlan::wasLoopTriggerAtEnqueueForQueueOrdering() for how JITWorklistThread's
+    // dequeue-time reordering uses this.
+    m_wasLoopTriggerAtEnqueue = static_cast<bool>(osrEntryBytecodeIndex);
+#endif
     RELEASE_ASSERT(m_codeBlock->alternative()->jitCode());
     m_inlineCallFrames->disableThreadingChecks();
 }
@@ -238,7 +246,12 @@ Plan::CompilationPath Plan::compileInThreadImpl()
     RUN_PHASE(performUnification);
     RUN_PHASE(performPredictionInjection);
     
+#if defined(WEBKIT_IOS6)
+    if (pipelineTuning().staticExecutionCountEstimation)
+        RUN_PHASE(performStaticExecutionCountEstimation);
+#else
     RUN_PHASE(performStaticExecutionCountEstimation);
+#endif
 
     if (m_mode == JITCompilationMode::FTLForOSREntry) {
         bool result = performOSREntrypointCreation(dfg);
@@ -255,7 +268,12 @@ Plan::CompilationPath Plan::compileInThreadImpl()
     RUN_PHASE(performPredictionPropagation);
     RUN_PHASE(performFixup);
     RUN_PHASE(performInvalidationPointInjection);
+#if defined(WEBKIT_IOS6)
+    if (pipelineTuning().typeCheckHoisting)
+        RUN_PHASE(performTypeCheckHoisting);
+#else
     RUN_PHASE(performTypeCheckHoisting);
+#endif
 
     dfg.m_fixpointState = FixpointNotConverged;
 
@@ -268,13 +286,23 @@ Plan::CompilationPath Plan::compileInThreadImpl()
         validate(dfg);
         
     RUN_PHASE(performBackwardsPropagation);
+#if defined(WEBKIT_IOS6)
+    if (pipelineTuning().strengthReduction)
+        RUN_PHASE(performStrengthReduction);
+#else
     RUN_PHASE(performStrengthReduction);
+#endif
     RUN_PHASE(performCPSRethreading);
     RUN_PHASE(performCFA);
     RUN_PHASE(performConstantFolding);
     changed = false;
     RUN_PHASE(performCFGSimplification);
+#if defined(WEBKIT_IOS6)
+    if (pipelineTuning().localCSE)
+        RUN_PHASE(performLocalCSE);
+#else
     RUN_PHASE(performLocalCSE);
+#endif
     
     if (validationEnabled())
         validate(dfg);
@@ -300,7 +328,12 @@ Plan::CompilationPath Plan::compileInThreadImpl()
         // ArgumentsEliminationPhase does everything that this phase does, and it doesn't introduce this
         // pathology.
         
+#if defined(WEBKIT_IOS6)
+        if (pipelineTuning().varargsForwarding)
+            RUN_PHASE(performVarargsForwarding); // Do this after CFG simplification and CPS rethreading.
+#else
         RUN_PHASE(performVarargsForwarding); // Do this after CFG simplification and CPS rethreading.
+#endif
     }
     if (changed) {
         RUN_PHASE(performCFA);

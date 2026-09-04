@@ -377,6 +377,23 @@ auto TreeResolver::resolveElement(Element& element, const Style::ComputedStyle* 
     }
 
     auto resolveAndAddPseudoElementStyle = [&](const PseudoElementIdentifier& pseudoElementIdentifier) {
+#if defined(WEBKIT_IOS6)
+        // Nine of these run for every element resolved. With the matched-pseudo-element bit clear,
+        // resolvePseudoElement can only reach resolveAncestorPseudoElement, which produces a style
+        // for ::first-line and ::first-letter and nothing else; and with no stored pseudo style on
+        // the previous style there is nothing to tear down either. So for every other type this is
+        // two bit tests in place of two out-of-line calls and two hash lookups.
+        switch (pseudoElementIdentifier.type) {
+        case PseudoElementType::FirstLine:
+        case PseudoElementType::FirstLetter:
+            break;
+        default:
+            if (!update.style->hasPseudoStyle(pseudoElementIdentifier.type)
+                && (!existingStyle || !existingStyle->hasPseudoElementStyles()))
+                return OptionSet<Change> { };
+            break;
+        }
+#endif
         const Style::ComputedStyle* existingPseudoStyle = existingStyle ? existingStyle->pseudoElementStyle(pseudoElementIdentifier) : nullptr;
         auto pseudoElementUpdate = resolvePseudoElement(element, pseudoElementIdentifier, update, parent().isInDisplayNoneTree, existingPseudoStyle);
 

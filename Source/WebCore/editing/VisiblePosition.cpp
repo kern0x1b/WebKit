@@ -147,7 +147,7 @@ Position VisiblePosition::leftVisuallyDistinctCandidate() const
         if (!box)
             return primaryDirection == TextDirection::LTR ? previousVisuallyDistinctCandidate(m_deepPosition) : nextVisuallyDistinctCandidate(m_deepPosition);
 
-        CheckedPtr renderer = &box->renderer();
+        auto* renderer = &box->renderer();
 
         while (true) {
             if ((renderer->isBlockLevelReplacedOrAtomicInline() || renderer->isBR()) && offset == box->rightmostCaretOffset())
@@ -266,9 +266,9 @@ Position VisiblePosition::leftVisuallyDistinctCandidate() const
             break;
         }
 
-        CheckedPtr remainingFragment = remainingTextFragmentForFirstLetter(*renderer);
+        auto* remainingFragment = remainingTextFragmentForFirstLetter(*renderer);
         RefPtr node = remainingFragment ? remainingFragment->textNode() : renderer->node();
-        p = makeDeprecatedLegacyPosition(protect(node).get(), convertOffsetInTextFragmentToNodeOffset(*renderer, offset));
+        p = makeDeprecatedLegacyPosition(node.get(), convertOffsetInTextFragmentToNodeOffset(*renderer, offset));
 
         if ((p.isCandidate() && p.downstream() != downstreamStart) || p.atStartOfTree() || p.atEndOfTree())
             return p;
@@ -314,7 +314,7 @@ Position VisiblePosition::rightVisuallyDistinctCandidate() const
         if (!box)
             return primaryDirection == TextDirection::LTR ? nextVisuallyDistinctCandidate(m_deepPosition) : previousVisuallyDistinctCandidate(m_deepPosition);
 
-        CheckedPtr renderer = &box->renderer();
+        auto* renderer = &box->renderer();
 
         while (true) {
             if ((renderer->isBlockLevelReplacedOrAtomicInline() || renderer->isBR()) && offset == box->leftmostCaretOffset())
@@ -437,9 +437,9 @@ Position VisiblePosition::rightVisuallyDistinctCandidate() const
             break;
         }
 
-        CheckedPtr remainingFragment = remainingTextFragmentForFirstLetter(*renderer);
+        auto* remainingFragment = remainingTextFragmentForFirstLetter(*renderer);
         RefPtr node = remainingFragment ? remainingFragment->textNode() : renderer->node();
-        p = makeDeprecatedLegacyPosition(protect(node).get(), convertOffsetInTextFragmentToNodeOffset(*renderer, offset));
+        p = makeDeprecatedLegacyPosition(node.get(), convertOffsetInTextFragmentToNodeOffset(*renderer, offset));
 
         if ((p.isCandidate() && p.downstream() != downstreamStart) || p.atStartOfTree() || p.atEndOfTree())
             return p;

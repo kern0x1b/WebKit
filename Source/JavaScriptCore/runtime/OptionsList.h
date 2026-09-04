@@ -38,20 +38,35 @@
 
 
 #if defined(WEBKIT_IOS6)
-// Compile sooner than upstream does.
+// Upstream's numbers, kept after measuring twice.
 //
-// The thresholds upstream picks assume a processor where staying in the
-// interpreter a while is cheap and compiling early wastes work. Here the
-// arithmetic is the other way round: a measured tight loop runs at 56 million
-// iterations a second once compiled and about two before, and the freezes that
-// matter are single passes of the site's renderer running three to seven seconds
-// inside the interpreter. Paying for compilation five times sooner is a good
-// trade when the alternative is interpreting a whole render.
-// Upstream's numbers, kept after measuring. Compiling five times sooner sounded
-// right for a processor this slow and was worse on both axes: passes of 5.4, 12.6,
-// 10.3, 1.7 and 0.7 seconds against 3.9, 9.7, 10.3 and 1.0, and 174 MB resident
-// against 151. Paying baseline compilation for the thousands of functions a
-// bundle calls once costs more than the interpreter does.
+// The first measurement compiled five times sooner and was worse on both axes:
+// passes of 5.4, 12.6, 10.3, 1.7 and 0.7 seconds against 3.9, 9.7, 10.3 and 1.0,
+// and 174 MB resident against 151. It concluded that paying baseline compilation
+// for the thousands of functions a bundle calls once costs more than the
+// interpreter does. Re-run after property inline caches were fixed in baseline
+// code, with a census of every live CodeBlock taken every five seconds: the
+// decision stands and every reason given for it is wrong.
+//
+// Lowering the interpreter's threshold alone, 500 to 100, halves the share of live
+// bytecode still interpreted - 47.1% to 25.9% - for 2.9 MB of a 27.2 MB code pool.
+// It is not expensive. It is also not useful: stalls, frame rate and resident
+// memory each moved further between two runs of one configuration than between any
+// two configurations. Resident tracks how many posts the feed delivered, r = 0.98
+// at 8.6 MB per thousand elements, and does not track these numbers at all, so
+// 174-against-151 is as likely to have been the feed as the compiler.
+//
+// Nor is the interpreted code the functions a bundle calls once: five live blocks
+// had run fewer than fifteen times, against two hundred and eleven sitting between
+// two hundred and five hundred, most of the way to the threshold and never
+// arriving. They never arrived because every compiled function in the process was
+// discarded about once a minute. Holding the whole compiled set instead - three
+// runs reached that state, one of them without being asked to - moved the frame
+// rate not at all: 15.5, 7.0 and 8.0 frames from the same tier state.
+//
+// So the tier the site's JavaScript runs in does not predict what the reader
+// feels, and neither of these numbers is worth moving again without a measurement
+// that separates it from the feed.
 #define WEBKIT_IOS6_JIT_WARMUP 500
 #define WEBKIT_IOS6_JIT_SOON 100
 #define WEBKIT_IOS6_OPTIMIZE_WARMUP 1000
@@ -71,6 +86,14 @@
 #define WEBKIT_IOS6_AHEAD_OF_TIME_BYTECODE true
 #else
 #define WEBKIT_IOS6_AHEAD_OF_TIME_BYTECODE false
+#endif
+
+#if defined(WEBKIT_IOS6)
+#define WEBKIT_IOS6_WORKLIST_THREADS 1
+#define WEBKIT_IOS6_COMPILER_THREAD_PRIORITY_DELTA -8
+#else
+#define WEBKIT_IOS6_WORKLIST_THREADS computeNumberOfWorkerThreads(3, 2)
+#define WEBKIT_IOS6_COMPILER_THREAD_PRIORITY_DELTA computePriorityDeltaOfWorkerThreads(-1, 0)
 #endif
 
 
@@ -119,6 +142,38 @@
 #define WEBKIT_IOS6_MEDIUM_HEAP_GROWTH_FACTOR 1.5
 #define WEBKIT_IOS6_LARGE_HEAP_GROWTH_FACTOR 1.24
 #define WEBKIT_IOS6_MAX_REGEXP_STACK_SIZE (128 * 1024 * 1024)
+#endif
+
+#if defined(WEBKIT_IOS6)
+// A floor, in bytes, under the amount a program may allocate between two collections.
+//
+// updateAllocationLimits() sets that budget to proportionalHeapSize(live) - live, which is
+// (growthFactor - 1) * live. The only guard upstream has against the budget collapsing is
+// m_minBytesPerCycle, and it is a floor on the total heap rather than on the increment, so
+// it stops having any effect as soon as the heap is larger than largeHeapSize - which here
+// is four megabytes. The growth factors this port runs are 1.25 / 1.12 / 1.05 against
+// upstream's 2 / 1.5 / 1.24, and the band is picked from the process footprint, which on
+// this device sits above mediumHeapRAMFraction * 512 MB for most of a page's life. So the
+// steady state is a five percent budget: with twenty megabytes live the collector is asked
+// to run again after one more megabyte. An event handler that allocates twenty megabytes of
+// garbage pays for twenty collections, and with useConcurrentGC forced off for anything that
+// is not x86_64 or arm64 (Options.cpp, notifyOptionsChanged) every one of them stops the
+// world on the main thread.
+//
+// A proportion is the wrong unit here anyway. The thing that has to be budgeted is the
+// jetsam limit, which is an absolute number of bytes, and the JS heap is not what dominates
+// the footprint - tiles, decoded images and the DOM are. Floor the increment instead: the
+// heap may exceed its proportional target by at most this many bytes, which is the whole of
+// the memory this costs, and the collector runs that much less often.
+//
+// Zero means "use the proportional rule alone", which is what every other port gets.
+#if CPU(ARM_THUMB2)
+#define WEBKIT_IOS6_MIN_BYTES_PER_COLLECTION_CYCLE (8 * 1024 * 1024)
+#else
+#define WEBKIT_IOS6_MIN_BYTES_PER_COLLECTION_CYCLE (3 * 1024 * 1024)
+#endif
+#else
+#define WEBKIT_IOS6_MIN_BYTES_PER_COLLECTION_CYCLE 0
 #endif
 
 using WTF::PrintStream;
@@ -309,6 +364,7 @@ bool hasCapacityToUseLargeGigacage();
     v(Double, mediumHeapGrowthFactor, WEBKIT_IOS6_MEDIUM_HEAP_GROWTH_FACTOR, Normal, nullptr) \
     v(Double, largeHeapGrowthFactor, WEBKIT_IOS6_LARGE_HEAP_GROWTH_FACTOR, Normal, nullptr) \
     v(Double, miniVMHeapGrowthFactor, 1.20, Normal, nullptr) \
+    v(Unsigned, minimumBytesPerCollectionCycle, WEBKIT_IOS6_MIN_BYTES_PER_COLLECTION_CYCLE, Normal, "Floor under the allocation budget between collections, in bytes. Zero uses the proportional growth factors alone."_s) \
     v(Double, heapGrowthSteepnessFactor, 2.00, Normal, nullptr) \
     v(Double, heapGrowthMaxIncrease, 3.00, Normal, nullptr) \
     v(Unsigned, aggressiveHeapThresholdInMB, 16 * 1024, Normal, nullptr) \
@@ -373,8 +429,8 @@ bool hasCapacityToUseLargeGigacage();
     v(Unsigned, maxDFGNodesInBasicBlockForPreciseAnalysis, 20000, Normal, "Disable precise but costly analysis and give conservative results if the number of DFG nodes in a block exceeds this threshold"_s) \
     \
     v(Bool, useConcurrentJIT, true, Normal, "allows the DFG / FTL compilation in threads other than the executing JS thread"_s) \
-    v(Unsigned, minNumberOfWorklistThreads, computeNumberOfWorkerThreads(3, 2), Normal, nullptr) \
-    v(Unsigned, maxNumberOfWorklistThreads, computeNumberOfWorkerThreads(3, 2), Normal, nullptr) \
+    v(Unsigned, minNumberOfWorklistThreads, WEBKIT_IOS6_WORKLIST_THREADS, Normal, nullptr) \
+    v(Unsigned, maxNumberOfWorklistThreads, WEBKIT_IOS6_WORKLIST_THREADS, Normal, nullptr) \
     v(Unsigned, numberOfBaselineCompilerThreads, computeNumberOfWorkerThreads(3, 2), Normal, nullptr) \
     v(Unsigned, numberOfDFGCompilerThreads, computeNumberOfWorkerThreads(3, 2) - 1, Normal, nullptr) \
     v(Unsigned, numberOfFTLCompilerThreads, computeNumberOfWorkerThreads(MAXIMUM_NUMBER_OF_FTL_COMPILER_THREADS, 2) - 1, Normal, nullptr) \
@@ -383,7 +439,7 @@ bool hasCapacityToUseLargeGigacage();
     v(Unsigned, worklistBaselineLoadWeight, 1, Normal, nullptr) \
     v(Unsigned, worklistDFGLoadWeight, 1, Normal, nullptr) \
     v(Unsigned, worklistFTLLoadWeight, 1, Normal, nullptr) \
-    v(Int32, priorityDeltaOfDFGCompilerThreads, computePriorityDeltaOfWorkerThreads(-1, 0), Normal, nullptr) \
+    v(Int32, priorityDeltaOfDFGCompilerThreads, WEBKIT_IOS6_COMPILER_THREAD_PRIORITY_DELTA, Normal, nullptr) \
     v(Int32, priorityDeltaOfFTLCompilerThreads, computePriorityDeltaOfWorkerThreads(-2, 0), Normal, nullptr) \
     v(Int32, priorityDeltaOfWasmCompilerThreads, computePriorityDeltaOfWorkerThreads(-1, 0), Normal, nullptr) \
     \

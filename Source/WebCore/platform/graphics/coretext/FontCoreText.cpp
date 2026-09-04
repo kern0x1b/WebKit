@@ -34,6 +34,7 @@
 #include "FontCascade.h"
 #include "FontCustomPlatformData.h"
 #include "FontDescription.h"
+#include "GlyphPage.h"
 #include "LocaleCocoa.h"
 #include "Logging.h"
 #include "OpenTypeCG.h"
@@ -615,6 +616,35 @@ float Font::platformWidthForGlyph(Glyph glyph) const
     }
     return advance.width;
 }
+
+#if defined(WEBKIT_IOS6) && !ENABLE(OPENTYPE_VERTICAL)
+void Font::prewarmGlyphAdvances(const GlyphPage& page) const
+{
+    if (!platformData().size())
+        return;
+
+    std::array<CGGlyph, GlyphPage::size> glyphs;
+    unsigned count = 0;
+    for (unsigned i = 0; i < GlyphPage::size; ++i) {
+        auto glyph = page.glyphForIndex(i);
+        if (!glyph || isZeroWidthSpaceGlyph(glyph))
+            continue;
+        glyphs[count++] = glyph;
+    }
+
+    if (count < 2)
+        return;
+
+    bool horizontal = platformData().orientation() == FontOrientation::Horizontal;
+    CTFontOrientation orientation = horizontal || m_isBrokenIdeographFallback ? kCTFontOrientationHorizontal : kCTFontOrientationVertical;
+
+    std::array<CGSize, GlyphPage::size> advances;
+    CTFontGetAdvancesForGlyphs(ctFont(), orientation, glyphs.data(), advances.data(), count);
+
+    for (unsigned i = 0; i < count; ++i)
+        m_glyphToWidthMap.metricsSlotForGlyph(glyphs[i]) = advances[i].width;
+}
+#endif
 
 GlyphBufferAdvance Font::applyTransforms(GlyphBuffer& glyphBuffer, unsigned beginningGlyphIndex, unsigned beginningStringIndex, bool enableKerning, bool requiresShaping, const AtomString& locale, StringView text, TextDirection textDirection) const
 {

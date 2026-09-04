@@ -35,6 +35,17 @@
 namespace WebCore {
 namespace Style {
 
+#if defined(WEBKIT_IOS6)
+static bool NODELETE attributeChangeFastPathEnabled()
+{
+    static const bool enabled = [] {
+        const char* value = getenv("WEBKIT_IOS6_ATTR_INVALIDATION_FAST_PATH");
+        return !value || value[0] != '0';
+    }();
+    return enabled;
+}
+#endif
+
 static bool NODELETE mayBeAffectedByAttributeChange(const RuleFeatureSet& features, bool isHTML, const QualifiedName& attributeName)
 {
     auto& nameSet = isHTML ? features.attributeLowercaseLocalNamesInRules : features.attributeLocalNamesInRules;
@@ -52,6 +63,24 @@ void AttributeChangeInvalidation::invalidateStyle(const QualifiedName& attribute
     bool mayAffectStyleInShadowTree = false;
 
     auto attributeNameForLookups = attributeName.localNameLowercase();
+
+#if defined(WEBKIT_IOS6)
+    // Every data-*/aria-* write on a connected element walked the ancestor rule features and reached
+    // the resolver twice, for an attribute name that no selector in the document mentions. Every
+    // consumer below is keyed on one of these three name sets - attributesAffectingHost and the
+    // attributeRules map are both filled only for names that were also added to the two
+    // *NamesInRules sets - so a name absent from all three cannot produce any invalidation.
+    // Only the element's own scope can be decided this cheaply: with a shadow root, an assigned
+    // slot, or a containing shadow root in play, traverseRuleFeatures visits other feature sets and
+    // warms the containing tree resolver, so those keep the full path.
+    if (attributeChangeFastPathEnabled() && !m_element->shadowRoot() && !m_element->assignedSlot() && !m_element->isInShadowTree()) [[likely]] {
+        auto& features = m_element->styleResolver().ruleSets().features();
+        if (!features.attributeLowercaseLocalNamesInRules.contains(attributeNameForLookups)
+            && !features.attributeLocalNamesInRules.contains(attributeName.localName())
+            && !features.substitutionAttributeNamesInRules.contains(attributeNameForLookups))
+            return;
+    }
+#endif
 
     traverseRuleFeatures(m_element, [&] (const RuleFeatureSet& features, bool mayAffectShadowTree) {
         if (mayAffectShadowTree && mayBeAffectedByAttributeChange(features, isHTML, attributeName))

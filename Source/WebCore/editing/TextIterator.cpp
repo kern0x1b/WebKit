@@ -78,6 +78,7 @@
 #include <wtf/Function.h>
 #include <wtf/StdLibExtras.h>
 #include <wtf/TZoneMallocInlines.h>
+#include <wtf/UnalignedAccess.h>
 #include <wtf/text/CString.h>
 #include <wtf/text/MakeString.h>
 #include <wtf/text/ParsingUtilities.h>
@@ -97,6 +98,67 @@ WTF_MAKE_TZONE_ALLOCATED_IMPL(TextIterator);
 
 using namespace WTF::Unicode;
 using namespace HTMLNames;
+
+static constexpr uint32_t textIteratorBroadcastByte(uint8_t value)
+{
+    return 0x01010101U * value;
+}
+
+static constexpr uint32_t textIteratorByteLaneHighBits = textIteratorBroadcastByte(0x80);
+
+static constexpr uint32_t textIteratorCollapsibleLimit = textIteratorBroadcastByte(0x0B);
+
+ALWAYS_INLINE static uint32_t wordHasByteBelowCollapsibleLimit(uint32_t word)
+{
+    return (word - textIteratorCollapsibleLimit) & ~word & textIteratorByteLaneHighBits;
+}
+
+template<typename Predicate>
+ALWAYS_INLINE static size_t findFirstCollapsible8(std::span<const Latin1Character> span, const Predicate& isCollapsible)
+{
+    size_t size = span.size();
+    size_t index = 0;
+    while (index + 4 <= size) {
+        if (wordHasByteBelowCollapsibleLimit(WTF::unalignedLoad<uint32_t>(span.subspan(index, 4).data()))) [[unlikely]] {
+            for (size_t candidate = index; candidate < index + 4; ++candidate) {
+                if (isCollapsible(span[candidate]))
+                    return candidate;
+            }
+        }
+        index += 4;
+    }
+    while (index < size && !isCollapsible(span[index]))
+        ++index;
+    return index;
+}
+
+static unsigned findFirstCollapsibleNewlineOrTab(const String& text, unsigned start, unsigned end, bool preserveNewline)
+{
+    if (start >= end)
+        return start;
+    unsigned scanEnd = std::min(end, text.length());
+    if (start >= scanEnd)
+        return end;
+
+    auto isCollapsible = [preserveNewline](char16_t character) {
+        return character == '\t' || (character == '\n' && !preserveNewline);
+    };
+
+    auto& impl = *text.impl();
+    size_t offset;
+    if (impl.is8Bit())
+        offset = findFirstCollapsible8(impl.span8().subspan(start, scanEnd - start), isCollapsible);
+    else {
+        auto span = impl.span16().subspan(start, scanEnd - start);
+        size_t size = span.size();
+        offset = 0;
+        while (offset < size && !isCollapsible(span[offset]))
+            ++offset;
+    }
+
+    unsigned result = start + static_cast<unsigned>(offset);
+    return result < scanEnd ? result : end;
+}
 
 // Buffer that knows how to compare with a search target.
 // Keeps enough of the previous text to be able to search in the future, but no more.
@@ -464,14 +526,16 @@ static bool isRendererAccessible(const RenderObject* renderer, TextIteratorBehav
     if (!renderer)
         return false;
 
-    CheckedRef style = renderer->style();
-    if (style->usedUserSelect() == UserSelect::None && behaviors.contains(TextIteratorBehavior::IgnoresUserSelectNone))
-        return false;
+    if (behaviors.contains(TextIteratorBehavior::IgnoresUserSelectNone)) [[unlikely]] {
+        if (renderer->style().usedUserSelect() == UserSelect::None)
+            return false;
+    }
 
-    if (renderer->isSkippedContent()) {
+    if (renderer->isSkippedContent()) [[unlikely]] {
         if (!behaviors.contains(TextIteratorBehavior::EntersSkippedContentRelevantToUser))
             return false;
-        return style->usedContentVisibility() == ContentVisibility::Auto || style->autoRevealsWhenFound();
+        auto& style = renderer->style();
+        return style.usedContentVisibility() == ContentVisibility::Auto || style.autoRevealsWhenFound();
     }
 
     return true;
@@ -533,17 +597,17 @@ void TextIterator::advance()
             return;
         }
         
-        CheckedPtr renderer = m_currentNode->renderer();
+        auto* renderer = m_currentNode->renderer();
         if (!m_handledNode) {
-            if (!isRendererAccessible(renderer.get(), m_behaviors)) {
+            if (!isRendererAccessible(renderer, m_behaviors)) {
                 m_handledNode = true;
                 m_handledChildren = !hasDisplayContents(*m_currentNode) && !renderer;
             } else {
-                if (isConsideredSkippedContent(dynamicDowncast<RenderBox>(renderer.get()), m_behaviors))
+                if (isConsideredSkippedContent(dynamicDowncast<RenderBox>(renderer), m_behaviors))
                     m_handledChildren = true;
                 else if (renderer->isRenderText() && m_currentNode->isTextNode())
                     m_handledNode = handleTextNode();
-                else if (isRendererReplacedElement(renderer.get(), m_behaviors) && (renderer->isInline() || !m_behaviors.contains(TextIteratorBehavior::EmitsNewlinesPerInnerTextSpec)))
+                else if (isRendererReplacedElement(renderer, m_behaviors) && (renderer->isInline() || !m_behaviors.contains(TextIteratorBehavior::EmitsNewlinesPerInnerTextSpec)))
                     m_handledNode = handleReplacedElement();
                 else
                     m_handledNode = handleNonTextNode();
@@ -555,18 +619,18 @@ void TextIterator::advance()
         // find a new current node to handle in depth-first manner,
         // calling exitNode() as we come back thru a parent node
 
-        RefPtr next = m_handledChildren ? nullptr : firstChild(m_behaviors, *protect(m_currentNode));
+        RefPtr next = m_handledChildren ? nullptr : firstChild(m_behaviors, *m_currentNode);
         m_offset = 0;
         if (!next) {
-            RefPtr currentNode = m_currentNode;
-            next = nextSibling(m_behaviors, *currentNode);
+            next = nextSibling(m_behaviors, *m_currentNode);
             if (!next) {
+                RefPtr currentNode = m_currentNode;
                 bool pastEnd = nextNode(m_behaviors, *currentNode) == m_pastEndNode;
                 RefPtr parentNode = parentNodeOrShadowHost(m_behaviors, *currentNode);
                 while (!next && parentNode) {
                     if ((pastEnd && parentNode == m_endContainer.get()) || isDescendantOf(m_behaviors, *m_endContainer, *parentNode))
                         return;
-                    bool haveRenderer = isRendererAccessible(protect(currentNode->renderer()), m_behaviors);
+                    bool haveRenderer = isRendererAccessible(currentNode->renderer(), m_behaviors);
                     RefPtr exitedNode = WTF::move(currentNode);
                     m_currentNode = WTF::move(parentNode);
                     currentNode = m_currentNode;
@@ -580,7 +644,7 @@ void TextIterator::advance()
                         return;
                     }
                     next = nextSibling(m_behaviors, *currentNode);
-                    if (next && isRendererAccessible(protect(currentNode->renderer()), m_behaviors))
+                    if (next && isRendererAccessible(currentNode->renderer(), m_behaviors))
                         exitNode(currentNode.get());
                 }
             }
@@ -589,8 +653,8 @@ void TextIterator::advance()
 
         // set the new current node
         m_currentNode = WTF::move(next);
-        if (RefPtr currentNode = m_currentNode)
-            pushFullyClippedState(m_fullyClippedStack, *currentNode, m_behaviors);
+        if (m_currentNode)
+            pushFullyClippedState(m_fullyClippedStack, *m_currentNode, m_behaviors);
         m_handledNode = false;
         m_handledChildren = false;
         m_handledFirstLetter = false;
@@ -622,13 +686,13 @@ bool TextIterator::handleTextNode()
     if (m_fullyClippedStack.top() && !m_behaviors.contains(TextIteratorBehavior::IgnoresStyleVisibility))
         return false;
 
-    CheckedRef renderer = *textNode->renderer();
+    auto& renderer = *textNode->renderer();
     m_lastTextNode = textNode.ptr();
-    auto rendererText = rendererTextForBehavior(renderer.get());
-    CheckedPtr textFragmentWithRemainingTextAfterFirstLetter = dynamicDowncast<RenderTextFragment>(renderer.get());
+    auto rendererText = rendererTextForBehavior(renderer);
+    auto* textFragmentWithRemainingTextAfterFirstLetter = dynamicDowncast<RenderTextFragment>(renderer);
 
     // handle pre-formatted text
-    if (!renderer->style().collapseWhiteSpace()) {
+    if (!renderer.style().collapseWhiteSpace()) {
         int runStart = m_offset;
         if (m_lastTextNodeEndedWithCollapsedSpace && hasVisibleTextNode(renderer)) {
             emitCharacter(' ', WTF::move(textNode), nullptr, runStart, runStart);
@@ -644,7 +708,7 @@ bool TextIterator::handleTextNode()
                 return false;
             }
         }
-        if (renderer->style().visibility() != Visibility::Visible && !m_behaviors.contains(TextIteratorBehavior::IgnoresStyleVisibility))
+        if (renderer.style().visibility() != Visibility::Visible && !m_behaviors.contains(TextIteratorBehavior::IgnoresStyleVisibility))
             return false;
         int rendererTextLength = rendererText.length();
         int end = (textNode.ptr() == m_endContainer) ? m_endOffset : INT_MAX;
@@ -661,12 +725,12 @@ bool TextIterator::handleTextNode()
         return true;
     }
 
-    std::tie(m_textRun, m_textRunLogicalOrderCache) = InlineIterator::firstTextBoxInLogicalOrderFor(renderer.get());
+    std::tie(m_textRun, m_textRunLogicalOrderCache) = InlineIterator::firstTextBoxInLogicalOrderFor(renderer);
 
     if (textFragmentWithRemainingTextAfterFirstLetter && !m_handledFirstLetter && !m_offset)
         handleTextNodeFirstLetter(*textFragmentWithRemainingTextAfterFirstLetter);
     else if (!m_textRun && rendererText.length()) {
-        if (renderer->style().visibility() != Visibility::Visible && !m_behaviors.contains(TextIteratorBehavior::IgnoresStyleVisibility))
+        if (renderer.style().visibility() != Visibility::Visible && !m_behaviors.contains(TextIteratorBehavior::IgnoresStyleVisibility))
             return false;
         m_lastTextNodeEndedWithCollapsedSpace = true; // entire block is collapsed space
         return true;
@@ -680,8 +744,9 @@ void TextIterator::handleTextRun()
 {
     Ref textNode = downcast<Text>(protect(m_currentNode).releaseNonNull());
 
-    CheckedRef renderer = m_firstLetterText ? *m_firstLetterText : *textNode->renderer();
-    if (renderer->style().visibility() != Visibility::Visible && !m_behaviors.contains(TextIteratorBehavior::IgnoresStyleVisibility)) {
+    auto& renderer = m_firstLetterText ? *m_firstLetterText : *textNode->renderer();
+    auto& style = renderer.style();
+    if (style.visibility() != Visibility::Visible && !m_behaviors.contains(TextIteratorBehavior::IgnoresStyleVisibility)) {
         m_textRun = { };
         return;
     }
@@ -690,7 +755,7 @@ void TextIterator::handleTextRun()
 
     // For remaining text fragments after a first-letter split, text box offsets are fragment-local but m_offset/m_endOffset are DOM offsets.
     unsigned remainingFragmentStart = 0;
-    if (auto* renderText = dynamicDowncast<RenderTextFragment>(renderer.get()); renderText && renderText->firstLetter())
+    if (auto* renderText = dynamicDowncast<RenderTextFragment>(renderer); renderText && renderText->firstLetter())
         remainingFragmentStart = renderText->start();
 
     auto toFragmentLocal = [&](unsigned nodeOffset) {
@@ -700,7 +765,7 @@ void TextIterator::handleTextRun()
         return localOffset + remainingFragmentStart;
     };
 
-    auto rendererText = rendererTextForBehavior(renderer.get());
+    auto rendererText = rendererTextForBehavior(renderer);
     auto rangeStart = toFragmentLocal(m_offset);
     auto rangeEnd = textNode.ptr() == m_endContainer ? std::make_optional(toFragmentLocal(m_endOffset)) : std::nullopt;
     while (m_textRun) {
@@ -713,11 +778,11 @@ void TextIterator::handleTextRun()
         // Check if we need to emit (previously) collapsed whitespace at the start of this run.
         auto isAfterRangeEnd = rangeEnd ? runStart > *rangeEnd : false;
         auto hasPrecedingCollapsedWhitespace = m_lastTextNodeEndedWithCollapsedSpace || (m_textRun == firstTextRun && textRunStart == runStart && runStart);
-        auto shouldEmitWhitespace = !isAfterRangeEnd && hasPrecedingCollapsedWhitespace && m_lastCharacter && !renderer->style().isCollapsibleWhiteSpace(m_lastCharacter);
+        auto shouldEmitWhitespace = !isAfterRangeEnd && hasPrecedingCollapsedWhitespace && m_lastCharacter && !style.isCollapsibleWhiteSpace(m_lastCharacter);
         if (shouldEmitWhitespace) {
-            if (m_lastTextNode == textNode.ptr() && runStart && renderer->style().isCollapsibleWhiteSpace(rendererText[runStart - 1])) {
+            if (m_lastTextNode == textNode.ptr() && runStart && style.isCollapsibleWhiteSpace(rendererText[runStart - 1])) {
                 unsigned spaceRunStart = runStart - 1;
-                while (spaceRunStart && renderer->style().isCollapsibleWhiteSpace(rendererText[spaceRunStart - 1]))
+                while (spaceRunStart && style.isCollapsibleWhiteSpace(rendererText[spaceRunStart - 1]))
                     --spaceRunStart;
                 emitCharacter(' ', WTF::move(textNode), nullptr, spaceRunStart, spaceRunStart + 1);
             } else
@@ -728,7 +793,7 @@ void TextIterator::handleTextRun()
         // Determine what the next text run will be, but don't advance yet
         auto nextTextRun = InlineIterator::nextTextBoxInLogicalOrder(m_textRun, m_textRunLogicalOrderCache);
         if (runStart < runEnd) {
-            bool shouldPreserveNewline = renderer->style().preserveNewline();
+            bool shouldPreserveNewline = style.preserveNewline();
             auto isCollapsibleNewlineOrTab = [&](char16_t character) {
                 return character == '\t' || (character == '\n' && !shouldPreserveNewline);
             };
@@ -740,11 +805,7 @@ void TextIterator::handleTextRun()
                 emitCharacter(' ', textNode.copyRef(), nullptr, runStart, runStart + 1);
                 m_offset = toNodeOffset(runStart + 1);
             } else {
-                auto subrunEnd = runStart + 1;
-                for (; subrunEnd < runEnd; ++subrunEnd) {
-                    if (isCollapsibleNewlineOrTab(rendererText[subrunEnd]))
-                        break;
-                }
+                auto subrunEnd = findFirstCollapsibleNewlineOrTab(rendererText, runStart + 1, runEnd, shouldPreserveNewline);
                 if (subrunEnd == runEnd && m_behaviors.contains(TextIteratorBehavior::BehavesAsIfNodesFollowing)) {
                     bool lastSpaceCollapsedByNextNonTextRun = !nextTextRun && rendererText.length() > subrunEnd && rendererText[subrunEnd] == ' ';
                     if (lastSpaceCollapsedByNextNonTextRun)
@@ -1147,7 +1208,8 @@ bool TextIterator::shouldRepresentNodeOffsetZero()
 
 bool TextIterator::shouldEmitSpaceBeforeAndAfterNode(Node& node)
 {
-    return node.renderer() && node.renderer()->isRenderTable() && (node.renderer()->isInline() || m_behaviors.contains(TextIteratorBehavior::EmitsCharactersBetweenAllVisiblePositions));
+    auto* renderer = node.renderer();
+    return renderer && renderer->isRenderTable() && (renderer->isInline() || m_behaviors.contains(TextIteratorBehavior::EmitsCharactersBetweenAllVisiblePositions));
 }
 
 void TextIterator::representNodeOffsetZero()
@@ -1385,10 +1447,17 @@ SimpleRange TextIterator::range() const
 
 Node* TextIterator::node() const
 {
-    auto start = this->range().start;
-    if (start.container->isCharacterDataNode())
-        return start.container.unsafePtr();
-    return start.container->traverseToChildAt(start.offset);
+    ASSERT(!atEnd());
+    if (m_positionOffsetBaseNode) {
+        unsigned index = m_positionOffsetBaseNode->computeNodeIndex();
+        m_positionStartOffset += index;
+        m_positionEndOffset += index;
+        m_positionOffsetBaseNode = nullptr;
+    }
+    Node* container = m_positionNode.get();
+    if (container->isCharacterDataNode())
+        return container;
+    return container->traverseToChildAt(static_cast<unsigned>(m_positionStartOffset));
 }
 
 #if ENABLE(TREE_DEBUGGING)
@@ -1456,11 +1525,11 @@ void SimplifiedBackwardsTextIterator::advance()
     while (m_node && !m_havePassedStartContainer) {
         // Don't handle node if we start iterating at [node, 0].
         if (!m_handledNode && !(m_node == m_endContainer && !m_endOffset)) {
-            CheckedPtr renderer = m_node->renderer();
-            if (CheckedPtr renderText = dynamicDowncast<RenderText>(renderer.get())) {
+            auto* renderer = m_node->renderer();
+            if (auto* renderText = dynamicDowncast<RenderText>(renderer)) {
                 if (renderText->style().visibility() == Visibility::Visible && m_offset > 0)
                     m_handledNode = handleTextNode();
-            } else if (isRendererReplacedElement(renderer.get(), m_behaviors) && (renderer->isInline() || !m_behaviors.contains(TextIteratorBehavior::EmitsNewlinesPerInnerTextSpec))) {
+            } else if (isRendererReplacedElement(renderer, m_behaviors) && (renderer->isInline() || !m_behaviors.contains(TextIteratorBehavior::EmitsNewlinesPerInnerTextSpec))) {
                 if (downcast<RenderElement>(*renderer).style().visibility() == Visibility::Visible && m_offset > 0)
                     m_handledNode = handleReplacedElement();
             } else
@@ -1471,11 +1540,11 @@ void SimplifiedBackwardsTextIterator::advance()
 
         if (!m_handledChildren && m_node->hasChildNodes()) {
             m_node = m_node->lastChild();
-            pushFullyClippedState(m_fullyClippedStack, *protect(m_node), m_behaviors);
+            pushFullyClippedState(m_fullyClippedStack, *m_node, m_behaviors);
         } else {
             // Exit empty containers as we pass over them or containers
             // where [container, 0] is where we started iterating.
-            if (!m_handledNode && canHaveChildrenForEditing(*protect(m_node)) && m_node->parentNode() && (!m_node->lastChild() || (m_node == m_endContainer && !m_endOffset))) {
+            if (!m_handledNode && canHaveChildrenForEditing(*m_node) && m_node->parentNode() && (!m_node->lastChild() || (m_node == m_endContainer && !m_endOffset))) {
                 exitNode();
                 if (m_positionNode) {
                     m_handledNode = true;
@@ -1499,14 +1568,14 @@ void SimplifiedBackwardsTextIterator::advance()
 
             m_fullyClippedStack.pop();
             if (advanceRespectingRange(protect(m_node->previousSibling()).get()))
-                pushFullyClippedState(m_fullyClippedStack, *protect(m_node), m_behaviors);
+                pushFullyClippedState(m_fullyClippedStack, *m_node, m_behaviors);
             else
                 m_node = nullptr;
         }
 
         // For the purpose of word boundary detection,
         // we should iterate all visible text and trailing (collapsed) whitespaces. 
-        m_offset = m_node ? maxOffsetIncludingCollapsedSpaces(*protect(m_node)) : 0;
+        m_offset = m_node ? maxOffsetIncludingCollapsedSpaces(*m_node) : 0;
         m_handledNode = false;
         m_handledChildren = false;
         
@@ -2145,7 +2214,7 @@ static inline bool isInsideReplacedElement(TextIterator& iterator, TextIteratorB
     ASSERT(!iterator.atEnd());
     ASSERT(iterator.text().length() == 1);
     RefPtr node = iterator.node();
-    return node && isRendererReplacedElement(protect(node->renderer()), behaviors);
+    return node && isRendererReplacedElement(node->renderer(), behaviors);
 }
 
 constexpr uint64_t NODELETE clampedAdd(uint64_t a, uint64_t b)
@@ -2221,7 +2290,11 @@ bool hasAnyPlainText(const SimpleRange& range, TextIteratorBehaviors behaviors, 
 String plainText(const SimpleRange& range, TextIteratorBehaviors defaultBehavior, bool isDisplayString)
 {
     // The initial buffer size can be critical for performance: https://bugs.webkit.org/show_bug.cgi?id=81192
+#if defined(WEBKIT_IOS6)
+    constexpr unsigned initialCapacity = 1 << 12;
+#else
     constexpr unsigned initialCapacity = 1 << 15;
+#endif
 
     Ref document = range.start.document();
 

@@ -2120,6 +2120,7 @@ public:
     Element* NODELETE cachedFirstElementWithAttribute(const QualifiedName& attribute) const;
     void setCachedFirstElementWithAttribute(const QualifiedName& attribute, Element&);
     void attributeAddedToElement(const QualifiedName& attribute);
+    bool hasCachedFirstElementWithAttribute() const { return !!m_cachedFirstElementWithAttribute; }
     void elementDisconnectedFromDocument(const Element&);
 
     WEBCORE_EXPORT void prefetch(const URL&, const Vector<String>&, std::optional<ReferrerPolicy>, bool lowPriority = false);

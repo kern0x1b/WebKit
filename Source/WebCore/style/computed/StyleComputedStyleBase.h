@@ -628,7 +628,12 @@ public:
 
     void setZoomFromAnimation(Zoom);
 
+#if defined(WEBKIT_IOS6)
+    ALWAYS_INLINE ZoomFactor usedZoomForLength() const;
+    WEBCORE_EXPORT ZoomFactor usedZoomForLengthWhenZoomed() const;
+#else
     inline ZoomFactor usedZoomForLength() const;
+#endif
 
     // MARK: - Fonts
 

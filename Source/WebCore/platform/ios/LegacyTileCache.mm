@@ -43,6 +43,7 @@
 #import "WebCoreThreadRun.h"
 #import <CoreText/CoreText.h>
 #import <pal/spi/cocoa/QuartzCoreSPI.h>
+#import <stdlib.h>
 #import <wtf/MemoryPressureHandler.h>
 #import <wtf/RAMSize.h>
 
@@ -57,6 +58,15 @@ static bool tileCacheChatterEnabled()
     if (enabled < 0)
         enabled = access("/tmp/native-engine-log", F_OK) == 0 ? 1 : 0;
     return enabled == 1;
+}
+
+static unsigned webkitIOS6TileBudgetFromEnvironment(const char* name, unsigned fallbackMegabytes)
+{
+    const char* value = getenv(name);
+    int megabytes = value ? atoi(value) : 0;
+    if (megabytes <= 0 || megabytes > 256)
+        megabytes = static_cast<int>(fallbackMegabytes);
+    return static_cast<unsigned>(megabytes) * 1024 * 1024;
 }
 #endif
 
@@ -83,6 +93,7 @@ namespace WebCore {
 
 #if defined(WEBKIT_IOS6)
 extern "C" int g_webkitIOS6PendingDrawWork;
+extern "C" unsigned g_webkitIOS6PaintsRefusedForLayout;
 // Raised when a _dispatchTileDidDraw: perform is in flight, lowered by
 // -[WebView _dispatchTileDidDraw:] when it runs. See drawLayer().
 extern "C" { int g_webkitIOS6TileDidDrawPending = 0; }
@@ -463,7 +474,7 @@ unsigned LegacyTileCache::tileCapacityForGrid(LegacyTileGrid* grid)
     static unsigned capacity;
     if (!capacity) {
 #if defined(WEBKIT_IOS6)
-        capacity = 32 * 1024 * 1024;
+        capacity = webkitIOS6TileBudgetFromEnvironment("WEBKIT_IOS6_TILE_BUDGET_MB", 24);
 #else
         size_t totalMemory = ramSize() / 1024 / 1024;
         if (totalMemory >= 1024)
@@ -486,6 +497,29 @@ unsigned LegacyTileCache::tileCapacityForGrid(LegacyTileGrid* grid)
         gridCapacity = capacity * 3 / 4;
     else
         gridCapacity = capacity;
+
+#if defined(WEBKIT_IOS6)
+    // The active grid has to hold the whole cover rect with room to spare, or
+    // dropDistantTiles() refuses and createTiles() returns having created
+    // nothing. A 1380 px cover rect against a 12 MB grid painted 18, 18 and 17%
+    // of the feed through ten 400 px flicks - the worst of every pairing tried.
+    // The same coverage against a 36 MB grid painted 44%, and the 2300 px rect
+    // this port now asks for against this 18 MB grid painted 31 to 62%.
+    //
+    // The level read above is kern.memorystatus_level, which is the whole
+    // system's free memory, and on this device the page is most of it - so the
+    // tiering cuts the grid to three tiles exactly while the reader is
+    // scrolling, which is the one moment it is needed. A floor rather than a
+    // rewrite: the ceiling still tiers, and real pressure is still answered by
+    // removeAllNonVisibleTilesInternal() and releaseMemory() above.
+    //
+    // On a 24000 px static page, where layout is cheap, three tiles and eleven
+    // paint the same: every frame of ten flicks whole, at 76 and 94 MB
+    // resident. Nothing here is what leaves the feed unpainted.
+    static const unsigned activeGridFloor = webkitIOS6TileBudgetFromEnvironment("WEBKIT_IOS6_TILE_FLOOR_MB", 18);
+    if (gridCapacity < static_cast<int>(activeGridFloor * 4 / 3))
+        gridCapacity = static_cast<int>(activeGridFloor * 4 / 3);
+#endif
 
     static int lastReportedLevel = -1;
     if (memoryLevel != lastReportedLevel) {
@@ -656,10 +690,19 @@ void LegacyTileCache::drawLayer(LegacyTileLayer* layer, CGContextRef context, Dr
     CGRect scaledFrame = [hostLayer() convertRect:[layer bounds] fromLayer:layer];
     CGContextScaleCTM(context, frame.size.width / scaledFrame.size.width, frame.size.height / scaledFrame.size.height);
 
+#if defined(WEBKIT_IOS6)
+    unsigned refusedPaintsBeforeDrawing = g_webkitIOS6PaintsRefusedForLayout;
+#endif
+
     if (RetainPtr<CGImage> contentReplacementImage = this->contentReplacementImage())
         drawReplacementImage(layer, context, contentReplacementImage.get());
     else
         drawWindowContent(layer, context, dirtyRect, drawingFlags, frame);
+
+#if defined(WEBKIT_IOS6)
+    if (drawingFlags != DrawingFlags::Snapshotting && g_webkitIOS6PaintsRefusedForLayout != refusedPaintsBeforeDrawing)
+        setNeedsDisplayInRect(enclosingIntRect(FloatRect(frame)));
+#endif
 
     ++layer.paintCount;
     if (m_tilePaintCountersVisible) {
@@ -918,6 +961,18 @@ void LegacyTileCache::setSpeculativeTileCreationEnabled(bool enabled)
 // wait. A plain relaxed atomic: a stale read costs one frame in either
 // direction, and the safety valve below bounds that anyway.
 extern "C" { int g_webkitIOS6PendingDrawWork = 1; }
+extern "C" { unsigned g_webkitIOS6PaintsRefusedForLayout = 0; }
+
+static double webkitIOS6EngineIntervalFromEnvironment(const char* name, double fallback)
+{
+    const char* value = getenv(name);
+    if (!value)
+        return fallback;
+    double milliseconds = atof(value);
+    if (milliseconds < 0)
+        return fallback;
+    return milliseconds / 1000.0;
+}
 
 // When the main thread has to stop asking politely and simply wait.
 //
@@ -933,7 +988,8 @@ extern "C" { int g_webkitIOS6PendingDrawWork = 1; }
 // - the layouts are around 300 ms now - in exchange for the page being whole.
 bool LegacyTileCache::mainThreadMustWaitForEngine()
 {
-    return CFAbsoluteTimeGetCurrent() - lastPreparedToDraw() > 0.15;
+    static const double mustWaitAfter = webkitIOS6EngineIntervalFromEnvironment("WEBKIT_IOS6_ENGINE_MUST_WAIT_MS", 0.15);
+    return CFAbsoluteTimeGetCurrent() - lastPreparedToDraw() > mustWaitAfter;
 }
 
 double& LegacyTileCache::lastPreparedToDraw()
@@ -950,9 +1006,10 @@ bool LegacyTileCache::mainThreadShouldWaitForEngine()
     // Never skipped for long. If the engine has been quiet but something was
     // missed - a case that raises no flag - this puts the main thread back in
     // step at four times a second, which is invisible but self-correcting.
+    static const double resyncAfter = webkitIOS6EngineIntervalFromEnvironment("WEBKIT_IOS6_ENGINE_RESYNC_MS", 0.25);
     static CFAbsoluteTime lastSynchronised;
     CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();
-    if (now - lastSynchronised > 0.25) {
+    if (now - lastSynchronised > resyncAfter) {
         lastSynchronised = now;
         return true;
     }
@@ -961,6 +1018,10 @@ bool LegacyTileCache::mainThreadShouldWaitForEngine()
 
 void LegacyTileCache::prepareToDraw()
 {
+#if defined(WEBKIT_IOS6)
+    g_webkitIOS6PendingDrawWork = 0;
+#endif
+
     // This will trigger document relayout if needed.
     [[m_window contentView] viewWillDraw];
 
@@ -969,7 +1030,9 @@ void LegacyTileCache::prepareToDraw()
         flushSavedDisplayRects();
     }
 
+#if !defined(WEBKIT_IOS6)
     g_webkitIOS6PendingDrawWork = 0;
+#endif
     lastPreparedToDraw() = CFAbsoluteTimeGetCurrent();
 }
 

@@ -507,30 +507,44 @@ IntRect LegacyTileGrid::calculateCoverRect(const IntRect& visibleRect, bool& cen
     IntRect coverRect = visibleRect;
     centerGrid = false;
 
-    // A screen above and a screen below, as upstream chose.
+    // Two screens above and two below, in half-screen units.
     //
-    // This was cut to half a screen on the belief that tiles were the largest
-    // block of memory in the process, sixty seven megabytes of it. That was a
-    // misreading of a region report: the tile cache accounts for three to five
-    // megabytes here and the large graphics figure is decoded image data. What
-    // the cut did buy was a flick outrunning its tiles - screenshots taken
-    // mid-drag show a blank page between two correctly pinned bars. Three screens
-    // of coverage at this size is about seven megabytes.
-    // Half a screen above and below rather than a whole one.
+    // Half a screen each way was chosen when tiles were thought to be the
+    // largest block of memory in the process. They are not: twenty runs of ten
+    // 400 px flicks over the feed, photographed eight frames at a time, put peak
+    // resident between 206 and 233 MB whatever this number was, because decoded
+    // images move it far more than layers do.
     //
-    // Each tile is 640 by 640 at this scale, which is 1.6 MB, and three screens
-    // of them came to eleven or twelve tiles - about nineteen megabytes of
-    // layers rather than the seven this comment used to claim. Soaked eight
-    // rounds at a time, that set of layers took the process down four times in
-    // nine runs, twice inside the GPU driver, where the smaller set has not
-    // fallen over. Two screens still cover the flick.
+    // Nor is this number what leaves the feed unpainted. On a 24000 px static
+    // page every setting from three tiles and 920 px to eleven tiles and 2300 px
+    // painted every frame of the same ten flicks, longest unpainted run 14 px of
+    // a 448 px content area. On the feed no setting painted reliably and the
+    // spread between settings sat inside the spread between repeats of one
+    // setting - 31 to 62% of the settled page for this value over five runs,
+    // 22 to 56% for half a screen over four. What is left over the feed is the
+    // site's own layout and script, at two to twelve frames per second with
+    // pauses of twelve seconds; no depth of coverage outruns that.
+    //
+    // Two screens each way is kept because it costs nothing: paired with the
+    // grid in LegacyTileCache::tileCapacityForGrid() it holds eleven tiles,
+    // 17.2 MB, against the fourteen tiles and 21.9 MB that half a screen and the
+    // old ceiling reached on the same page - the same memory spent ahead of the
+    // reader instead of behind. Raising this without raising that grid is the
+    // one thing measured as actively worse.
+    //
+    // Standing warning from the session that cut this to half a screen: eleven
+    // or twelve tiles of layers took the process down four times in nine soaks
+    // of eight rounds, twice inside the GPU driver. That is the count this pair
+    // of numbers now settles at. Twenty five sessions since have exited cleanly,
+    // but the soak has not been repeated - if deaths come back, this is where to
+    // look first, and the two environment variables move it without a rebuild.
     static const int verticalScreens = [] -> int {
         if (const char* override = getenv("WEBKIT_IOS6_TILE_COVERAGE_HALVES")) {
             int value = atoi(override);
             if (value > 0 && value <= 8)
                 return value;
         }
-        return 1;
+        return 4;
     }();
     coverRect.inflateX(visibleRect.width() / 2);
     coverRect.inflateY(visibleRect.height() * verticalScreens / 2);

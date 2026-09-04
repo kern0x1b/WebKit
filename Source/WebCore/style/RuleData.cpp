@@ -85,6 +85,34 @@ static inline MatchBasedOnRuleHash NODELETE computeMatchBasedOnRuleHash(const CS
     return MatchBasedOnRuleHash::None;
 }
 
+#if defined(WEBKIT_IOS6)
+static bool NODELETE computeIsSimpleCompound(const CSSSelector& selector)
+{
+    unsigned componentCount = 0;
+    for (const CSSSelector* component = &selector; ; ) {
+        switch (component->match()) {
+        case CSSSelector::Match::Class:
+        case CSSSelector::Match::Id:
+        case CSSSelector::Match::Tag:
+            break;
+        default:
+            return false;
+        }
+        if (component->selectorList())
+            return false;
+        ++componentCount;
+
+        const CSSSelector* preceding = component->precedingInComplexSelector();
+        if (!preceding)
+            break;
+        if (component->relation() != CSSSelector::Relation::Subselector)
+            return false;
+        component = preceding;
+    }
+    return componentCount > 1;
+}
+#endif
+
 static inline PropertyAllowlist determinePropertyAllowlist(const CSSSelector& selector)
 {
     // The nested selector list scanned below is the one of `selector` itself, so its result does not
@@ -145,6 +173,9 @@ RuleData::RuleData(const StyleRule& styleRule, unsigned selectorIndex, unsigned 
     , m_propertyAllowlist(std::to_underlying(PropertyAllowlist::None))
     , m_isStartingStyle(std::to_underlying(isStartingStyle))
     , m_isEnabled(true)
+#if defined(WEBKIT_IOS6)
+    , m_isSimpleCompound(false)
+#endif
     , m_position(position)
 {
     ASSERT(m_position == position);
@@ -161,6 +192,11 @@ RuleData::RuleData(const StyleRule& styleRule, unsigned selectorIndex, unsigned 
     // walks. So for the vast majority of rules the whole walk is known to be pointless.
     if (canMatchPseudoElement)
         m_propertyAllowlist = std::to_underlying(determinePropertyAllowlist(selector));
+
+#if defined(WEBKIT_IOS6)
+    if (!canMatchPseudoElement && !m_matchBasedOnRuleHash)
+        m_isSimpleCompound = computeIsSimpleCompound(selector);
+#endif
 
     m_descendantSelectorIdentifierHashes = SelectorFilter::collectHashes(selector);
 }

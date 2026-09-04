@@ -67,6 +67,19 @@ public:
 #if ENABLE(TOUCH_EVENTS)
     enum class TouchListType : uint8_t { Touches, TargetTouches, ChangedTouches };
     TouchList& touchList(TouchListType);
+#if defined(WEBKIT_IOS6)
+    void ios6AdoptTouchLists(TouchList& touches, TouchList& targetTouches, TouchList& changedTouches)
+    {
+        m_touches = &touches;
+        m_targetTouches = &targetTouches;
+        m_changedTouches = &changedTouches;
+    }
+    void ios6EnsureTouchLists()
+    {
+        if (!m_touches)
+            initializeTouchLists();
+    }
+#endif
 #endif
 
 private:
@@ -106,8 +119,10 @@ inline EventContext::EventContext(Type type, Node* node, RefPtr<EventTarget>&& c
 {
     ASSERT(!isUnreachableNode(m_target.get()));
 #if ENABLE(TOUCH_EVENTS)
+#if !defined(WEBKIT_IOS6)
     if (m_type == Type::Touch)
         initializeTouchLists();
+#endif
 #else
     ASSERT(m_type != Type::Touch);
 #endif

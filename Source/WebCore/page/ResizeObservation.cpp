@@ -91,6 +91,34 @@ auto ResizeObservation::computeObservedSizes() const -> std::optional<BoxSizes>
     return BoxSizes { };
 }
 
+#if defined(WEBKIT_IOS6)
+std::optional<LayoutSize> ResizeObservation::computeObservedLogicalSizeForObservedBox() const
+{
+    if (RefPtr svg = dynamicDowncast<SVGElement>(target())) {
+        if (svg->hasAssociatedSVGLayoutBox()) {
+            LayoutSize size;
+            if (auto svgRect = svg->getBoundingBox()) {
+                size.setWidth(svgRect->width());
+                size.setHeight(svgRect->height());
+            }
+            return size;
+        }
+    }
+
+    if (RefPtr target = m_target) {
+        if (CheckedPtr box = target->renderBox()) {
+            if (box->isSkippedContent())
+                return std::nullopt;
+            if (m_observedBox == ResizeObserverBoxOptions::BorderBox)
+                return Style::adjustLayoutSizeForAbsoluteZoom(box->logicalSize(), *box);
+            return Style::adjustLayoutSizeForAbsoluteZoom(box->contentBoxLogicalSize(), *box);
+        }
+    }
+
+    return LayoutSize { };
+}
+#endif
+
 LayoutPoint ResizeObservation::computeTargetLocation() const
 {
     if (RefPtr target = m_target; target && !target->isSVGElement()) {
@@ -123,6 +151,19 @@ FloatSize ResizeObservation::snappedContentBoxSize() const
 
 std::optional<ResizeObservation::BoxSizes> ResizeObservation::elementSizeChanged() const
 {
+#if defined(WEBKIT_IOS6)
+    auto currentLogicalSize = computeObservedLogicalSizeForObservedBox();
+    if (!currentLogicalSize)
+        return std::nullopt;
+
+    auto& lastLogicalSize = m_observedBox == ResizeObserverBoxOptions::BorderBox
+        ? m_lastObservationSizes.borderBoxLogicalSize
+        : m_lastObservationSizes.contentBoxLogicalSize;
+    if (lastLogicalSize == *currentLogicalSize)
+        return std::nullopt;
+
+    return computeObservedSizes();
+#else
     auto currentSizes = computeObservedSizes();
     if (!currentSizes)
         return std::nullopt;
@@ -143,6 +184,7 @@ std::optional<ResizeObservation::BoxSizes> ResizeObservation::elementSizeChanged
     }
 
     return { };
+#endif
 }
 
 // https://drafts.csswg.org/resize-observer/#calculate-depth-for-node

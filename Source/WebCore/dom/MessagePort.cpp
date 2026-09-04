@@ -206,12 +206,23 @@ ExceptionOr<void> MessagePort::postMessage(JSC::JSGlobalObject& globalObject, JS
 
     if (RefPtr partner = m_localPartner) {
         partner->m_localQueue.append(WTF::move(message));
+#if defined(WEBKIT_IOS6)
+        RefPtr partnerContext = partner->scriptExecutionContext();
+        if (partner->isStarted() && partnerContext && !partnerContext->activeDOMObjectsAreSuspended()) {
+            queueTaskKeepingObjectAlive(*partner, TaskSource::PostedMessageQueue, [](auto& port) {
+                port.drainOneLocalMessage();
+            });
+        } else {
+            ++partner->m_newLocalMessages;
+        }
+#else
         ++partner->m_newLocalMessages;
         if (partner->isStarted()) {
             queueTaskKeepingObjectAlive(*partner, TaskSource::PostedMessageQueue, [](auto& port) mutable {
                 port.dispatchMessages();
             });
         }
+#endif
         return { };
     }
 

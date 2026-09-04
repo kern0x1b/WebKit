@@ -29,9 +29,28 @@
 #include "ImageBuffer.h"
 #include <wtf/TZoneMallocInlines.h>
 
+#if defined(WEBKIT_IOS6)
+#include <cstdlib>
+#endif
+
 namespace WebCore {
 
 WTF_MAKE_TZONE_ALLOCATED_IMPL(FilterResults);
+
+#if defined(WEBKIT_IOS6)
+static size_t filterResultsIOS6MemoryCapBytes()
+{
+    static const size_t cap = [] -> size_t {
+        if (const char* override = getenv("WEBKIT_IOS6_FILTER_RESULT_CACHE_KB")) {
+            int parsed = atoi(override);
+            if (parsed > 0)
+                return static_cast<size_t>(parsed) * KB;
+        }
+        return 4 * MB;
+    }();
+    return cap;
+}
+#endif
 
 FilterResults::FilterResults(std::unique_ptr<ImageBufferAllocator>&& allocator)
     : m_allocator(allocator ? WTF::move(allocator) : makeUnique<ImageBufferAllocator>())
@@ -55,7 +74,11 @@ size_t FilterResults::memoryCost() const
 
 bool FilterResults::canCacheResult(const FilterImage& result) const
 {
+#if defined(WEBKIT_IOS6)
+    const size_t maxAllowedMemoryCost = filterResultsIOS6MemoryCapBytes();
+#else
     static constexpr size_t maxAllowedMemoryCost = 100 * MB;
+#endif
     CheckedSize totalMemoryCost = memoryCost();
 
     totalMemoryCost += result.memoryCost();

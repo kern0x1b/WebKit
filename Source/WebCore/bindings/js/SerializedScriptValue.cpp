@@ -4559,7 +4559,13 @@ ExceptionOr<Ref<SerializedScriptValue>> SerializedScriptValue::create(JSGlobalOb
     WasmModuleArray wasmModules;
     WasmMemoryHandleArray wasmMemoryHandles;
 #endif
+#if defined(WEBKIT_IOS6)
+    ArrayBufferContentsArray ios6SharedBuffers;
+    ArrayBufferContentsArray& sharedBuffersForSerializer = ios6SharedBuffers;
+#else
     std::unique_ptr<ArrayBufferContentsArray> sharedBuffers = makeUnique<ArrayBufferContentsArray>();
+    ArrayBufferContentsArray& sharedBuffersForSerializer = *sharedBuffers;
+#endif
 #if ENABLE(WEB_RTC)
     Vector<RefPtr<RTCEncodedAudioFrame>> serializedRTCEncodedAudioFrames;
     Vector<RefPtr<RTCEncodedVideoFrame>> serializedRTCEncodedVideoFrames;
@@ -4604,7 +4610,7 @@ ExceptionOr<Ref<SerializedScriptValue>> SerializedScriptValue::create(JSGlobalOb
         wasmModules,
         wasmMemoryHandles,
 #endif
-        blobHandles, buffer, context, *sharedBuffers, forStorage,
+        blobHandles, buffer, context, sharedBuffersForSerializer, forStorage,
         fileSystemHandleKeepAlives);
 
     // Serialization may throw an exception. If we see one, we should exit early. To satisfy
@@ -4783,7 +4789,11 @@ ExceptionOr<Ref<SerializedScriptValue>> SerializedScriptValue::create(JSGlobalOb
         , .detachedMediaStreamTracks = WTF::move(detachedMediaStreamTrackStorages)
         , .detachedMediaStreamTrackHandles = WTF::move(detachedMediaStreamTrackHandleStorages)
 #endif
+#if defined(WEBKIT_IOS6)
+        , .sharedBufferContentsArray = ios6SharedBuffers.isEmpty() ? nullptr : makeUnique<ArrayBufferContentsArray>(WTF::move(ios6SharedBuffers))
+#else
         , .sharedBufferContentsArray = WTF::move(sharedBuffers)
+#endif
         , .detachedImageBitmaps = WTF::move(detachedImageBitmaps)
 #if ENABLE(OFFSCREEN_CANVAS_IN_WORKERS)
         , .detachedOffscreenCanvases = WTF::move(detachedCanvases)

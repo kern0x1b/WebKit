@@ -53,6 +53,13 @@ inline void traverseRuleFeaturesInShadowTree(Element& element, TraverseFunction&
 template <typename TraverseFunction>
 inline void traverseRuleFeaturesForSlotted(Element& element, TraverseFunction&& function)
 {
+#if defined(WEBKIT_IOS6)
+    // assignedShadowRootsIfSlotted is out of line and returns a Vector by value. On a document with
+    // no shadow DOM at all it always returns an empty one, so pay the call only when the element is
+    // actually slotted.
+    if (!element.assignedSlot()) [[likely]]
+        return;
+#endif
     auto assignedShadowRoots = assignedShadowRootsIfSlotted(element);
     for (auto& assignedShadowRoot : assignedShadowRoots) {
         auto& ruleSets = assignedShadowRoot->styleScope().resolver().ruleSets();

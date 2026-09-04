@@ -2618,6 +2618,19 @@ HashMap<Ref<MutationObserver>, MutationRecordDeliveryOptions> Node::registeredMu
         }
     };
 
+#if defined(WEBKIT_IOS6)
+    for (SUPPRESS_UNCOUNTED_LOCAL Node* node = this; node; node = node->parentNode()) {
+        if (!node->hasRareData())
+            continue;
+        auto* data = node->rareData()->mutationObserverDataIfExists();
+        if (!data)
+            continue;
+        for (Ref registration : data->registry)
+            collectMatchingObserversForMutation(registration);
+        for (Ref registration : data->transientRegistry)
+            collectMatchingObserversForMutation(registration);
+    }
+#else
     for (RefPtr node = this; node; node = node->parentNode()) {
         if (auto* registry = node->mutationObserverRegistry()) {
             for (Ref registration : *registry)
@@ -2628,6 +2641,7 @@ HashMap<Ref<MutationObserver>, MutationRecordDeliveryOptions> Node::registeredMu
                 collectMatchingObserversForMutation(registration);
         }
     }
+#endif
 
     return observers;
 }
@@ -2684,6 +2698,19 @@ void Node::notifyMutationObserversNodeWillDetach()
     if (!document().hasMutationObservers())
         return;
 
+#if defined(WEBKIT_IOS6)
+    for (SUPPRESS_UNCOUNTED_LOCAL Node* node = parentNode(); node; node = node->parentNode()) {
+        if (!node->hasRareData())
+            continue;
+        auto* data = node->rareData()->mutationObserverDataIfExists();
+        if (!data)
+            continue;
+        for (Ref registration : data->registry)
+            registration->observedSubtreeNodeWillDetach(*this);
+        for (Ref registration : data->transientRegistry)
+            registration->observedSubtreeNodeWillDetach(*this);
+    }
+#else
     for (CheckedPtr node = parentNode(); node; node = node->parentNode()) {
         if (auto* registry = node->mutationObserverRegistry()) {
             for (Ref registration : *registry)
@@ -2694,6 +2721,7 @@ void Node::notifyMutationObserversNodeWillDetach()
                 registration->observedSubtreeNodeWillDetach(*this);
         }
     }
+#endif
 }
 
 void Node::dispatchScopedEvent(Event& event)
@@ -3198,7 +3226,13 @@ TextStream& operator<<(TextStream& ts, const Node& node)
 
 NodeIdentifier Node::nodeIdentifier() const
 {
-    return nodeIdentifiersMap().ensure(const_cast<Node&>(*this), [&] {
+    auto& map = nodeIdentifiersMap();
+    if (hasStateFlag(StateFlag::HasNodeIdentifier)) {
+        auto iterator = map.find(this);
+        if (iterator != map.end())
+            return iterator->value;
+    }
+    return map.ensure(const_cast<Node&>(*this), [&] {
         setStateFlag(StateFlag::HasNodeIdentifier);
         return NodeIdentifier::generate();
     }).iterator->value;

@@ -40,6 +40,7 @@
 #include "ThreadGlobalData.h"
 #include "WebKitFontFamilyNames.h"
 #include "WorkerOrWorkletThread.h"
+#include <cstdlib>
 #include <wtf/Function.h>
 #include <wtf/HashMap.h>
 #include <wtf/MemoryPressureHandler.h>
@@ -234,8 +235,30 @@ FontPlatformData* FontCache::cachedFontPlatformData(const FontDescription& fontD
 }
 
 #if defined(WEBKIT_IOS6)
-const unsigned cMaxInactiveFontData = 40;
-const unsigned cTargetInactiveFontData = 24;
+static unsigned fontCachePurgeLimitFromEnvironment(const char* name, unsigned fallback)
+{
+    const char* value = std::getenv(name);
+    if (!value || !*value)
+        return fallback;
+    char* end = nullptr;
+    unsigned long parsed = std::strtoul(value, &end, 10);
+    if (end == value)
+        return fallback;
+    return static_cast<unsigned>(parsed);
+}
+
+static unsigned fontCachePurgeMaxInactiveFontData()
+{
+    static const unsigned value = fontCachePurgeLimitFromEnvironment("WEBKIT_IOS6_MAX_INACTIVE_FONT_DATA", 40);
+    return value;
+}
+
+static unsigned fontCachePurgeTargetInactiveFontData()
+{
+    static const unsigned value = fontCachePurgeLimitFromEnvironment("WEBKIT_IOS6_TARGET_INACTIVE_FONT_DATA", 24);
+    return value;
+}
+
 #elif PLATFORM(IOS_FAMILY)
 const unsigned cMaxInactiveFontData = 120;
 const unsigned cTargetInactiveFontData = 100;
@@ -245,8 +268,17 @@ const unsigned cTargetInactiveFontData = 200;
 #endif
 
 #if defined(WEBKIT_IOS6)
-const unsigned cMaxUnderMemoryPressureInactiveFontData = 16;
-const unsigned cTargetUnderMemoryPressureInactiveFontData = 8;
+static unsigned fontCachePurgeMaxUnderMemoryPressureInactiveFontData()
+{
+    static const unsigned value = fontCachePurgeLimitFromEnvironment("WEBKIT_IOS6_MAX_INACTIVE_FONT_DATA_UNDER_PRESSURE", 16);
+    return value;
+}
+
+static unsigned fontCachePurgeTargetUnderMemoryPressureInactiveFontData()
+{
+    static const unsigned value = fontCachePurgeLimitFromEnvironment("WEBKIT_IOS6_TARGET_INACTIVE_FONT_DATA_UNDER_PRESSURE", 8);
+    return value;
+}
 #else
 const unsigned cMaxUnderMemoryPressureInactiveFontData = 50;
 const unsigned cTargetUnderMemoryPressureInactiveFontData = 30;
@@ -281,7 +313,11 @@ Ref<Font> FontCache::fontForPlatformData(const FontPlatformData& platformData)
 void FontCache::purgeInactiveFontDataIfNeeded()
 {
     bool underMemoryPressure = MemoryPressureHandler::singleton().isUnderMemoryPressure();
+#if defined(WEBKIT_IOS6)
+    unsigned inactiveFontDataLimit = underMemoryPressure ? fontCachePurgeMaxUnderMemoryPressureInactiveFontData() : fontCachePurgeMaxInactiveFontData();
+#else
     unsigned inactiveFontDataLimit = underMemoryPressure ? cMaxUnderMemoryPressureInactiveFontData : cMaxInactiveFontData;
+#endif
 
     LOG(Fonts, "FontCache::purgeInactiveFontDataIfNeeded() - underMemoryPressure %d, inactiveFontDataLimit %u", underMemoryPressure, inactiveFontDataLimit);
 
@@ -291,7 +327,11 @@ void FontCache::purgeInactiveFontDataIfNeeded()
     if (inactiveCount <= inactiveFontDataLimit)
         return;
 
+#if defined(WEBKIT_IOS6)
+    unsigned targetFontDataLimit = underMemoryPressure ? fontCachePurgeTargetUnderMemoryPressureInactiveFontData() : fontCachePurgeTargetInactiveFontData();
+#else
     unsigned targetFontDataLimit = underMemoryPressure ? cTargetUnderMemoryPressureInactiveFontData : cTargetInactiveFontData;
+#endif
     purgeInactiveFontData(inactiveCount - targetFontDataLimit);
 }
 

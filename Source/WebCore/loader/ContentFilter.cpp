@@ -72,6 +72,18 @@ Vector<ContentFilter::Type>& ContentFilter::types()
 
 RefPtr<ContentFilter> ContentFilter::create(ContentFilterClient& client, IsMainFrameLoad isMainFrameLoad)
 {
+#if defined(WEBKIT_IOS6)
+    // There is no content filtering service on this system - no WebFilterEvaluator
+    // and no NEFilterSource - so every registered type's create() hands back
+    // nothing, and the container ends up holding empty references that the
+    // request path dereferences. Measured: SIGSEGV on the first navigation, in
+    // ThreadSafeWeakPtrControlBlock::strongRef() under
+    // ContentFilter::continueAfterWillSendRequest. Callers already accept a null
+    // filter, which is the honest answer here.
+    UNUSED_PARAM(client);
+    UNUSED_PARAM(isMainFrameLoad);
+    return nullptr;
+#else
     PlatformContentFilter::FilterParameters params;
 #if HAVE(WEBCONTENTRESTRICTIONS)
     params = PlatformContentFilter::FilterParameters {
@@ -92,6 +104,7 @@ RefPtr<ContentFilter> ContentFilter::create(ContentFilterClient& client, IsMainF
         return nullptr;
 
     return adoptRef(*new ContentFilter(WTF::move(filters), client));
+#endif
 }
 
 ContentFilter::ContentFilter(Container&& contentFilters, ContentFilterClient& client)

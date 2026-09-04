@@ -36,36 +36,46 @@ public:
         , m_saveAndRestore(saveAndRestore)
     {
         if (m_saveAndRestore)
-            CGContextSaveGState(m_context.get());
+            CGContextSaveGState(contextRef());
     }
-    
+
     ~CGContextStateSaver()
     {
         if (m_saveAndRestore)
-            CGContextRestoreGState(m_context.get());
+            CGContextRestoreGState(contextRef());
     }
-    
+
     void save()
     {
         ASSERT(!m_saveAndRestore);
-        CGContextSaveGState(m_context.get());
+        CGContextSaveGState(contextRef());
         m_saveAndRestore = true;
     }
 
     void restore()
     {
         ASSERT(m_saveAndRestore);
-        CGContextRestoreGState(m_context.get());
+        CGContextRestoreGState(contextRef());
         m_saveAndRestore = false;
     }
-    
+
     bool didSave() const
     {
         return m_saveAndRestore;
     }
-    
+
 private:
+#if defined(WEBKIT_IOS6)
+    // Stack scoped inside a single drawing call: the context always outlives it,
+    // and the retain/release pair is two atomics per drawing operation.
+    CGContextRef contextRef() const { return m_context; }
+
+    CGContextRef m_context;
+#else
+    CGContextRef contextRef() const { return m_context.get(); }
+
     RetainPtr<CGContextRef> m_context;
+#endif
     bool m_saveAndRestore;
 };
 

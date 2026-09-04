@@ -54,15 +54,15 @@ bool canUseForLineLayout(const RenderBlockFlow& rootContainer)
 bool canUseForIntrinsicWidthComputation(const RenderBlockFlow& blockContainer)
 {
     for (auto walker = InlineWalker(blockContainer); !walker.atEnd(); walker.advance()) {
-        CheckedRef renderer = *walker.current();
-        if (!renderer->isInFlow())
+        auto& renderer = *walker.current();
+        if (!renderer.isInFlow())
             return false;
 
         auto isFullySupportedInFlowRenderer = isAnyOf<RenderText, RenderLineBreak, RenderInline, RenderListMarker>(renderer);
         if (isFullySupportedInFlowRenderer)
             continue;
 
-        if (CheckedPtr renderBlock = dynamicDowncast<RenderBlock>(renderer.get()); renderBlock && renderBlock->isAtomicInlineLevelBox() && !renderBlock->firstChild()) {
+        if (auto* renderBlock = dynamicDowncast<RenderBlock>(renderer); renderBlock && renderBlock->isAtomicInlineLevelBox() && !renderBlock->firstChild()) {
             if (renderBlock->style().usedAppearance() != StyleAppearance::None || (renderBlock->element() && renderBlock->element()->firstChild())) {
                 // FIXME: Various widgets with or without appearance.
                 // Dynamic content change (e.g. adding/removing select options) needs to dirty inlineContentCache.
@@ -71,8 +71,8 @@ bool canUseForIntrinsicWidthComputation(const RenderBlockFlow& blockContainer)
             continue;
         }
 
-        CheckedRef unsupportedRenderElement = downcast<RenderElement>(renderer.get());
-        if (!unsupportedRenderElement->writingMode().isHorizontal() || !unsupportedRenderElement->style().logicalWidth().isFixed())
+        auto& unsupportedRenderElement = downcast<RenderElement>(renderer);
+        if (!unsupportedRenderElement.writingMode().isHorizontal() || !unsupportedRenderElement.style().logicalWidth().isFixed())
             return false;
 
         auto isNonSupportedFixedWidthContent = [&] {
@@ -82,7 +82,7 @@ bool canUseForIntrinsicWidthComputation(const RenderBlockFlow& blockContainer)
                 return true;
             // FIXME: See RenderReplaced::computeIntrinsicLogicalWidthContributions where m_minContentLogicalWidthContribution is set to 0.
             auto isReplacedWithSpecialIntrinsicWidth = [&] {
-                if (auto* renderReplaced = dynamicDowncast<RenderReplaced>(unsupportedRenderElement.get()))
+                if (auto* renderReplaced = dynamicDowncast<RenderReplaced>(unsupportedRenderElement))
                     return renderReplaced->style().logicalMaxWidth().isPercentOrCalculated();
                 return false;
             };

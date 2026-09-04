@@ -69,6 +69,9 @@ private:
     void retargetTouch(EventContext::TouchListType, const Touch&);
     void retargetTouchList(EventContext::TouchListType, const TouchList*);
     void retargetTouchLists(const TouchEvent&);
+#if defined(WEBKIT_IOS6)
+    bool ios6ShareTouchListsAcrossPath(const TouchEvent&);
+#endif
 #endif
 
     Vector<EventContext, 32> m_path;

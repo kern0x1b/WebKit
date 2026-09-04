@@ -5026,7 +5026,7 @@ void SpeculativeJIT::compileMathIC(Node* node, JITBinaryMathIC<Generator>* mathI
     if (generatedInline) {
         ASSERT(!addICGenerationState->slowPathJumps.empty());
 
-        Vector<SilentRegisterSavePlan> savePlans;
+        Vector<SilentRegisterSavePlan, silentRegisterSavePlanInlineCapacity> savePlans;
         silentSpillAllRegistersImpl(false, savePlans, resultRegs);
 
         auto done = label();
@@ -5708,7 +5708,7 @@ void SpeculativeJIT::compileMathIC(Node* node, JITUnaryMathIC<Generator>* mathIC
     if (generatedInline) {
         ASSERT(!icGenerationState->slowPathJumps.empty());
 
-        Vector<SilentRegisterSavePlan> savePlans;
+        Vector<SilentRegisterSavePlan, silentRegisterSavePlanInlineCapacity> savePlans;
         silentSpillAllRegistersImpl(false, savePlans, resultRegs);
 
         auto done = label();
@@ -7932,7 +7932,7 @@ void SpeculativeJIT::compileStringEquality(
 
     done.link(this);
 
-    Vector<SilentRegisterSavePlan> savePlans;
+    Vector<SilentRegisterSavePlan, silentRegisterSavePlanInlineCapacity> savePlans;
     silentSpillAllRegistersImpl(false, savePlans, leftTempGPR);
     Label doneOperationCall = label();
     addSlowPathGeneratorLambda([=, this, savePlans = WTF::move(savePlans), slowCase = WTF::move(slowCase)]() mutable {
@@ -13756,7 +13756,7 @@ void SpeculativeJIT::compileStoreBarrier(Node* node)
 
     Label done = label();
 
-    Vector<SilentRegisterSavePlan> savePlans;
+    Vector<SilentRegisterSavePlan, silentRegisterSavePlanInlineCapacity> savePlans;
     silentSpillAllRegistersImpl(false, savePlans, InvalidGPRReg);
 
     addSlowPathGeneratorLambda([=, this, savePlans = WTF::move(savePlans)]() {
@@ -17382,7 +17382,7 @@ void SpeculativeJIT::compileHasIndexedProperty(Node* node, S_JITOperation_GCZ sl
     }
     }
 
-    Vector<SilentRegisterSavePlan> savePlans;
+    Vector<SilentRegisterSavePlan, silentRegisterSavePlanInlineCapacity> savePlans;
     silentSpillAllRegistersImpl(false, savePlans, resultGPR);
     Label doneOperationCall = label();
     addSlowPathGeneratorLambda([=, this, savePlans = WTF::move(savePlans), slowCases = WTF::move(slowCases)]() {

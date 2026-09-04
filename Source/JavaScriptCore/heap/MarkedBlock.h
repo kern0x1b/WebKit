@@ -359,7 +359,10 @@ public:
     bool isMarked(HeapVersion markingVersion, const void*);
     bool isMarked(const void*, Dependency);
     bool testAndSetMarked(const void*, Dependency);
-        
+#if defined(WEBKIT_IOS6)
+    bool testAndSetMarkedUncontended(const void*, Dependency);
+#endif
+
     bool isAtom(const void*);
     void clearMarked(const void*);
     
@@ -626,6 +629,14 @@ inline bool MarkedBlock::testAndSetMarked(const void* p, Dependency dependency)
     assertMarksNotStale();
     return header().m_marks.concurrentTestAndSet(atomNumber(p), dependency);
 }
+
+#if defined(WEBKIT_IOS6)
+inline bool MarkedBlock::testAndSetMarkedUncontended(const void* p, Dependency)
+{
+    assertMarksNotStale();
+    return header().m_marks.testAndSet(atomNumber(p));
+}
+#endif
 
 inline const WTF::BitSet<MarkedBlock::atomsPerBlock>& MarkedBlock::marks() const
 {

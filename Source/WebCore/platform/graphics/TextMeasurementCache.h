@@ -53,7 +53,20 @@ struct TextShapingContext {
 namespace TextMeasurementCacheDefaults {
 static constexpr int minInterval = -3; // A cache hit pays for about 3 cache misses.
 static constexpr int maxInterval = 20; // Sampling at this interval has almost no overhead.
+#if defined(WEBKIT_IOS6)
+// One of these caches exists per FontCascadeFonts, not per document. Each slot is a
+// HashMap entry storing a SmallStringKey (72 bytes: 64-byte char16_t array + hash/length
+// word, padded) plus CachedType (a glyph-run width, small) plus HashMap's own per-slot
+// overhead, and WTF::HashTable never runs above ~50% load before rehashing, so live
+// capacity is roughly double the entry count. That puts the desktop default of 500000
+// entries at over a million slots at ~176 bytes each -- north of 180 MB for a single
+// font's cache alone, on a device with 512 MB total. 20000 is sized for the pathological
+// case this cap exists to guard against (a feed rendering thousands of distinct strings
+// against one font), not for ordinary pages, which never get near it.
+static constexpr unsigned maxSize = 20000;
+#else
 static constexpr unsigned maxSize = 500000; // Just enough to guard against pathological growth.
+#endif
 static constexpr unsigned maxTextLength = 64; // Maximum text length for SmallStringKey.
 }
 

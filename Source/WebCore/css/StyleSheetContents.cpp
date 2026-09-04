@@ -400,7 +400,8 @@ const AtomString& StyleSheetContents::namespaceURIFromPrefix(const AtomString& p
 bool StyleSheetContents::parseAuthorStyleSheet(const CachedCSSStyleSheet* cachedStyleSheet, const SecurityOrigin* securityOrigin)
 {
 #if defined(WEBKIT_IOS6)
-    if (getenv("WEBKIT_IOS6_STYLE_LOG")) [[unlikely]] {
+    static const bool logSheets = getenv("WEBKIT_IOS6_STYLE_LOG");
+    if (logSheets) [[unlikely]] {
         static unsigned sheets;
         static double totalMilliseconds;
         MonotonicTime started = MonotonicTime::now();

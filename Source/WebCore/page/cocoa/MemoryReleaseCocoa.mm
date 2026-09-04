@@ -45,12 +45,21 @@
 
 namespace WebCore {
 
-void platformReleaseMemory(Critical)
+void platformReleaseMemory(Critical critical)
 {
+    UNUSED_PARAM(critical);
+
 #if PLATFORM(IOS_FAMILY) && !PLATFORM(IOS_FAMILY_SIMULATOR) && !PLATFORM(MACCATALYST)
+#if defined(WEBKIT_IOS6)
+    if (critical == Critical::Yes) {
+        GSFontInitialize();
+        GSFontPurgeFontCache();
+    }
+#else
     // FIXME: Remove this call to GSFontInitialize() once <rdar://problem/32886715> is fixed.
     GSFontInitialize();
     GSFontPurgeFontCache();
+#endif
 #endif
 
     LocaleCocoa::releaseMemory();
@@ -96,7 +105,10 @@ void jettisonExpensiveObjectsOnTopLevelNavigation()
     if (!shouldJettison)
         return;
 
-#if PLATFORM(IOS_FAMILY)
+#if defined(WEBKIT_IOS6)
+    if (shouldDeleteAllCodeForMemoryPressure())
+        GarbageCollectionController::singleton().deleteAllLinkedCode(JSC::DeleteAllCodeIfNotCollecting);
+#elif PLATFORM(IOS_FAMILY)
     // Throw away linked JS code. Linked code is tied to a global object and is not reusable.
     // The immediate memory savings outweigh the cost of recompilation in case we go back again.
     GarbageCollectionController::singleton().deleteAllLinkedCode(JSC::DeleteAllCodeIfNotCollecting);

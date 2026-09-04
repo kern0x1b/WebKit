@@ -37,7 +37,11 @@ namespace WebCore {
 
 const Font* FontRanges::Range::font(ExternalResourceDownloadPolicy policy) const
 {
+#if defined(WEBKIT_IOS6)
+    return m_fontAccessor->font(policy);
+#else
     return protect(m_fontAccessor)->font(policy);
+#endif
 }
 
 FontRanges::FontRanges(FontRanges&& other, IsGenericFontFamily isGenericFontFamily)
@@ -88,11 +92,11 @@ GlyphData FontRanges::glyphDataForCharacter(char32_t character, ExternalResource
 
     for (auto& range : m_ranges) {
         if (range.from() <= character && character <= range.to()) {
-            if (RefPtr font = range.font(policy)) {
+            if (const Font* font = range.font(policy)) {
                 if (font->isInterstitial()) {
                     policy = ExternalResourceDownloadPolicy::Forbid;
                     if (!resultFont)
-                        resultFont = WTF::move(font);
+                        resultFont = font;
                 } else {
                     auto glyphData = font->glyphDataForCharacter(character);
                     if (glyphData.isValid()) {

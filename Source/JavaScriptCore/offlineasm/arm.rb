@@ -98,6 +98,8 @@ def armMoveImmediate(value, register)
         $asm.puts "mov #{register.armOperand}, \##{value}"
     elsif (~value) >= 0 && (~value) < 256
         $asm.puts "mvn #{register.armOperand}, \##{~value}"
+    elsif value >= 0 && value <= 0xffffffff && ((~value) & 0xffffffff) < 256
+        $asm.puts "mvn #{register.armOperand}, \##{(~value) & 0xffffffff}"
     else
         $asm.puts "movw #{register.armOperand}, \##{value & 0xffff}"
         if (value & 0xffff0000) != 0
@@ -329,6 +331,118 @@ def armLowerLabelReferences(list)
     newList
 end
 
+class ARMNegatedImmediate < Immediate
+end
+
+ARM_COMPARE_BRANCH_OPCODES =
+    [
+     "bieq", "bpeq", "bbeq",
+     "bineq", "bpneq", "bbneq",
+     "bia", "bpa", "bba",
+     "biaeq", "bpaeq", "bbaeq",
+     "bib", "bpb", "bbb",
+     "bibeq", "bpbeq", "bbbeq",
+     "bigt", "bpgt", "bbgt",
+     "bigteq", "bpgteq", "bbgteq",
+     "bilt", "bplt", "bblt",
+     "bilteq", "bplteq", "bblteq"
+    ]
+
+def armSmallImmediateValue(operand)
+    return nil unless operand.is_a? Immediate
+    return nil if operand.is_a? ARMNegatedImmediate
+    value = operand.value
+    return nil unless value.is_a? Integer
+    return nil if value < -0x80000000 or value > 0xffffffff
+    value & 0xffffffff
+end
+
+def armNegatedCompareMagnitude(operand)
+    value = armSmallImmediateValue(operand)
+    return nil if value.nil?
+    return nil if value <= 0xff
+    magnitude = (-value) & 0xffffffff
+    return nil unless magnitude >= 1 and magnitude <= 0xff
+    magnitude
+end
+
+def armClearedBitsMask(operand)
+    value = armSmallImmediateValue(operand)
+    return nil if value.nil?
+    return nil if value <= 0xff
+    mask = (~value) & 0xffffffff
+    return nil unless mask <= 0xff
+    mask
+end
+
+def armMultiplierShift(operand)
+    value = armSmallImmediateValue(operand)
+    return nil if value.nil?
+    [[value, false], [(-value) & 0xffffffff, true]].each {
+        | candidate, negate |
+        next if candidate == 0
+        next unless (candidate & (candidate - 1)) == 0
+        shift = 0
+        shift += 1 while (candidate >> shift) != 1
+        return [shift, negate]
+    }
+    nil
+end
+
+def armLowerImmediateOperations(list)
+    newList = []
+    list.each {
+        | node |
+        unless node.is_a? Instruction
+            newList << node
+            next
+        end
+
+        case node.opcode
+        when "muli", "mulp"
+            shiftAndNegate = node.operands.size == 2 && node.operands[1].register? ? armMultiplierShift(node.operands[0]) : nil
+            if shiftAndNegate.nil?
+                newList << node
+            else
+                shift, negate = shiftAndNegate
+                if shift > 0
+                    newList << Instruction.new(node.codeOrigin, "lshifti", [Immediate.new(node.codeOrigin, shift), node.operands[1]], node.annotation)
+                end
+                if negate
+                    newList << Instruction.new(node.codeOrigin, "negi", [node.operands[1]], node.annotation)
+                end
+            end
+        when "andi", "andp"
+            mask = node.operands.size == 2 && node.operands[1].register? ? armClearedBitsMask(node.operands[0]) : nil
+            if mask.nil?
+                newList << node
+            else
+                newList << Instruction.new(node.codeOrigin, "clrbp", [node.operands[1], Immediate.new(node.codeOrigin, mask), node.operands[1]], node.annotation)
+            end
+        when *ARM_COMPARE_BRANCH_OPCODES
+            magnitude = node.operands.size == 3 && !node.operands[0].immediate? ? armNegatedCompareMagnitude(node.operands[1]) : nil
+            if magnitude.nil?
+                newList << node
+            else
+                newList << Instruction.new(node.codeOrigin, node.opcode, [node.operands[0], ARMNegatedImmediate.new(node.codeOrigin, magnitude), node.operands[2]], node.annotation)
+            end
+        else
+            newList << node
+        end
+    }
+    newList
+end
+
+class Instruction
+    def self.lowerMisplacedAddressesARMv7(node, newList)
+        if node.is_a? Instruction and node.opcode == "jmp" and node.operands.size == 1 and node.operands[0].is_a? BaseIndex
+            newList << node
+            return true, newList
+        end
+        return false, newList
+    end
+end
+
 class Sequence
     def getModifiedListARMv7
         raise unless $activeBackend == "ARMv7"
@@ -362,6 +476,7 @@ class Sequence
             end
         }
         result = riscLowerMalformedAddressesDouble(result)
+        result = armLowerImmediateOperations(result)
         result = riscLowerMisplacedImmediates(result, ["storeb", "storeh", "storei", "storep", "storeq", "store2ia"])
         result = riscLowerMalformedImmediates(result, 0..0xff, 0..0x0ff)
         result = riscLowerMisplacedAddresses(result)
@@ -374,6 +489,14 @@ end
 
 def armOperands(operands)
     operands.map{|v| v.armOperand}.join(", ")
+end
+
+def emitArmBranchCompare(operands)
+    if operands[1].is_a? ARMNegatedImmediate
+        $asm.puts "cmn #{operands[0].armOperand}, #{operands[1].armOperand}"
+    else
+        $asm.puts "cmp #{armOperands(operands[0..1])}"
+    end
 end
 
 def armFlippedOperands(operands)
@@ -786,7 +909,7 @@ class Instruction
             elsif Immediate.new(nil, 0) == operands[1]
                 $asm.puts "tst #{operands[0].armOperand}, #{operands[0].armOperand}"
             else
-                $asm.puts "cmp #{armOperands(operands[0..1])}"
+                emitArmBranchCompare(operands)
             end
             $asm.puts "beq #{operands[2].asmLabel}"
         when "bineq", "bpneq", "bbneq"
@@ -795,32 +918,32 @@ class Instruction
             elsif Immediate.new(nil, 0) == operands[1]
                 $asm.puts "tst #{operands[0].armOperand}, #{operands[0].armOperand}"
             else
-                $asm.puts "cmp #{armOperands(operands[0..1])}"
+                emitArmBranchCompare(operands)
             end
             $asm.puts "bne #{operands[2].asmLabel}"
         when "bia", "bpa", "bba"
-            $asm.puts "cmp #{armOperands(operands[0..1])}"
+            emitArmBranchCompare(operands)
             $asm.puts "bhi #{operands[2].asmLabel}"
         when "biaeq", "bpaeq", "bbaeq"
-            $asm.puts "cmp #{armOperands(operands[0..1])}"
+            emitArmBranchCompare(operands)
             $asm.puts "bhs #{operands[2].asmLabel}"
         when "bib", "bpb", "bbb"
-            $asm.puts "cmp #{armOperands(operands[0..1])}"
+            emitArmBranchCompare(operands)
             $asm.puts "blo #{operands[2].asmLabel}"
         when "bibeq", "bpbeq", "bbbeq"
-            $asm.puts "cmp #{armOperands(operands[0..1])}"
+            emitArmBranchCompare(operands)
             $asm.puts "bls #{operands[2].asmLabel}"
         when "bigt", "bpgt", "bbgt"
-            $asm.puts "cmp #{armOperands(operands[0..1])}"
+            emitArmBranchCompare(operands)
             $asm.puts "bgt #{operands[2].asmLabel}"
         when "bigteq", "bpgteq", "bbgteq"
-            $asm.puts "cmp #{armOperands(operands[0..1])}"
+            emitArmBranchCompare(operands)
             $asm.puts "bge #{operands[2].asmLabel}"
         when "bilt", "bplt", "bblt"
-            $asm.puts "cmp #{armOperands(operands[0..1])}"
+            emitArmBranchCompare(operands)
             $asm.puts "blt #{operands[2].asmLabel}"
         when "bilteq", "bplteq", "bblteq"
-            $asm.puts "cmp #{armOperands(operands[0..1])}"
+            emitArmBranchCompare(operands)
             $asm.puts "ble #{operands[2].asmLabel}"
         when "btiz", "btpz", "btbz"
             emitArmTest(operands)
@@ -834,6 +957,8 @@ class Instruction
         when "jmp"
             if operands[0].label?
                 $asm.puts "b #{operands[0].asmLabel}"
+            elsif operands[0].address?
+                $asm.puts "ldr pc, #{operands[0].armOperand}"
             else
                 $asm.puts "mov pc, #{operands[0].armOperand}"
             end

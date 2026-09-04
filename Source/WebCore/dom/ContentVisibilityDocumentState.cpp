@@ -87,8 +87,12 @@ void ContentVisibilityDocumentState::observe(Element& element)
 {
     Ref document = element.document();
     auto& state = document->contentVisibilityDocumentState();
-    if (RefPtr intersectionObserver = state.intersectionObserver(document))
+    if (RefPtr intersectionObserver = state.intersectionObserver(document)) {
         intersectionObserver->observe(element);
+#if defined(WEBKIT_IOS6)
+        state.m_mayHaveTargetsWithoutViewportProximity = true;
+#endif
+    }
 }
 
 void ContentVisibilityDocumentState::unobserve(Element& element)
@@ -139,7 +143,7 @@ IntersectionObserver* ContentVisibilityDocumentState::intersectionObserver(Docum
     return m_observer.get();
 }
 
-bool ContentVisibilityDocumentState::checkRelevancyOfContentVisibilityElement(Element& target, OptionSet<ContentRelevancy> relevancyToCheck) const
+bool ContentVisibilityDocumentState::checkRelevancyOfContentVisibilityElement(Element& target, OptionSet<ContentRelevancy> relevancyToCheck, const SimpleRange* selectionRange) const
 {
     auto oldRelevancy = target.contentRelevancy();
     OptionSet<ContentRelevancy> newRelevancy;
@@ -164,13 +168,8 @@ bool ContentVisibilityDocumentState::checkRelevancyOfContentVisibilityElement(El
     if (relevancyToCheck.contains(ContentRelevancy::Focused))
         setRelevancyValue(ContentRelevancy::Focused, target.hasFocusWithin());
 
-    auto targetContainsSelection = [](Element& target) {
-        auto selectionRange = target.document().selection().selection().range();
-        return selectionRange && intersects<ComposedTree>(*selectionRange, target);
-    };
-
     if (relevancyToCheck.contains(ContentRelevancy::Selected))
-        setRelevancyValue(ContentRelevancy::Selected, targetContainsSelection(target));
+        setRelevancyValue(ContentRelevancy::Selected, selectionRange && intersects<ComposedTree>(*selectionRange, target));
 
     auto hasTopLayerinSubtree = [](const Element& target) {
         for (auto& element : target.document().topLayerElements()) {
@@ -208,8 +207,15 @@ bool ContentVisibilityDocumentState::checkRelevancyOfContentVisibilityElement(El
 DidUpdateAnyContentRelevancy ContentVisibilityDocumentState::updateRelevancyOfContentVisibilityElements(OptionSet<ContentRelevancy> relevancyToCheck) const
 {
     auto didUpdateAnyContentRelevancy = DidUpdateAnyContentRelevancy::No;
+    bool checksSelection = relevancyToCheck.contains(ContentRelevancy::Selected);
+    bool didComputeSelectionRange = false;
+    std::optional<SimpleRange> selectionRange;
     for (Ref target : m_observer->observationTargets()) {
-        if (checkRelevancyOfContentVisibilityElement(target, relevancyToCheck))
+        if (checksSelection && !didComputeSelectionRange) {
+            didComputeSelectionRange = true;
+            selectionRange = target->document().selection().selection().range();
+        }
+        if (checkRelevancyOfContentVisibilityElement(target, relevancyToCheck, selectionRange ? &*selectionRange : nullptr))
             didUpdateAnyContentRelevancy = DidUpdateAnyContentRelevancy::Yes;
     }
     return didUpdateAnyContentRelevancy;
@@ -219,6 +225,10 @@ HadInitialVisibleContentVisibilityDetermination ContentVisibilityDocumentState::
 {
     if (!m_observer)
         return HadInitialVisibleContentVisibilityDetermination::No;
+#if defined(WEBKIT_IOS6)
+    if (!m_mayHaveTargetsWithoutViewportProximity)
+        return HadInitialVisibleContentVisibilityDetermination::No;
+#endif
     Vector<Ref<Element>> elementsToCheck;
     for (Ref target : m_observer->observationTargets()) {
         bool checkForInitialDetermination = !m_elementViewportProximities.contains(target) && !target->isRelevantToUser();
@@ -226,13 +236,17 @@ HadInitialVisibleContentVisibilityDetermination ContentVisibilityDocumentState::
             elementsToCheck.append(target);
     }
     auto hadInitialVisibleContentVisibilityDetermination = HadInitialVisibleContentVisibilityDetermination::No;
+#if defined(WEBKIT_IOS6)
+    if (elementsToCheck.isEmpty())
+        m_mayHaveTargetsWithoutViewportProximity = false;
+#endif
     if (!elementsToCheck.isEmpty()) {
         Ref document = elementsToCheck.first()->document();
         if (protect(m_observer)->updateObservations(*protect(document->frame())) == IntersectionObserver::NeedNotify::Yes)
             protect(m_observer)->notify();
 
         for (auto& element : elementsToCheck) {
-            checkRelevancyOfContentVisibilityElement(element, { ContentRelevancy::OnScreen });
+            checkRelevancyOfContentVisibilityElement(element, { ContentRelevancy::OnScreen }, nullptr);
             if (element->isRelevantToUser())
                 hadInitialVisibleContentVisibilityDetermination = HadInitialVisibleContentVisibilityDetermination::Yes;
         }

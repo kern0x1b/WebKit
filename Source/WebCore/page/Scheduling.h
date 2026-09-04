@@ -16,8 +16,10 @@
 
 #pragma once
 
+#include <WebCore/PlatformExportMacros.h>
 #include <optional>
 #include <wtf/RefCounted.h>
+#include <wtf/Seconds.h>
 #include <wtf/TZoneMalloc.h>
 
 namespace WebCore {
@@ -50,5 +52,13 @@ public:
 private:
     Scheduling() = default;
 };
+
+#if defined(WEBKIT_IOS6)
+WEBCORE_EXPORT void ios6NoteScrollMovement();
+WEBCORE_EXPORT void ios6SetRenderingUpdatePending(bool);
+WEBCORE_EXPORT std::optional<Seconds> ios6ScrollTaskBudget();
+WEBCORE_EXPORT void ios6NoteEventLoopRun(unsigned taskBatchSize, bool scrollPriority);
+WEBCORE_EXPORT void ios6NoteScrollPriorityDeferral();
+#endif
 
 } // namespace WebCore

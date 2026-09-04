@@ -56,6 +56,11 @@
 #include <wtf/SequesteredMalloc.h>
 #include <wtf/SimpleStats.h>
 #include <wtf/text/MakeString.h>
+#if defined(WEBKIT_IOS6)
+#include <algorithm>
+#include <cstdlib>
+#include <mutex>
+#endif
 
 WTF_ALLOW_UNSAFE_BUFFER_USAGE_BEGIN
 
@@ -63,6 +68,360 @@ namespace JSC {
 namespace JITInternal {
 static constexpr const bool verbose = false;
 }
+
+#if defined(WEBKIT_IOS6)
+// Counts, for the whole session, how many CodeBlocks compileAndLinkWithoutFinalizing() below
+// refuses to ever hand to the DFG because bytecodeCost() exceeds
+// Options::maximumOptimizationCandidateBytecodeCost() - the refusal is permanent, since a
+// CannotCompile CodeBlock never emits the counter that would otherwise trigger a later retry
+// (see emit_op_enter() in JITOpcodes.cpp). Off unless WEBKIT_IOS6_OPT_CEILING_LOG names a file,
+// in which case one line is appended per refusal and a full ranked summary is appended on every
+// GC tick (Heap.cpp calls dumpSnapshot() right after it writes its own GC log line) and at exit.
+namespace CostCeilingInstrumentation {
+
+struct Refusal {
+    CString description;
+    unsigned bytecodeCost;
+    uint32_t callCount { 0 };
+};
+
+static std::mutex& lock()
+{
+    static std::mutex s_lock;
+    return s_lock;
+}
+
+static Vector<Refusal*>& entries()
+{
+    static Vector<Refusal*> s_entries;
+    return s_entries;
+}
+
+static unsigned& otherReasonRefusalCount()
+{
+    static unsigned s_count = 0;
+    return s_count;
+}
+
+static const char* logPath()
+{
+    static const char* path = getenv("WEBKIT_IOS6_OPT_CEILING_LOG");
+    return (path && path[0]) ? path : nullptr;
+}
+
+// Not static: JITPlan.cpp checks this before paying for a MonotonicTime::now() read on every
+// JITPlan construction (i.e. every compile, at every tier - most of which are not DFG plans
+// refused for cost at all), so that the read only happens when instrumentation is actually on.
+bool enabled()
+{
+    return logPath();
+}
+
+// The A/B switch for JITWorklistThread::poll()'s dequeue-time reordering of the DFG queue
+// (see JITWorklistThread.cpp) - deliberately independent of enabled() above, so a run can
+// flip reordering on or off while leaving WEBKIT_IOS6_OPT_CEILING_LOG (and therefore the
+// dispatch-age histogram both runs are compared by) set the same way. Not static, for the
+// same reason as enabled(): JITPlan.cpp checks it before reading a clock on every plan
+// construction.
+bool queueOrderingEnabled()
+{
+    static bool value = [] {
+        const char* env = getenv("WEBKIT_IOS6_DFG_QUEUE_HOTTEST_FIRST");
+        return env && env[0];
+    }();
+    return value;
+}
+
+// A plan whose code block has not re-crossed its tier-up threshold even once since this plan
+// was queued (see JITPlan::reheatCountForQueueOrdering()), and that was not itself triggered
+// from inside a loop (see JITPlan::wasLoopTriggerAtEnqueueForQueueOrdering()), and that has
+// been waiting at least this long, is dropped rather than compiled - see
+// JITWorklistThread::selectAndRemoveBestDFGPlan() in JITWorklistThread.cpp. Defaults to 750ms,
+// deliberately past the 500ms bucket boundary already used by the dispatch-age histogram, so
+// only plans that would have landed in the worst "500-2000ms" or "2000ms+" buckets are ever
+// candidates. Set WEBKIT_IOS6_DFG_QUEUE_DISCARD_MS to something larger than any plan could
+// plausibly wait to disable discarding while keeping reordering on, for an A/B of the two
+// halves of this feature against each other.
+unsigned queueDiscardThresholdMS()
+{
+    static unsigned value = [] {
+        const char* env = getenv("WEBKIT_IOS6_DFG_QUEUE_DISCARD_MS");
+        if (!env || !env[0])
+            return 750u;
+        long parsed = strtol(env, nullptr, 10);
+        return parsed > 0 ? static_cast<unsigned>(parsed) : 750u;
+    }();
+    return value;
+}
+
+// The starvation bound: once a plan has waited this long, it is dispatched next regardless of
+// how it scores against competing plans (see JITWorklistThread::selectAndRemoveBestDFGPlan()).
+// Defaults to 500ms, the same boundary the dispatch-age histogram already uses for its
+// "100-500" / "500-2000" bucket split, so with the switch on, no plan should land past that
+// bucket edge except by however long it takes the single DFG compiler thread to clear
+// whatever else already crossed the bound first (see the report in this file's dumpSnapshot()
+// for the honest statement of that residual).
+unsigned queueStarveThresholdMS()
+{
+    static unsigned value = [] {
+        const char* env = getenv("WEBKIT_IOS6_DFG_QUEUE_STARVE_MS");
+        if (!env || !env[0])
+            return 500u;
+        long parsed = strtol(env, nullptr, 10);
+        return parsed > 0 ? static_cast<unsigned>(parsed) : 500u;
+    }();
+    return value;
+}
+
+static unsigned& queueReorderedCount()
+{
+    static unsigned s_count = 0;
+    return s_count;
+}
+
+static unsigned& queueStarvationPromotionCount()
+{
+    static unsigned s_count = 0;
+    return s_count;
+}
+
+static unsigned& queueDiscardedCount()
+{
+    static unsigned s_count = 0;
+    return s_count;
+}
+
+// Called from JITWorklistThread::selectAndRemoveBestDFGPlan() when it picks a plan other than
+// the one at the front of the queue, i.e. reordering actually changed the outcome versus plain
+// FIFO. Locked the same as the rest of this namespace's counters so dumpSnapshot() sees a
+// consistent snapshot; contention is a non-issue since numberOfDFGCompilerThreads is pinned to
+// 1 on this platform, so there is only ever one caller.
+void recordQueueReordered()
+{
+    std::lock_guard<std::mutex> locker(lock());
+    ++queueReorderedCount();
+}
+
+// Called when the plan picked was picked purely because it crossed the starvation bound (see
+// queueStarveThresholdMS() above), not because it scored highest.
+void recordQueueStarvationPromotion()
+{
+    std::lock_guard<std::mutex> locker(lock());
+    ++queueStarvationPromotionCount();
+}
+
+// Called once per plan dropped by selectAndRemoveBestDFGPlan()'s eviction pass. Every dropped
+// plan is a dispatch that recordDFGQueueAge() (and therefore dfgDispatches in the QUEUE line)
+// will never see, so dfgDispatches after a run with the switch on should be lower than a
+// matched run with it off by roughly this count - the two counts are the cross-check for each
+// other.
+void recordQueueDiscarded()
+{
+    std::lock_guard<std::mutex> locker(lock());
+    ++queueDiscardedCount();
+}
+
+static FILE* logFile()
+{
+    static FILE* file = [] () -> FILE* {
+        const char* path = logPath();
+        if (!path)
+            return nullptr;
+        FILE* opened = fopen(path, "a");
+        if (opened)
+            setvbuf(opened, nullptr, _IOLBF, 0);
+        return opened;
+    }();
+    return file;
+}
+
+static const char* describe(const CString& string)
+{
+    return string.isNull() ? "?" : string.data();
+}
+
+static constexpr unsigned maxTrackedEntries = 2000;
+
+// Called once per refused CodeBlock, from the CannotCompile branch of
+// compileAndLinkWithoutFinalizing(). Allocates a counter cell that is never freed and never
+// moved, so its address can be baked into JIT-compiled code as an AbsoluteAddress.
+uint32_t* recordCostRefusal(CodeBlock* codeBlock, unsigned bytecodeCost)
+{
+    if (!enabled())
+        return nullptr;
+
+    std::lock_guard<std::mutex> locker(lock());
+    if (entries().size() >= maxTrackedEntries)
+        return nullptr;
+
+    auto* entry = new Refusal;
+    entry->bytecodeCost = bytecodeCost;
+    ScriptExecutable* executable = codeBlock->ownerExecutable();
+    entry->description = makeString(
+        codeBlock->inferredNameWithHash(), " ("_s,
+        executable->sourceURLStripped(), ":"_s, executable->firstLine(), ")"_s).utf8();
+    entries().append(entry);
+
+    if (FILE* log = logFile()) {
+        fprintf(log, "%.3f REFUSAL cost=%u name=\"%s\"\n",
+            MonotonicTime::now().secondsSinceEpoch().value(), bytecodeCost, describe(entry->description));
+    }
+
+    return &entry->callCount;
+}
+
+void recordOtherRefusal()
+{
+    if (!enabled())
+        return;
+    std::lock_guard<std::mutex> locker(lock());
+    ++otherReasonRefusalCount();
+}
+
+// How long a DFG::Plan sat in JITWorklist before a worker thread actually started compiling
+// it, i.e. how long the single numberOfDFGCompilerThreads=1 slot made it wait its turn. Fed
+// from JITPlan::compileInThread() in JITPlan.cpp; age is (dispatch time - JITPlan construction
+// time), which is a slight underestimate since a plan is not literally enqueued the instant it
+// is constructed, but the two happen back to back in the same call with nothing that blocks
+// between them.
+//
+// Reported as bucket counts, not a mean/max - per-run GC-log timings on this device have been
+// seen to vary by more than 2x between otherwise identical runs, so "mean dispatch age was
+// 40ms" is not trustworthy from a single run. "3 plans waited over a second" is a count, and a
+// count from one run is a fact.
+static SimpleStats& dfgQueueAgeStatsMS()
+{
+    static SimpleStats stats;
+    return stats;
+}
+
+static double& dfgQueueAgeMaxMS()
+{
+    static double maxMS = 0;
+    return maxMS;
+}
+
+// Bucket boundaries in ms: [0,16) one frame, [16,100), [100,500), [500,2000), [2000,inf).
+static unsigned* dfgQueueAgeBuckets()
+{
+    static unsigned buckets[5] = { 0, 0, 0, 0, 0 };
+    return buckets;
+}
+
+static unsigned dfgQueueAgeBucketFor(double ms)
+{
+    if (ms < 16)
+        return 0;
+    if (ms < 100)
+        return 1;
+    if (ms < 500)
+        return 2;
+    if (ms < 2000)
+        return 3;
+    return 4;
+}
+
+void recordDFGQueueAge(Seconds age)
+{
+    if (!enabled())
+        return;
+    double ms = age.milliseconds();
+    std::lock_guard<std::mutex> locker(lock());
+    dfgQueueAgeStatsMS().add(ms);
+    dfgQueueAgeMaxMS() = std::max(dfgQueueAgeMaxMS(), ms);
+    dfgQueueAgeBuckets()[dfgQueueAgeBucketFor(ms)]++;
+}
+
+// Appended after every GC (Heap.cpp) and once more at process exit, so a killed process still
+// leaves behind whatever was current as of the last collection.
+void dumpSnapshot()
+{
+    if (!enabled())
+        return;
+    FILE* log = logFile();
+    if (!log)
+        return;
+
+    std::lock_guard<std::mutex> locker(lock());
+    if (entries().isEmpty() && !otherReasonRefusalCount() && !dfgQueueAgeStatsMS()
+        && !queueReorderedCount() && !queueStarvationPromotionCount() && !queueDiscardedCount())
+        return;
+
+    Vector<Refusal*> sorted = entries();
+    std::sort(sorted.begin(), sorted.end(), [](Refusal* a, Refusal* b) {
+        return a->callCount > b->callCount;
+    });
+
+    unsigned ceiling = Options::maximumOptimizationCandidateBytecodeCost();
+    unsigned buckets[5] = { 0, 0, 0, 0, 0 }; // (1-2x],(2-4x],(4-8x],(8-16x],(16x+] of the ceiling
+    uint64_t totalCalls = 0;
+    // Three tiers of "was this refusal cold or hot", as plain counts: called at all, called
+    // enough to matter, called enough that it would very likely have paid for a DFG compile.
+    unsigned calledAtLeastOnce = 0;
+    unsigned calledAtLeast100 = 0;
+    unsigned calledAtLeast1000 = 0;
+    for (auto* entry : entries()) {
+        totalCalls += entry->callCount;
+        if (entry->callCount)
+            ++calledAtLeastOnce;
+        if (entry->callCount >= 100)
+            ++calledAtLeast100;
+        if (entry->callCount >= 1000)
+            ++calledAtLeast1000;
+        unsigned ratio = ceiling ? (entry->bytecodeCost / ceiling) : 0;
+        unsigned bucket = ratio < 2 ? 0 : ratio < 4 ? 1 : ratio < 8 ? 2 : ratio < 16 ? 3 : 4;
+        buckets[bucket]++;
+    }
+
+    double now = MonotonicTime::now().secondsSinceEpoch().value();
+    fprintf(log, "%.3f SUMMARY ceiling=%u refusedForCost=%zu refusedOther=%u"
+        " calledAtLeastOnce=%u calledAtLeast100=%u calledAtLeast1000=%u totalCalls=%llu"
+        " histogram_of_ceiling_multiples[1-2x,2-4x,4-8x,8-16x,16x+]=%u,%u,%u,%u,%u\n",
+        now, ceiling, entries().size(), otherReasonRefusalCount(),
+        calledAtLeastOnce, calledAtLeast100, calledAtLeast1000,
+        static_cast<unsigned long long>(totalCalls),
+        buckets[0], buckets[1], buckets[2], buckets[3], buckets[4]);
+
+    if (dfgQueueAgeStatsMS()) {
+        unsigned* qb = dfgQueueAgeBuckets();
+        fprintf(log, "%.3f QUEUE dfgDispatches=%.0f histogram_of_dispatchAgeMS[0-16,16-100,100-500,500-2000,2000+]=%u,%u,%u,%u,%u"
+            " (context only, not a counter: mean=%.2fms max=%.2fms)\n",
+            now, dfgQueueAgeStatsMS().count(), qb[0], qb[1], qb[2], qb[3], qb[4],
+            dfgQueueAgeStatsMS().mean(), dfgQueueAgeMaxMS());
+    }
+
+    // Only meaningful with WEBKIT_IOS6_DFG_QUEUE_HOTTEST_FIRST set - all three counters stay 0
+    // otherwise. queueReordered is how often the linear scan in
+    // JITWorklistThread::selectAndRemoveBestDFGPlan() picked something other than the front of
+    // the queue; queueStarvationPromotions is how many of those picks were forced purely by
+    // the starvation bound rather than by score; queueDiscarded is how many plans never got
+    // compiled at all - compare it against the drop in dfgDispatches above versus a matched
+    // run with the switch off (see recordQueueDiscarded()'s comment for why those two numbers
+    // should track each other).
+    if (queueReorderedCount() || queueStarvationPromotionCount() || queueDiscardedCount()) {
+        fprintf(log, "%.3f ORDER queueReordered=%u queueStarvationPromotions=%u queueDiscarded=%u"
+            " starveThresholdMS=%u discardThresholdMS=%u\n",
+            now, queueReorderedCount(), queueStarvationPromotionCount(), queueDiscardedCount(),
+            queueStarveThresholdMS(), queueDiscardThresholdMS());
+    }
+
+    unsigned rank = 0;
+    for (auto* entry : sorted) {
+        if (rank++ >= 10)
+            break;
+        fprintf(log, "%.3f TOP callCount=%u cost=%u name=\"%s\"\n",
+            now, entry->callCount, entry->bytecodeCost, describe(entry->description));
+    }
+}
+
+static void registerAtExitDumpOnce()
+{
+    static std::once_flag once;
+    std::call_once(once, [] { std::atexit([] { dumpSnapshot(); }); });
+}
+
+} // namespace CostCeilingInstrumentation
+#endif // defined(WEBKIT_IOS6)
 
 Seconds totalBaselineCompileTime;
 Seconds totalDFGCompileTime;
@@ -722,6 +1081,16 @@ RefPtr<BaselineJITCode> JIT::compileAndLinkWithoutFinalizing(JITCompilationEffor
     case DFG::CannotCompile:
         m_canBeOptimized = false;
         m_shouldEmitProfiling = false;
+#if defined(WEBKIT_IOS6)
+        if (CostCeilingInstrumentation::enabled()) {
+            unsigned cost = m_profiledCodeBlock->bytecodeCost();
+            if (cost > Options::maximumOptimizationCandidateBytecodeCost()) {
+                m_costCeilingCounterSlot = CostCeilingInstrumentation::recordCostRefusal(m_profiledCodeBlock, cost);
+                CostCeilingInstrumentation::registerAtExitDumpOnce();
+            } else
+                CostCeilingInstrumentation::recordOtherRefusal();
+        }
+#endif
         break;
     case DFG::CanCompile:
     case DFG::CanCompileAndInline:

@@ -483,6 +483,10 @@ void FrameSelection::setSelection(const VisibleSelection& selection, OptionSet<S
     LOG_WITH_STREAM(Selection, stream << "FrameSelection::setSelection " << selection);
 
     RefPtr document = m_document.get();
+#if defined(WEBKIT_IOS6)
+    RefPtr startContainerBeforeChange = m_selection.start().containerNode();
+    RefPtr endContainerBeforeChange = m_selection.end().containerNode();
+#endif
     if (!setSelectionWithoutUpdatingAppearance(selection, options, align, granularity))
         return;
 
@@ -499,7 +503,19 @@ void FrameSelection::setSelection(const VisibleSelection& selection, OptionSet<S
     m_selectionRevealIntent = intent;
     m_pendingSelectionUpdate = true;
 
+#if defined(WEBKIT_IOS6)
+    auto selectionStayedWithinSameTextNodes = [&] {
+        RefPtr startContainer = m_selection.start().containerNode();
+        RefPtr endContainer = m_selection.end().containerNode();
+        return startContainer == startContainerBeforeChange && endContainer == endContainerBeforeChange
+            && startContainer && startContainer->isCharacterDataNode()
+            && endContainer && endContainer->isCharacterDataNode();
+    };
+    if (!selectionStayedWithinSameTextNodes())
+        document->scheduleContentRelevancyUpdate(ContentRelevancy::Selected);
+#else
     document->scheduleContentRelevancyUpdate(ContentRelevancy::Selected);
+#endif
 
     if (document->hasPendingStyleRecalc())
         return;
@@ -1586,7 +1602,12 @@ bool FrameSelection::modify(Alteration alter, SelectionDirection direction, Text
     // Setting a selection will clear it, so save it to possibly restore later.
     // Note: the Start position type is arbitrary because it is unused, it would be
     // the requested position type if there were no xPosForVerticalArrowNavigation set.
+#if defined(WEBKIT_IOS6)
+    bool needsXPosForVerticalArrowNavigation = granularity == TextGranularity::LineGranularity || granularity == TextGranularity::ParagraphGranularity;
+    LayoutUnit x = needsXPosForVerticalArrowNavigation ? lineDirectionPointForBlockDirectionNavigation(PositionType::Start) : LayoutUnit { };
+#else
     LayoutUnit x = lineDirectionPointForBlockDirectionNavigation(PositionType::Start);
+#endif
 
     m_selection.setDirectionality((shouldAlwaysUseDirectionalSelection(m_document.get()) || alter == Alteration::Extend)
         ? Directionality::Strong : Directionality::None);
@@ -1623,8 +1644,13 @@ bool FrameSelection::modify(Alteration alter, SelectionDirection direction, Text
         break;
     }
     
+#if defined(WEBKIT_IOS6)
+    if (needsXPosForVerticalArrowNavigation)
+        m_xPosForVerticalArrowNavigation = x;
+#else
     if (granularity == TextGranularity::LineGranularity || granularity == TextGranularity::ParagraphGranularity)
         m_xPosForVerticalArrowNavigation = x;
+#endif
 
     if (userTriggered == UserTriggered::Yes)
         m_granularity = TextGranularity::CharacterGranularity;
@@ -2402,6 +2428,17 @@ void FrameSelection::updateAppearance()
     }
 #endif
 
+#if defined(WEBKIT_IOS6)
+    if (!m_shouldShowBlockCursor && oldSelection.isCaret() && oldSelection.start() == oldSelection.end()) {
+        ScriptDisallowedScope::InMainThread scriptDisallowedScope;
+        if (document) {
+            if (CheckedPtr view = document->renderView())
+                view->selection().clear();
+        }
+        return;
+    }
+#endif
+
     // Construct a new VisibleSolution, since m_selection is not necessarily valid, and the following steps
     // assume a valid selection. See <https://bugs.webkit.org/show_bug.cgi?id=69563> and <rdar://problem/10232866>.
 #if ENABLE(TEXT_CARET)
@@ -2574,13 +2611,14 @@ FloatRect FrameSelection::selectionBounds(ClipToVisibleContent clipToVisibleCont
     if (!renderView)
         return LayoutRect();
 
-    if (!m_selection.range())
+    auto selectionRange = m_selection.range();
+    if (!selectionRange)
         return LayoutRect();
-    
+
 #if PLATFORM(IOS_FAMILY)
-    auto selectionGeometries = RenderObject::collectSelectionGeometries(m_selection.range().value()).geometries;
+    auto selectionGeometries = RenderObject::collectSelectionGeometries(*selectionRange).geometries;
     IntRect visibleSelectionRect;
-    for (auto geometry : selectionGeometries)
+    for (auto& geometry : selectionGeometries)
         visibleSelectionRect.unite(geometry.rect());
     
     if (clipToVisibleContent == ClipToVisibleContent::No)

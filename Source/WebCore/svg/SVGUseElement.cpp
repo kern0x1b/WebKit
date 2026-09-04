@@ -296,20 +296,22 @@ void SVGUseElement::updateUserAgentShadowTree()
     }
 
     RELEASE_ASSERT(!isDescendantOf(target.get()));
+    bool sawEventListeners = false;
     {
         Ref shadowRoot = ensureUserAgentShadowRoot();
         ScriptDisallowedScope::EventAllowedScope eventAllowedScope { shadowRoot };
-        cloneTarget(shadowRoot, *target);
+        cloneTarget(shadowRoot, *target, &sawEventListeners);
         // cloneTarget() strips every <symbol> below the clone root, so the only <symbol> the
         // symbol pass can find is the clone root itself -- unless expanding a nested <use>
         // introduced a fresh clone root.
-        bool expandedUseElement = expandUseElementsInShadowTree();
+        bool expandedUseElement = expandUseElementsInShadowTree(&sawEventListeners);
         if (expandedUseElement || is<SVGSymbolElement>(shadowRoot->firstChild()))
             expandSymbolElementsInShadowTree();
         updateRelativeLengthsInformation();
     }
 
-    transferEventListenersToShadowTree();
+    if (sawEventListeners)
+        transferEventListenersToShadowTree();
 
     // When we invalidate the other shadow trees, it's important that we don't
     // follow any cycles and invalidate ourselves. To avoid that, we temporarily
@@ -461,7 +463,7 @@ static void removeDisallowedAndSymbolElementsFromSubtree(SVGElement& subtree)
     disassociateAndRemoveClones(elementsToRemove);
 }
 
-static void associateClonesWithOriginals(SVGElement& clone, SVGElement& original)
+static void associateClonesWithOriginals(SVGElement& clone, SVGElement& original, bool* sawEventListeners = nullptr)
 {
     // This assertion checks that we don't call this with the arguments backwards.
     // The clone is new and so it's not installed in a parent yet.
@@ -470,8 +472,13 @@ static void associateClonesWithOriginals(SVGElement& clone, SVGElement& original
     // The loop below works because we are associating these clones immediately, before
     // doing transformations like removing disallowed elements or expanding elements.
     clone.setCorrespondingElement(&original);
-    for (auto pair : descendantsOfType<SVGElement>(clone, original))
+    if (sawEventListeners && original.hasEventTargetData())
+        *sawEventListeners = true;
+    for (auto pair : descendantsOfType<SVGElement>(clone, original)) {
         protect(pair.first)->setCorrespondingElement(Ref { pair.second }.ptr());
+        if (sawEventListeners && !*sawEventListeners && pair.second.hasEventTargetData())
+            *sawEventListeners = true;
+    }
 }
 
 static void associateReplacementCloneWithOriginal(SVGElement& replacementClone, SVGElement& originalClone)
@@ -532,11 +539,11 @@ RefPtr<SVGElement> SVGUseElement::findTarget(AtomString* targetID) const
     return target;
 }
 
-void SVGUseElement::cloneTarget(ContainerNode& container, SVGElement& target) const
+void SVGUseElement::cloneTarget(ContainerNode& container, SVGElement& target, bool* sawEventListeners) const
 {
     Ref targetClone = downcast<SVGElement>(target.cloneElementWithChildren(protect(document()), nullptr));
     ScriptDisallowedScope::EventAllowedScope eventAllowedScope { targetClone };
-    associateClonesWithOriginals(targetClone.get(), target);
+    associateClonesWithOriginals(targetClone.get(), target, sawEventListeners);
     removeDisallowedAndSymbolElementsFromSubtree(targetClone.get());
     transferSizeAttributesToTargetClone(targetClone.get());
     container.appendChild(targetClone);
@@ -554,7 +561,7 @@ static void cloneDataAndChildren(SVGElement& replacementClone, SVGElement& origi
     removeDisallowedElementsFromSubtree(replacementClone);
 }
 
-bool SVGUseElement::expandUseElementsInShadowTree() const
+bool SVGUseElement::expandUseElementsInShadowTree(bool* sawEventListeners) const
 {
     bool expandedAny = false;
     auto descendants = descendantsOfType<SVGUseElement>(*userAgentShadowRoot());
@@ -581,7 +588,7 @@ bool SVGUseElement::expandUseElementsInShadowTree() const
         replacementClone->removeAttribute(XLinkNames::hrefAttr);
 
         if (target)
-            originalClone->cloneTarget(replacementClone.get(), *target);
+            originalClone->cloneTarget(replacementClone.get(), *target, sawEventListeners);
 
         protect(originalClone->parentNode())->replaceChild(replacementClone, originalClone);
 

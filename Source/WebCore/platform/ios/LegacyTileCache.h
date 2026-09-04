@@ -202,10 +202,10 @@ private:
     //
     // The eviction grain matters as much as the total. computeAvailableMemory()
     // rounds up to a 128MB multiple, so ramSize() reports 512MB here and
-    // LegacyTileCache::tileCapacityForGrid() caps the cache at 64MB; the active
-    // grid then gets gridCapacity*3/4, i.e. 12/24/36/48MB as systemMemoryLevel()
-    // (kern.memorystatus_level, and -1 if that sysctl is unavailable) crosses
-    // 15/20/30. LegacyTileGrid::tileByteSize() charges (T*screenScale)^2*4 per
+    // LegacyTileCache::tileCapacityForGrid() caps the cache at 24MB and floors
+    // the active grid at 18MB, rather than letting systemMemoryLevel()
+    // (kern.memorystatus_level, and -1 if that sysctl is unavailable) tier it
+    // down to 6MB. LegacyTileGrid::tileByteSize() charges (T*screenScale)^2*4 per
     // tile flat, so at screenScale 2:
     //
     //   T=512: 4MB/tile      -> 24MB for the cover rect. At the 12MB floor the

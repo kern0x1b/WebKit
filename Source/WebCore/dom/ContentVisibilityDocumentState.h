@@ -33,6 +33,7 @@ namespace WebCore {
 
 class Document;
 class Element;
+struct SimpleRange;
 
 enum class DidUpdateAnyContentRelevancy : bool { No, Yes };
 enum class IsSkippedContent : bool { No, Yes };
@@ -59,7 +60,7 @@ public:
     static void updateAnimations(const Element&, IsSkippedContent wasSkipped, IsSkippedContent becomesSkipped);
 
 private:
-    bool checkRelevancyOfContentVisibilityElement(Element&, OptionSet<ContentRelevancy>) const;
+    bool checkRelevancyOfContentVisibilityElement(Element&, OptionSet<ContentRelevancy>, const SimpleRange* selectionRange) const;
 
     void removeViewportProximity(const Element&);
 
@@ -68,6 +69,10 @@ private:
     RefPtr<IntersectionObserver> m_observer;
 
     WeakHashMap<Element, ViewportProximity, WeakPtrImplWithEventTargetData> m_elementViewportProximities;
+
+#if defined(WEBKIT_IOS6)
+    mutable bool m_mayHaveTargetsWithoutViewportProximity { false };
+#endif
 };
 
 } // namespace

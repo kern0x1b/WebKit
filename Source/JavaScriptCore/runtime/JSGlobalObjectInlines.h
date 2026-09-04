@@ -459,9 +459,17 @@ inline GetterSetter* JSGlobalObject::arrayBufferSpeciesGetterSetter(ArrayBufferS
 {
     switch (sharingMode) {
     case ArrayBufferSharingMode::Default:
+#if defined(WEBKIT_IOS6)
+        return m_arrayBufferSpeciesGetterSetter.get(this);
+#else
         return m_arrayBufferSpeciesGetterSetter.get();
+#endif
     case ArrayBufferSharingMode::Shared:
+#if defined(WEBKIT_IOS6)
+        return m_sharedArrayBufferSpeciesGetterSetter.get(this);
+#else
         return m_sharedArrayBufferSpeciesGetterSetter.get();
+#endif
     }
     RELEASE_ASSERT_NOT_REACHED();
     return nullptr;

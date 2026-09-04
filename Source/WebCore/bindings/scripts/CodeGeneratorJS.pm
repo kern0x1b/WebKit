@@ -2250,7 +2250,7 @@ sub GetOperationReturnedArgumentName
 
 sub IsAcceleratedDOMAttribute
 {
-    my ($interface, $attribute) = @_;
+    my ($interface, $attribute, $ignoreDOMJIT) = @_;
 
     # If we use CustomGetterSetter in IDL code generator we cannot skip type check.
     return 0 if NeedsRuntimeCheck($interface, $attribute) and AttributeShouldBeOnInstance($interface, $attribute);
@@ -2266,8 +2266,17 @@ sub IsAcceleratedDOMAttribute
     return 0 if IsJSBuiltin($interface, $attribute);
     return 0 if $attribute->extendedAttributes->{LegacyLenientThis};
     return 0 if $codeGenerator->IsPromiseType($attribute->type);
-    return 0 if $attribute->extendedAttributes->{DOMJIT};
+    return 0 if $attribute->extendedAttributes->{DOMJIT} and !$ignoreDOMJIT;
     return 1;
+}
+
+sub IsAcceleratedDOMJITAttribute
+{
+    my ($interface, $attribute) = @_;
+
+    return 0 unless $attribute->extendedAttributes->{DOMJIT};
+    return 0 if IsAcceleratedDOMAttribute($interface, $attribute);
+    return IsAcceleratedDOMAttribute($interface, $attribute, 1);
 }
 
 sub StringifyJSCAttributes
@@ -6042,7 +6051,16 @@ sub GenerateAttributeGetterTrampolineDefinition
     
     push(@$outputArray, "JSC_DEFINE_CUSTOM_GETTER(${attributeGetterName}, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName attributeName))\n");
     push(@$outputArray, "{\n");
-    push(@$outputArray, "    return IDLAttribute<${className}>::${callAttributeGetterName}<" . join(", ", @templateParameters) . ">(*lexicalGlobalObject, thisValue, attributeName);\n");
+    if (IsAcceleratedDOMJITAttribute($interface, $attribute)) {
+        my @acceleratedTemplateParameters = (@templateParameters, "CastedThisErrorBehavior::Assert");
+        push(@$outputArray, "#if defined(WEBKIT_IOS6)\n");
+        push(@$outputArray, "    return IDLAttribute<${className}>::${callAttributeGetterName}<" . join(", ", @acceleratedTemplateParameters) . ">(*lexicalGlobalObject, thisValue, attributeName);\n");
+        push(@$outputArray, "#else\n");
+        push(@$outputArray, "    return IDLAttribute<${className}>::${callAttributeGetterName}<" . join(", ", @templateParameters) . ">(*lexicalGlobalObject, thisValue, attributeName);\n");
+        push(@$outputArray, "#endif\n");
+    } else {
+        push(@$outputArray, "    return IDLAttribute<${className}>::${callAttributeGetterName}<" . join(", ", @templateParameters) . ">(*lexicalGlobalObject, thisValue, attributeName);\n");
+    }
     push(@$outputArray, "}\n\n");
 }
 

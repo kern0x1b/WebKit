@@ -24,6 +24,7 @@
  */
 
 #include "config.h"
+#include <wtf/MemoryFootprint.h>
 #include "MemoryRelease.h"
 
 #if defined(WEBKIT_IOS6)
@@ -98,6 +99,55 @@ static double residentMegabytes()
     return info.resident_size / 1048576.0;
 }
 
+// This is a last resort, not a policy, and it has been set wrongly in both directions.
+//
+// It was 235 when the process ran at 200-290 MB. It was then lowered to 160 on the argument
+// that 235 was above every valid measurement and therefore dead - true of the numbers at
+// that moment, and wrong within hours, because the process had since grown to 204-244 MB.
+// At 160 the test is true on every firing of the application's memory valve, and a census
+// on the device found compiled code being discarded in full twice per 160-second scroll.
+//
+// That single constant produced four separate symptoms elsewhere: 28,456 inline-cache
+// condition-set allocations in 100 s (68% of all C++ allocation on the web thread) as the
+// caches were rebuilt from nothing; a recorded tier-up conclusion whose stated reason turned
+// out to measure this instead (compiling the whole interpreted population costs ~2 MB of a
+// 27.2 MB pool, not a memory blow-up); the ratchet in CodeBlock::~CodeBlock, which sets
+// didOptimize = False on a baseline block that never reached the DFG and quadruples that
+// function's next threshold; and continuous traffic through the single process-wide
+// executable-allocator lock, taken while CodeBlock::m_lock is held.
+//
+// Deleting code was measured expensive long before any of that: 71-77 s of stalled time over
+// four page switches with the code deleted against 51-53 s with it kept.
+//
+// The deeper fault was not the number but the unit. This gate had its own residentMegabytes()
+// reading task_basic_info.resident_size, while WTF::memoryFootprint() - which the collector's
+// bands are calibrated against - was changed to report the task's own anonymous memory,
+// because resident size is three-fifths shared cache and framework text that collecting or
+// discarding code cannot release. Two related decisions were left on two different scales.
+// Restoring 235 on the resident scale would not have fixed it either: resident peaks at 249.
+//
+// So this now asks the same question the collector asks, and fires only when the collector
+// has already lost - the collector's own hard band (JSC_IOS6_GC_HARD_MB, the one that
+// promotes a collection to a full one) is 180 MB of the same quantity, not 130; 130 was true
+// when this paragraph was written and is not true now.
+//
+// The number this gate actually sat against was never the hard band, it was the collector's
+// absolute band (JSC_IOS6_GC_ABSOLUTE_MB) - the valve that force-releases full-collection
+// suppression. 235 here vs 225 there was a 10 MB margin: fire just after the collector's own
+// last resort has already been spent, not instead of it.
+//
+// Tonight JSC_IOS6_GC_ABSOLUTE_MB moved 225 -> 265, on live-device evidence that 225 sat
+// inside ordinary navigation load and kept force-releasing suppression that didn't need
+// releasing. This gate did not move with it, which inverts the ordering it was built on:
+// at 235 it now fires 30 MB before the collector's own last resort does, on the same kind of
+// ordinary load, not after the collector has already lost. The standing resident measurement
+// already on record for this device - 205-235 MB in the first hundred seconds, peaking at 249
+// - sits on top of 235, not above it, so this is not a hypothetical crossing.
+//
+// Moved to 275, keeping the same 10 MB margin above the new absolute band. Reasoned from the
+// in-tree numbers, not re-measured live tonight - if a live census shows resident still
+// routinely clearing 275, that call was wrong and needs a device run, not another guess.
+// WEBKIT_IOS6_CODE_DELETION_THRESHOLD_MB moves it.
 static double codeDeletionThresholdMegabytes()
 {
     static const double threshold = [] -> double {
@@ -106,9 +156,14 @@ static double codeDeletionThresholdMegabytes()
             if (value > 0)
                 return value;
         }
-        return 235;
+        return 275;
     }();
     return threshold;
+}
+
+bool shouldDeleteAllCodeForMemoryPressure()
+{
+    return residentMegabytes() >= codeDeletionThresholdMegabytes();
 }
 #endif
 
@@ -193,7 +248,11 @@ static void releaseCriticalMemory(Synchronous synchronous, MaintainBackForwardCa
     }
 
 #if defined(WEBKIT_IOS6)
-    if (residentMegabytes() >= codeDeletionThresholdMegabytes()) {
+    if (shouldDeleteAllCodeForMemoryPressure()) {
+        // Both numbers, because they are the two scales this decision was accidentally
+        // straddling, and a wipe is expensive enough to be worth a line either way.
+        WTFLogAlways("[codewipe] footprint %.0f MB, resident %.0f MB, threshold %.0f MB",
+            WTF::memoryFootprint() / 1048576.0, residentMegabytes(), codeDeletionThresholdMegabytes());
         if (synchronous == Synchronous::Yes)
             GarbageCollectionController::singleton().deleteAllCode(JSC::PreventCollectionAndDeleteAllCode);
         else

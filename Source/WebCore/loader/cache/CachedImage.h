@@ -210,6 +210,9 @@ private:
     bool m_shouldPaintBrokenImage : 1;
     bool m_forceUpdateImageDataEnabledForTesting : 1;
     bool m_allowsOrientationOverride : 1;
+#if defined(WEBKIT_IOS6)
+    bool m_intrinsicSizeIsAvailable { false };
+#endif
 };
 
 } // namespace WebCore

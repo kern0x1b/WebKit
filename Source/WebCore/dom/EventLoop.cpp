@@ -27,6 +27,9 @@
 #include "EventLoop.h"
 
 #include "Microtasks.h"
+#if defined(WEBKIT_IOS6)
+#include "Scheduling.h"
+#endif
 #include "ScriptExecutionContextInlines.h"
 #include <JavaScriptCore/JSGlobalObject.h>
 #include <JavaScriptCore/JSMicrotaskDispatcher.h>
@@ -335,6 +338,27 @@ void EventLoop::run(JSC::VM& vm, std::optional<ApproximateTime> deadline)
         m_groupsWithSuspendedTasks.clear();
         TaskVector remainingTasks;
         bool hasReachedDeadline = false;
+#if defined(WEBKIT_IOS6)
+        unsigned tasksExecuted = 0;
+        bool scrollPriority = false;
+        if (auto scrollBudget = ios6ScrollTaskBudget()) {
+            auto scrollDeadline = ApproximateTime::now() + *scrollBudget;
+            bool tighter = !deadline || scrollDeadline < *deadline;
+            if (getenv("WEBKIT_IOS6_DEBUG_EXPOSED_RECT")) {
+                if (deadline)
+                    WTFLogAlways("[deadlinecmp] hasDeadline=1 existingAheadMs=%.2f tighter=%d", (deadline->secondsSinceEpoch() - ApproximateTime::now().secondsSinceEpoch()).milliseconds(), tighter);
+                else
+                    WTFLogAlways("[deadlinecmp] hasDeadline=0 tighter=%d", tighter);
+            }
+            if (tighter) {
+                deadline = scrollDeadline;
+                scrollPriority = true;
+            }
+        }
+        if (getenv("WEBKIT_IOS6_DEBUG_EXPOSED_RECT"))
+            WTFLogAlways("[notecall] scrollPriority=%d taskCount=%zu", scrollPriority, tasks.size());
+        ios6NoteEventLoopRun(static_cast<unsigned>(tasks.size()), scrollPriority);
+#endif
         for (auto& task : tasks) {
             {
                 CheckedPtr group = task->group();
@@ -342,14 +366,25 @@ void EventLoop::run(JSC::VM& vm, std::optional<ApproximateTime> deadline)
                     continue;
 
                 hasReachedDeadline = hasReachedDeadline || (deadline && ApproximateTime::now() > *deadline);
+#if defined(WEBKIT_IOS6)
+                if (scrollPriority && !tasksExecuted)
+                    hasReachedDeadline = false;
+#endif
                 if (group->isSuspended() || hasReachedDeadline) {
                     m_groupsWithSuspendedTasks.add(*group);
                     remainingTasks.append(WTF::move(task));
+#if defined(WEBKIT_IOS6)
+                    if (scrollPriority)
+                        ios6NoteScrollPriorityDeferral();
+#endif
                     continue;
                 }
             }
 
             task->execute();
+#if defined(WEBKIT_IOS6)
+            ++tasksExecuted;
+#endif
             didPerformMicrotaskCheckpoint = true;
             performMicrotaskCheckpoint(vm);
         }

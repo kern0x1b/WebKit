@@ -555,17 +555,19 @@ void RenderBlockFlow::layoutBlockWithNoChildren()
 void RenderBlockFlow::layoutBlock(RelayoutChildren relayoutChildren, LayoutUnit pageLogicalHeight)
 {
 #if defined(WEBKIT_IOS6)
-    extern unsigned g_webkitIOS6BlocksLaidOut;
-    extern unsigned g_webkitIOS6BlocksForced;
-    extern unsigned g_webkitIOS6BlocksDirty;
-    extern unsigned g_webkitIOS6BlocksViaChild;
-    ++g_webkitIOS6BlocksLaidOut;
-    if (relayoutChildren == RelayoutChildren::Yes)
-        ++g_webkitIOS6BlocksForced;
-    else if (selfNeedsLayout())
-        ++g_webkitIOS6BlocksDirty;
-    else if (normalChildNeedsLayout())
-        ++g_webkitIOS6BlocksViaChild;
+    if (g_webkitIOS6LayoutCounters) [[unlikely]] {
+        extern unsigned g_webkitIOS6BlocksLaidOut;
+        extern unsigned g_webkitIOS6BlocksForced;
+        extern unsigned g_webkitIOS6BlocksDirty;
+        extern unsigned g_webkitIOS6BlocksViaChild;
+        ++g_webkitIOS6BlocksLaidOut;
+        if (relayoutChildren == RelayoutChildren::Yes)
+            ++g_webkitIOS6BlocksForced;
+        else if (selfNeedsLayout())
+            ++g_webkitIOS6BlocksDirty;
+        else if (normalChildNeedsLayout())
+            ++g_webkitIOS6BlocksViaChild;
+    }
 #endif
     ASSERT(needsLayout());
 
@@ -812,9 +814,9 @@ void RenderBlockFlow::dirtyForLayoutFromPercentageHeightDescendant(RenderBox& de
         && formattingContextRootIntrinsicLogicalWidthsDependOnOwnHeight(*formattingContextRoot))
         descendant.invalidateContentLogicalWidths();
 
-    for (CheckedPtr<RenderElement> renderer = &descendant; renderer && renderer != this && !renderer->normalChildNeedsLayout(); renderer = renderer->container()) {
+    for (RenderElement* renderer = &descendant; renderer && renderer != this && !renderer->normalChildNeedsLayout(); renderer = renderer->container()) {
         renderer->setChildNeedsLayout(MarkingBehavior::MarkOnlyThis);
-        if (CheckedPtr renderBox = dynamicDowncast<RenderBox>(*renderer)) {
+        if (auto* renderBox = dynamicDowncast<RenderBox>(*renderer)) {
             // If the width of an image is affected by the height of a child (e.g., an image with an aspect ratio),
             // then we have to dirty preferred widths, since even enclosing blocks can become dirty as a result.
             // (A horizontal flexbox that contains an inline image wrapped in an anonymous block for example.)
@@ -824,7 +826,7 @@ void RenderBlockFlow::dirtyForLayoutFromPercentageHeightDescendant(RenderBox& de
             // children themselves have percent-height replaced elements with aspect ratios (e.g.
             // #target -> div[height:100%] -> canvas[height:100%]) needs its own descendants dirtied
             // so that the preferred widths cascade correctly up the tree.
-            if (CheckedPtr blockFlow = dynamicDowncast<RenderBlockFlow>(*renderBox))
+            if (auto* blockFlow = dynamicDowncast<RenderBlockFlow>(*renderBox))
                 blockFlow->dirtyForLayoutFromPercentageHeightDescendants();
         }
     }

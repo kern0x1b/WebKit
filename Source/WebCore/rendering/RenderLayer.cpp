@@ -1589,6 +1589,12 @@ void RenderLayer::recursiveUpdateLayerPositionsAfterScroll(OptionSet<UpdateLayer
     if (!m_hasVisibleDescendant && !m_hasVisibleContent)
         return;
 
+#if defined(WEBKIT_IOS6)
+    if (!flags.containsAny({ HasChangedAncestor, HasSeenViewportConstrainedAncestor, IsOverflowScroll })
+        && !m_hasViewportConstrainedDescendant && !isViewportConstrained())
+        return;
+#endif
+
     bool positionChanged = updateLayerPosition();
     if (positionChanged)
         flags.add(HasChangedAncestor);
@@ -3251,13 +3257,24 @@ void RenderLayer::paint(GraphicsContext& context, const LayoutRect& damageRect, 
 void RenderLayer::clipToRect(GraphicsContext& context, GraphicsContextStateSaver& stateSaver, RegionContextStateSaver& regionContextStateSaver, const LayerPaintingInfo& paintingInfo, OptionSet<PaintBehavior> paintBehavior, const ClipRect& clipRect, BorderRadiusClippingRule rule)
 {
     bool needsClipping = !clipRect.isInfinite() && clipRect.rect() != paintingInfo.paintDirtyRect;
+
+    FloatRect snappedClipRect;
+    if (needsClipping) {
+        LayoutRect adjustedClipRect = clipRect.rect();
+        adjustedClipRect.move(paintingInfo.subpixelOffset);
+        snappedClipRect = snapRectToDevicePixelsIfNeeded(adjustedClipRect, renderer());
+#if defined(WEBKIT_IOS6)
+        // Intersecting the clip with a rectangle that already contains it changes
+        // nothing, but still costs a gState save, a state copy and the restore.
+        if (!paintingInfo.regionContext && !context.paintingDisabled() && snappedClipRect.contains(FloatRect { context.clipBounds() }))
+            needsClipping = false;
+#endif
+    }
+
     if (needsClipping || clipRect.affectedByRadius())
         stateSaver.save();
 
     if (needsClipping) {
-        LayoutRect adjustedClipRect = clipRect.rect();
-        adjustedClipRect.move(paintingInfo.subpixelOffset);
-        auto snappedClipRect = snapRectToDevicePixelsIfNeeded(adjustedClipRect, renderer());
         context.clip(snappedClipRect);
         regionContextStateSaver.pushClip(enclosingIntRect(snappedClipRect));
     }

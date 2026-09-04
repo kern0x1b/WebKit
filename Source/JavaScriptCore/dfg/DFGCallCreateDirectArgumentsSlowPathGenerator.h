@@ -64,7 +64,7 @@ private:
     RegisteredStructure m_structure;
     GPRReg m_lengthGPR;
     unsigned m_minCapacity;
-    Vector<SilentRegisterSavePlan, 2> m_plans;
+    Vector<SilentRegisterSavePlan, silentRegisterSavePlanInlineCapacity> m_plans;
 };
 
 } } // namespace JSC::DFG

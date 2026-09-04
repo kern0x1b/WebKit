@@ -104,10 +104,7 @@ struct SameSizeAsRenderText : public RenderObject {
 #endif
     float widths[4];
     String text;
-    std::optional<bool> canUseSimplifiedTextMeasuring;
-    std::optional<bool> hasPositionDependentContentWidth;
-    std::optional<bool> m_hasStrongDirectionalityContent;
-    uint32_t bitfields : 14;
+    uint32_t bitfields : 20;
 };
 
 static_assert(sizeof(RenderText) == sizeof(SameSizeAsRenderText), "RenderText should stay small");
@@ -483,34 +480,32 @@ void RenderText::initiateFontLoadingByAccessingGlyphDataAndComputeCanUseSimplifi
     auto& fontCascade = style.fontCascade();
     // See webkit.org/b/252668
     auto fontVariant = FontVariant::Auto;
-    m_canUseSimplifiedTextMeasuring = canUseSimpleFontCodePath();
+    auto canUseSimplifiedTextMeasuring = canUseSimpleFontCodePath();
 #if USE(FONT_VARIANT_VIA_FEATURES)
     auto fontVariantCaps = fontCascade.fontDescription().variantCaps();
     if (fontVariantCaps == FontVariantCaps::Small || fontVariantCaps == FontVariantCaps::AllSmall || fontVariantCaps ==  FontVariantCaps::Petite || fontVariantCaps == FontVariantCaps::AllPetite) {
         // This matches the behavior of ComplexTextController::collectComplexTextRuns(): that function doesn't perform font fallback
         // on the capitalized characters when small caps is enabled, so we shouldn't here either.
         fontVariant = FontVariant::Normal;
-        m_canUseSimplifiedTextMeasuring = false;
+        canUseSimplifiedTextMeasuring = false;
     }
 #endif
     auto whitespaceIsCollapsed = style.collapseWhiteSpace();
     Ref primaryFont = fontCascade.primaryFont();
-    m_canUseSimplifiedTextMeasuring = *m_canUseSimplifiedTextMeasuring && !fontCascade.wordSpacing() && !fontCascade.letterSpacing() && !primaryFont->syntheticBoldOffset() && (&firstLineStyle() == &style || &fontCascade == &firstLineStyle().fontCascade());
+    canUseSimplifiedTextMeasuring = canUseSimplifiedTextMeasuring && !fontCascade.wordSpacing() && !fontCascade.letterSpacing() && !primaryFont->syntheticBoldOffset() && (&firstLineStyle() == &style || &fontCascade == &firstLineStyle().fontCascade());
 
-    if (*m_canUseSimplifiedTextMeasuring) {
+    if (canUseSimplifiedTextMeasuring) {
         // Additional check on the font codepath.
         auto run = TextRun { textContent };
         run.setCharacterScanForCodePath(false);
-        m_canUseSimplifiedTextMeasuring = fontCascade.codePath(run) == FontCascade::CodePath::Simple;
+        canUseSimplifiedTextMeasuring = fontCascade.codePath(run) == FontCascade::CodePath::Simple;
     }
 
-    m_hasPositionDependentContentWidth = false;
-    m_hasStrongDirectionalityContent = false;
+    auto hasPositionDependentContentWidth = false;
+    auto hasStrongDirectionalityContent = false;
     auto mayHaveStrongDirectionalityContent = !textContent.is8Bit();
     // FIXME: Pre-warm glyph loading in FontCascade with the most common range.
     if (!mayHaveStrongDirectionalityContent) {
-        auto canUseSimplifiedTextMeasuring = *m_canUseSimplifiedTextMeasuring;
-        auto hasPositionDependentContentWidth = false;
         WTF::BitSet<256> hasSeen;
         primaryFont->glyphForCharacter(' ');
         for (auto character : textContent.span8()) {
@@ -521,20 +516,24 @@ void RenderText::initiateFontLoadingByAccessingGlyphDataAndComputeCanUseSimplifi
             if (!canUseSimplifiedTextMeasuring && hasPositionDependentContentWidth)
                 break;
         }
-        m_canUseSimplifiedTextMeasuring = canUseSimplifiedTextMeasuring;
-        m_hasPositionDependentContentWidth = hasPositionDependentContentWidth;
-        return;
-    }
-    WTF::BitSet<256> hasSeen;
-    for (char32_t character : StringView(textContent).codePoints()) {
-        if (character < 256) {
-            if (hasSeen.testAndSet(character))
-                continue;
+    } else {
+        WTF::BitSet<256> hasSeen;
+        for (char32_t character : StringView(textContent).codePoints()) {
+            if (character < 256) {
+                if (hasSeen.testAndSet(character))
+                    continue;
+            }
+            canUseSimplifiedTextMeasuring = canUseSimplifiedTextMeasuring && fontCascade.canUseSimplifiedTextMeasuring(character, fontVariant, whitespaceIsCollapsed, primaryFont);
+            hasPositionDependentContentWidth = hasPositionDependentContentWidth || character == tabCharacter;
+            hasStrongDirectionalityContent = hasStrongDirectionalityContent || Layout::TextUtil::isStrongDirectionalityCharacter(character);
+            if (!canUseSimplifiedTextMeasuring && hasPositionDependentContentWidth && hasStrongDirectionalityContent)
+                break;
         }
-        m_canUseSimplifiedTextMeasuring = *m_canUseSimplifiedTextMeasuring && fontCascade.canUseSimplifiedTextMeasuring(character, fontVariant, whitespaceIsCollapsed, primaryFont);
-        m_hasPositionDependentContentWidth = *m_hasPositionDependentContentWidth || character == tabCharacter;
-        m_hasStrongDirectionalityContent = *m_hasStrongDirectionalityContent || (mayHaveStrongDirectionalityContent && Layout::TextUtil::isStrongDirectionalityCharacter(character));
     }
+
+    setCanUseSimplifiedTextMeasuring(canUseSimplifiedTextMeasuring);
+    setHasPositionDependentContentWidth(hasPositionDependentContentWidth);
+    setHasStrongDirectionalityContent(hasStrongDirectionalityContent);
 }
 
 void RenderText::styleDidChange(Style::Difference diff, const Style::ComputedStyle* oldStyle)
@@ -556,7 +555,7 @@ void RenderText::styleDidChange(Style::Difference diff, const Style::ComputedSty
         m_useBackslashAsYenSymbol = computeUseBackslashAsYenSymbol();
 
     if (oldStyle && !oldStyle->fontCascadeEqual(newStyle))
-        m_canUseSimplifiedTextMeasuring = { };
+        setCanUseSimplifiedTextMeasuring({ });
 
     auto needsRenderedTextUpdateOnly = [&] {
         if (!oldStyle)
@@ -1858,9 +1857,9 @@ void RenderText::setRenderedText(const String& newText)
 
     m_containsOnlyASCII = text().containsOnlyASCII();
     m_fontCodePath = computeFontCodePath(text(), m_containsOnlyASCII);
-    m_canUseSimplifiedTextMeasuring = { };
-    m_hasPositionDependentContentWidth = { };
-    m_hasStrongDirectionalityContent = { };
+    setCanUseSimplifiedTextMeasuring({ });
+    setHasPositionDependentContentWidth({ });
+    setHasStrongDirectionalityContent({ });
 
     if (m_text != originalText) {
         originalTextMap().set(*this, originalText);

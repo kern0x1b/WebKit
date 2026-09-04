@@ -68,7 +68,11 @@ namespace JSC {
 #define MIN_SPARSE_ARRAY_INDEX 100000U
 // If you try to allocate a contiguous array larger than this, then we will allocate an ArrayStorage
 // array instead. We allow for an array that occupies 1GB of VM.
+#if defined(WEBKIT_IOS6)
+#define MIN_ARRAY_STORAGE_CONSTRUCTION_LENGTH (8 * 1024 * 1024 / 8)
+#else
 #define MIN_ARRAY_STORAGE_CONSTRUCTION_LENGTH (1024 * 1024 * 1024 / 8)
+#endif
 #define MAX_STORAGE_VECTOR_INDEX (MAX_STORAGE_VECTOR_LENGTH - 1)
 // 0xFFFFFFFF is a bit weird -- is not an array index even though it's an integer.
 #define MAX_ARRAY_INDEX 0xFFFFFFFEU

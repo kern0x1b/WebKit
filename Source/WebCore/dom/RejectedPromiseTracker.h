@@ -59,6 +59,10 @@ public:
 
     void processQueueSoon();
 
+#if defined(WEBKIT_IOS6)
+    bool hasPendingRejections() const { return !m_aboutToBeNotifiedRejectedPromises.isEmpty(); }
+#endif
+
 private:
     void reportUnhandledRejections(Vector<UnhandledPromise>&&);
     void reportRejectionHandled(Ref<DOMPromise>&&);

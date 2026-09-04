@@ -134,8 +134,16 @@ void LockAlgorithm<LockType, isHeldBit, hasParkedBit, Hooks>::lockSlow(Atomic<Lo
 
         // We allow ourselves to barge in.
         if (!(currentValue & isHeldBit)) {
+#if defined(WEBKIT_IOS6)
+            // This is the same acquisition lockFast()/lockFastAssumingZero() perform with
+            // std::memory_order_acquire, so seq_cst here is a leading dmb ish that no caller
+            // can be relying on: the uncontended path never provided a total order either.
+            if (lock.compareExchangeWeak(currentValue, Hooks::lockHook(currentValue | isHeldBit), std::memory_order_acquire))
+                return;
+#else
             if (lock.compareExchangeWeak(currentValue, Hooks::lockHook(currentValue | isHeldBit)))
                 return;
+#endif
             continue;
         }
 
@@ -214,8 +222,14 @@ void LockAlgorithm<LockType, isHeldBit, hasParkedBit, Hooks>::unlockSlow(Atomic<
         }
         
         if ((oldByteValue & mask) == isHeldBit) {
+#if defined(WEBKIT_IOS6)
+            // Same release unlockFast()/unlockFastAssumingZero() perform; see lockSlow().
+            if (lock.compareExchangeWeak(oldByteValue, Hooks::unlockHook(oldByteValue & ~isHeldBit), std::memory_order_release))
+                return;
+#else
             if (lock.compareExchangeWeak(oldByteValue, Hooks::unlockHook(oldByteValue & ~isHeldBit)))
                 return;
+#endif
             continue;
         }
 

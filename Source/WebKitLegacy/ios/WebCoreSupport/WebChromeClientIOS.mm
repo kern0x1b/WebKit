@@ -106,6 +106,25 @@ static inline bool uiKitDelegateImplements(WebView *webView, SEL selector)
 {
     return [[webView _UIKitDelegate] respondsToSelector:selector];
 }
+
+static void callUIKitDelegateAsync(WebView *webView, SEL selector)
+{
+    if (![webView _UIKitDelegateForwarder])
+        return;
+
+    RetainPtr<id> delegate = [webView _UIKitDelegate];
+    if (![delegate respondsToSelector:selector])
+        return;
+
+    if (!WebThreadIsCurrent()) {
+        [delegate.get() performSelector:selector withObject:webView];
+        return;
+    }
+
+    RunLoop::mainSingleton().dispatch([delegate = WTF::move(delegate), webView = retainPtr(webView), selector] {
+        [delegate.get() performSelector:selector withObject:webView.get()];
+    });
+}
 #endif
 
 void WebChromeClientIOS::setWindowRect(const WebCore::FloatRect& r)
@@ -364,10 +383,10 @@ void WebChromeClientIOS::attachRootGraphicsLayer(LocalFrame&, GraphicsLayer* gra
 void WebChromeClientIOS::didFlushCompositingLayers()
 {
 #if defined(WEBKIT_IOS6)
-    if (!uiKitDelegateImplements(webView(), @selector(webViewDidCommitCompositingLayerChanges:)))
-        return;
-#endif
+    callUIKitDelegateAsync(webView(), @selector(webViewDidCommitCompositingLayerChanges:));
+#else
     [[[webView() _UIKitDelegateForwarder] asyncForwarder] webViewDidCommitCompositingLayerChanges:webView()];
+#endif
 }
 
 bool WebChromeClientIOS::fetchCustomFixedPositionLayoutRect(IntRect& rect)

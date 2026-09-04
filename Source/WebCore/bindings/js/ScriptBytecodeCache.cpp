@@ -53,6 +53,14 @@
 
 namespace WebCore {
 
+static bool scriptBytecodeCacheChatterEnabled()
+{
+    static int enabled = -1;
+    if (enabled < 0)
+        enabled = access("/tmp/native-bytecode-log", F_OK) == 0 ? 1 : 0;
+    return enabled == 1;
+}
+
 static constexpr uint32_t bytecodeCacheMagic = 0x4a424332;
 static constexpr uint32_t bytecodeCacheFormatVersion = 2;
 static constexpr size_t bytecodeCacheMetaSize = 128;
@@ -619,13 +627,15 @@ RefPtr<JSC::CachedBytecode> ScriptBytecodeCacheEntry::load()
     auto reject = [&](const char* reason) -> RefPtr<JSC::CachedBytecode> {
         removePath(metaPath);
         removePath(payloadPath);
-        WTFLogAlways("BYTECODE miss %s reason %s", shortenedURL(m_provider.sourceURL()).utf8().data(), reason);
+        if (scriptBytecodeCacheChatterEnabled())
+            WTFLogAlways("BYTECODE miss %s reason %s", shortenedURL(m_provider.sourceURL()).utf8().data(), reason);
         return nullptr;
     };
 
     auto meta = readMeta(metaPath);
     if (!meta) {
-        WTFLogAlways("BYTECODE miss %s reason absent source %llu B", shortenedURL(m_provider.sourceURL()).utf8().data(), static_cast<unsigned long long>(m_sourceLength));
+        if (scriptBytecodeCacheChatterEnabled())
+            WTFLogAlways("BYTECODE miss %s reason absent source %llu B", shortenedURL(m_provider.sourceURL()).utf8().data(), static_cast<unsigned long long>(m_sourceLength));
         return nullptr;
     }
 
@@ -665,11 +675,13 @@ RefPtr<JSC::CachedBytecode> ScriptBytecodeCacheEntry::load()
     Seconds elapsed = MonotonicTime::now() - m_lookupStart;
     cache.didHit(meta->payloadSize, elapsed);
     touchLastUsed(metaPath, nowInSeconds());
-    WTFLogAlways("BYTECODE hit %s blob %llu B source %llu B load %.1f ms",
-        shortenedURL(m_provider.sourceURL()).utf8().data(),
-        static_cast<unsigned long long>(meta->payloadSize),
-        static_cast<unsigned long long>(m_sourceLength),
-        elapsed.milliseconds());
+    if (scriptBytecodeCacheChatterEnabled()) {
+        WTFLogAlways("BYTECODE hit %s blob %llu B source %llu B load %.1f ms",
+            shortenedURL(m_provider.sourceURL()).utf8().data(),
+            static_cast<unsigned long long>(meta->payloadSize),
+            static_cast<unsigned long long>(m_sourceLength),
+            elapsed.milliseconds());
+    }
     return m_cachedBytecode;
 }
 
@@ -685,7 +697,8 @@ void ScriptBytecodeCacheEntry::store(const JSC::BytecodeCacheGenerator& generato
         String rejectedBase = appendPathComponent(cache.directory(), m_key);
         removePath(makeString(rejectedBase, ".meta"_s));
         removePath(makeString(rejectedBase, ".bc"_s));
-        WTFLogAlways("BYTECODE reject %s: decode refused a loaded blob, regenerating", shortenedURL(m_provider.sourceURL()).utf8().data());
+        if (scriptBytecodeCacheChatterEnabled())
+            WTFLogAlways("BYTECODE reject %s: decode refused a loaded blob, regenerating", shortenedURL(m_provider.sourceURL()).utf8().data());
     }
 
     if (m_cachedBytecode && m_cachedBytecode->hasUpdates())
@@ -706,11 +719,13 @@ void ScriptBytecodeCacheEntry::store(const JSC::BytecodeCacheGenerator& generato
 
     Seconds encodeElapsed = MonotonicTime::now() - encodeStart;
     cache.didEncode(bytes, encodeElapsed);
-    WTFLogAlways("BYTECODE encode %s blob %llu B source %llu B compile %.1f ms encode %.1f ms",
-        shortenedURL(m_provider.sourceURL()).utf8().data(),
-        static_cast<unsigned long long>(bytes),
-        static_cast<unsigned long long>(m_sourceLength),
-        compileTime.milliseconds(), encodeElapsed.milliseconds());
+    if (scriptBytecodeCacheChatterEnabled()) {
+        WTFLogAlways("BYTECODE encode %s blob %llu B source %llu B compile %.1f ms encode %.1f ms",
+            shortenedURL(m_provider.sourceURL()).utf8().data(),
+            static_cast<unsigned long long>(bytes),
+            static_cast<unsigned long long>(m_sourceLength),
+            compileTime.milliseconds(), encodeElapsed.milliseconds());
+    }
 }
 
 void ScriptBytecodeCacheEntry::discard()
@@ -808,9 +823,11 @@ void ScriptBytecodeCacheEntry::commit()
     Seconds elapsed = MonotonicTime::now() - start;
     cache.noteWritten(totalSize + bytecodeCacheMetaSize);
     cache.didCommit(totalSize, elapsed);
-    WTFLogAlways("BYTECODE commit %s blob %llu B in %.1f ms",
-        shortenedURL(m_provider.sourceURL()).utf8().data(),
-        static_cast<unsigned long long>(totalSize), elapsed.milliseconds());
+    if (scriptBytecodeCacheChatterEnabled()) {
+        WTFLogAlways("BYTECODE commit %s blob %llu B in %.1f ms",
+            shortenedURL(m_provider.sourceURL()).utf8().data(),
+            static_cast<unsigned long long>(totalSize), elapsed.milliseconds());
+    }
     cache.evictIfNeeded();
 }
 

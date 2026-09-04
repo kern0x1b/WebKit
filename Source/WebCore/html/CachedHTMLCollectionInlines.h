@@ -110,7 +110,11 @@ Element* CachedHTMLCollection<HTMLCollectionClass>::namedItem(const AtomString& 
 
     Ref root = rootNode();
     if (traversalType != CollectionTraversalType::CustomForwardOnly && root->isInTreeScope()) {
+#if defined(WEBKIT_IOS6)
+        RefPtr<Element> candidate;
+#else
         WeakPtr<Element, WeakPtrImplWithEventTargetData> candidate;
+#endif
 
         Ref treeScope = root->treeScope();
         if (treeScope->hasElementWithId(name)) {

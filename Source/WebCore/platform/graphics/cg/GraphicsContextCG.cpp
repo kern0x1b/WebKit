@@ -45,6 +45,8 @@
 #include "Timer.h"
 #include <pal/spi/cg/CoreGraphicsSPI.h>
 #include <pal/spi/cg/ImageIOSPI.h>
+#include <array>
+#include <optional>
 #include <wtf/MathExtras.h>
 #include <wtf/RetainPtr.h>
 #include <wtf/TZoneMallocInlines.h>
@@ -58,9 +60,43 @@ namespace WebCore {
 
 WTF_MAKE_TZONE_ALLOCATED_IMPL(GraphicsContextCG);
 
+#if defined(WEBKIT_IOS6)
+// Every colour space this CoreGraphics can make is the one device RGB space, so an
+// sRGB byte colour is already in destination form.
+static std::optional<std::array<CGFloat, 4>> NODELETE ios6DeviceRGBComponents(const Color& color)
+{
+    auto bytes = color.tryGetAsSRGBABytes();
+    if (!bytes)
+        return std::nullopt;
+    auto components = asColorComponents(bytes->resolved());
+    return std::array<CGFloat, 4> {
+        static_cast<CGFloat>(components[0] / 255.0),
+        static_cast<CGFloat>(components[1] / 255.0),
+        static_cast<CGFloat>(components[2] / 255.0),
+        static_cast<CGFloat>(components[3] / 255.0) };
+}
+#endif
+
 static void setCGFillColor(CGContextRef context, const Color& color, const DestinationColorSpace& colorSpace)
 {
+#if defined(WEBKIT_IOS6)
+    if (auto components = ios6DeviceRGBComponents(color)) {
+        CGContextSetRGBFillColor(context, (*components)[0], (*components)[1], (*components)[2], (*components)[3]);
+        return;
+    }
+#endif
     CGContextSetFillColorWithColor(context, cachedCGColorInDestinationStandardRange(color, colorSpace).get());
+}
+
+static void NODELETE setCGStrokeColor(CGContextRef context, const Color& color, const DestinationColorSpace& colorSpace)
+{
+#if defined(WEBKIT_IOS6)
+    if (auto components = ios6DeviceRGBComponents(color)) {
+        CGContextSetRGBStrokeColor(context, (*components)[0], (*components)[1], (*components)[2], (*components)[3]);
+        return;
+    }
+#endif
+    CGContextSetStrokeColorWithColor(context, cachedCGColorInDestinationStandardRange(color, colorSpace).get());
 }
 
 CGAffineTransform getUserToBaseCTM(CGContextRef context)
@@ -1067,6 +1103,14 @@ void GraphicsContextCG::clipPath(const Path& path, WindRule clipRule)
     if (path.isEmpty())
         CGContextClipToRect(context, CGRectZero);
     else {
+#if defined(WEBKIT_IOS6)
+        if (auto* segment = path.singleSegmentIfExists()) {
+            if (auto* rectSegment = std::get_if<PathRect>(&segment->data())) {
+                CGContextClipToRect(context, rectSegment->rect);
+                return;
+            }
+        }
+#endif
         setCGContextPath(context, path);
         if (clipRule == WindRule::EvenOdd)
             CGContextEOClip(context);
@@ -1253,7 +1297,7 @@ void GraphicsContextCG::didUpdateState(GraphicsContextState& state)
             break;
 
         case GraphicsContextState::Change::StrokeBrush:
-            CGContextSetStrokeColorWithColor(context, cachedCGColorInDestinationStandardRange(state.strokeBrush().color(), colorSpace()).get());
+            setCGStrokeColor(context, state.strokeBrush().color(), colorSpace());
             break;
 
         case GraphicsContextState::Change::CompositeMode:
@@ -1496,6 +1540,26 @@ FloatRect GraphicsContextCG::roundToDevicePixels(const FloatRect& rect) const
     }
     if (m_userToDeviceTransformKnownToBeIdentity)
         return roundedIntRect(rect);
+
+    if (!deviceMatrix.b && !deviceMatrix.c) {
+        CGFloat deviceScaleX = std::abs(deviceMatrix.a);
+        CGFloat deviceScaleY = std::abs(deviceMatrix.d);
+
+        CGFloat left = std::round(rect.x() * deviceScaleX);
+        CGFloat top = std::round(rect.y() * deviceScaleY);
+        CGFloat right = std::round((rect.x() + rect.width()) * deviceScaleX);
+        CGFloat bottom = std::round((rect.y() + rect.height()) * deviceScaleY);
+
+        if (top == bottom && rect.height())
+            bottom += 1;
+        if (left == right && rect.width())
+            right += 1;
+
+        FloatPoint roundedOrigin { static_cast<float>(left / deviceScaleX), static_cast<float>(top / deviceScaleY) };
+        FloatPoint roundedLowerRight { static_cast<float>(right / deviceScaleX), static_cast<float>(bottom / deviceScaleY) };
+        return FloatRect(roundedOrigin, roundedLowerRight - roundedOrigin);
+    }
+
     return cgRoundToDevicePixelsNonIdentity(deviceMatrix, rect);
 }
 

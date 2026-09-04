@@ -27,6 +27,7 @@
 
 #include "DecodingOptions.h"
 #include "ImageTypes.h"
+#include <atomic>
 #include <wtf/SynchronizedFixedQueue.h>
 #include <wtf/ThreadSafeRefCounted.h>
 #include <wtf/WorkQueue.h>
@@ -75,11 +76,20 @@ private:
 
     Seconds minimumDecodingDurationForTesting() const { return m_minimumDecodingDurationForTesting; }
 
+#if defined(WEBKIT_IOS6)
+    static void drainNextPendingDecode();
+    void removePendingDecodes();
+    bool removeFromDecodeQueue(const Request&);
+#endif
+
     ThreadSafeWeakRef<BitmapImageSource> m_source;
 
     RefPtr<RequestQueue> m_requestQueue;
     DecodeQueue m_decodeQueue;
     RefPtr<WorkQueue> m_workQueue;
+#if defined(WEBKIT_IOS6)
+    std::atomic<unsigned> m_generation { 0 };
+#endif
 
     Seconds m_minimumDecodingDurationForTesting;
 };

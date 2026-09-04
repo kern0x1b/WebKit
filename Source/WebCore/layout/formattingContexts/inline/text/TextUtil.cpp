@@ -72,7 +72,12 @@ InlineLayoutUnit TextUtil::width(const InlineTextBox& inlineTextBox, const FontC
     // The "non-whitespace" + "whitespace" pattern is very common for inline content and since most of the "non-whitespace" runs end up with
     // their "whitespace" pair on the line (notable exception is when trailing whitespace is trimmed).
     // Including the trailing whitespace here enables us to cut the number of text measures when placing content on the line.
+#if defined(WEBKIT_IOS6)
+    UNUSED_PARAM(useTrailingWhitespaceMeasuringOptimization);
+    auto extendedMeasuring = false;
+#else
     auto extendedMeasuring = useTrailingWhitespaceMeasuringOptimization == UseTrailingWhitespaceMeasuringOptimization::Yes && to < text.length() && text[to] == space && (fontCascade.enableKerning() || fontCascade.requiresShaping());
+#endif
     if (extendedMeasuring)
         ++to;
     auto width = 0.f;
@@ -202,8 +207,8 @@ static TextUtil::EnclosingAscentDescent enclosingGlyphBoundsForRunWithIterator(c
                 character = u_toupper(character);
 
             auto glyphData = fontCascade.glyphDataForCharacter(character, isRTL);
-            Ref font = glyphData.font ? Ref { *glyphData.font } : primaryFont;
-            auto bounds = font->boundsForGlyph(glyphData.glyph);
+            auto& font = glyphData.font ? *glyphData.font : primaryFont.get();
+            auto bounds = font.boundsForGlyph(glyphData.glyph);
 
             enclosingAscent = std::min(enclosingAscent.value_or(bounds.y()), bounds.y());
             enclosingDescent = std::max(enclosingDescent.value_or(bounds.maxY()), bounds.maxY());

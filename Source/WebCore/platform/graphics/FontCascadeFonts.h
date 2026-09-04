@@ -81,7 +81,20 @@ namespace ShapedTextCacheDefaults {
 static constexpr int initialInterval = -3; // Cache immediately, no countdown
 static constexpr int minInterval = -3; // After a hit, cache the next 3 attempts
 static constexpr int maxInterval = -3; // Never ramp up sampling, stay aggressive
+#if defined(WEBKIT_IOS6)
+// Same unscaled-desktop-constant class as GlyphGeometryCache (TextMeasurementCache.h):
+// one of these per FontCascadeFonts instance, entries hold a GlyphBuffer-backed display
+// list ("large" per the comment this replaces), on a 512 MB device. Canvas fillText/
+// strokeText is rare on this app's own pages, but the cap existed to guard the
+// pathological case, not the common one, so it should scale down with everything else.
+// This is a compile-time default, not independently runtime-overridable: TextMeasurementCache's
+// maxSizeLimit() reads the same WEBKIT_IOS6_TEXT_MEASUREMENT_CACHE_MAX_SIZE env var this
+// constant's fallback value feeds into for every instantiation, GlyphGeometryCache included -
+// setting that var overrides both caches at once, not this one alone.
+static constexpr unsigned maxSize = 500;
+#else
 static constexpr unsigned maxSize = 3000; // Shaped text entries are large due to GlyphBuffer
+#endif
 static constexpr unsigned maxTextLength = 128; // Larger than default to cache longer canvas text
 }
 

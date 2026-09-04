@@ -1062,7 +1062,7 @@ bool RenderLayerCompositor::updateCompositingLayers(CompositingUpdateType update
         if (recordLayers < 0)
             recordLayers = access("/tmp/native-weblock-on", F_OK) == 0 ? 1 : 0;
         static CFAbsoluteTime lastLayerReport;
-        CFAbsoluteTime layerNow = CFAbsoluteTimeGetCurrent();
+        CFAbsoluteTime layerNow = recordLayers ? CFAbsoluteTimeGetCurrent() : 0;
         if (recordLayers && layerNow - lastLayerReport > 3.0) {
             lastLayerReport = layerNow;
             unsigned backed = 0;
@@ -1113,7 +1113,10 @@ bool RenderLayerCompositor::updateCompositingLayers(CompositingUpdateType update
                 }
             }
         }
-    } compositingUpdateTimer(getenv("WEBKIT_IOS6_COMPOSITING_LOG") != nullptr, updateType);
+    } compositingUpdateTimer([] {
+        static bool report = getenv("WEBKIT_IOS6_COMPOSITING_LOG") != nullptr;
+        return report;
+    }(), updateType);
 #endif
 
 #if ENABLE(TREE_DEBUGGING)

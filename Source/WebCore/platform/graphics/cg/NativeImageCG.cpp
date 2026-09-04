@@ -75,9 +75,15 @@ RefPtr<NativeImage> NativeImage::createTransient(PlatformImagePtr&& image)
     return create(WTF::move(transientImage));
 }
 
+void NativeImage::cacheSize() const
+{
+    m_cachedWidth = static_cast<int>(CGImageGetWidth(m_platformImage.get()));
+    m_cachedHeight = static_cast<int>(CGImageGetHeight(m_platformImage.get()));
+}
+
 IntSize NativeImage::size() const
 {
-    return IntSize(CGImageGetWidth(m_platformImage.get()), CGImageGetHeight(m_platformImage.get()));
+    return IntSize(m_cachedWidth, m_cachedHeight);
 }
 
 bool NativeImage::hasAlpha() const

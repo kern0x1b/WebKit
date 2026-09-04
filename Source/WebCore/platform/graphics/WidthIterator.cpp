@@ -438,6 +438,7 @@ inline void WidthIterator::advanceInternal(TextIterator& textIterator, GlyphBuff
     const auto textSpacingTrim = fontDescription.textSpacingTrim();
     const bool needsTextSpacingTrim = !textSpacingTrim.isSpaceAll();
     const bool skipSmallCaps = smallCapsState.skipSmallCapsProcessing();
+    const unsigned runLength = m_run->length();
 
     char32_t character = 0;
     float width = 0;
@@ -449,9 +450,16 @@ inline void WidthIterator::advanceInternal(TextIterator& textIterator, GlyphBuff
         m_containsTabs |= character == tabCharacter;
         advanceInternalState.currentCharacterIndex = textIterator.currentIndex();
         unsigned advanceLength = clusterLength;
-        if (advanceInternalState.currentCharacterIndex + advanceLength == m_run->length())
+        if (advanceInternalState.currentCharacterIndex + advanceLength == runLength)
             m_lastCharacterIndex = advanceInternalState.currentCharacterIndex;
         bool isDefaultIgnorable = isDefaultIgnorableCodePointFast(character);
+#if defined(WEBKIT_IOS6)
+        m_mayNeedVisibilityRules = m_mayNeedVisibilityRules
+            || isDefaultIgnorable
+            || character <= lastControlCharacter
+            || character == noBreakSpace
+            || character == objectReplacementCharacter;
+#endif
 
         // capitalized() is two ICU property lookups. With font-variant-caps: normal its
         // result is dead: shouldSynthesizeSmallCaps() and updateCharacterAndSmallCapsIfNeeded()
@@ -483,7 +491,7 @@ inline void WidthIterator::advanceInternal(TextIterator& textIterator, GlyphBuff
         // updateFont() stores into a RefPtr, so the raw pointer only has to survive the
         // call; protect() would ref and immediately deref once per character.
         advanceInternalState.updateFont(glyphData.font ? glyphData.font.get() : primaryFont.ptr());
-        smallCapsState.shouldSynthesizeCharacter = shouldSynthesizeSmallCaps(smallCapsState.dontSynthesizeSmallCaps, advanceInternalState.font.get(), character, capitalizedCharacter, smallCapsState.fontVariantCaps, smallCapsState.engageAllSmallCapsProcessing);
+        smallCapsState.shouldSynthesizeCharacter = !skipSmallCaps && shouldSynthesizeSmallCaps(smallCapsState.dontSynthesizeSmallCaps, advanceInternalState.font.get(), character, capitalizedCharacter, smallCapsState.fontVariantCaps, smallCapsState.engageAllSmallCapsProcessing);
         updateCharacterAndSmallCapsIfNeeded(smallCapsState, capitalizedCharacter, characterToWrite);
 
         // Same reason as updateFont(): within a run this is the same Font every character,
@@ -511,6 +519,11 @@ inline void WidthIterator::advanceInternal(TextIterator& textIterator, GlyphBuff
         // nextRangeFont owns the reference for the whole iteration; taking another Ref here
         // is a refcount round trip per character.
         const Font& currentRangeFont = *advanceInternalState.nextRangeFont;
+
+#if defined(WEBKIT_IOS6)
+        if (currentRangeFont.syntheticBoldOffset())
+            m_mayNeedSyntheticBold = true;
+#endif
 
         width = currentRangeFont.widthForGlyph(glyph, Font::SyntheticBoldInclusion::Exclude); // We apply synthetic bold after shaping, in applyCSSVisibilityRules().
         advanceInternalState.widthOfCurrentFontRange += width;
@@ -790,6 +803,11 @@ void WidthIterator::applyCSSVisibilityRules(GlyphBuffer& glyphBuffer, unsigned g
 {
     // This function needs to be kept in sync with characterCanUseSimplifiedTextMeasuring().
 
+#if defined(WEBKIT_IOS6)
+    if (!m_mayNeedVisibilityRules && !m_mayNeedSyntheticBold)
+        return;
+#endif
+
     float yPosition = height(glyphBuffer.initialAdvance());
 
     auto adjustForSyntheticBold = [&](auto index) {
@@ -887,6 +905,10 @@ void WidthIterator::finalize(GlyphBuffer& buffer)
 void WidthIterator::advance(unsigned offset, GlyphBuffer& glyphBuffer)
 {
     m_containsTabs = false;
+#if defined(WEBKIT_IOS6)
+    m_mayNeedVisibilityRules = false;
+    m_mayNeedSyntheticBold = false;
+#endif
     unsigned length = m_run->length();
 
     if (offset > length)

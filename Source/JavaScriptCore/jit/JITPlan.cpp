@@ -50,6 +50,16 @@ extern Seconds totalFTLCompileTime;
 extern Seconds totalFTLDFGCompileTime;
 extern Seconds totalFTLB3CompileTime;
 
+#if defined(WEBKIT_IOS6)
+// Defined in JIT.cpp; declared here rather than pulling in JIT.h, which this file has no other
+// reason to include.
+namespace CostCeilingInstrumentation {
+bool enabled();
+void recordDFGQueueAge(Seconds);
+bool queueOrderingEnabled();
+}
+#endif
+
 JITPlan::JITPlan(JITCompilationMode mode, CodeBlock* codeBlock)
     : m_mode(mode)
     , m_vm(&codeBlock->vm())
@@ -57,6 +67,12 @@ JITPlan::JITPlan(JITCompilationMode mode, CodeBlock* codeBlock)
     , m_signpostMessage(signpostMessage())
 {
     m_vm->changeNumberOfActiveJITPlans(1);
+#if defined(WEBKIT_IOS6)
+    if (CostCeilingInstrumentation::enabled())
+        m_timeCreatedForQueueInstrumentation = MonotonicTime::now();
+    if (CostCeilingInstrumentation::queueOrderingEnabled())
+        m_timeCreatedForQueueOrdering = MonotonicTime::now();
+#endif
 }
 
 JITPlan::~JITPlan()
@@ -262,6 +278,15 @@ void JITPlan::endSignpostImpl(JITPlan::SignpostDetail detail)
 void JITPlan::compileInThread(JITWorklistThread* thread)
 {
     SetForScope threadScope(m_thread, thread);
+
+#if defined(WEBKIT_IOS6)
+    // Dispatch time minus construction time: how long this plan waited for a worker thread,
+    // i.e. what numberOfDFGCompilerThreads=1 actually costs in latency. m_timeCreatedForQueueInstrumentation
+    // is left at its zero default when instrumentation is off, which is also true for every
+    // non-DFG plan, so isDFG() plus the zero check keep this out of the baseline-compile path.
+    if (isDFG() && m_timeCreatedForQueueInstrumentation)
+        CostCeilingInstrumentation::recordDFGQueueAge(MonotonicTime::now() - m_timeCreatedForQueueInstrumentation);
+#endif
 
     MonotonicTime before;
     CString codeBlockName;

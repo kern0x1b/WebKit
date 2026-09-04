@@ -627,6 +627,9 @@ static Class s_pdfViewClass;
 #if PLATFORM(IOS_FAMILY)
     _WebSafeAsyncForwarder *_asyncForwarder;
 #endif
+#if defined(WEBKIT_IOS6)
+    BOOL _defaultTargetAnswersOnWebThread;
+#endif
 }
 - (instancetype)initWithTarget:(id)target defaultTarget:(id)defaultTarget;
 #if PLATFORM(IOS_FAMILY)
@@ -1411,11 +1414,21 @@ static void WebKitInitializeGamepadProviderIfNecessary()
 }
 #endif
 
+static void webViewStartupMark(const char* what, double& last)
+{
+    double now = CFAbsoluteTimeGetCurrent() * 1000.0;
+    fprintf(stderr, "[startup] %-34s %7.1f ms\n", what, now - last);
+    last = now;
+}
+
 - (void)_commonInitializationWithFrameName:(NSString *)frameName groupName:(NSString *)groupName
 {
+    double startupLast = CFAbsoluteTimeGetCurrent() * 1000.0;
+    double startupBegan = startupLast;
     WebCoreThreadViolationCheckRoundTwo();
 
     WebPreferences *standardPreferences = [WebPreferences standardPreferences];
+    webViewStartupMark("WebPreferences standardPreferences", startupLast);
     [standardPreferences willAddToWebView];
 
     _private->preferences = standardPreferences;
@@ -1470,6 +1483,7 @@ static void WebKitInitializeGamepadProviderIfNecessary()
         if ([standardPreferences databasesEnabled])
 #endif
         [WebDatabaseManager sharedWebDatabaseManager];
+    webViewStartupMark("WebDatabaseManager (WebSQL)", startupLast);
 
 #if PLATFORM(IOS_FAMILY)
         if ([standardPreferences storageTrackerEnabled])
@@ -1487,6 +1501,7 @@ static void WebKitInitializeGamepadProviderIfNecessary()
 #endif
 #if USE(AUDIO_SESSION)
         WebCore::AudioSession::enableMediaPlayback();
+    webViewStartupMark("AudioSession::enableMediaPlayback", startupLast);
 #endif
 
 #if ENABLE(VIDEO)
@@ -1558,6 +1573,7 @@ static void WebKitInitializeGamepadProviderIfNecessary()
     pageConfiguration.storageNamespaceProvider = _private->group->storageNamespaceProvider();
     pageConfiguration.visitedLinkStore = _private->group->visitedLinkStore();
     _private->page = WebCore::Page::create(WTF::move(pageConfiguration));
+    webViewStartupMark("Page::create", startupLast);
     storageProvider->setPage(*_private->page);
 
     // A page starts out not visible and waits for its client to say otherwise.
@@ -1611,6 +1627,7 @@ static void WebKitInitializeGamepadProviderIfNecessary()
         [self setSmartInsertDeleteEnabled:[[NSUserDefaults standardUserDefaults] boolForKey:WebSmartInsertDeleteEnabled]];
 
     [WebFrame _createMainFrameWithPage:_private->page.get() frameName:frameName frameView:frameView.get()];
+    webViewStartupMark("main frame + UA stylesheet", startupLast);
 
 #if PLATFORM(IOS_FAMILY)
     NSRunLoop *runLoop = WebThreadNSRunLoop();
@@ -1654,10 +1671,12 @@ static void WebKitInitializeGamepadProviderIfNecessary()
     // do this on the current thread on iOS, since the web thread could be blocked on the main thread,
     // and prefs need to be changed synchronously <rdar://problem/5841558>
     [self _preferencesChanged:prefs];
+    webViewStartupMark("preferences sweep (623 getters)", startupLast);
     _private->page->settings().setFontFallbackPrefersPictographs(true);
 #endif
 
     WebInstallMemoryPressureHandler();
+    webViewStartupMark("memory pressure handler", startupLast);
 
 #if PLATFORM(MAC)
     if (!WebKitLinkedOnOrAfter(WEBKIT_FIRST_VERSION_WITH_LOCAL_RESOURCE_SECURITY_RESTRICTION)) {
@@ -1679,6 +1698,10 @@ static void WebKitInitializeGamepadProviderIfNecessary()
 
     WTF::listenForLanguageChangeNotifications();
 #endif // PLATFORM(MAC)
+
+    webViewStartupMark("rest of _commonInitialization", startupLast);
+    fprintf(stderr, "[startup] %-34s %7.1f ms\n", "TOTAL _commonInitialization",
+        CFAbsoluteTimeGetCurrent() * 1000.0 - startupBegan);
 }
 
 - (id)_initWithFrame:(NSRect)f frameName:(NSString *)frameName groupName:(NSString *)groupName
@@ -1910,6 +1933,39 @@ static void WebKitInitializeGamepadProviderIfNecessary()
     // scrolled to the middle of the screen reported isIntersecting false with a
     // ratio of zero, measured on the device, and a feed that loads on
     // intersection never loaded anything.
+#if defined(WEBKIT_IOS6)
+    {
+        Locker locker { _private->pendingLayoutViewportRectMutex };
+        _private->pendingLayoutViewportRect = rect;
+        if (_private->layoutViewportRectUpdateScheduled)
+            return;
+        _private->layoutViewportRectUpdateScheduled = true;
+    }
+
+    WebThreadRun(^{
+        CGRect latestRect;
+        {
+            Locker locker { _private->pendingLayoutViewportRectMutex };
+            latestRect = _private->pendingLayoutViewportRect;
+            _private->layoutViewportRectUpdateScheduled = false;
+        }
+
+        RefPtr frame = [self _mainCoreFrame];
+        if (!frame)
+            return;
+        RefPtr frameView = frame->view();
+        if (!frameView)
+            return;
+        // Without TriggerLayoutOrNot::No this marks every viewport-constrained
+        // object for layout on each call, and called once per frame of a scroll
+        // that took the interface to 1.5 frames per second and threw the bars 386
+        // pixels off. The size is unchanged while scrolling, which is the only
+        // case that genuinely needs a layout, and the function forces one itself
+        // when the height changes.
+        frameView->setLayoutViewportOverrideRect(WebCore::LayoutRect(latestRect.origin.x, latestRect.origin.y, latestRect.size.width, latestRect.size.height),
+            WebCore::LocalFrameView::TriggerLayoutOrNot::No);
+    });
+#else
     WebThreadRun(^{
         RefPtr frame = [self _mainCoreFrame];
         if (!frame)
@@ -1926,6 +1982,7 @@ static void WebKitInitializeGamepadProviderIfNecessary()
         frameView->setLayoutViewportOverrideRect(WebCore::LayoutRect(rect.origin.x, rect.origin.y, rect.size.width, rect.size.height),
             WebCore::LocalFrameView::TriggerLayoutOrNot::No);
     });
+#endif
 }
 
 + (void)_relieveMemoryPressure
@@ -3021,6 +3078,18 @@ ALLOW_DEPRECATED_DECLARATIONS_END
 
 #if PLATFORM(IOS_FAMILY)
     } else {
+#if defined(WEBKIT_IOS6)
+        if (!WTF::atomicCompareExchangeStrong(&_private->preferencesChangedSweepScheduled, NO, YES))
+            return;
+
+        WebThreadRun(^{
+            WTF::atomicStore(&_private->preferencesChangedSweepScheduled, NO);
+            WebPreferences *preferences = [self preferences];
+            if (!preferences)
+                return;
+            [self _preferencesChanged:preferences];
+        });
+#else
         WebThreadRun(^{
             // It is possible that the prefs object has already changed before the invocation could be called
             // on the web thread. This is not possible on TOT which is why they have a simple ASSERT.
@@ -3029,6 +3098,7 @@ ALLOW_DEPRECATED_DECLARATIONS_END
                 return;
             [self _preferencesChanged:preferences];
         });
+#endif
     }
 #endif
 }
@@ -5167,6 +5237,12 @@ IGNORE_WARNINGS_END
 #if PLATFORM(IOS_FAMILY)
     _asyncForwarder = [[_WebSafeAsyncForwarder alloc] initWithForwarder:self];
 #endif
+#if defined(WEBKIT_IOS6)
+    _defaultTargetAnswersOnWebThread = [defaultTarget isKindOfClass:[WebDefaultFrameLoadDelegate class]]
+        || [defaultTarget isKindOfClass:[WebDefaultResourceLoadDelegate class]]
+        || [defaultTarget isKindOfClass:[WebDefaultEditingDelegate class]]
+        || [defaultTarget isKindOfClass:[WebDefaultUIKitDelegate class]];
+#endif
     return self;
 }
 
@@ -5193,6 +5269,15 @@ IGNORE_WARNINGS_END
 {
 #if PLATFORM(IOS_FAMILY)
     if (WebThreadIsCurrent()) {
+#if defined(WEBKIT_IOS6)
+        if (_defaultTargetAnswersOnWebThread
+            && invocation.selector != @selector(webView:runOpenPanelForFileButtonWithResultListener:configuration:)
+            && invocation.selector != @selector(webView:runOpenPanelForFileButtonWithResultListener:)
+            && ![_target respondsToSelector:invocation.selector]) {
+            [invocation invokeWithTarget:_defaultTarget];
+            return;
+        }
+#endif
         [invocation retainArguments];
         WebThreadCallDelegate(invocation);
         return;

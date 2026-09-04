@@ -126,6 +126,10 @@ private:
     GlyphBounds m_glyphBounds;
     TextDirection m_direction { TextDirection::LTR };
     bool m_containsTabs { false };
+#if defined(WEBKIT_IOS6)
+    bool m_mayNeedVisibilityRules { false };
+    bool m_mayNeedSyntheticBold { false };
+#endif
     bool m_isAfterExpansion { false };
     bool m_enableKerning { false };
     bool m_requiresShaping { false };

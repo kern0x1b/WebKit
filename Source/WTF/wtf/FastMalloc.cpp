@@ -28,6 +28,9 @@
 
 #include <bmalloc/bmalloc.h>
 #include <string.h>
+#if defined(WEBKIT_IOS6) && USE(SYSTEM_MALLOC) && !ENABLE(MALLOC_HEAP_BREAKDOWN)
+#include <malloc/malloc.h>
+#endif
 #include <wtf/Atomics.h>
 #include <wtf/CheckedArithmetic.h>
 #include <wtf/PageBlock.h>
@@ -443,6 +446,31 @@ void fastFree(void* object)
 
 #endif // defined(WEBKIT_IOS6) && USE(SYSTEM_MALLOC) && !ENABLE(MALLOC_HEAP_BREAKDOWN)
 
+#if defined(WEBKIT_IOS6) && USE(SYSTEM_MALLOC) && !ENABLE(MALLOC_HEAP_BREAKDOWN)
+
+static bool shouldRoundToMallocGoodSize()
+{
+    static bool enabled = []() -> bool {
+        const char* value = getenv("WEBKIT_IOS6_MALLOC_GOOD_SIZE");
+        return value ? !!atoi(value) : true;
+    }();
+    return enabled;
+}
+
+size_t fastMallocSize(const void* p)
+{
+    return malloc_size(p);
+}
+
+size_t fastMallocGoodSize(size_t size)
+{
+    if (!shouldRoundToMallocGoodSize())
+        return size;
+    return malloc_good_size(size);
+}
+
+#else
+
 size_t fastMallocSize(const void* p)
 {
 #if BENABLE(MALLOC_SIZE)
@@ -464,6 +492,8 @@ size_t fastMallocGoodSize(size_t size)
     return size;
 #endif
 }
+
+#endif
 
 void* fastAlignedMalloc(size_t alignment, size_t size)
 {

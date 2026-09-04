@@ -345,7 +345,7 @@ bool RenderFlexibleBox::hitTestChildren(const HitTestRequest& request, HitTestRe
 void RenderFlexibleBox::paintChildren(PaintInfo& paintInfo, const LayoutPoint& paintOffset, PaintInfo& paintInfoForFlexItem, bool usePrintRect)
 {
     for (auto& renderer : m_flexItems) {
-        CheckedPtr flexItem = renderer.get();
+        auto* flexItem = renderer.get();
         if (flexItem && !paintChild(*flexItem, paintInfo, paintOffset, paintInfoForFlexItem, usePrintRect, PaintAsInlineBlock))
             return;
     }
@@ -671,6 +671,10 @@ void RenderFlexibleBox::layoutFlexItemWithMainSize(FlexLayoutItem& flexLayoutIte
     // We may have already forced relayout for orthogonal flowing children in
     // computeInnerFlexBaseSizeForFlexItem.
     bool forceFlexItemRelayout = flexLayoutItem.shouldInvalidateChildContent && !hasFlexItemCompletedLayout(flexItem);
+#if defined(WEBKIT_IOS6)
+    if (!forceFlexItemRelayout && flexItemHasPercentHeightDescendants(flexItem) && hasFlexItemCompletedLayout(flexItem))
+        forceFlexItemRelayout = true;
+#else
     if (!forceFlexItemRelayout && flexItemHasPercentHeightDescendants(flexItem)) {
         // Have to force another relayout even though the child is sized
         // correctly, because its descendants are not sized correctly yet. Our
@@ -678,6 +682,7 @@ void RenderFlexibleBox::layoutFlexItemWithMainSize(FlexLayoutItem& flexLayoutIte
         // So, redo it here.
         forceFlexItemRelayout = true;
     }
+#endif
     updateFlexItemDirtyBitsBeforeLayout(forceFlexItemRelayout, flexItem);
     if (!flexItem.needsLayout())
         flexItem.markForPaginationRelayoutIfNeeded();

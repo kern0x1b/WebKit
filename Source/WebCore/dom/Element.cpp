@@ -3136,11 +3136,19 @@ Node::NeedsPostConnectionSteps Element::insertionSteps(InsertionType insertionTy
                 topDocument->appendAutofocusCandidate(*this);
         }
 
+#if defined(WEBKIT_IOS6)
+        if (hasAttributesWithoutUpdate() && document().hasCachedFirstElementWithAttribute()) [[unlikely]] {
+            Ref document = this->document();
+            for (auto& attribute : attributes())
+                document->attributeAddedToElement(attribute.name());
+        }
+#else
         if (hasAttributesWithoutUpdate()) {
             Ref document = this->document();
             for (auto& attribute : attributes())
                 document->attributeAddedToElement(attribute.name());
         }
+#endif
     }
 
     if (parentNode() == &parentOfInsertedTree) {

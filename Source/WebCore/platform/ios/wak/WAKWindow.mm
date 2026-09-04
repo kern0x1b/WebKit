@@ -30,6 +30,7 @@
 
 #import "LegacyTileCache.h"
 #import "PlatformScreen.h"
+#import "Scheduling.h"
 #import "WAKViewInternal.h"
 #import "WebCoreThreadRun.h"
 #import "WebEvent.h"
@@ -401,8 +402,23 @@ static RetainPtr<WebEvent>& currentEvent()
 
 - (void)setExposedScrollViewRect:(CGRect)exposedScrollViewRect
 {
+#if defined(WEBKIT_IOS6)
+    bool moved;
+    {
+        Locker locker { _exposedScrollViewRectLock };
+        moved = !CGRectEqualToRect(_exposedScrollViewRect, exposedScrollViewRect);
+        _exposedScrollViewRect = exposedScrollViewRect;
+    }
+    if (moved)
+        WebCore::ios6NoteScrollMovement();
+    if (getenv("WEBKIT_IOS6_DEBUG_EXPOSED_RECT"))
+        WTFLogAlways("[exposedrect] moved=%d rect=%.1f,%.1f,%.1f,%.1f", moved,
+            exposedScrollViewRect.origin.x, exposedScrollViewRect.origin.y,
+            exposedScrollViewRect.size.width, exposedScrollViewRect.size.height);
+#else
     Locker locker { _exposedScrollViewRectLock };
     _exposedScrollViewRect = exposedScrollViewRect;
+#endif
 }
 
 - (CGRect)exposedScrollViewRect

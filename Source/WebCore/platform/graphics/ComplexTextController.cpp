@@ -62,7 +62,7 @@ public:
     TextLayout(RenderText& text, const FontCascade& fontCascade, float xPos)
         : m_fontCascade(fontCascade)
         , m_run(constructTextRun(text, xPos))
-        , m_controller(makeUniqueRef<ComplexTextController>(m_fontCascade, m_run, true))
+        , m_controller(makeUniqueRef<ComplexTextController>(m_fontCascade, m_run, true, nullptr, false, false))
     {
     }
 
@@ -117,7 +117,7 @@ void ComplexTextController::computeExpansionOpportunity()
     }
 }
 
-ComplexTextController::ComplexTextController(const FontCascade& fontCascade, const TextRun& run, bool mayUseNaturalWritingDirection, SingleThreadWeakHashSet<const Font>* fallbackFonts, bool forTextEmphasis)
+ComplexTextController::ComplexTextController(const FontCascade& fontCascade, const TextRun& run, bool mayUseNaturalWritingDirection, SingleThreadWeakHashSet<const Font>* fallbackFonts, bool forTextEmphasis, bool computeGlyphBounds)
     : m_fallbackFonts(fallbackFonts)
     , m_fontCascade(fontCascade)
     , m_run(run)
@@ -125,6 +125,7 @@ ComplexTextController::ComplexTextController(const FontCascade& fontCascade, con
     , m_expansion(run.expansion())
     , m_mayUseNaturalWritingDirection(mayUseNaturalWritingDirection)
     , m_forTextEmphasis(forTextEmphasis)
+    , m_computeGlyphBounds(computeGlyphBounds)
     , m_textSpacingState(run.textSpacingState())
 {
     computeExpansionOpportunity();
@@ -187,7 +188,7 @@ Vector<float> ComplexTextController::glyphAdvancesForTextRun(const FontCascade& 
 {
     ASSERT(textRun.rtl());
 
-    auto textController = ComplexTextController { fontCascade, textRun };
+    auto textController = ComplexTextController { fontCascade, textRun, false, nullptr, false, false };
     size_t numberOfCharacters = 0;
     for (size_t runIndex = 0; runIndex < textController.m_complexTextRuns.size(); ++runIndex)
         numberOfCharacters += textController.m_complexTextRuns[runIndex]->stringLength();
@@ -734,7 +735,9 @@ void ComplexTextController::adjustGlyphsAndAdvances()
         bool isMonotonic = true;
 
 #if USE(CORE_TEXT) || USE(SKIA)
-        auto boundsForGlyphs = font->boundsForGlyphs(glyphs);
+        Vector<FloatRect, Font::inlineGlyphRunCapacity> boundsForGlyphs;
+        if (m_computeGlyphBounds)
+            boundsForGlyphs = font->boundsForGlyphs(glyphs);
 #endif
 
         for (unsigned glyphIndex = 0; glyphIndex < glyphCount; glyphIndex++) {
@@ -758,20 +761,23 @@ void ComplexTextController::adjustGlyphsAndAdvances()
                 // make tabCharacter glyph invisible after advancing.
                 glyph = deletedGlyph;
 #if USE(CORE_TEXT) || USE(SKIA)
-                boundsForGlyphs[glyphIndex] = font->boundsForGlyph(glyph);
+                if (m_computeGlyphBounds)
+                    boundsForGlyphs[glyphIndex] = font->boundsForGlyph(glyph);
 #endif
             } else if (character == zeroWidthNonJoiner) {
                 // zeroWidthNonJoiner is rendered as deletedGlyph for compatibility with other engines: https://bugs.webkit.org/show_bug.cgi?id=285959
                 advance.setWidth(0);
                 glyph = deletedGlyph;
 #if USE(CORE_TEXT) || USE(SKIA)
-                boundsForGlyphs[glyphIndex] = font->boundsForGlyph(glyph);
+                if (m_computeGlyphBounds)
+                    boundsForGlyphs[glyphIndex] = font->boundsForGlyph(glyph);
 #endif
             } else if (!treatAsSpace && FontCascade::treatAsZeroWidthSpace(character)) {
                 advance.setWidth(0);
                 glyph = font->spaceGlyph();
 #if USE(CORE_TEXT) || USE(SKIA)
-                boundsForGlyphs[glyphIndex] = font->boundsForGlyph(glyph);
+                if (m_computeGlyphBounds)
+                    boundsForGlyphs[glyphIndex] = font->boundsForGlyph(glyph);
 #endif
             }
 
@@ -782,7 +788,8 @@ void ComplexTextController::adjustGlyphsAndAdvances()
                 // Let's assume that .notdef is visible.
                 glyph = 0;
 #if USE(CORE_TEXT) || USE(SKIA)
-                boundsForGlyphs[glyphIndex] = font->boundsForGlyph(glyph);
+                if (m_computeGlyphBounds)
+                    boundsForGlyphs[glyphIndex] = font->boundsForGlyph(glyph);
 #endif
                 advance.setWidth(font->widthForGlyph(glyph));
             }
@@ -878,7 +885,8 @@ void ComplexTextController::adjustGlyphsAndAdvances()
                 if (!FontCascade::canReceiveTextEmphasis(ch32) || (U_GET_GC_MASK(character) & U_GC_M_MASK)) {
                     glyph = deletedGlyph;
 #if USE(CORE_TEXT) || USE(SKIA)
-                    boundsForGlyphs[glyphIndex] = font->boundsForGlyph(glyph);
+                    if (m_computeGlyphBounds)
+                        boundsForGlyphs[glyphIndex] = font->boundsForGlyph(glyph);
 #endif
                 }
             }
@@ -892,16 +900,18 @@ void ComplexTextController::adjustGlyphsAndAdvances()
             }
             m_adjustedGlyphs.append(glyph);
 
+            if (m_computeGlyphBounds) {
 #if USE(CORE_TEXT) || USE(SKIA)
-            auto& glyphBounds = boundsForGlyphs[glyphIndex];
+                auto& glyphBounds = boundsForGlyphs[glyphIndex];
 #else
-            auto glyphBounds = font->boundsForGlyph(glyph);
+                auto glyphBounds = font->boundsForGlyph(glyph);
 #endif
-            glyphBounds.move(glyphOrigin.x(), glyphOrigin.y());
-            m_minGlyphBoundingBoxX = std::min(m_minGlyphBoundingBoxX, glyphBounds.x());
-            m_maxGlyphBoundingBoxX = std::max(m_maxGlyphBoundingBoxX, glyphBounds.maxX());
-            m_minGlyphBoundingBoxY = std::min(m_minGlyphBoundingBoxY, glyphBounds.y());
-            m_maxGlyphBoundingBoxY = std::max(m_maxGlyphBoundingBoxY, glyphBounds.maxY());
+                glyphBounds.move(glyphOrigin.x(), glyphOrigin.y());
+                m_minGlyphBoundingBoxX = std::min(m_minGlyphBoundingBoxX, glyphBounds.x());
+                m_maxGlyphBoundingBoxX = std::max(m_maxGlyphBoundingBoxX, glyphBounds.maxX());
+                m_minGlyphBoundingBoxY = std::min(m_minGlyphBoundingBoxY, glyphBounds.y());
+                m_maxGlyphBoundingBoxY = std::max(m_maxGlyphBoundingBoxY, glyphBounds.maxY());
+            }
             glyphOrigin.move(advance);
 
             previousCharacterIndex = characterIndex;

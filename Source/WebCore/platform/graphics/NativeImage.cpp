@@ -62,6 +62,7 @@ NativeImage::NativeImage(PlatformImagePtr&& platformImage, std::optional<GainMap
     : m_platformImage(WTF::move(platformImage))
     , m_gainMap(WTF::move(gainMap))
 {
+    cacheSize();
     computeHeadroom();
 }
 #endif
@@ -91,6 +92,7 @@ void NativeImage::replacePlatformImage(PlatformImagePtr&& platformImage) const
 {
     ASSERT(platformImage);
     m_platformImage = WTF::move(platformImage);
+    cacheSize();
     computeHeadroom();
 }
 
@@ -101,6 +103,10 @@ size_t NativeImage::sizeInBytes() const
 }
 
 void NativeImage::computeHeadroom() const
+{
+}
+
+void NativeImage::cacheSize() const
 {
 }
 #endif

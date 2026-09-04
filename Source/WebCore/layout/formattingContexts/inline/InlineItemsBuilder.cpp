@@ -951,6 +951,11 @@ void InlineItemsBuilder::computeInlineTextItemWidthsAndTextSpacing(InlineItemLis
                     if (auto inlineBoxBoundaryTextSpacing = inlineBoxBoundaryTextSpacings.find(potentialInlineBoxStartIndex); inlineBoxBoundaryTextSpacing != inlineBoxBoundaryTextSpacings.end())
                         extraInlineTextSpacing = inlineBoxBoundaryTextSpacing->value;
                 }
+                auto textSpacingCanNotAffectWidth = !extraInlineTextSpacing
+                    && spacingState.lastCharacterClassFromPreviousRun == TextSpacing::CharacterClass::Undefined
+                    && inlineTextItem->style().textAutospace().isNoAutospace();
+                if (textSpacingCanNotAffectWidth && !inlineTextItem->isWhitespace() && inlineTextItem->width())
+                    continue;
                 auto& fontCascade = inlineTextItem->style().fontCascade();
                 auto width = InlineLayoutUnit { };
                 auto mayHaveGlyphOverflow = [&] {
@@ -980,8 +985,14 @@ void InlineItemsBuilder::computeInlineTextItemWidthsAndTextSpacing(InlineItemLis
 
 bool InlineItemsBuilder::buildInlineItemListForTextFromBreakingPositionsCache(const InlineTextBox& inlineTextBox, InlineItemList& inlineItemList)
 {
+    auto& breakingPositionCache = TextBreakingPositionCache::singleton();
+    if (breakingPositionCache.isEmpty())
+        return false;
+    if (inlineTextBox.content().length() < TextBreakingPositionCache::minimumRequiredTextLengthForContentBreakCache)
+        return false;
+
     auto& text = inlineTextBox.content();
-    auto* breakingPositions = TextBreakingPositionCache::singleton().get({ text, { inlineTextBox.style() }, m_securityOrigin.data() });
+    auto* breakingPositions = breakingPositionCache.get({ text, { inlineTextBox.style() }, m_securityOrigin.data() });
     if (!breakingPositions)
         return false;
 
