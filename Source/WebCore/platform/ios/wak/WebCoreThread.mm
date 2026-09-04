@@ -27,6 +27,9 @@
 #import "WebCoreThread.h"
 #include <atomic>
 #include <execinfo.h>
+#include <mach/mach.h>
+#include <mach/mach_time.h>
+#include <mach/thread_policy.h>
 #include <sched.h>
 #include <unistd.h>
 
@@ -953,6 +956,48 @@ static WebThreadContext* CurrentThreadContext()
     return *threadContext;
 }
 
+#if defined(WEBKIT_IOS6)
+// Spike: give the web thread a real-time scheduling class so the timeshare
+// scheduler can't starve it mid-hold of the web lock while the UIKit main
+// thread is waiting on it (see WebRunLoopLock/_WebThreadLock below) - the
+// same thread_policy_set(THREAD_TIME_CONSTRAINT_POLICY) trick CoreAudio uses
+// for its render thread. Unlike QOS classes this needs no entitlement on any
+// iOS version. The web thread isn't a periodic callback like an audio
+// render thread, so period/constraint are a rough fit at one display
+// refresh; exceeding the computation budget demotes the thread back to
+// timeshare rather than crashing or hanging anything, so this is safe to
+// try. Opt-in via a /tmp marker file, not an env var: launchctl setenv only
+// reaches processes launchd itself spawns, not ones SpringBoard posix_spawns
+// on launch, so it silently never reached this thread - a file check works
+// regardless of how the app got launched.
+static void SetWebThreadRealTimePolicyIfRequested()
+{
+    if (access("/tmp/webthread-realtime-enable", F_OK) != 0)
+        return;
+
+    mach_timebase_info_data_t timebase;
+    mach_timebase_info(&timebase);
+    auto microsecondsToAbsoluteTime = [&](uint64_t microseconds) -> uint32_t {
+        return static_cast<uint32_t>(microseconds * 1000 * timebase.denom / timebase.numer);
+    };
+
+    thread_time_constraint_policy_data_t policy;
+    policy.period = microsecondsToAbsoluteTime(16667);
+    policy.computation = microsecondsToAbsoluteTime(5000);
+    policy.constraint = microsecondsToAbsoluteTime(16667);
+    policy.preemptible = TRUE;
+
+    thread_port_t thisThread = mach_thread_self();
+    kern_return_t result = thread_policy_set(thisThread, THREAD_TIME_CONSTRAINT_POLICY, reinterpret_cast<thread_policy_t>(&policy), THREAD_TIME_CONSTRAINT_POLICY_COUNT);
+    mach_port_deallocate(mach_task_self(), thisThread);
+
+    if (FILE* f = fopen("/tmp/webthread-realtime-result.txt", "w")) {
+        fprintf(f, "%s (kern_return_t %d)\n", result == KERN_SUCCESS ? "granted" : "denied", result);
+        fclose(f);
+    }
+}
+#endif
+
 static void* RunWebThread(void*)
 {
     FloatingPointEnvironment::singleton().propagateMainThreadEnvironment();
@@ -969,6 +1014,10 @@ static void* RunWebThread(void*)
 
 #if HAVE(PTHREAD_SETNAME_NP)
     pthread_setname_np("WebThread");
+#endif
+
+#if defined(WEBKIT_IOS6)
+    SetWebThreadRealTimePolicyIfRequested();
 #endif
 
     webThreadContext = CurrentThreadContext();
