@@ -3152,6 +3152,16 @@ ALLOW_DEPRECATED_DECLARATIONS_END
     settings.setBackForwardCacheExpirationInterval(Seconds { [preferences _backForwardCacheExpirationInterval] });
     settings.setPitchCorrectionAlgorithm(static_cast<WebCore::MediaPlayerEnums::PitchCorrectionAlgorithm>([preferences _pitchCorrectionAlgorithm]));
 
+    // requestFullscreen()'s IDL is EnabledBySetting=FullScreenEnabled, checked against
+    // WebCore::Settings, not against the WebPreferences object directly - this legacy
+    // (WK1) sync function is otherwise hand-maintained per setting, and apparently never
+    // grew a line for this one, unlike the modern WK2 preferences pipeline that generates
+    // its sync automatically. Without this, [preferences setFullScreenEnabled:YES] changes
+    // a value nothing ever reads: the live Settings the JS bindings actually check stays at
+    // its compiled-in `false` default (UnifiedWebPreferences.yaml's WebKitLegacy default),
+    // and document.fullscreenEnabled/Element.requestFullscreen stay absent regardless.
+    settings.setFullScreenEnabled([preferences fullScreenEnabled]);
+
     // FIXME: Add a way to have a preference check multiple different keys.
     settings.setDeveloperExtrasEnabled([preferences developerExtrasEnabled]);
 
