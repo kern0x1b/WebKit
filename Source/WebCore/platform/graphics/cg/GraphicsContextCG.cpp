@@ -230,7 +230,9 @@ static void setCGContextPath(CGContextRef context, const Path& path)
 
 static void drawPathWithCGContext(CGContextRef context, CGPathDrawingMode drawingMode, const Path& path)
 {
-    CGContextDrawPathDirect(context, drawingMode, path.platformPath(), nullptr);
+    CGContextBeginPath(context);
+    CGContextAddPath(context, path.platformPath());
+    CGContextDrawPath(context, drawingMode);
 }
 
 static RenderingMode renderingModeForCGContext(CGContextRef cgContext, GraphicsContextCG::CGContextSource source)
