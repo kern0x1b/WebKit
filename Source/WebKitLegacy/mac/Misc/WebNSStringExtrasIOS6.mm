@@ -27,6 +27,18 @@
  */
 
 #import "config.h"
+
+#ifdef IOS6_CLASS_PREFIX_H
+#define _web_drawAtPoint Rev_web_drawAtPoint
+#define __web_drawAtPoint Rev__web_drawAtPoint
+#define _web_drawInRect Rev_web_drawInRect
+#define __web_drawInRect Rev__web_drawInRect
+#define _web_sizeWithFont Rev_web_sizeWithFont
+#define _web_sizeInRect Rev_web_sizeInRect
+#define _web_sizeForWidth Rev_web_sizeForWidth
+#define _web_stringForWidth Rev_web_stringForWidth
+#endif
+
 #import "WebNSStringExtrasIOS6.h"
 
 #import "WebKitNSStringExtras.h"
@@ -196,15 +208,38 @@ static CTLineRef createTruncatedLine(CTLineRef line, NSString *string, GSFontRef
     return truncated ? truncated : (CTLineRef)CFRetain(line);
 }
 
+@protocol RevFontLineHeight
+- (CGFloat)lineHeight;
+@end
+
+static CGFloat fontLineHeight(GSFontRef font, CTFontRef ct)
+{
+    if (isKnownObjectiveCObject(font)) {
+        id<RevFontLineHeight> f = (id<RevFontLineHeight>)font;
+        if ([f respondsToSelector:@selector(lineHeight)]) {
+            CGFloat lh = [f lineHeight];
+            if (lh > 0)
+                return ceilf(lh);
+        }
+    }
+    if (ct)
+        return ceilf(CTFontGetAscent(ct)) + ceilf(CTFontGetDescent(ct)) + ceilf(CTFontGetLeading(ct));
+    return 0;
+}
+
 static CGSize lineSize(CTLineRef line, GSFontRef font)
 {
     if (!line)
         return CGSizeZero;
     CGFloat ascent = 0, descent = 0, leading = 0;
     double width = CTLineGetTypographicBounds(line, &ascent, &descent, &leading);
-    if (ascentRoundingEnabled)
-        ascent = ceilf(ascent);
-    return CGSizeMake(wordRoundingEnabled ? ceilf(width) : width, ascent + ceilf(descent));
+    CGFloat height = fontLineHeight(font, coreTextFont(font));
+    if (height < 1) {
+        if (ascentRoundingEnabled)
+            ascent = ceilf(ascent);
+        height = ascent + ceilf(descent);
+    }
+    return CGSizeMake(wordRoundingEnabled ? ceilf(width) : width, height);
 }
 
 static CGSize drawLine(CTLineRef line, CGPoint point, GSFontRef font, BOOL measureOnly, BOOL drawUnderline)
@@ -332,6 +367,7 @@ static void wrapParagraph(NSString *paragraph, GSFontRef font, CGFloat letterSpa
         start += take;
     }
 }
+
 
 @implementation NSString (WebNSStringExtrasIOS6)
 
@@ -484,9 +520,7 @@ static void wrapParagraph(NSString *paragraph, GSFontRef font, CGFloat letterSpa
         return CGSizeZero;
     }
 
-    CGFloat ascent = CTFontGetAscent(coreText);
-    CGFloat descent = CTFontGetDescent(coreText);
-    CGFloat step = ascent + descent + lineSpacing;
+    CGFloat step = fontLineHeight(font, coreText) + lineSpacing;
 
     NSArray *paragraphs = [self componentsSeparatedByString:@"\n"];
     NSMutableArray *lines = [NSMutableArray array];

@@ -107,7 +107,7 @@ Ref<MediaPlaybackTargetCocoa> MediaPlaybackTargetCocoa::create(RetainPtr<AVOutpu
 
 Ref<MediaPlaybackTargetCocoa> MediaPlaybackTargetCocoa::create()
 {
-#if PLATFORM(IOS_FAMILY) && !PLATFORM(IOS_FAMILY_SIMULATOR) && !PLATFORM(MACCATALYST)
+#if PLATFORM(IOS_FAMILY) && !PLATFORM(IOS_FAMILY_SIMULATOR) && !PLATFORM(MACCATALYST) && !defined(WEBKIT_IOS6)
     NSString *routingContextUID = [[PAL::getAVAudioSessionClassSingleton() sharedInstance] routingContextUID];
     return create([PAL::getAVOutputContextClassSingleton() outputContextForID:routingContextUID]);
 #else

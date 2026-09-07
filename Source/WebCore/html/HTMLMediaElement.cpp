@@ -1708,7 +1708,12 @@ void HTMLMediaElement::prepareForLoad()
         // 9 - Invoke the media element's resource selection algorithm.
         // Note, unless the restriction on requiring user action has been removed,
         // do not begin downloading data.
-        if (mediaSession->dataLoadingPermitted())
+#if ENABLE(MEDIA_STREAM)
+        bool isMediaStreamProvider = m_mediaProvider && std::holds_alternative<Ref<MediaStream>>(*m_mediaProvider);
+#else
+        bool isMediaStreamProvider = false;
+#endif
+        if (mediaSession->dataLoadingPermitted() || isMediaStreamProvider)
             selectMediaResource();
     }
 

@@ -114,7 +114,7 @@ platform/mac/WebCoreView.mm @nonARC
 
 platform/mediarecorder/MediaRecorderPrivateWriter.cpp
 
-platform/mediastream/cocoa/CoreAudioCaptureUnit.mm @nonARC
+// REV-EXCLUDED platform/mediastream/cocoa/CoreAudioCaptureUnit.mm @nonARC
 
 platform/network/cocoa/WebCoreResourceHandleAsOperationQueueDelegate.mm @nonARC
 

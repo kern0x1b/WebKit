@@ -87,7 +87,7 @@
 
 - (id)_webView
 {
-    return [self _web_superviewOfClass:NSClassFromString(@"WebView")];
+    return [self _web_superviewOfClass:NSClassFromString(@IOS6_CLASS_NAME(WebView))];
 }
 
 - (id)_web_superviewOfClass:(Class)viewClass
@@ -101,7 +101,7 @@
 
 - (id)_web_parentWebFrameView
 {
-    return [self _web_superviewOfClass:NSClassFromString(@"WebFrameView")];
+    return [self _web_superviewOfClass:NSClassFromString(@IOS6_CLASS_NAME(WebFrameView))];
 }
 
 - (BOOL)_web_firstResponderIsSelfOrDescendantView
@@ -121,7 +121,7 @@
 
 - (void)_web_addDescendantWebHTMLViewsToArray:(NSMutableArray *)array
 {
-    Class htmlView = NSClassFromString(@"WebHTMLView");
+    Class htmlView = NSClassFromString(@IOS6_CLASS_NAME(WebHTMLView));
     for (WAKView *subview in [self subviews]) {
         if (htmlView && [subview isKindOfClass:htmlView])
             [array addObject:subview];

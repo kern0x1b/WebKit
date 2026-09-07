@@ -73,7 +73,7 @@ void WebProgressTrackerClient::progressEstimateChanged(WebCore::LocalFrame&)
     CFDictionaryAddValue(userInfo.get(), WebViewProgressEstimatedProgressKey, progress);
     if (bodyBackgroundColor)
         CFDictionaryAddValue(userInfo.get(), WebViewProgressBackgroundColorKey, bodyBackgroundColor);
-    
+
     WebThreadPostNotification(WebViewProgressEstimateChangedNotification, m_webView, (NSDictionary *)userInfo.get());
 #endif
 }

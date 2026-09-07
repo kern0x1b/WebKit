@@ -430,13 +430,11 @@ AllowsInlineMediaPlayback:
   webKitLegacyPreferenceKey: WebKitMediaPlaybackAllowsInline
   defaultValue:
     WebKitLegacy:
-      "PLATFORM(IOS_FAMILY)": WebKit::defaultAllowsInlineMediaPlayback()
       default: true
     WebKit:
       "PLATFORM(IOS_FAMILY)": false
       default: true
     WebCore:
-      "PLATFORM(IOS_FAMILY)": false
       default: true
 
 AllowsInlineMediaPlaybackAfterFullscreen:
@@ -918,11 +916,11 @@ BeaconAPIEnabled:
   humanReadableDescription: "Beacon API"
   defaultValue:
     WebKitLegacy:
-      default: false
+      default: true
     WebKit:
       default: true
     WebCore:
-      default: false
+      default: true
 
 BidiContentAwarePasteEnabled:
   type: bool
@@ -993,7 +991,7 @@ BroadcastChannelEnabled:
   humanReadableDescription: "BroadcastChannel API"
   defaultValue:
     WebKitLegacy:
-      default: false
+      default: true
     WebKit:
       default: true
     WebCore:
@@ -1560,7 +1558,7 @@ CSSScrollbarGutterEnabled:
   humanReadableDescription: "Enable scrollbar-gutter CSS property"
   defaultValue:
     WebKitLegacy:
-      default: false
+      default: true
     WebKit:
       default: true
     WebCore:
@@ -1574,7 +1572,7 @@ CSSScrollbarWidthEnabled:
   humanReadableDescription: "Enable scrollbar-width CSS property"
   defaultValue:
     WebKitLegacy:
-      default: false
+      default: true
     WebKit:
       default: true
     WebCore:
@@ -2036,11 +2034,11 @@ ClearSiteDataHTTPHeaderEnabled:
   humanReadableDescription: "Enable Clear-Site-Data HTTP Header support"
   defaultValue:
     WebKitLegacy:
-      default: false
+      default: true
     WebKit:
       default: true
     WebCore:
-      default: false
+      default: true
 
 CloseWatcherEnabled:
   type: bool
@@ -2126,11 +2124,11 @@ CompressionStreamEnabled:
   humanReadableDescription: "Enable Compression Stream API"
   defaultValue:
     WebKitLegacy:
-      default: false
+      default: true
     WebKit:
       default: true
     WebCore:
-      default: false
+      default: true
 
 ConsistentQueryParameterFilteringInternalQuirkEnabled:
   type: bool
@@ -2785,11 +2783,11 @@ DownloadAttributeEnabled:
   status: embedder
   defaultValue:
     WebKitLegacy:
-      default: false
+      default: true
     WebKit:
       default: true
     WebCore:
-      default: false
+      default: true
 
 DynamicSiteInterventionsEnabled:
   type: bool
@@ -3054,7 +3052,7 @@ EventTimingEnabled:
   humanReadableDescription: "Enable the Event Timing API and supporting instrumentation"
   defaultValue:
     WebKitLegacy:
-      default: false
+      default: true
     WebKit:
       default: true
     WebCore:
@@ -3621,7 +3619,7 @@ GetBoundingClientRectZoomedEnabled:
   humanReadableDescription: "Get(Bounding)ClientRect API return a zoomed rect"
   defaultValue:
     WebKitLegacy:
-      default: false
+      default: true
     WebKit:
       "PLATFORM(IOS_FAMILY)": WebKit::defaultGetBoundingClientRectZoomedEnabled()
       default: true
@@ -4494,9 +4492,9 @@ InteractiveFormValidationEnabled:
     WebKit:
       default: true
     WebKitLegacy:
-      default: false
+      default: true
     WebCore:
-      default: false
+      default: true
 
 # FIXME: Is this implemented for WebKitLegacy? If not, this should be excluded from WebKitLegacy entirely (though we should still set the default value to false when initializing settings).
 InterruptAudioOnPageVisibilityChangeEnabled:
@@ -4932,11 +4930,11 @@ LazyIframeLoadingEnabled:
   humanReadableDescription: "Enable lazy iframe loading support"
   defaultValue:
     WebKitLegacy:
-      default: false
+      default: true
     WebKit:
       default: true
     WebCore:
-      default: false
+      default: true
 
 LazyImageLoadingEnabled:
   type: bool
@@ -4946,11 +4944,11 @@ LazyImageLoadingEnabled:
   humanReadableDescription: "Enable lazy image loading support"
   defaultValue:
     WebKitLegacy:
-      default: false
+      default: true
     WebKit:
       default: true
     WebCore:
-      default: false
+      default: true
 
 LegacyEncryptedMediaAPIEnabled:
   type: bool
@@ -5595,13 +5593,12 @@ MediaDevicesEnabled:
   condition: ENABLE(MEDIA_STREAM)
   defaultValue:
     WebKitLegacy:
-      default: false
+      default: true
     WebKit:
       "PLATFORM(GTK) || PLATFORM(WPE)": true
       default: false
     WebCore:
-      "PLATFORM(GTK) || PLATFORM(WPE)": true
-      default: false
+      default: true
   disableInLockdownMode: true
 
 MediaEnabled:
@@ -6479,7 +6476,7 @@ OverscrollBehaviorEnabled:
   humanReadableDescription: "Enable CSS overscroll-behavior"
   defaultValue:
     WebKitLegacy:
-      default: false
+      default: true
     WebKit:
       "PLATFORM(WIN)": false
       default: true
@@ -7572,7 +7569,7 @@ ScrollToTextFragmentEnabled:
   humanReadableDescription: "Enable Scroll To Text Fragment"
   defaultValue:
     WebKitLegacy:
-      default: false
+      default: true
     WebKit:
       default: true
     WebCore:
@@ -7652,7 +7649,7 @@ ScrollendEventEnabled:
   humanReadableDescription: "Enable scrollend event"
   defaultValue:
     WebKitLegacy:
-      default: false
+      default: true
     WebKit:
       default: true
     WebCore:
@@ -8658,7 +8655,7 @@ TargetTextPseudoElementEnabled:
   humanReadableDescription: "Enable the ::target-text CSS pseudo-element"
   defaultValue:
     WebKitLegacy:
-      default: false
+      default: true
     WebKit:
       default: true
     WebCore:
@@ -8721,12 +8718,12 @@ TextAreasAreResizable:
   webcoreOnChange: setNeedsRecalcStyleInAllFrames
   defaultValue:
     WebKitLegacy:
-      default: false
+      default: true
     WebKit:
       "PLATFORM(IOS_FAMILY)": false
       default: true
     WebCore:
-      default: false
+      default: true
 
 TextAutosizingEnabled:
   type: bool
@@ -9401,11 +9398,11 @@ UserActivationAPIEnabled:
   humanReadableDescription: "Enable User Activation API"
   defaultValue:
     WebKitLegacy:
-      default: false
+      default: true
     WebKit:
       default: true
     WebCore:
-      default: false
+      default: true
 
 UserGesturePromisePropagationEnabled:
   type: bool
@@ -9665,12 +9662,11 @@ VisualViewportAPIEnabled:
   humanReadableDescription: "Enable Visual Viewport API"
   defaultValue:
     WebKitLegacy:
-      "PLATFORM(IOS_FAMILY)" : false
       default: true
     WebKit:
       default: true
     WebCore:
-      default: false
+      default: true
 
 VisualViewportEnabled:
   type: bool
@@ -10235,7 +10231,7 @@ WebLocksAPIEnabled:
   humanReadableDescription: "Web Locks API"
   defaultValue:
     WebKitLegacy:
-      default: false
+      default: true
     WebKit:
       default: true
     WebCore:

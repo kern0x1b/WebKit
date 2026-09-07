@@ -1630,15 +1630,18 @@ static WebFrameLoadType NODELETE toWebFrameLoadType(WebCore::FrameLoadType frame
 
 - (void)selectNSRange:(NSRange)range onElement:(DOMElement *)element
 {
-    // FIXME: This method does not do a useful operation: treating NSRange offsets as child node offsets does not make logical sense. Also, it's highly unlikely anyone calls it. We should delete it.
     if (!element)
         return;
     auto frame = core(self);
     if (!frame)
         return;
-    auto& coreElement = *core(element);
-    unsigned startOffset = range.location;
-    unsigned endOffset = NSMaxRange(range);
+    RefPtr<WebCore::Node> node = core(static_cast<DOMNode *>(element));
+    if (!is<WebCore::Element>(node))
+        return;
+    auto& coreElement = downcast<WebCore::Element>(*node);
+    unsigned childCount = coreElement.countChildNodes();
+    unsigned startOffset = std::min<unsigned>(range.location, childCount);
+    unsigned endOffset = std::min<unsigned>(NSMaxRange(range), childCount);
     frame->selection().setSelection(WebCore::VisibleSelection { WebCore::SimpleRange { { coreElement, startOffset }, { coreElement, endOffset } } }, { WebCore::FrameSelection::SetSelectionOption::FireSelectEvent });
 }
 

@@ -51,10 +51,7 @@ void platformReleaseMemory(Critical critical)
 
 #if PLATFORM(IOS_FAMILY) && !PLATFORM(IOS_FAMILY_SIMULATOR) && !PLATFORM(MACCATALYST)
 #if defined(WEBKIT_IOS6)
-    if (critical == Critical::Yes) {
-        GSFontInitialize();
-        GSFontPurgeFontCache();
-    }
+    (void)critical;
 #else
     // FIXME: Remove this call to GSFontInitialize() once <rdar://problem/32886715> is fixed.
     GSFontInitialize();

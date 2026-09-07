@@ -61,6 +61,7 @@
 #import <WebCore/Icon.h>
 #import <WebCore/IntRect.h>
 #import <WebCore/LocalFrameInlines.h>
+#import <WebCore/LocalFrameView.h>
 #import <WebCore/NodeDocument.h>
 #import <WebCore/PlatformScreen.h>
 #import <WebCore/RenderBox.h>
@@ -102,6 +103,10 @@ static WebMediaCaptureType webMediaCaptureType(MediaCaptureType type)
 WTF_MAKE_TZONE_ALLOCATED_IMPL(WebChromeClientIOS);
 
 #if defined(WEBKIT_IOS6)
+@interface NSObject (RevViewportForFrameCompat)
+- (void)webView:(WebView *)webView didReceiveViewportArguments:(NSDictionary *)arguments forFrame:(WebFrame *)frame;
+@end
+
 static inline bool uiKitDelegateImplements(WebView *webView, SEL selector)
 {
     return [[webView _UIKitDelegate] respondsToSelector:selector];
@@ -278,7 +283,14 @@ FloatSize WebChromeClientIOS::overrideAvailableScreenSize() const
 
 void WebChromeClientIOS::dispatchViewportPropertiesDidChange(const WebCore::ViewportArguments& arguments) const
 {
-    [[webView() _UIKitDelegateForwarder] webView:webView() didReceiveViewportArguments:dictionaryForViewportArguments(arguments)];
+    NSDictionary *dictionary = dictionaryForViewportArguments(arguments);
+#if defined(WEBKIT_IOS6)
+    if (uiKitDelegateImplements(webView(), @selector(webView:didReceiveViewportArguments:forFrame:))) {
+        [[webView() _UIKitDelegateForwarder] webView:webView() didReceiveViewportArguments:dictionary forFrame:[webView() mainFrame]];
+        return;
+    }
+#endif
+    [[webView() _UIKitDelegateForwarder] webView:webView() didReceiveViewportArguments:dictionary];
 }
 
 void WebChromeClientIOS::dispatchDisabledAdaptationsDidChange(const OptionSet<WebCore::DisabledAdaptations>&) const

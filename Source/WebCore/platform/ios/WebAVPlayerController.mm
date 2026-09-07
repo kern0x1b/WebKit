@@ -222,7 +222,11 @@ namespace WebCore {
 
 RetainPtr<WebAVPlayerController> createWebAVPlayerController()
 {
+#if defined(WEBKIT_IOS6)
+    return adoptNS([[WebAVPlayerController alloc] init]);
+#else
     return adoptNS((WebAVPlayerController *)[[webAVPlayerControllerClassSingleton() alloc] init]);
+#endif
 }
 
 Class webAVPlayerControllerClassSingleton()
@@ -250,6 +254,7 @@ Class webAVPlayerControllerClassSingleton()
     RetainPtr<WebAVMediaSelectionOption> _currentAudioMediaSelectionOption;
     RetainPtr<WebAVMediaSelectionOption> _currentLegibleMediaSelectionOption;
     RetainPtr<AVPlayer> _player;
+    BOOL _observersRegistered;
 }
 
 - (instancetype)init
@@ -277,15 +282,18 @@ Class webAVPlayerControllerClassSingleton()
     [self addObserver:self forKeyPath:@"seekableTimeRanges" options:(NSKeyValueObservingOptionOld | NSKeyValueObservingOptionNew | NSKeyValueObservingOptionInitial) context:WebAVPlayerControllerSeekableTimeRangesObserverContext];
     [self addObserver:self forKeyPath:@"hasLiveStreamingContent" options:NSKeyValueObservingOptionInitial context:WebAVPlayerControllerHasLiveStreamingContentObserverContext];
     [self addObserver:self forKeyPath:@"playingOnSecondScreen" options:NSKeyValueObservingOptionNew context:WebAVPlayerControllerIsPlayingOnSecondScreenObserverContext];
+    _observersRegistered = YES;
 
     return self;
 }
 
 - (void)dealloc
 {
-    [self removeObserver:self forKeyPath:@"seekableTimeRanges" context:WebAVPlayerControllerSeekableTimeRangesObserverContext];
-    [self removeObserver:self forKeyPath:@"hasLiveStreamingContent" context:WebAVPlayerControllerHasLiveStreamingContentObserverContext];
-    [self removeObserver:self forKeyPath:@"playingOnSecondScreen" context:WebAVPlayerControllerIsPlayingOnSecondScreenObserverContext];
+    if (_observersRegistered) {
+        [self removeObserver:self forKeyPath:@"seekableTimeRanges" context:WebAVPlayerControllerSeekableTimeRangesObserverContext];
+        [self removeObserver:self forKeyPath:@"hasLiveStreamingContent" context:WebAVPlayerControllerHasLiveStreamingContentObserverContext];
+        [self removeObserver:self forKeyPath:@"playingOnSecondScreen" context:WebAVPlayerControllerIsPlayingOnSecondScreenObserverContext];
+    }
 
     [_playerControllerProxy release];
     [_loadedTimeRanges release];

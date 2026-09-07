@@ -52,12 +52,32 @@
 #import "WebPreferenceKeysPrivate.h"
 #import "WebPreferencesInternal.h"
 #import "WebPreferencesPrivate.h"
+#import "DOMElementInternal.h"
+#import "DOMNodeInternal.h"
+#import "DOMRangeInternal.h"
 #import "WebFrameInternal.h"
 #import "WebViewInternal.h"
+#import <WebCore/BackForwardCache.h>
 #import <WebCore/Document.h>
+#import <WebCore/FloatSize.h>
+#import <WebCore/GarbageCollectionController.h>
+#import <WebCore/PrintContext.h>
+#import <WebCore/HTMLBodyElement.h>
+#import <WebCore/HTMLDivElement.h>
+#import <WebCore/HTMLElement.h>
+#import <WebCore/HTMLNames.h>
 #import <WebCore/LocalFrame.h>
+#import <WebCore/LocalFrameInlines.h>
 #import <WebCore/LocalFrameView.h>
+#import <WebCore/Page.h>
+#import <WebCore/Range.h>
+#import <WebCore/Settings.h>
+#import <WebCore/SimpleRange.h>
+#import <WebCore/WebCoreThreadRun.h>
 #import <WebCore/WebEventRegion.h>
+#import <WebCore/markup.h>
+#import <JavaScriptCore/DeleteAllCodeEffort.h>
+#import <wtf/FastMalloc.h>
 #import "WebViewPrivate.h"
 
 #define WebKitNSURLDiskCacheSizePreferenceKey @"WebKitNSURLDiskCacheSize"
@@ -357,10 +377,21 @@
 
 - (NSString *)_markupStringFromRange:(DOMRange *)range nodes:(NSArray **)nodes
 {
-    UNUSED_PARAM(range);
-    if (nodes)
-        *nodes = nil;
-    return nil;
+    WebCore::Range *coreRange = core(range);
+    if (!coreRange) {
+        if (nodes)
+            *nodes = nil;
+        return nil;
+    }
+    Vector<Ref<WebCore::Node>> nodeList;
+    WTF::String markup = WebCore::serializePreservingVisualAppearance(makeSimpleRange(*coreRange), nodes ? &nodeList : nullptr, WebCore::AnnotateForInterchange::Yes);
+    if (nodes) {
+        NSMutableArray *array = [NSMutableArray arrayWithCapacity:nodeList.size()];
+        for (auto& node : nodeList)
+            [array addObject:kit(node.ptr())];
+        *nodes = array;
+    }
+    return markup.createNSString().autorelease();
 }
 
 - (NSArray *)_nodesFromList:(void *)nodes
@@ -392,10 +423,14 @@
 
 - (void)_suspendAnimations
 {
+    if (auto page = [[self webView] page])
+        page->suspendActiveDOMObjectsAndAnimations();
 }
 
 - (void)_resumeAnimations
 {
+    if (auto page = [[self webView] page])
+        page->resumeActiveDOMObjectsAndAnimations();
 }
 
 - (void)_setExcludeFromTextSearch:(bool)exclude
@@ -421,7 +456,14 @@
 
 - (NSString *)_stringWithDocumentTypeStringAndMarkupString:(NSString *)markupString
 {
-    return markupString;
+    auto* frame = core(self);
+    if (!frame)
+        return markupString;
+    RefPtr document = frame->document();
+    if (!document)
+        return markupString;
+    NSString *doctype = WebCore::documentTypeString(*document).createNSString().autorelease();
+    return [doctype stringByAppendingString:markupString ?: @""];
 }
 
 - (void)clearPPTStats
@@ -450,6 +492,30 @@
 
 - (void)createDefaultFieldEditorDocumentStructure
 {
+    auto* frame = core(self);
+    if (!frame)
+        return;
+    RefPtr document = frame->document();
+    if (!document)
+        return;
+    RefPtr<WebCore::HTMLElement> body = document->body();
+    if (!body)
+        return;
+
+    body->setAttributeWithoutSynchronization(WebCore::HTMLNames::styleAttr, "margin:0; padding:0; border:0;"_s);
+
+    auto appendDiv = [&](const AtomString& identifier, const AtomString& inlineStyle, bool editable) {
+        auto div = WebCore::HTMLDivElement::create(*document);
+        div->setAttributeWithoutSynchronization(WebCore::HTMLNames::idAttr, identifier);
+        if (!inlineStyle.isEmpty())
+            div->setAttributeWithoutSynchronization(WebCore::HTMLNames::styleAttr, inlineStyle);
+        if (editable)
+            div->setAttributeWithoutSynchronization(WebCore::HTMLNames::contenteditableAttr, "true"_s);
+        body->appendChild(div);
+    };
+
+    appendDiv("text"_s, "white-space:pre; overflow:hidden; -webkit-user-select:text; word-wrap:normal;"_s, true);
+    appendDiv("size"_s, "position:absolute; visibility:hidden; white-space:pre; top:0; left:0;"_s, false);
 }
 
 - (void)finalize
@@ -471,8 +537,7 @@
 
 - (bool)isPageBoxVisible:(int)pageIndex
 {
-    UNUSED_PARAM(pageIndex);
-    return false;
+    return WebCore::PrintContext::isPageBoxVisible(core(self), pageIndex);
 }
 
 - (BOOL)isSingleLine
@@ -507,29 +572,17 @@
 
 - (int)pageNumberForElement:(DOMElement *)element :(float)pageWidth :(float)pageHeight
 {
-    UNUSED_PARAM(element);
-    UNUSED_PARAM(pageWidth);
-    UNUSED_PARAM(pageHeight);
-    return -1;
+    return WebCore::PrintContext::pageNumberForElement(core(element), WebCore::FloatSize(pageWidth, pageHeight));
 }
 
 - (NSString *)pageProperty:(const char *)propertyName :(int)pageNumber
 {
-    UNUSED_PARAM(propertyName);
-    UNUSED_PARAM(pageNumber);
-    return nil;
+    return WebCore::PrintContext::pageProperty(core(self), WTF::String::fromUTF8(propertyName), pageNumber).createNSString().autorelease();
 }
 
 - (NSString *)pageSizeAndMarginsInPixels:(int)pageIndex :(int)width :(int)height :(int)marginTop :(int)marginRight :(int)marginBottom :(int)marginLeft
 {
-    UNUSED_PARAM(pageIndex);
-    UNUSED_PARAM(width);
-    UNUSED_PARAM(height);
-    UNUSED_PARAM(marginTop);
-    UNUSED_PARAM(marginRight);
-    UNUSED_PARAM(marginBottom);
-    UNUSED_PARAM(marginLeft);
-    return nil;
+    return WebCore::PrintContext::pageSizeAndMarginsInPixels(core(self), pageIndex, width, height, marginTop, marginRight, marginBottom, marginLeft).createNSString().autorelease();
 }
 
 @end
@@ -598,10 +651,16 @@
 
 + (void)discardAllCompiledCode
 {
+    WebThreadRun(^{
+        WebCore::GarbageCollectionController::singleton().deleteAllCode(JSC::DeleteAllCodeIfNotCollecting);
+    });
 }
 
 + (void)releaseFastMallocMemory
 {
+    WebThreadRun(^{
+        WTF::releaseFastMallocFreeMemory();
+    });
 }
 
 + (void)drainLayerPool
@@ -710,6 +769,9 @@
 
 - (void)_clearBackForwardCache
 {
+    WebThreadRun(^{
+        WebCore::BackForwardCache::singleton().pruneToSizeNow(0, WebCore::PruningReason::MemoryPressure);
+    });
 }
 
 - (JSValueRef)_computedStyleIncludingVisitedInfo:(JSContextRef)context forElement:(JSValueRef)element
@@ -775,7 +837,8 @@
 
 - (void)_setMinimumTimerInterval:(double)interval
 {
-    UNUSED_PARAM(interval);
+    if (auto* frame = core([self mainFrame]))
+        frame->settings().setMinimumDOMTimerInterval(WTF::Seconds(interval));
 }
 
 - (void)_setNetworkStateIsOnline:(BOOL)isOnline

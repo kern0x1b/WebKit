@@ -327,7 +327,11 @@ void VideoPresentationInterfaceIOS::doSetup()
 
 #if !PLATFORM(WATCHOS)
     if (shouldCreateWindow()) {
+#if defined(WEBKIT_IOS6)
+        m_window = adoptNS([PAL::allocUIWindowInstance() initWithFrame:[[PAL::getUIScreenClassSingleton() mainScreen] bounds]]);
+#else
         m_window = adoptNS([PAL::allocUIWindowInstance() initWithWindowScene:[[m_parentView window] windowScene]]);
+#endif
         [m_window setBackgroundColor:clearUIColor()];
         [m_window setValue:@"WebCore::VideoPresentationInterfaceIOS" forKey:@"_debugName"];
         if (!m_viewController)
@@ -336,8 +340,12 @@ void VideoPresentationInterfaceIOS::doSetup()
         [m_viewController _setIgnoreAppSupportedOrientations:YES];
         [m_window setRootViewController:m_viewController.get()];
         auto textEffectsWindowLevel = [&] {
+#if defined(WEBKIT_IOS6)
+            return PAL::get_UIKit_UITextEffectsBeneathStatusBarWindowLevelSingleton();
+#else
             auto *textEffectsWindow = [PAL::getUITextEffectsWindowClassSingleton() sharedTextEffectsWindowForWindowScene:[m_window windowScene]];
             return textEffectsWindow ? textEffectsWindow.windowLevel : PAL::get_UIKit_UITextEffectsBeneathStatusBarWindowLevelSingleton();
+#endif
         }();
         [m_window setWindowLevel:textEffectsWindowLevel - 1];
         [m_window makeKeyAndVisible];

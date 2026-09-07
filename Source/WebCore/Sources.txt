@@ -2842,12 +2842,13 @@ platform/mediastream/RealtimeMediaSourceSupportedConstraints.cpp
 platform/mediastream/RealtimeOutgoingAudioSource.cpp
 platform/mediastream/RealtimeOutgoingVideoSource.cpp
 platform/mediastream/RealtimeVideoCaptureSource.cpp
+platform/mediastream/rev/RealtimeMediaSourceCenterRev.cpp
 platform/mediastream/WebRTCProvider.cpp
 platform/mock/DeviceOrientationClientMock.cpp
 platform/mock/GeolocationClientMock.cpp
-platform/mock/MockRealtimeAudioSource.cpp
-platform/mock/MockRealtimeMediaSourceCenter.cpp
-platform/mock/MockRealtimeVideoSource.cpp
+// REV-EXCLUDED platform/mock/MockRealtimeAudioSource.cpp
+// REV-EXCLUDED platform/mock/MockRealtimeMediaSourceCenter.cpp
+// REV-EXCLUDED platform/mock/MockRealtimeVideoSource.cpp
 platform/mock/PlatformMediaEngineConfigurationFactoryMock.cpp
 platform/mock/PlatformSpeechSynthesizerMock.cpp
 platform/mock/RTCDataChannelHandlerMock.cpp

@@ -41,8 +41,12 @@ static auto cocoaFontClassSingleton()
 
 RetainPtr<CTFontDescriptorRef> SystemFontDatabaseCoreText::smallCaptionFontDescriptor()
 {
+#if PLATFORM(IOS_FAMILY)
+    return adoptCF(CTFontDescriptorCreateForUIType(kCTFontUIFontSmallSystem, [cocoaFontClassSingleton() smallSystemFontSize], nullptr));
+#else
     auto font = [cocoaFontClassSingleton() systemFontOfSize:[cocoaFontClassSingleton() smallSystemFontSize]];
     return static_cast<CTFontDescriptorRef>(font.fontDescriptor);
+#endif
 }
 
 RetainPtr<CTFontDescriptorRef> SystemFontDatabaseCoreText::menuFontDescriptor()

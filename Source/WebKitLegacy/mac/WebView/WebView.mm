@@ -75,6 +75,7 @@
 #import "WebFrameViewInternal.h"
 #import "WebGeolocationClient.h"
 #import "WebGeolocationPositionInternal.h"
+#import "WebUserMediaClient.h"
 #import "WebHTMLRepresentation.h"
 #import "WebHTMLViewInternal.h"
 #import "WebHistoryDelegate.h"
@@ -1588,6 +1589,9 @@ static void webViewStartupMark(const char* what, double& last)
 #if ENABLE(GEOLOCATION)
     WebCore::provideGeolocationTo(_private->page.get(), WebGeolocationClient::create(self));
 #endif
+#if ENABLE(MEDIA_STREAM)
+    WebCore::provideUserMediaTo(_private->page.get(), WebUserMediaClient::create(self));
+#endif
 #if ENABLE(NOTIFICATIONS)
     WebCore::provideNotification(_private->page.get(), new WebNotificationClient(self));
 #endif
@@ -2513,7 +2517,7 @@ static NSMutableSet *knownPluginMIMETypes()
         return;
     }
 
-    if (!WTF::atomicCompareExchangeStrong(&_private->didDrawTiles, NO, YES))
+    if (WTF::atomicCompareExchangeStrong(&_private->didDrawTiles, NO, YES))
         return;
 
     WebThreadLock();
@@ -8683,6 +8687,16 @@ FORWARD(toggleUnderline)
 {
     [self _performResponderOperation:_cmd with:text];
 }
+
+#if defined(WEBKIT_IOS6)
+- (BOOL)_requiresKeyboardWhenFirstResponder
+{
+    if (auto* coreFrame = core([self _selectedOrMainFrame]))
+        if (auto* doc = coreFrame->document())
+            return doc->focusedElement() != nullptr;
+    return NO;
+}
+#endif
 
 - (NSDictionary *)typingAttributes
 {

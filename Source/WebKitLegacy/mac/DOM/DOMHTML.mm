@@ -136,6 +136,13 @@
     scrollableArea->scrollToOffset(WebCore::ScrollOffset(x, y), scrollPositionChangeOptions);
 }
 
+#if defined(WEBKIT_IOS6)
+- (void)setScrollXOffset:(int)x scrollYOffset:(int)y adjustForPurpleCaret:(BOOL)adjustForPurpleCaret
+{
+    [self setScrollXOffset:x scrollYOffset:y adjustForIOSCaret:adjustForPurpleCaret];
+}
+#endif
+
 - (void)absolutePosition:(int *)x :(int *)y :(int *)w :(int *)h
 {
     auto* renderer = core(self)->renderBox();

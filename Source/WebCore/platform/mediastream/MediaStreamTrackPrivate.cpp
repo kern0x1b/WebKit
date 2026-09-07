@@ -551,7 +551,7 @@ RefPtr<WebAudioSourceProvider> MediaStreamTrackPrivate::createAudioSourceProvide
     ASSERT(isMainThread());
     ALWAYS_LOG(LOGIDENTIFIER);
 
-#if PLATFORM(COCOA)
+#if PLATFORM(COCOA) && !defined(WEBKIT_IOS6)
     return MediaStreamTrackAudioSourceProviderCocoa::create(*this);
 #elif USE(GSTREAMER)
     return AudioSourceProviderGStreamer::create(*this);

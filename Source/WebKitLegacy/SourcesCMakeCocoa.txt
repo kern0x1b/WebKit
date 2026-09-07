@@ -112,6 +112,7 @@ mac/WebCoreSupport/WebGeolocationClient.mm @nonARC
 mac/WebCoreSupport/WebKitFullScreenListener.mm @nonARC
 mac/WebCoreSupport/WebMediaKeySystemClient.mm @nonARC
 mac/WebCoreSupport/WebNotificationClient.mm @nonARC
+mac/WebCoreSupport/WebUserMediaClient.mm @nonARC
 mac/WebCoreSupport/WebOpenPanelResultListener.mm @nonARC
 mac/WebCoreSupport/WebPaymentCoordinatorClient.mm @nonARC
 mac/WebCoreSupport/WebPlatformStrategies.mm @nonARC

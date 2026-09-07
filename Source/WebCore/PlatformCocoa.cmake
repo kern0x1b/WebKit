@@ -531,12 +531,13 @@ list(APPEND WebCore_SOURCES
 
     platform/mediarecorder/MediaRecorderPrivateWriter.cpp
 
-    platform/mediastream/cocoa/CoreAudioCaptureUnit.mm
-    platform/mediastream/cocoa/MockRealtimeVideoSourceCocoa.mm
-    platform/mediastream/cocoa/RealtimeOutgoingVideoSourceCocoa.cpp
+    # REV-EXCLUDED cocoa/libwebrtc mediastream capture backend (modern AVFoundation, not on iOS 6)
+    # platform/mediastream/cocoa/CoreAudioCaptureUnit.mm
+    # platform/mediastream/cocoa/MockRealtimeVideoSourceCocoa.mm
+    # platform/mediastream/cocoa/RealtimeOutgoingVideoSourceCocoa.cpp
 
-    platform/mediastream/libwebrtc/LibWebRTCAudioModule.cpp
-    platform/mediastream/libwebrtc/LibWebRTCDav1dDecoder.cpp
+    # platform/mediastream/libwebrtc/LibWebRTCAudioModule.cpp
+    # platform/mediastream/libwebrtc/LibWebRTCDav1dDecoder.cpp
 
     platform/network/cf/CertificateInfoCFNet.cpp
     platform/network/cf/DNSResolveQueueCFNet.cpp

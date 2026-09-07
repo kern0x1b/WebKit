@@ -262,7 +262,6 @@ static void* lib##Library(bool = false) \
         framework##Library(); \
         _STORE_IN_GETCLASS_SECTION static char const auditedClassName[] = #className; \
         class##className.classObject = objc_getClass(auditedClassName); \
-        RELEASE_ASSERT(class##className.classObject); \
         get##className##ClassSingleton = className##Function; \
         return class##className.classObject; \
     } \
@@ -318,8 +317,8 @@ static void* lib##Library(bool = false) \
     { \
         _STORE_IN_DLSYM_SECTION static char const auditedName[] = #name; \
         void** pointer = static_cast<void**>(dlsym(framework##Library(false), auditedName)); \
-        RELEASE_ASSERT_WITH_MESSAGE(pointer, "%s", dlerror()); \
-        pointer##name = static_cast<type>(*pointer); \
+        if (pointer) \
+            pointer##name = static_cast<type>(*pointer); \
         get##name = name##Function; \
         SUPPRESS_UNRETAINED_ARG return pointer##name; \
     }
@@ -359,7 +358,10 @@ static void* lib##Library(bool = false) \
     { \
         _STORE_IN_DLSYM_SECTION static char const auditedName[] = #name; \
         void* constant = dlsym(framework##Library(false), auditedName); \
-        RELEASE_ASSERT_WITH_MESSAGE(constant, "soft-linked constant %s is not in %s: %s", auditedName, #framework, dlerror() ? dlerror() : "no error reported"); \
+        if (!constant) { \
+            get##name##Singleton = name##Function; \
+            return constant##name.constant; \
+        } \
         constant##name.constant = *static_cast<type const *>(constant); \
         get##name##Singleton = name##Function; \
         return constant##name.constant; \

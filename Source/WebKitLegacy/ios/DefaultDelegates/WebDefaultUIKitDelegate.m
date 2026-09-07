@@ -82,6 +82,11 @@ static WebDefaultUIKitDelegate *sharedDelegate = nil;
 
 }
 
+- (void)webView:(WebView *)aWebView didReceiveViewportArguments:(NSDictionary *)arguments forFrame:(WebFrame *)frame
+{
+
+}
+
 - (void)webView:(WebView *)aWebView needsScrollNotifications:(NSNumber *)aNumber forFrame:(WebFrame *)aFrame
 {
     
