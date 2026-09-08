@@ -10286,14 +10286,19 @@ void WebInstallMemoryPressureHandler(void)
             // limits and releaseNoncriticalMemory() emptied everything every ten
             // seconds. The two jetsam figures in the comments above (122 MB and
             // 180 MB) are both wrong; the process demonstrably runs at 240 MB.
-            // Conservative is not a resting place either: measurementTimerFired()
-            // calls releaseMemory() for it as well, so the ten second cache flush
-            // continues there. The bands are therefore placed above the measured
-            // working set: Unrestricted below 260 MB so ordinary browsing costs
-            // nothing, Conservative from 260 MB, Strict from 300 MB.
+            // The bands are calibrated against a jetsam report rather than a
+            // guess. The system killed this process at 72246 pages, which is
+            // 282 MB, for vm-pageshortage; anything at or above that is fatal, so
+            // Strict has to act well before it. Measured page footprints: an
+            // ordinary site sits at about 208 MB, a heavy one at 256 MB.
+            // Conservative therefore starts at 216 MB and Strict at 256 MB, which
+            // leaves ordinary browsing Unrestricted - the point of moving these
+            // at all, since below Strict the engine stops behaving as though it
+            // were permanently out of memory - while still leaving 26 MB of room
+            // to release in before the kill.
             constexpr uint64_t processMemoryCeiling = 400 * MB;
             memoryPressureHandler.setConfiguration(MemoryPressureHandler::Configuration {
-                processMemoryCeiling, 0.65, 0.75, std::nullopt, 10_s });
+                processMemoryCeiling, 0.54, 0.64, std::nullopt, 10_s });
 #endif
             memoryPressureHandler.setLowMemoryHandler([] (Critical critical, Synchronous synchronous) {
 #if PLATFORM(IOS_FAMILY)
