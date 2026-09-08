@@ -294,6 +294,12 @@ static RetainPtr<CFDictionaryRef> smallCapsTrueTypeDictionary(int rawKey, int ra
 
 static void unionBitVectors(BitVector& result, CFBitVectorRef source)
 {
+    // A coverage query can come back with nothing - this CoreText answers no
+    // coverage for a feature it does not know - and the count below dereferences
+    // whatever it is given. Any page using small-caps took the process down.
+    if (!source)
+        return;
+
     CFIndex length = CFBitVectorGetCount(source);
     result.ensureSize(length);
     CFIndex min = 0;
