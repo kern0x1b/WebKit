@@ -1117,7 +1117,11 @@
 #define HAVE_APPLE_PUSH_SERVICE_URL_TOKEN_SUPPORT 1
 #endif
 
-#if PLATFORM(COCOA)
+// ImageIO decodes AVIF from iOS 16, JPEG-XL never shipped in it, and HEIC needs
+// both iOS 11 and the HEVC hardware this device does not have. Claiming any of
+// them in the image Accept header makes servers negotiate a format that then
+// renders as nothing.
+#if PLATFORM(COCOA) && !defined(WEBKIT_IOS6)
 #define HAVE_AVIF 1
 #endif
 
@@ -1413,10 +1417,12 @@
     || PLATFORM(IOS) \
     || PLATFORM(APPLETV) \
     || PLATFORM(WATCHOS)
+#if !defined(WEBKIT_IOS6)
 #define HAVE_JPEGXL 1
 #endif
+#endif
 
-#if PLATFORM(COCOA)
+#if PLATFORM(COCOA) && !defined(WEBKIT_IOS6)
 #define HAVE_HEIC 1
 #endif
 

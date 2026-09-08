@@ -35,6 +35,9 @@
 #include "PNGImageDecoder.h"
 #include "WEBPImageDecoder.h"
 #endif
+#if PLATFORM(COCOA) && USE(WEBP)
+#include "WEBPImageDecoder.h"
+#endif
 #if USE(AVIF)
 #include "AVIFImageDecoder.h"
 #endif
@@ -93,6 +96,11 @@ static bool matchesCURSignature(std::span<const uint8_t> contents)
     return spanHasPrefix(contents, unsafeMakeSpan("\x00\x00\x02\x00", 4));
 }
 
+#endif // !PLATFORM(COCOA)
+
+// Also wanted on a CG port that builds the WebP decoder, since its platform
+// decodes every other format here but not this one.
+#if !PLATFORM(COCOA) || USE(WEBP)
 static bool matchesWebPSignature(std::span<const uint8_t> contents)
 {
     return spanHasPrefix(contents, "RIFF"_span) && spanHasPrefix(contents.subspan(8), "WEBPVP"_span);
@@ -157,6 +165,14 @@ RefPtr<ScalableImageDecoder> ScalableImageDecoder::create(FragmentedSharedBuffer
     if (matchesBMPSignature(contentsSpan))
         return BMPImageDecoder::create(alphaOption, gammaAndColorProfileOption);
 
+    if (matchesWebPSignature(contentsSpan))
+        return WEBPImageDecoder::create(alphaOption, gammaAndColorProfileOption);
+#endif
+
+#if PLATFORM(COCOA) && USE(WEBP)
+    // The dispatch above is inside !PLATFORM(COCOA), where the platform decodes
+    // none of those formats. A CG port reaches this decoder only for the formats
+    // its own does not handle, which here includes WebP.
     if (matchesWebPSignature(contentsSpan))
         return WEBPImageDecoder::create(alphaOption, gammaAndColorProfileOption);
 #endif

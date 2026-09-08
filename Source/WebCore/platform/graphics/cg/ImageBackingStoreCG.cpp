@@ -26,6 +26,8 @@
 #include "config.h"
 #include "ImageBackingStore.h"
 
+#include "ColorSpaceCG.h"
+
 namespace WebCore {
 
 static void dataProviderReleaseCallback(void* info, const void*, size_t)
@@ -42,7 +44,13 @@ PlatformImagePtr ImageBackingStore::image() const
     size_t height = size().height();
     size_t bytesPerRow = bytesPerPixel * width;
 
-    auto colorSpace = adoptCF(CGColorSpaceCreateWithName(kCGColorSpaceSRGB));
+    // Through the engine's own singleton rather than by name: this CoreGraphics
+    // answers to none of the colour space names and returns nothing for
+    // kCGColorSpaceSRGB, so CGImageCreate below got a null space and produced no
+    // image at all - a decoded picture that reported its size and drew nothing.
+    // The singleton already knows what to do here, and elsewhere saves creating
+    // the space again for every frame.
+    RetainPtr colorSpace = sRGBColorSpaceSingleton();
     auto dataProvider = adoptCF(CGDataProviderCreateWithData(m_pixels.get(), m_pixelsSpan.data(), height * bytesPerRow, dataProviderReleaseCallback));
 
     if (!dataProvider)

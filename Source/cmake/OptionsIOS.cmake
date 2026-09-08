@@ -66,6 +66,17 @@ WEBKIT_OPTION_DEFAULT_PORT_VALUE(USE_JPEGXL PRIVATE OFF)
 WEBKIT_OPTION_DEFAULT_PORT_VALUE(USE_LCMS PRIVATE OFF)
 WEBKIT_OPTION_DEFAULT_PORT_VALUE(USE_WOFF2 PRIVATE OFF)
 
+# ImageIO decodes WebP from iOS 14, so this port builds the decoder WebKit
+# carries for platforms that cannot. The image Accept header follows this: see
+# acceptHeaderValueForImageResource in CachedResourceRequest.cpp.
+if (USE_WEBP)
+    find_package(WebP COMPONENTS demux)
+    if (NOT WebP_FOUND)
+        message(FATAL_ERROR "libwebp is required for USE_WEBP")
+    endif ()
+    SET_AND_EXPOSE_TO_BUILD(USE_WEBP ON)
+endif ()
+
 # Off by default because the system font parser handles WOFF2 from iOS 7 onward.
 # It does not on the release this port targets, so the build turns it on and
 # supplies the library; every other port that does this calls find_package here.

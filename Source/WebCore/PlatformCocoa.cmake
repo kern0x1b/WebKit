@@ -9,6 +9,13 @@ if (CMAKE_SYSTEM_NAME STREQUAL "iOS")
     )
 endif ()
 
+if (USE_WEBP)
+    # Only the WebP decoder, not platform/ImageDecoders.cmake: that module brings
+    # every software decoder and libjpeg and libpng with it, and this platform
+    # decodes those formats itself. WebP is the one it cannot.
+    list(APPEND WebCore_LIBRARIES WebP::libwebp WebP::demux)
+endif ()
+
 if (USE_OPENSSL)
     include(platform/OpenSSL.cmake)
     # The headers sit beside the library the port passes in, so the path is
@@ -320,6 +327,7 @@ list(APPEND WebCore_PRIVATE_INCLUDE_DIRECTORIES
     "${WEBCORE_DIR}/platform/graphics/opengl"
     "${WEBCORE_DIR}/platform/graphics/re"
     "${WEBCORE_DIR}/platform/image-decoders"
+    "${WEBCORE_DIR}/platform/image-decoders/webp"
     "${WEBCORE_DIR}/platform/mediacapabilities"
     "${WEBCORE_DIR}/platform/mediarecorder/cocoa"
     "${WEBCORE_DIR}/platform/mediastream/cocoa"
