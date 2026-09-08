@@ -131,6 +131,7 @@
 #endif
 
 #if PLATFORM(IOS_FAMILY)
+#import <UIKit/UIKit.h>
 #import <WebCore/WAKClipView.h>
 #import <WebCore/WAKWindow.h>
 #import <WebCore/WebCoreThreadMessage.h>
@@ -960,11 +961,144 @@ bool WebChromeClient::canEnterVideoFullscreen(WebCore::HTMLVideoElement&, WebCor
 #endif
 }
 
-bool WebChromeClient::supportsVideoFullscreen(WebCore::HTMLMediaElementEnums::VideoFullscreenMode)
+
+#if PLATFORM(IOS_FAMILY) && defined(WEBKIT_IOS6) && ENABLE(VIDEO)
+
+// Full-screen video on this system is the movie player the platform ships, not
+// the AVKit presentation the modern code path expects: AVKit does not exist here.
+// The player is handed the element's current source and position, and the element
+// is told when it begins and stops being the fullscreen element so the page stays
+// in step with what the viewer sees.
+// The movie player ships with the system but is not in this SDK's headers as a
+// weakly-linked class, so its interface is declared here for the few selectors
+// used, and the class itself is looked up at runtime.
+@protocol RevMoviePlayer <NSObject>
+- (double)currentPlaybackTime;
+- (void)setCurrentPlaybackTime:(double)time;
+- (void)stop;
+@end
+
+@protocol RevMoviePlayerViewController <NSObject>
+- (id)initWithContentURL:(NSURL *)url;
+- (id<RevMoviePlayer>)moviePlayer;
+@end
+
+@interface RevFullscreenVideoPresenter : NSObject {
+    RefPtr<WebCore::HTMLVideoElement> _element;
+    RetainPtr<UIViewController> _controller;
+}
+- (id)initWithElement:(WebCore::HTMLVideoElement&)element;
+- (void)present;
+- (void)dismiss;
+@end
+
+static RetainPtr<RevFullscreenVideoPresenter>& currentFullscreenVideoPresenter()
 {
-#if !PLATFORM(IOS_FAMILY) || HAVE(AVKIT)
+    static NeverDestroyed<RetainPtr<RevFullscreenVideoPresenter>> presenter;
+    return presenter.get();
+}
+
+@implementation RevFullscreenVideoPresenter
+
+- (id)initWithElement:(WebCore::HTMLVideoElement&)element
+{
+    self = [super init];
+    if (self)
+        _element = &element;
+    return self;
+}
+
+- (UIViewController *)presentingController
+{
+    UIWindow *window = [[UIApplication sharedApplication] keyWindow];
+    UIViewController *controller = [window rootViewController];
+    while ([controller presentedViewController])
+        controller = [controller presentedViewController];
+    return controller;
+}
+
+- (void)present
+{
+    RefPtr element = _element;
+    if (!element)
+        return;
+
+    RetainPtr url = element->currentSrc().createNSURL();
+    if (!url)
+        return;
+
+    Class playerClass = NSClassFromString(@"MPMoviePlayerViewController");
+    if (!playerClass)
+        return;
+
+    _controller = adoptNS(static_cast<UIViewController *>([[playerClass alloc] initWithContentURL:url.get()]));
+    id<RevMoviePlayer> player = [static_cast<id<RevMoviePlayerViewController>>(_controller.get()) moviePlayer];
+    [player setCurrentPlaybackTime:element->currentTime()];
+
+    [[NSNotificationCenter defaultCenter] addObserver:self
+        selector:@selector(playbackDidFinish:)
+        name:@"MPMoviePlayerPlaybackDidFinishNotification"
+        object:player];
+
+    element->pause();
+
+    UIViewController *presenter = [self presentingController];
+    if (!presenter) {
+        _controller = nullptr;
+        return;
+    }
+
+    [presenter presentViewController:_controller.get() animated:YES completion:nil];
+    element->didBecomeFullscreenElement();
+}
+
+- (void)playbackDidFinish:(NSNotification *)notification
+{
+    UNUSED_PARAM(notification);
+    [self dismiss];
+}
+
+- (void)dismiss
+{
+    if (!_controller)
+        return;
+
+    id<RevMoviePlayer> player = [static_cast<id<RevMoviePlayerViewController>>(_controller.get()) moviePlayer];
+    double resumeTime = [player currentPlaybackTime];
+    [player stop];
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
+
+    [[_controller.get() presentingViewController] dismissViewControllerAnimated:YES completion:nil];
+    _controller = nullptr;
+
+    if (RefPtr element = _element) {
+        if (std::isfinite(resumeTime) && resumeTime > 0)
+            element->setCurrentTime(resumeTime);
+        // didStopBeingFullscreenElement only clears the in-transition flag; the
+        // element still believes it is fullscreen, which leaves the inline
+        // controls hidden after the player is dismissed. Take it out of
+        // fullscreen properly first.
+        element->exitFullscreen();
+        element->didStopBeingFullscreenElement();
+    }
+
+    if (currentFullscreenVideoPresenter() == self)
+        currentFullscreenVideoPresenter() = nullptr;
+}
+
+@end
+
+#endif
+
+bool WebChromeClient::supportsVideoFullscreen(WebCore::HTMLMediaElementEnums::VideoFullscreenMode mode)
+{
+#if PLATFORM(IOS_FAMILY) && defined(WEBKIT_IOS6) && ENABLE(VIDEO)
+    return mode == WebCore::HTMLMediaElementEnums::VideoFullscreenModeStandard;
+#elif !PLATFORM(IOS_FAMILY) || HAVE(AVKIT)
+    UNUSED_PARAM(mode);
     return true;
 #else
+    UNUSED_PARAM(mode);
     return false;
 #endif
 }
@@ -983,8 +1117,17 @@ void WebChromeClient::enterVideoFullscreenForVideoElement(WebCore::HTMLVideoElem
     BEGIN_BLOCK_OBJC_EXCEPTIONS
     if (m_mockVideoPresentationModeEnabled)
         videoElement.didBecomeFullscreenElement();
+#if PLATFORM(IOS_FAMILY) && defined(WEBKIT_IOS6) && ENABLE(VIDEO)
+    else {
+        UNUSED_PARAM(mode);
+        auto presenter = adoptNS([[RevFullscreenVideoPresenter alloc] initWithElement:videoElement]);
+        currentFullscreenVideoPresenter() = presenter;
+        [presenter present];
+    }
+#else
     else
         [m_webView _enterVideoFullscreenForVideoElement:&videoElement mode:mode];
+#endif
     END_BLOCK_OBJC_EXCEPTIONS
 }
 
@@ -993,8 +1136,13 @@ void WebChromeClient::exitVideoFullscreenForVideoElement(WebCore::HTMLVideoEleme
     BEGIN_BLOCK_OBJC_EXCEPTIONS
     if (m_mockVideoPresentationModeEnabled)
         videoElement.didStopBeingFullscreenElement();
+#if PLATFORM(IOS_FAMILY) && defined(WEBKIT_IOS6) && ENABLE(VIDEO)
+    else if (RetainPtr presenter = currentFullscreenVideoPresenter())
+        [presenter dismiss];
+#else
     else
         [m_webView _exitVideoFullscreen];
+#endif
     END_BLOCK_OBJC_EXCEPTIONS
     completionHandler(true);
 }

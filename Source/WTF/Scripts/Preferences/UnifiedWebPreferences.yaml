@@ -9529,11 +9529,11 @@ VideoFullscreenRequiresElementFullscreen:
   condition: ENABLE(FULLSCREEN_API)
   defaultValue:
     WebKitLegacy:
-      default: true
+      default: false
     WebKit:
       default: defaultVideoFullscreenRequiresElementFullscreen()
     WebCore:
-      default: true
+      default: false
   sharedPreferenceForWebProcess: true
 
 VideoPresentationManagerEnabled:
