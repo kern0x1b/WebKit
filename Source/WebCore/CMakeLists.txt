@@ -2664,6 +2664,7 @@ set(MODERN_MEDIA_CONTROLS_STYLE_SHEETS
     "${WEBCORE_DIR}/Modules/modern-media-controls/controls/slider.css"
     "${WEBCORE_DIR}/Modules/modern-media-controls/controls/status-label.css"
     "${WEBCORE_DIR}/Modules/modern-media-controls/controls/text-tracks.css"
+    "${WEBCORE_DIR}/Modules/modern-media-controls/controls/time-control.css"
     "${WEBCORE_DIR}/Modules/modern-media-controls/controls/time-label.css"
     "${WEBCORE_DIR}/Modules/modern-media-controls/controls/watchos-activity-indicator.css"
     "${WEBCORE_DIR}/Modules/modern-media-controls/controls/watchos-media-controls.css"

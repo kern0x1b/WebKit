@@ -20,7 +20,10 @@ target_compile_options(WebCore PRIVATE ${WEBKIT_PRIVATE_FRAMEWORKS_COMPILE_FLAG}
 
 # ios6: BrowserEngineKit is iOS 17. -weak_framework still requires the framework
 # to be found at link time; it only makes the runtime reference weak.
-find_library(BROWSERENGINEKIT_LIBRARY BrowserEngineKit)
+find_library(BROWSERENGINEKIT_LIBRARY BrowserEngineKit
+    PATHS "${CMAKE_OSX_SYSROOT}/System/Library/Frameworks"
+    NO_DEFAULT_PATH
+)
 if (BROWSERENGINEKIT_LIBRARY)
     target_link_options(WebCore PRIVATE -weak_framework BrowserEngineKit)
 endif ()
