@@ -152,29 +152,32 @@ bridge/objc/objc_class.mm @nonARC @no-unify-when(bundle<=8) @cost:5
 bridge/objc/objc_instance.mm @nonARC @no-unify-when(bundle<=8) @cost:4
 bridge/objc/objc_runtime.mm @nonARC @no-unify-when(bundle<=8) @cost:5
 bridge/objc/objc_utility.mm @nonARC @no-unify-when(bundle<=8) @cost:5
-crypto/cocoa/CommonCryptoDERUtilities.cpp
-crypto/cocoa/CryptoAlgorithmAESCBCCocoa.cpp
-crypto/cocoa/CryptoAlgorithmAESCFBCocoa.cpp
-crypto/cocoa/CryptoAlgorithmAESCTRCocoa.cpp
-crypto/cocoa/CryptoAlgorithmAESGCMCocoa.cpp
-crypto/cocoa/CryptoAlgorithmAESKWCocoa.cpp
-crypto/cocoa/CryptoAlgorithmECDHCocoa.cpp
-crypto/cocoa/CryptoAlgorithmECDSACocoa.cpp
-crypto/cocoa/CryptoAlgorithmEd25519Cocoa.cpp
-crypto/cocoa/CryptoAlgorithmHKDFCocoa.cpp
-crypto/cocoa/CryptoAlgorithmHMACCocoa.cpp
-crypto/cocoa/CryptoAlgorithmPBKDF2Cocoa.cpp
-crypto/cocoa/CryptoAlgorithmRSASSA_PKCS1_v1_5Cocoa.cpp
-crypto/cocoa/CryptoAlgorithmRSA_OAEPCocoa.cpp
-crypto/cocoa/CryptoAlgorithmRSA_PSSCocoa.cpp
-crypto/cocoa/CryptoAlgorithmRegistryCocoa.cpp
-crypto/cocoa/CryptoAlgorithmX25519Cocoa.cpp
-crypto/cocoa/CryptoKeyCocoa.cpp
-crypto/cocoa/CryptoKeyECCocoa.cpp
-crypto/cocoa/CryptoKeyOKPCocoa.cpp
-crypto/cocoa/CryptoKeyRSACocoa.cpp
-crypto/cocoa/CryptoUtilitiesCocoa.cpp
-crypto/cocoa/SerializedCryptoKeyWrapCocoa.mm @nonARC
+// ios6: The Cocoa Web Crypto backend performs its operations in CryptoKit, whose
+// ios6: Swift has no armv7 target. WebKit's own OpenSSL backend is built instead -
+// ios6: see platform/OpenSSL.cmake and USE_OPENSSL in Source/cmake/OptionsCocoa.cmake.
+// ios6: crypto/cocoa/CommonCryptoDERUtilities.cpp
+// ios6: crypto/cocoa/CryptoAlgorithmAESCBCCocoa.cpp
+// ios6: crypto/cocoa/CryptoAlgorithmAESCFBCocoa.cpp
+// ios6: crypto/cocoa/CryptoAlgorithmAESCTRCocoa.cpp
+// ios6: crypto/cocoa/CryptoAlgorithmAESGCMCocoa.cpp
+// ios6: crypto/cocoa/CryptoAlgorithmAESKWCocoa.cpp
+// ios6: crypto/cocoa/CryptoAlgorithmECDHCocoa.cpp
+// ios6: crypto/cocoa/CryptoAlgorithmECDSACocoa.cpp
+// ios6: crypto/cocoa/CryptoAlgorithmEd25519Cocoa.cpp
+// ios6: crypto/cocoa/CryptoAlgorithmHKDFCocoa.cpp
+// ios6: crypto/cocoa/CryptoAlgorithmHMACCocoa.cpp
+// ios6: crypto/cocoa/CryptoAlgorithmPBKDF2Cocoa.cpp
+// ios6: crypto/cocoa/CryptoAlgorithmRSASSA_PKCS1_v1_5Cocoa.cpp
+// ios6: crypto/cocoa/CryptoAlgorithmRSA_OAEPCocoa.cpp
+// ios6: crypto/cocoa/CryptoAlgorithmRSA_PSSCocoa.cpp
+// ios6: crypto/cocoa/CryptoAlgorithmRegistryCocoa.cpp
+// ios6: crypto/cocoa/CryptoAlgorithmX25519Cocoa.cpp
+// ios6: crypto/cocoa/CryptoKeyCocoa.cpp
+// ios6: crypto/cocoa/CryptoKeyECCocoa.cpp
+// ios6: crypto/cocoa/CryptoKeyOKPCocoa.cpp
+// ios6: crypto/cocoa/CryptoKeyRSACocoa.cpp
+// ios6: crypto/cocoa/CryptoUtilitiesCocoa.cpp
+// ios6: crypto/cocoa/SerializedCryptoKeyWrapCocoa.mm @nonARC
 crypto/CommonCryptoUtilities.cpp
 dom/DataTransferMac.mm @nonARC
 dom/ios/TouchEvents.cpp

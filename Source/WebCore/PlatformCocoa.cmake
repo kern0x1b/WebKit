@@ -9,6 +9,18 @@ if (CMAKE_SYSTEM_NAME STREQUAL "iOS")
     )
 endif ()
 
+if (USE_OPENSSL)
+    include(platform/OpenSSL.cmake)
+    # The headers sit beside the library the port passes in, so the path is
+    # derived from it rather than written here.
+    get_filename_component(IOS6_OPENSSL_LIB_DIR "${WEBKIT_IOS6_CRYPTO_LIB}" DIRECTORY)
+    get_filename_component(IOS6_OPENSSL_ROOT "${IOS6_OPENSSL_LIB_DIR}" DIRECTORY)
+    list(APPEND WebCore_PRIVATE_INCLUDE_DIRECTORIES
+        "${WEBCORE_DIR}/crypto/openssl"
+        "${IOS6_OPENSSL_ROOT}/include"
+    )
+endif ()
+
 make_directory("${CMAKE_BINARY_DIR}/WebCore/Modules")
 configure_file(${WEBCORE_DIR}/WebCore.modulemap ${CMAKE_BINARY_DIR}/WebCore/Modules/module.modulemap COPYONLY)
 configure_file(${WEBCORE_DIR}/WebCore_Private.modulemap ${CMAKE_BINARY_DIR}/WebCore/Modules/module.private.modulemap COPYONLY)

@@ -206,6 +206,17 @@ if (WEBKIT_IOS6_COMPAT_LIB)
     # shared cache, so opt out rather than drop the -U that _objc_msgSend_stret needs.
 endif ()
 
+# iOS 6 has no Swift runtime and therefore no CryptoKit, which is where the Cocoa
+# Web Crypto backend performs AES-GCM, AES-KW, HKDF, HMAC and every curve
+# algorithm. WebKit carries a complete OpenSSL backend for the ports that have no
+# CryptoKit either, and this port already builds OpenSSL 3.0 for its TLS - the
+# version that backend targets. Using it is what makes Web Crypto real here, and
+# it brings ECDSA, ECDH, RSA, PBKDF2 and the remaining AES modes with it.
+if (WEBKIT_IOS6_CRYPTO_LIB)
+    SET_AND_EXPOSE_TO_BUILD(USE_OPENSSL ON)
+    link_libraries(${WEBKIT_IOS6_CRYPTO_LIB})
+endif ()
+
 # iOS 6 ships a 2012 libc++ with no std::filesystem and no C++17 runtime,
 # so every binary links the one built alongside this port.
 if (WEBKIT_IOS6_LIBCXX_DIR)

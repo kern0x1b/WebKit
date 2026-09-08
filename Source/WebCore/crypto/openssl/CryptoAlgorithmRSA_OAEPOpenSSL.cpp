@@ -36,7 +36,11 @@ namespace WebCore {
 
 ExceptionOr<Vector<uint8_t>> CryptoAlgorithmRSA_OAEP::platformEncrypt(const CryptoAlgorithmRsaOaepParams& parameters, const CryptoKeyRSA& key, const Vector<uint8_t>& plainText)
 {
-#if defined(EVP_PKEY_CTX_set_rsa_oaep_md) && defined(EVP_PKEY_CTX_set_rsa_mgf1_md) && defined(EVP_PKEY_CTX_set0_rsa_oaep_label)
+/* These three were macros in OpenSSL 1.1.1, so a defined() test found them. In
+   3.0 they are ordinary functions and the test fails, which reported RSA-OAEP as
+   NotSupportedError on a library that implements it. Accept either shape. */
+#if OPENSSL_VERSION_NUMBER >= 0x30000000L \
+    || (defined(EVP_PKEY_CTX_set_rsa_oaep_md) && defined(EVP_PKEY_CTX_set_rsa_mgf1_md) && defined(EVP_PKEY_CTX_set0_rsa_oaep_label))
     const EVP_MD* md = digestAlgorithm(key.hashAlgorithmIdentifier());
     if (!md)
         return Exception { ExceptionCode::NotSupportedError };
@@ -85,7 +89,11 @@ ExceptionOr<Vector<uint8_t>> CryptoAlgorithmRSA_OAEP::platformEncrypt(const Cryp
 
 ExceptionOr<Vector<uint8_t>> CryptoAlgorithmRSA_OAEP::platformDecrypt(const CryptoAlgorithmRsaOaepParams& parameters, const CryptoKeyRSA& key, const Vector<uint8_t>& cipherText)
 {
-#if defined(EVP_PKEY_CTX_set_rsa_oaep_md) && defined(EVP_PKEY_CTX_set_rsa_mgf1_md) && defined(EVP_PKEY_CTX_set0_rsa_oaep_label)
+/* These three were macros in OpenSSL 1.1.1, so a defined() test found them. In
+   3.0 they are ordinary functions and the test fails, which reported RSA-OAEP as
+   NotSupportedError on a library that implements it. Accept either shape. */
+#if OPENSSL_VERSION_NUMBER >= 0x30000000L \
+    || (defined(EVP_PKEY_CTX_set_rsa_oaep_md) && defined(EVP_PKEY_CTX_set_rsa_mgf1_md) && defined(EVP_PKEY_CTX_set0_rsa_oaep_label))
     const EVP_MD* md = digestAlgorithm(key.hashAlgorithmIdentifier());
     if (!md)
         return Exception { ExceptionCode::NotSupportedError };

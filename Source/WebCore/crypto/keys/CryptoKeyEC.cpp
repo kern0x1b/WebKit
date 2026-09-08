@@ -31,7 +31,12 @@
 #include "JsonWebKey.h"
 #include <wtf/text/Base64.h>
 
-#if OS(DARWIN) && !PLATFORM(GTK)
+/* The three backend blocks below are meant to be exclusive, but only GCrypt and
+   OpenSSL were ever asked for by a non-Darwin port, so this one was not written
+   to stand aside for them. This port is Darwin and uses the OpenSSL backend,
+   because the Darwin one performs its work in CryptoKit and there is no Swift
+   runtime here. */
+#if OS(DARWIN) && !PLATFORM(GTK) && !USE(OPENSSL)
 #include <pal/crypto/CryptoTypes.h>
 #include <pal/crypto/PlatformECKey.h>
 #endif

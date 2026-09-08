@@ -67,7 +67,7 @@ cocoa/WebContentRestrictionsSoftLink.mm @nonARC
 cocoa/WebPrivacySoftLink.mm @nonARC
 cocoa/WritingToolsUISoftLink.mm @nonARC
 
-crypto/PALCryptoUnavailableIOS6.cpp
+// ios6: crypto/PALCryptoUnavailableIOS6.cpp — replaced by WebKit's OpenSSL crypto backend
 // ios6: crypto/CryptoAlgorithmAESGCMCocoa.cpp
 // ios6: crypto/CryptoAlgorithmAESKWCocoaBridging.cpp
 // ios6: crypto/CryptoAlgorithmEd25519CocoaBridging.cpp

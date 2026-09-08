@@ -76,7 +76,10 @@ WebCoreOpaqueRoot root(CryptoKey* key)
     return WebCoreOpaqueRoot { key };
 }
 
-#if !OS(DARWIN) || PLATFORM(GTK)
+/* The Darwin half of this lives in crypto/cocoa/CryptoKeyCocoa.cpp, which this
+   port does not build: its Web Crypto comes from WebKit's OpenSSL backend. The
+   generic version below is what every OpenSSL port uses. */
+#if !OS(DARWIN) || PLATFORM(GTK) || USE(OPENSSL)
 Vector<uint8_t> CryptoKey::randomData(size_t size)
 {
     Vector<uint8_t> result(size);
