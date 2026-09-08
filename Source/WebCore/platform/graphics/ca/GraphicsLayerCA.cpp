@@ -109,10 +109,26 @@ static const int cMaxPixelDimension = 2048;
 static const unsigned cMaxLayerTreeDepth = 128;
 
 // About 10 screens of an iPhone 6 Plus. <rdar://problem/44532782>
+#if defined(WEBKIT_IOS6)
+// The areas this is compared against come from borderBoxRect(), which is in CSS
+// pixels, while the constant above counts device pixels of a 3x phone. On this
+// screen, 320x480 in CSS pixels, that budget is around 178 screenfuls rather
+// than the ten it reads as. Ten screens of this display is the intended amount.
+static const unsigned cMaxTotalBackdropFilterArea = 320 * 480 * 10;
+#else
 static const unsigned cMaxTotalBackdropFilterArea = 1242 * 2208 * 10;
+#endif
 
 // Don't let a single tiled layer use more than 156MB of memory. On a 3x display with RGB10A8 surfaces, this is about 12 tiles.
+#if defined(WEBKIT_IOS6)
+// 156 MB is more than half the memory this device has, and the process is killed
+// at 282 MB, so as a ceiling on one layer it never fires before something worse
+// does. Twelve tiles of this 2x display at four bytes a pixel is the same
+// intent, and lands near 12 MB.
+static const unsigned cMaxScaledTiledLayerMemorySize = 1024 * 1024 * 12;
+#else
 static const unsigned cMaxScaledTiledLayerMemorySize = 1024 * 1024 * 156;
+#endif
 
 // If we send a duration of 0 to CA, then it will use the default duration
 // of 250ms. So send a very small value instead.
