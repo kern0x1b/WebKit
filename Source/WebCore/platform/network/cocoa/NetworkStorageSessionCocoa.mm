@@ -201,6 +201,19 @@ void NetworkStorageSession::setAllCookiesToSameSiteStrict(const RegistrableDomai
 // other path on this port already ends up using, so hand that back rather than
 // raising an exception WebKit will swallow and leave the caller having done
 // nothing.
+#if defined(WEBKIT_IOS6)
+// This release has the plain reader but not the newer variant that also takes a
+// main document URL, so it is declared here rather than in the shared SPI header.
+extern "C" CFArrayRef CFHTTPCookieStorageCopyCookiesForURL(CFHTTPCookieStorageRef, CFURLRef, Boolean sendSecureCookies);
+
+// True when the session was given a jar of its own - private browsing - rather
+// than the one jar this CFNetwork shares with the rest of the system.
+static bool isSessionOwnedStorage(CFHTTPCookieStorageRef storage)
+{
+    return storage && storage != _CFHTTPCookieStorageGetDefault(kCFAllocatorDefault);
+}
+#endif
+
 static RetainPtr<NSHTTPCookieStorage> wrapCookieStorage(CFHTTPCookieStorageRef storage)
 {
 #if defined(WEBKIT_IOS6)
@@ -392,10 +405,16 @@ void NetworkStorageSession::setHTTPCookiesForURL(CFHTTPCookieStorageRef cookieSt
     // write raised, WebKit swallowed the exception, and document.cookie silently
     // did nothing - which is most of what makes a wrapped site fail to stay
     // logged in.
-    UNUSED_PARAM(cookieStorage);
     UNUSED_PARAM(partition);
     UNUSED_PARAM(sameSiteInfo);
     UNUSED_PARAM(thirdPartyCookieBlockingDecision);
+    if (isSessionOwnedStorage(cookieStorage)) {
+        // A private session has a jar of its own. Writing through the shared
+        // NSHTTPCookieStorage would put its cookies in the persistent jar, where
+        // they would outlive the session and be visible to ordinary browsing.
+        CFHTTPCookieStorageSetCookies(cookieStorage, (__bridge CFArrayRef)cookies, (__bridge CFURLRef)url, (__bridge CFURLRef)mainDocumentURL);
+        return;
+    }
     [[NSHTTPCookieStorage sharedHTTPCookieStorage] setCookies:cookies forURL:url mainDocumentURL:mainDocumentURL];
 #else
     if (!cookieStorage) {
@@ -417,6 +436,16 @@ RetainPtr<NSArray> NetworkStorageSession::httpCookiesForURL(CFHTTPCookieStorageR
         RELEASE_ASSERT(!m_isInMemoryCookieStore);
         cookieStorage = _CFHTTPCookieStorageGetDefault(kCFAllocatorDefault);
     }
+
+#if defined(WEBKIT_IOS6)
+    if (isSessionOwnedStorage(cookieStorage)) {
+        // Read the session's own jar, for the same reason the write path does:
+        // wrapCookieStorage() hands back the shared jar here, so a private
+        // session would otherwise read everyone else's cookies.
+        RetainPtr cookies = adoptCF(CFHTTPCookieStorageCopyCookiesForURL(cookieStorage, (__bridge CFURLRef)url, true));
+        return (__bridge NSArray *)cookies.get();
+    }
+#endif
 
     // FIXME: Stop creating a new NSHTTPCookieStorage object each time we want to query the cookie jar.
     // NetworkStorageSession could instead keep a NSHTTPCookieStorage object for us.
