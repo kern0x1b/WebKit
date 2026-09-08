@@ -209,7 +209,18 @@ private:
     MediaPlayer::NetworkState networkState() const final { return m_networkState; }
     MediaPlayer::ReadyState readyState() const final { return m_readyState; }
 
-    const PlatformTimeRanges& buffered() const final { return PlatformTimeRanges::emptyRanges(); }
+    const PlatformTimeRanges& buffered() const final
+    {
+        m_buffered.clear();
+        if (m_item) {
+            for (NSValue *value in [m_item.get() loadedTimeRanges]) {
+                CMTimeRange range = [value CMTimeRangeValue];
+                if (CMTIMERANGE_IS_VALID(range))
+                    m_buffered.add(PAL::toMediaTime(range.start), PAL::toMediaTime(CMTimeRangeGetEnd(range)));
+            }
+        }
+        return m_buffered;
+    }
     bool didLoadingProgress() const final { bool p = m_didProgress; m_didProgress = false; return p; }
 
     PlatformLayer* platformLayer() const final
@@ -263,6 +274,7 @@ private:
     bool m_visible { false };
     bool m_durationKnown { false };
     mutable bool m_didProgress { false };
+    mutable PlatformTimeRanges m_buffered;
 };
 
 class RevAVFPlayerFactory final : public MediaPlayerFactory {
