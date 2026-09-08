@@ -918,7 +918,13 @@
 
 #if PLATFORM(COCOA)
 #define HAVE_CORE_TEXT_SBIX_IMAGE_SIZE_FUNCTIONS 1
+// This says the system font parser understands WOFF itself, so WebKit compiles
+// its own converter out. That holds from iOS 7 onward; the parser on this
+// release rejects a WOFF file outright, which left every WOFF web font failing
+// to load. Turning it off restores the converter that WebKit still carries.
+#if !defined(WEBKIT_IOS6)
 #define HAVE_WOFF_SUPPORT 1
+#endif
 #endif
 
 #if PLATFORM(MAC) || PLATFORM(IOS) || PLATFORM(MACCATALYST) || PLATFORM(VISION)
