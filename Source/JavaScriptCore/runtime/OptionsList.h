@@ -442,15 +442,15 @@ bool hasCapacityToUseLargeGigacage();
     v(Unsigned, minNumberOfWorklistThreads, WEBKIT_IOS6_WORKLIST_THREADS, Normal, nullptr) \
     v(Unsigned, maxNumberOfWorklistThreads, WEBKIT_IOS6_WORKLIST_THREADS, Normal, nullptr) \
     v(Unsigned, numberOfBaselineCompilerThreads, computeNumberOfWorkerThreads(3, 2), Normal, nullptr) \
-    /* One thread on this device, since the Darwin thread tuning in Options.cpp is
-       gated on CPU(ARM64) and does not compile for armv7. That gate looked accidental
-       - the reasoning there is about core counts, and on two cores it would ask for
-       two DFG threads - so it was measured. Two threads is worse: over SoundCloud,
-       The Verge and Hacker News the mean age of a plan waiting in the queue rose from
-       267ms to 330ms, and the number waiting longer than half a second went from 82
-       to 195. With two cores and a busy main thread, a second compiler takes the time
-       the first one needed. Left at one; this matches the earlier finding that
-       reordering the same queue also hurts. */
+    /* One thread on this device, since the Darwin thread tuning in Options.cpp is \
+       gated on CPU(ARM64) and does not compile for armv7. That gate looked accidental \
+       - the reasoning there is about core counts, and on two cores it would ask for \
+       two DFG threads - so it was measured. Two threads is worse: over SoundCloud, \
+       The Verge and Hacker News the mean age of a plan waiting in the queue rose from \
+       267ms to 330ms, and the number waiting longer than half a second went from 82 \
+       to 195. With two cores and a busy main thread, a second compiler takes the time \
+       the first one needed. Left at one; this matches the earlier finding that \
+       reordering the same queue also hurts. */ \
     v(Unsigned, numberOfDFGCompilerThreads, computeNumberOfWorkerThreads(3, 2) - 1, Normal, nullptr) \
     v(Unsigned, numberOfFTLCompilerThreads, computeNumberOfWorkerThreads(MAXIMUM_NUMBER_OF_FTL_COMPILER_THREADS, 2) - 1, Normal, nullptr) \
     v(Unsigned, numberOfWasmCompilerThreads, computeNumberOfWorkerThreads(INT32_MAX, 2) - 1, Normal, nullptr) \
@@ -471,13 +471,13 @@ bool hasCapacityToUseLargeGigacage();
     \
     v(Bool, breakOnThrow, false, Normal, nullptr) \
     \
-    /* Upstream lowers this to 42403 for 32-bit ARM, in a Linux-gated block whose
-       reasoning is about the architecture rather than the operating system, so it
-       looked like it should apply here too. Measured with WEBKIT_IOS6_OPT_CEILING_LOG
-       (see JIT.cpp) at the lower value across SoundCloud, The Verge, Google and Hacker
-       News: 1629 DFG dispatches, refusedForCost=0. Not one code block on the real web
-       is anywhere near either ceiling, so neither value changes anything. Left at the
-       upstream default; do not spend time on it again. */
+    /* Upstream lowers this to 42403 for 32-bit ARM, in a Linux-gated block whose \
+       reasoning is about the architecture rather than the operating system, so it \
+       looked like it should apply here too. Measured with WEBKIT_IOS6_OPT_CEILING_LOG \
+       (see JIT.cpp) at the lower value across SoundCloud, The Verge, Google and Hacker \
+       News: 1629 DFG dispatches, refusedForCost=0. Not one code block on the real web \
+       is anywhere near either ceiling, so neither value changes anything. Left at the \
+       upstream default; do not spend time on it again. */ \
     v(Unsigned, maximumOptimizationCandidateBytecodeCost, 100000, Normal, nullptr) \
     \
     v(Unsigned, maximumFunctionForCallInlineCandidateBytecodeCostForDFG, 80, Normal, nullptr) \
