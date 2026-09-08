@@ -1041,13 +1041,20 @@ bool WebChromeClient::supportsFullScreenForElement(const WebCore::Element& eleme
         return CallUIDelegateReturningBoolean(false, m_webView, selector, kit(const_cast<WebCore::Element*>(&element)), withKeyboard);
 #if !PLATFORM(IOS_FAMILY)
     return [m_webView _supportsFullScreenForElement:const_cast<WebCore::Element*>(&element) withKeyboard:withKeyboard];
+#elif defined(WEBKIT_IOS6)
+    // There is no UI delegate to ask on this platform: the host application is not
+    // a WebKitLegacy client. Element fullscreen needs nothing from the embedder
+    // beyond permission and the completion callbacks, because WebCore's own
+    // fullscreen renderer expands the element to fill the view.
+    UNUSED_PARAM(element);
+    return !withKeyboard;
 #else
     return NO;
 #endif
 }
 
 // FIXME: Remove this when rdar://144645925 is resolved.
-void WebChromeClient::enterFullScreenForElement(WebCore::Element& element, WebCore::HTMLMediaElementEnums::VideoFullscreenMode, CompletionHandler<void(WebCore::ExceptionOr<void>)>&& willEnterFullscreen, CompletionHandler<bool(bool)>&& didEnterFullscreen)
+void WebChromeClient::enterFullScreenForElement(WebCore::Element& element, WebCore::HTMLMediaElementEnums::VideoFullscreenMode mode, CompletionHandler<void(WebCore::ExceptionOr<void>)>&& willEnterFullscreen, CompletionHandler<bool(bool)>&& didEnterFullscreen)
 {
     SEL selector = @selector(webView:enterFullScreenForElement:listener:);
     if ([[m_webView UIDelegate] respondsToSelector:selector]) {
@@ -1061,6 +1068,20 @@ void WebChromeClient::enterFullScreenForElement(WebCore::Element& element, WebCo
         [m_webView _enterFullScreenForElement:&element willEnterFullscreen:WTF::move(willEnterFullscreen) didEnterFullscreen:[didEnterFullscreen = WTF::move(didEnterFullscreen)] (bool result) mutable {
             didEnterFullscreen(result);
         }];
+#elif defined(WEBKIT_IOS6)
+    else {
+        // Drive the sequence the embedder is responsible for: tell WebCore to
+        // install the fullscreen element, hand its result to the request's
+        // completion handler, then report that the presentation is up. WebCore's
+        // fullscreen renderer expands the element to fill the view from there.
+        callOnMainThread([element = Ref { element }, mode, willEnterFullscreen = WTF::move(willEnterFullscreen), didEnterFullscreen = WTF::move(didEnterFullscreen)] () mutable {
+            Ref fullscreen = element->document().fullscreen();
+            auto result = fullscreen->willEnterFullscreen(element.get(), mode);
+            bool succeeded = !result.hasException();
+            willEnterFullscreen(WTF::move(result));
+            didEnterFullscreen(succeeded);
+        });
+    }
 #endif
 }
 
@@ -1076,6 +1097,17 @@ void WebChromeClient::exitFullScreenForElement(WebCore::Element* element, Comple
 #if !PLATFORM(IOS_FAMILY)
     else
         [m_webView _exitFullScreenForElement:element completionHandler:WTF::move(completionHandler)];
+#elif defined(WEBKIT_IOS6)
+    else {
+        callOnMainThread([element = RefPtr { element }, completionHandler = WTF::move(completionHandler)] () mutable {
+            if (element) {
+                Ref fullscreen = element->document().fullscreen();
+                if (fullscreen->willExitFullscreen())
+                    fullscreen->didExitFullscreen([] (auto) { });
+            }
+            completionHandler();
+        });
+    }
 #endif
 }
 
