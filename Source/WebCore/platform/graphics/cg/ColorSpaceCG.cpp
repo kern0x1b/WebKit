@@ -132,28 +132,15 @@ CGColorSpaceRef linearDisplayP3ColorSpaceSingleton()
 CGColorSpaceRef linearSRGBColorSpaceSingleton()
 {
 #if defined(WEBKIT_IOS6)
-    // Every named space falls back to device RGB on this CoreGraphics, which is
-    // gamma encoded. Handing that back here would be wrong rather than merely
-    // approximate: linearRGB is the colour space SVG filters interpolate in by
-    // default, so every filter would be computed on gamma encoded pixels.
-    // A calibrated space with a gamma of one and the sRGB primaries is genuinely
-    // linear and can be built on this release.
-    static LazyNeverDestroyed<RetainPtr<CGColorSpaceRef>> colorSpace;
-    static std::once_flag onceFlag;
-    std::call_once(onceFlag, [] {
-        const CGFloat whitePoint[3] = { 0.9505, 1.0, 1.089 }; // D65
-        const CGFloat blackPoint[3] = { 0, 0, 0 };
-        const CGFloat gamma[3] = { 1, 1, 1 };
-        const CGFloat matrix[9] = {
-            0.4124, 0.2126, 0.0193,
-            0.3576, 0.7152, 0.1192,
-            0.1805, 0.0722, 0.9505
-        };
-        colorSpace.construct(adoptCF(CGColorSpaceCreateCalibratedRGB(whitePoint, blackPoint, gamma, matrix)));
-        if (!colorSpace.get())
-            colorSpace.construct(adoptCF(CGColorSpaceCreateDeviceRGB()));
-    });
-    return colorSpace.get().get();
+    // This CoreGraphics has no colour management: it matches between spaces by
+    // their primaries and ignores their transfer function. A calibrated space
+    // with a gamma of one was tried here and measured on device - it did not
+    // linearise anything (a saturate filter gave the same 92 grey in linearRGB
+    // as in sRGB, where linear light asks for 110), while its primaries did
+    // shift colour, so an identity colour matrix turned 192,64,64 into
+    // 171,76,66. A filter that changes nothing must change nothing, so this
+    // hands back the one RGB space the system really has.
+    return sRGBColorSpaceSingleton();
 #else
     return namedColorSpace<kCGColorSpaceLinearSRGB>();
 #endif
