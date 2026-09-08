@@ -122,9 +122,14 @@ IntSize BitmapImageDescriptor::sourceSize(ImageOrientation orientation) const
 {
     IntSize size;
 
-#if !USE(CG)
+#if !USE(CG) || defined(WEBKIT_IOS6)
     // It's possible that we have decoded the metadata, but not frame contents yet. In that case ImageDecoder claims to
     // have the size available, but the frame cache is empty. Return the decoder size without caching in such case.
+    //
+    // This guard is needed here as well, not only off CG. Asking for the primary
+    // frame in that state re-enters through primaryFrameIndex() and back into
+    // size(), and the recursion runs until the stack is gone: image-heavy pages
+    // crashed with two identical frames at the top of the trace.
     RefPtr decoder = m_source->decoderIfExists();
     if (decoder && m_source->frames().isEmpty())
         size = decoder->size();

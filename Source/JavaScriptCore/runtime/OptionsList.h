@@ -119,6 +119,12 @@
 // so the same fractions of a much smaller budget.
 #if CPU(ARM_THUMB2)
 #define WEBKIT_IOS6_LARGE_HEAP_SIZE (4 * 1024 * 1024)
+// The medium and small floors were left at upstream's 4 MB and 1 MB, so a worker
+// VM was handed the same never-collect-below floor as the whole page, and unlike
+// Large those two are not clamped against RAM at all. In 2012 the ratio between
+// the page's heap and a worker's was sixteen to one; keep that shape.
+#define WEBKIT_IOS6_MEDIUM_HEAP_SIZE (1024 * 1024)
+#define WEBKIT_IOS6_SMALL_HEAP_SIZE (512 * 1024)
 #define WEBKIT_IOS6_SMALL_HEAP_RAM_FRACTION 0.08
 #define WEBKIT_IOS6_MEDIUM_HEAP_RAM_FRACTION 0.2
 #define WEBKIT_IOS6_SMALL_HEAP_GROWTH_FACTOR 1.25
@@ -127,6 +133,8 @@
 #define WEBKIT_IOS6_MAX_REGEXP_STACK_SIZE (16 * 1024 * 1024)
 #else
 #define WEBKIT_IOS6_LARGE_HEAP_SIZE (2 * 1024 * 1024)
+#define WEBKIT_IOS6_MEDIUM_HEAP_SIZE (512 * 1024)
+#define WEBKIT_IOS6_SMALL_HEAP_SIZE (256 * 1024)
 #define WEBKIT_IOS6_SMALL_HEAP_RAM_FRACTION 0.04
 #define WEBKIT_IOS6_MEDIUM_HEAP_RAM_FRACTION 0.10
 #define WEBKIT_IOS6_SMALL_HEAP_GROWTH_FACTOR 1.20
@@ -136,6 +144,8 @@
 #endif
 #else
 #define WEBKIT_IOS6_LARGE_HEAP_SIZE (32 * 1024 * 1024)
+#define WEBKIT_IOS6_MEDIUM_HEAP_SIZE (4 * 1024 * 1024)
+#define WEBKIT_IOS6_SMALL_HEAP_SIZE (1024 * 1024)
 #define WEBKIT_IOS6_SMALL_HEAP_RAM_FRACTION 0.25
 #define WEBKIT_IOS6_MEDIUM_HEAP_RAM_FRACTION 0.5
 #define WEBKIT_IOS6_SMALL_HEAP_GROWTH_FACTOR 2
@@ -356,8 +366,8 @@ bool hasCapacityToUseLargeGigacage();
     v(Bool, optimizeParallelSlotVisitorsForStoppedMutator, false, Normal, nullptr) \
     v(Bool, verboseHeapSnapshotLogging, true, Normal, nullptr) \
     v(Unsigned, largeHeapSize, WEBKIT_IOS6_LARGE_HEAP_SIZE, Normal, nullptr) \
-    v(Unsigned, mediumHeapSize, 4 * 1024 * 1024, Normal, nullptr) \
-    v(Unsigned, smallHeapSize, 1 * 1024 * 1024, Normal, nullptr) \
+    v(Unsigned, mediumHeapSize, WEBKIT_IOS6_MEDIUM_HEAP_SIZE, Normal, nullptr) \
+    v(Unsigned, smallHeapSize, WEBKIT_IOS6_SMALL_HEAP_SIZE, Normal, nullptr) \
     v(Double, smallHeapRAMFraction, WEBKIT_IOS6_SMALL_HEAP_RAM_FRACTION, Normal, nullptr) \
     v(Double, smallHeapGrowthFactor, WEBKIT_IOS6_SMALL_HEAP_GROWTH_FACTOR, Normal, nullptr) \
     v(Double, mediumHeapRAMFraction, WEBKIT_IOS6_MEDIUM_HEAP_RAM_FRACTION, Normal, nullptr) \
