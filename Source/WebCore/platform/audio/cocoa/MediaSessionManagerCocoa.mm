@@ -74,6 +74,17 @@ do { \
 } while (0)
 #endif
 
+
+#if defined(WEBKIT_IOS6)
+
+// Declared locally: this SDK does not carry the class as a weakly linked symbol,
+// so it is looked up at runtime.
+@protocol RevNowPlayingInfoCentre <NSObject>
+- (void)setNowPlayingInfo:(NSDictionary *)info;
+@end
+
+#endif
+
 namespace WebCore {
 
 WTF_MAKE_TZONE_ALLOCATED_IMPL(MediaSessionManagerCocoa);
@@ -431,8 +442,52 @@ void MediaSessionManagerCocoa::clearNowPlayingInfo()
 #endif
 }
 
+
+#if defined(WEBKIT_IOS6)
+
+static void publishNowPlayingInfoToNowPlayingCentre(const WebCore::NowPlayingInfo& nowPlayingInfo)
+{
+    Class centreClass = NSClassFromString(@"MPNowPlayingInfoCenter");
+    if (!centreClass)
+        return;
+
+    id<RevNowPlayingInfoCentre> centre = [centreClass performSelector:@selector(defaultCenter)];
+    if (!centre)
+        return;
+
+    RetainPtr info = adoptNS([[NSMutableDictionary alloc] init]);
+    auto setString = [&] (NSString *key, const String& value) {
+        if (!value.isEmpty())
+            [info.get() setObject:value.createNSString().get() forKey:key];
+    };
+    setString(@"MPMediaItemPropertyTitle", nowPlayingInfo.metadata.title);
+    setString(@"MPMediaItemPropertyArtist", nowPlayingInfo.metadata.artist);
+    setString(@"MPMediaItemPropertyAlbumTitle", nowPlayingInfo.metadata.album);
+
+    if (std::isfinite(nowPlayingInfo.duration))
+        [info.get() setObject:@(nowPlayingInfo.duration) forKey:@"MPMediaItemPropertyPlaybackDuration"];
+    if (std::isfinite(nowPlayingInfo.currentTime))
+        [info.get() setObject:@(nowPlayingInfo.currentTime) forKey:@"MPNowPlayingInfoPropertyElapsedPlaybackTime"];
+    [info.get() setObject:@(nowPlayingInfo.isPlaying ? nowPlayingInfo.rate : 0) forKey:@"MPNowPlayingInfoPropertyPlaybackRate"];
+
+    [centre setNowPlayingInfo:info.get()];
+}
+
+#endif
+
 void MediaSessionManagerCocoa::setNowPlayingInfo(bool setAsNowPlayingApplication, bool shouldUpdateNowPlayingSuppression, const NowPlayingInfo& nowPlayingInfo)
 {
+#if defined(WEBKIT_IOS6)
+    // MediaRemote is absent on this system, so the modern publisher below never
+    // runs and nothing ever describes what is playing. The now playing centre in
+    // MediaPlayer is the interface this platform offers for that, and it is what
+    // fills the lock screen and the multitasking transport view.
+    UNUSED_PARAM(setAsNowPlayingApplication);
+    UNUSED_PARAM(shouldUpdateNowPlayingSuppression);
+    publishNowPlayingInfoToNowPlayingCentre(nowPlayingInfo);
+    return;
+#endif
+
     if (!isMediaRemoteFrameworkAvailable())
         return;
 
