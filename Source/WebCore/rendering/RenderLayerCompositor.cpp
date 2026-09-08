@@ -688,7 +688,15 @@ void RenderLayerCompositor::cacheAcceleratedCompositingFlagsAfterLayout()
         return false;
     };
 
+#if defined(WEBKIT_IOS6)
+    // forceCompositingMode is an embedder setting WebKitLegacy never sets, so a
+    // scrollable frame stayed uncomposited and had no layer to hand over. Its
+    // own condition is enough on its own: a frame is composited here because it
+    // scrolls, which is the only reason this port asks.
+    bool forceCompositingMode = m_hasAcceleratedCompositing && frameContentRequiresCompositing();
+#else
     bool forceCompositingMode = m_hasAcceleratedCompositing && m_renderView.settings().forceCompositingMode() && frameContentRequiresCompositing();
+#endif
     if (forceCompositingMode != m_forceCompositingMode) {
         m_forceCompositingMode = forceCompositingMode;
         rootRenderLayer().setDescendantsNeedCompositingRequirementsTraversal();
@@ -904,7 +912,43 @@ void RenderLayerCompositor::updateScrollCoordinatedLayersAfterFlush()
         m_legacyScrollingLayerCoordinator->registerAllViewportConstrainedLayers(*this);
         m_legacyScrollingLayerCoordinator->registerAllScrollingLayers();
     }
+#if defined(WEBKIT_IOS6)
+    updateFrameScrollingLayerForEmbedder();
+#endif
 }
+
+#if defined(WEBKIT_IOS6)
+// A subframe scrolls its own document, which is not a RenderLayer and so never
+// reaches the scrolling layer coordinator above. The embedder's contract does not
+// care about the difference: it wants a container layer, a contents layer, a
+// content size and a node to report back against, and a frame has all four, its
+// node being the element that owns it.
+void RenderLayerCompositor::updateFrameScrollingLayerForEmbedder()
+{
+    auto& frameView = m_renderView.frameView();
+    RefPtr ownerElement = frameView.frame().ownerElement();
+    if (!ownerElement || !m_scrollContainerLayer || !m_scrolledContentsLayer)
+        return;
+
+    auto contentsSize = frameView.totalContentsSize();
+    auto visibleSize = frameView.visibleContentRect().size();
+    bool scrolls = contentsSize.height() > visibleSize.height() || contentsSize.width() > visibleSize.width();
+
+    if (!scrolls) {
+        if (m_registeredFrameScrollingLayerWithEmbedder) {
+            m_registeredFrameScrollingLayerWithEmbedder = false;
+            page().chrome().client().removeScrollingLayer(ownerElement.get(),
+                m_scrollContainerLayer->platformLayer(), m_scrolledContentsLayer->platformLayer());
+        }
+        return;
+    }
+
+    m_registeredFrameScrollingLayerWithEmbedder = true;
+    page().chrome().client().addOrUpdateScrollingLayer(ownerElement.get(),
+        m_scrollContainerLayer->platformLayer(), m_scrolledContentsLayer->platformLayer(),
+        contentsSize, true, true);
+}
+#endif
 #endif
 
 void RenderLayerCompositor::didChangePlatformLayerForLayer(RenderLayer& layer, const GraphicsLayer*)
@@ -4201,7 +4245,12 @@ bool RenderLayerCompositor::requiresCompositingForScrollableFrame(RequiresCompos
     if (isRootFrameCompositor())
         return false;
 
-#if PLATFORM(COCOA) || USE(COORDINATED_GRAPHICS)
+#if defined(WEBKIT_IOS6)
+    // Async frame scrolling is what asks for this upstream, and it needs a
+    // scrolling coordinator that WebKitLegacy has none of. The embedder scrolls
+    // the layer for us instead, so what matters here is only that a scrollable
+    // frame gets composited and therefore gets a layer to hand over.
+#elif PLATFORM(COCOA) || USE(COORDINATED_GRAPHICS)
     if (!m_renderView.settings().asyncFrameScrollingEnabled())
         return false;
 #endif
@@ -5329,7 +5378,15 @@ void RenderLayerCompositor::ensureRootLayer()
             m_scrolledContentsLayer->setAnchorPoint({ });
 
 #if PLATFORM(IOS_FAMILY)
-            if (m_renderView.settings().asyncFrameScrollingEnabled()) {
+            // A subframe needs a scroll container of its own here for the same
+            // reason an overflow area does: it is the layer the embedder wraps
+            // in a scroll view. Without one a frame keeps the plain clipping
+            // layer and cannot be scrolled by touch at all.
+            bool needsScrollContainer = m_renderView.settings().asyncFrameScrollingEnabled();
+#if defined(WEBKIT_IOS6)
+            needsScrollContainer = needsScrollContainer || !m_renderView.frameView().frame().isRootFrame();
+#endif
+            if (needsScrollContainer) {
                 m_scrollContainerLayer = GraphicsLayer::create(graphicsLayerFactory(), *this, GraphicsLayer::Type::ScrollContainer);
 
                 m_scrollContainerLayer->setName(MAKE_STATIC_STRING_IMPL("scroll container"));

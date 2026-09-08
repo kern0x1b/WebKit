@@ -185,6 +185,12 @@ private:
 #if PLATFORM(IOS_FAMILY)
             AnimatedOpacityTrigger | // Allow opacity animations to trigger compositing mode for iOS: <rdar://problem/7830677>
 #endif
+#if defined(WEBKIT_IOS6)
+            // A scrollable frame has to be composited to have a layer to hand
+            // the embedder, which is the only way it can be scrolled by touch
+            // here. See RenderLayerCompositor::updateFrameScrollingLayerForEmbedder.
+            ScrollableNonMainFrameTrigger |
+#endif
             AnimationTrigger);
     }
 

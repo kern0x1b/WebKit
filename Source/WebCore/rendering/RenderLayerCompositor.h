@@ -528,6 +528,10 @@ private:
 #if PLATFORM(IOS_FAMILY)
     void updateScrollCoordinatedLayersAfterFlushIncludingSubframes();
     void updateScrollCoordinatedLayersAfterFlush();
+#if defined(WEBKIT_IOS6)
+    void updateFrameScrollingLayerForEmbedder();
+    bool m_registeredFrameScrollingLayerWithEmbedder { false };
+#endif
 #endif
 
     FloatRect visibleRectForLayerFlushing() const;
