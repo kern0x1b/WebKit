@@ -93,6 +93,14 @@ ImageDrawResult BitmapImage::draw(GraphicsContext& context, const FloatRect& des
     auto size = m_source->size(ImageOrientation::Orientation::None);
     auto sourceSize = m_source->sourceSize(ImageOrientation::Orientation::None);
 
+    // Both of the scales below divide by a size, and either can still be empty
+    // here: the frame metadata may not have arrived, in which case the source
+    // reports nothing. Dividing then puts infinities in the source rectangle and
+    // the draw faults further down - the most frequent crash on this port was
+    // here. There is nothing to draw from a zero sized image anyway.
+    if (size.isEmpty() || sourceSize.isEmpty())
+        return ImageDrawResult::DidNothing;
+
     // adjustedSourceRect is in the coordinates of densityCorrectedSize, so map it to the sourceSize.
     auto adjustedSourceRect = sourceRect;
     if (sourceSize != size)
@@ -142,7 +150,7 @@ ImageDrawResult BitmapImage::draw(GraphicsContext& context, const FloatRect& des
 #if defined(WEBKIT_IOS6)
         // Scaling a full-cover source rect lands a fraction of a pixel off the frame
         // bounds, and GraphicsContextCG then saves state and clips on every draw.
-        if (imageSize != sourceSize) {
+        if (imageSize != sourceSize && !sourceSize.isEmpty()) {
             if (adjustedSourceRect == FloatRect { { }, FloatSize { sourceSize } })
                 adjustedSourceRect = FloatRect { { }, FloatSize { imageSize } };
             else
