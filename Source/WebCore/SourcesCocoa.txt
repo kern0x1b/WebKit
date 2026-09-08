@@ -397,7 +397,7 @@ platform/graphics/MediaPlaybackTargetPicker.cpp
 // ios6: platform/graphics/avfoundation/objc/MediaPlayerPrivateAVFoundationObjC.mm @nonARC @no-unify-when(bundle<=8) @cost:9
 // ios6: platform/graphics/avfoundation/objc/MediaPlayerPrivateMediaSourceAVFObjC.mm @nonARC @no-unify-when(bundle<=8) @cost:8
 // ios6: platform/graphics/avfoundation/objc/MediaPlayerPrivateMediaStreamAVFObjC.mm @nonARC @no-unify-when(bundle<=8) @cost:6
-// ios6: platform/graphics/avfoundation/objc/MediaSampleAVFObjC.mm @nonARC
+platform/graphics/avfoundation/objc/MediaSampleAVFObjC.mm @nonARC
 // ios6: platform/graphics/avfoundation/objc/MediaSourcePrivateAVFObjC.mm @nonARC
 // ios6: platform/graphics/avfoundation/objc/SourceBufferPrivateAVFObjC.mm @nonARC @no-unify-when(bundle<=8) @cost:7
 // ios6: platform/graphics/avfoundation/objc/SourceBufferParserAVFObjC.mm @nonARC @no-unify-when(bundle<=8) @cost:5
