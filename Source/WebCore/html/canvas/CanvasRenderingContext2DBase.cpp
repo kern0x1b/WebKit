@@ -3360,6 +3360,15 @@ RefPtr<ImageBuffer> CanvasRenderingContext2DBase::allocateImageBuffer() const
     RenderingMode renderingMode = !willReadFrequently() && protect(canvasBase())->shouldAccelerate() ? RenderingMode::Accelerated : RenderingMode::Unaccelerated;
     if (auto renderingModeForTesting = this->renderingModeForTesting())
         renderingMode = *renderingModeForTesting;
+#if defined(WEBKIT_IOS6)
+    // Refuse the buffer rather than let the total climb until the process is
+    // killed. Four bytes a pixel, matching what the removed upstream check used.
+    if (!canAllocateCanvasPixelMemory(4 * canvasBase().size().unclampedArea())) {
+        scriptExecutionContext->addConsoleMessage(MessageSource::JS, MessageLevel::Warning,
+            makeString("Total canvas memory use exceeds the maximum limit ("_s, maxActiveCanvasPixelMemory() / (1024 * 1024), " MB)."_s));
+        return nullptr;
+    }
+#endif
     return ImageBuffer::create(canvasBase().size(), renderingMode, RenderingPurpose::Canvas, 1, colorSpace(), pixelFormat(), scriptExecutionContext->graphicsClient());
 }
 

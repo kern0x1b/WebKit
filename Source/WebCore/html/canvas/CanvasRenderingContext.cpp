@@ -24,6 +24,8 @@
  */
 
 #include "config.h"
+#include <wtf/CheckedArithmetic.h>
+#include <wtf/RAMSize.h>
 #include "CanvasRenderingContext.h"
 
 #include "CachedImage.h"
@@ -216,10 +218,42 @@ void CanvasRenderingContext::checkOrigin(const CSSStyleImageValue&)
     m_canvas->setOriginTainted();
 }
 
+#if defined(WEBKIT_IOS6)
+// The aggregate limit on canvas backing store was removed upstream in 2023 for
+// devices with memory to spare; the commit that removed it says plainly that it
+// "might mean more pages crash (jetsam) than break". This device has 512 MB and
+// jetsam is exactly the failure it was protecting against, so the limit is kept
+// here. Only the total is capped: each canvas is still checked individually by
+// validateArea().
+static std::atomic<size_t> s_activeCanvasPixelMemory { 0 };
+
+size_t CanvasRenderingContext::maxActiveCanvasPixelMemory()
+{
+    // Deliberately not ramSize(): this port forces that value down for the sake
+    // of the JavaScript heap, and sizing canvas from it leaves about 16 MB, which
+    // is too little for ordinary pages. The physical memory is what the removed
+    // upstream check meant, and gives 128 MB here.
+    return WTF::ramSizeDisregardingJetsamLimit() / 4;
+}
+
+bool CanvasRenderingContext::canAllocateCanvasPixelMemory(size_t cost)
+{
+    CheckedSize requested = s_activeCanvasPixelMemory.load(std::memory_order_relaxed);
+    requested += cost;
+    return !requested.hasOverflowed() && requested <= maxActiveCanvasPixelMemory();
+}
+#endif
+
 void CanvasRenderingContext::updateMemoryCost(size_t newMemoryCost) const
 {
     size_t oldMemoryCost = m_memoryCost.load(std::memory_order_relaxed);
     m_memoryCost.store(newMemoryCost, std::memory_order_relaxed);
+#if defined(WEBKIT_IOS6)
+    if (newMemoryCost >= oldMemoryCost)
+        s_activeCanvasPixelMemory.fetch_add(newMemoryCost - oldMemoryCost, std::memory_order_relaxed);
+    else
+        s_activeCanvasPixelMemory.fetch_sub(oldMemoryCost - newMemoryCost, std::memory_order_relaxed);
+#endif
     if (newMemoryCost) {
         if (RefPtr scriptExecutionContext = protect(canvasBase())->scriptExecutionContext()) {
             JSC::JSLockHolder lock(scriptExecutionContext->vm());
