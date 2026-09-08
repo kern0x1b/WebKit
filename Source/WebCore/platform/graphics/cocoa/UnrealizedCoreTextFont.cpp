@@ -32,6 +32,7 @@
 #include "FontInterrogation.h"
 #include "FontMetricsNormalization.h"
 #include <CoreFoundation/CoreFoundation.h>
+#include <CoreText/SFNTLayoutTypes.h>
 #include <optional>
 #include <pal/spi/cf/CoreTextSPI.h>
 
@@ -171,17 +172,120 @@ static void addAttributesForFontPalettes(CFMutableDictionaryRef attributes, cons
     }
 }
 
+#if defined(WEBKIT_IOS6)
+// This CoreText addresses features by the numeric AAT type/selector pair; the
+// OpenType tag keys arrived in iOS 8, and handing it a tag-keyed dictionary
+// crashes descriptor matching. The mapping below is Apple's own, as it stood
+// before commit 06230e738722 replaced it with the tag form, so tags a page asks
+// for are translated rather than dropped: without it font-feature-settings and
+// every font-variant-* were silently ignored.
+static void appendRawTrueTypeFeature(CFMutableArrayRef features, int type, int selector)
+{
+    auto typeNumber = adoptCF(CFNumberCreate(kCFAllocatorDefault, kCFNumberIntType, &type));
+    auto selectorNumber = adoptCF(CFNumberCreate(kCFAllocatorDefault, kCFNumberIntType, &selector));
+    CFTypeRef featureKeys[] = { kCTFontFeatureTypeIdentifierKey, kCTFontFeatureSelectorIdentifierKey };
+    CFTypeRef featureValues[] = { typeNumber.get(), selectorNumber.get() };
+    auto feature = adoptCF(CFDictionaryCreate(kCFAllocatorDefault, featureKeys, featureValues, std::size(featureKeys), &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks));
+    CFArrayAppendValue(features, feature.get());
+}
+
+// An OpenType tag is four ASCII bytes; the literals below are lower case, and a
+// page may have written the tag in either case.
+static bool tagEquals(FontTag tag, const char (&comparison)[5])
+{
+    for (size_t i = 0; i < tag.size(); ++i) {
+        char c = tag[i];
+        if (c >= 'A' && c <= 'Z')
+            c += 'a' - 'A';
+        if (c != comparison[i])
+            return false;
+    }
+    return true;
+}
+
+static void appendTrueTypeFeature(CFMutableArrayRef features, const FontFeature& feature)
+{
+    if (tagEquals(feature.tag(), "liga") || tagEquals(feature.tag(), "clig")) {
+        if (feature.enabled()) {
+            appendRawTrueTypeFeature(features, kLigaturesType, kCommonLigaturesOnSelector);
+            appendRawTrueTypeFeature(features, kLigaturesType, kContextualLigaturesOnSelector);
+        } else {
+            appendRawTrueTypeFeature(features, kLigaturesType, kCommonLigaturesOffSelector);
+            appendRawTrueTypeFeature(features, kLigaturesType, kContextualLigaturesOffSelector);
+        }
+    } else if (tagEquals(feature.tag(), "dlig")) {
+        if (feature.enabled())
+            appendRawTrueTypeFeature(features, kLigaturesType, kRareLigaturesOnSelector);
+        else
+            appendRawTrueTypeFeature(features, kLigaturesType, kRareLigaturesOffSelector);
+    } else if (tagEquals(feature.tag(), "hlig")) {
+        if (feature.enabled())
+            appendRawTrueTypeFeature(features, kLigaturesType, kHistoricalLigaturesOnSelector);
+        else
+            appendRawTrueTypeFeature(features, kLigaturesType, kHistoricalLigaturesOffSelector);
+    } else if (tagEquals(feature.tag(), "calt")) {
+        if (feature.enabled())
+            appendRawTrueTypeFeature(features, kContextualAlternatesType, kContextualAlternatesOnSelector);
+        else
+            appendRawTrueTypeFeature(features, kContextualAlternatesType, kContextualAlternatesOffSelector);
+    } else if (tagEquals(feature.tag(), "subs") && feature.enabled())
+        appendRawTrueTypeFeature(features, kVerticalPositionType, kInferiorsSelector);
+    else if (tagEquals(feature.tag(), "sups") && feature.enabled())
+        appendRawTrueTypeFeature(features, kVerticalPositionType, kSuperiorsSelector);
+    else if (tagEquals(feature.tag(), "smcp") && feature.enabled())
+        appendRawTrueTypeFeature(features, kLowerCaseType, kLowerCaseSmallCapsSelector);
+    else if (tagEquals(feature.tag(), "c2sc") && feature.enabled())
+        appendRawTrueTypeFeature(features, kUpperCaseType, kUpperCaseSmallCapsSelector);
+    else if (tagEquals(feature.tag(), "pcap") && feature.enabled())
+        appendRawTrueTypeFeature(features, kLowerCaseType, kLowerCasePetiteCapsSelector);
+    else if (tagEquals(feature.tag(), "c2pc") && feature.enabled())
+        appendRawTrueTypeFeature(features, kUpperCaseType, kUpperCasePetiteCapsSelector);
+    else if (tagEquals(feature.tag(), "titl") && feature.enabled())
+        appendRawTrueTypeFeature(features, kStyleOptionsType, kTitlingCapsSelector);
+    else if (tagEquals(feature.tag(), "lnum") && feature.enabled())
+        appendRawTrueTypeFeature(features, kNumberCaseType, kUpperCaseNumbersSelector);
+    else if (tagEquals(feature.tag(), "onum") && feature.enabled())
+        appendRawTrueTypeFeature(features, kNumberCaseType, kLowerCaseNumbersSelector);
+    else if (tagEquals(feature.tag(), "pnum") && feature.enabled())
+        appendRawTrueTypeFeature(features, kNumberSpacingType, kProportionalNumbersSelector);
+    else if (tagEquals(feature.tag(), "tnum") && feature.enabled())
+        appendRawTrueTypeFeature(features, kNumberSpacingType, kMonospacedNumbersSelector);
+    else if (tagEquals(feature.tag(), "frac") && feature.enabled())
+        appendRawTrueTypeFeature(features, kFractionsType, kDiagonalFractionsSelector);
+    else if (tagEquals(feature.tag(), "afrc") && feature.enabled())
+        appendRawTrueTypeFeature(features, kFractionsType, kVerticalFractionsSelector);
+    else if (tagEquals(feature.tag(), "ordn") && feature.enabled())
+        appendRawTrueTypeFeature(features, kVerticalPositionType, kOrdinalsSelector);
+    else if (tagEquals(feature.tag(), "zero") && feature.enabled())
+        appendRawTrueTypeFeature(features, kTypographicExtrasType, kSlashedZeroOnSelector);
+    else if (tagEquals(feature.tag(), "hist") && feature.enabled())
+        appendRawTrueTypeFeature(features, kLigaturesType, kHistoricalLigaturesOnSelector);
+    else if (tagEquals(feature.tag(), "fwid") && feature.enabled())
+        appendRawTrueTypeFeature(features, kTextSpacingType, kMonospacedTextSelector);
+    else if (tagEquals(feature.tag(), "pwid") && feature.enabled())
+        appendRawTrueTypeFeature(features, kTextSpacingType, kProportionalTextSelector);
+    else if (tagEquals(feature.tag(), "ruby") && feature.enabled())
+        appendRawTrueTypeFeature(features, kRubyKanaType, kRubyKanaOnSelector);
+}
+#endif
+
 static void applyFeatures(CFMutableDictionaryRef attributes, const FeaturesMap& featuresToBeApplied)
 {
     if (featuresToBeApplied.isEmpty())
         return;
 
 #if defined(WEBKIT_IOS6)
-    // Features are addressed by OpenType tag from iOS 8 onwards. This CoreText
-    // knows only the numeric AAT type/selector pairs, and hands a tag-keyed
-    // feature dictionary to descriptor matching, which crashes on it. Losing
-    // ligature and figure control is the cost of not doing that.
-    UNUSED_PARAM(attributes);
+    RetainPtr<CFMutableArrayRef> aatFeatures;
+    if (RetainPtr existing = static_cast<CFArrayRef>(CFDictionaryGetValue(attributes, kCTFontFeatureSettingsAttribute)))
+        aatFeatures = adoptCF(CFArrayCreateMutableCopy(kCFAllocatorDefault, 0, existing.get()));
+    else
+        aatFeatures = adoptCF(CFArrayCreateMutable(kCFAllocatorDefault, 0, &kCFTypeArrayCallBacks));
+
+    for (auto& p : featuresToBeApplied)
+        appendTrueTypeFeature(aatFeatures.get(), FontFeature(p.key, p.value));
+
+    if (CFArrayGetCount(aatFeatures.get()))
+        CFDictionarySetValue(attributes, kCTFontFeatureSettingsAttribute, aatFeatures.get());
     return;
 #else
 
