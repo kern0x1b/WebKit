@@ -1,4 +1,6 @@
 #import "config.h"
+
+#import "AVAssetMIMETypeCache.h"
 #import "RevMediaPlayerAVF.h"
 
 #import "AudioTrackPrivate.h"
@@ -440,25 +442,21 @@ private:
         return adoptRef(*new RevMediaPlayerAVF(player));
     }
 
+    // Answered by AVFoundation rather than from a list written here. The list
+    // named five container types, so canPlayType() denied every other format the
+    // framework plays - 3GPP, M4V, WAV, AIFF, bare AAC, the audio/mp3 spelling,
+    // and HLS - and a page choosing between <source> elements skipped them.
     void getSupportedTypes(HashSet<String>& types) const final
     {
-        types.add("video/mp4"_s);
-        types.add("video/quicktime"_s);
-        types.add("audio/mpeg"_s);
-        types.add("audio/mp4"_s);
-        types.add("audio/x-m4a"_s);
+        types = AVAssetMIMETypeCache::singleton().supportedTypes();
     }
 
     MediaPlayer::SupportsType supportsTypeAndCodecs(const MediaEngineSupportParameters& parameters) const final
     {
-        HashSet<String> types;
-        getSupportedTypes(types);
-        bool ok = types.contains(parameters.type.containerType());
-        if (parameters.type.containerType().isEmpty())
+        auto containerType = parameters.type.containerType();
+        if (containerType.isEmpty())
             return MediaPlayer::SupportsType::IsNotSupported;
-        if (ok)
-            return MediaPlayer::SupportsType::IsSupported;
-        return MediaPlayer::SupportsType::IsNotSupported;
+        return AVAssetMIMETypeCache::singleton().canDecodeType(parameters.type.raw());
     }
 };
 

@@ -381,7 +381,7 @@ platform/graphics/MediaPlaybackTargetPicker.cpp
 // ios6: platform/graphics/avfoundation/SampleBufferDisplayLayer.cpp
 // ios6: platform/graphics/avfoundation/WebAVSampleBufferListener.mm @nonARC @no-unify-when(bundle<=8)
 // ios6: platform/graphics/avfoundation/WebMediaSessionManagerMac.cpp
-// ios6: platform/graphics/avfoundation/objc/AVAssetMIMETypeCache.mm @nonARC
+platform/graphics/avfoundation/objc/AVAssetMIMETypeCache.mm @nonARC
 // ios6: platform/graphics/avfoundation/objc/AVAssetTrackUtilities.mm @nonARC @no-unify-when(bundle<=8)
 // ios6: platform/graphics/avfoundation/objc/AVOutputDeviceMenuControllerTargetPicker.mm @nonARC @no-unify-when(bundle<=8)
 // ios6: platform/graphics/avfoundation/objc/AVRoutePickerViewTargetPicker.mm @nonARC
