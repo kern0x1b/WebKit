@@ -107,6 +107,10 @@
 #include "RevMediaPlayerMediaStream.h"
 #endif
 
+#if USE(AVFOUNDATION) && defined(WEBKIT_IOS6)
+#include "RevMediaPlayerAVF.h"
+#endif
+
 #if ENABLE(COCOA_WEBM_PLAYER)
 #include "MediaPlayerPrivateWebM.h"
 #endif
@@ -330,7 +334,11 @@ static void buildMediaEnginesVector() WTF_REQUIRES_LOCK(mediaEngineVectorLock)
 
 #if USE(AVFOUNDATION)
     if (DeprecatedGlobalSettings::isAVFoundationEnabled()) {
+#if defined(WEBKIT_IOS6)
+        registerRevAVFPlayer(addMediaEngine);
+#else
         MediaPlayerPrivateAVFoundationObjC::registerMediaEngine(addMediaEngine);
+#endif
 #if ENABLE(MEDIA_SOURCE)
         MediaPlayerPrivateMediaSourceAVFObjC::registerMediaEngine(addMediaEngine);
 #endif

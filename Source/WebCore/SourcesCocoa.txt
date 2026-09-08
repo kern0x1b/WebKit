@@ -705,6 +705,7 @@ platform/mediarecorder/MediaRecorderPrivateEncoder.cpp
 platform/mediastream/rev/RevCameraCaptureSource.mm @nonARC @no-unify
 platform/mediastream/rev/RevMediaPlayerMediaStream.mm @nonARC @no-unify
 platform/mediastream/rev/RevAudioCaptureSource.mm @nonARC @no-unify
+platform/graphics/avfoundation/rev/RevMediaPlayerAVF.mm @nonARC @no-unify
 platform/mock/MediaPlaybackTargetMock.cpp
 platform/mock/MediaPlaybackTargetPickerMock.cpp
 platform/mock/MockAudioDestinationCocoa.cpp

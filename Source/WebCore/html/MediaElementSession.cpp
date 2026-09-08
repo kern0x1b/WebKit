@@ -1085,6 +1085,10 @@ bool MediaElementSession::requiresFullscreenForVideoPlayback() const
     if (!element)
         return false;
 
+#if defined(WEBKIT_IOS6)
+    return false;
+#endif
+
     if (pageExplicitlyAllowsElementToAutoplayInline(*element))
         return false;
 
