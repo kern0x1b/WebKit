@@ -2005,7 +2005,7 @@ void WebFrameLoaderClient::getLoadDecisionForIcons(const Vector<std::pair<WebCor
         return;
     }
 
-#if !PLATFORM(IOS_FAMILY)
+#if !PLATFORM(IOS_FAMILY) || defined(WEBKIT_IOS6)
     ASSERT(!m_loadingIcon);
     // WebKit 1, which only supports one icon per page URL, traditionally has preferred the last icon in case of multiple icons listed.
     // To preserve that behavior we walk the list backwards.
@@ -2022,7 +2022,8 @@ void WebFrameLoaderClient::getLoadDecisionForIcons(const Vector<std::pair<WebCor
         });
     }
 #else
-    // No WebCore icon loading on iOS
+    // No WebCore icon loading on iOS. This port does load them: see
+    // finishedLoadingIcon below, which hands the bytes to the application.
     for (auto& icon : icons)
         documentLoader->didGetLoadDecisionForIcon(false, icon.second, [](auto) { });
 #endif
@@ -2048,9 +2049,44 @@ static NSImage *webGetNSImage(WebCore::Image* image, NSSize size)
 }
 #endif // !PLATFORM(IOS_FAMILY)
 
+#if defined(WEBKIT_IOS6)
+// Posted when a page's declared icon has been fetched, with the icon's bytes and
+// the page URL it belongs to. There is no icon delegate message on this platform
+// - the icon store on iOS lived inside the browser, not in WebKit - and adding a
+// selector to the embedder's frame load delegate class stops it from finishing
+// any load, so a notification is how the bytes travel.
+NSString * const WebViewDidLoadMainFrameIconNotification = @"WebViewDidLoadMainFrameIconNotification";
+NSString * const WebViewMainFrameIconDataKey = @"WebViewMainFrameIconData";
+NSString * const WebViewMainFrameIconPageURLKey = @"WebViewMainFrameIconPageURL";
+#endif
+
 void WebFrameLoaderClient::finishedLoadingIcon(WebCore::FragmentedSharedBuffer* iconData)
 {
-#if !PLATFORM(IOS_FAMILY)
+#if defined(WEBKIT_IOS6)
+    ASSERT(m_loadingIcon);
+    m_loadingIcon = false;
+
+    RetainPtr webView = getWebView(m_webFrame.get());
+    if (!webView || !iconData)
+        return;
+
+    RefPtr contiguous = iconData->makeContiguous();
+    RetainPtr data = contiguous->createNSData();
+    if (![data.get() length])
+        return;
+
+    RetainPtr<NSString> pageURL;
+    if (auto* frame = core(m_webFrame.get())) {
+        if (RefPtr loader = frame->loader().documentLoader())
+            pageURL = loader->url().string().createNSString();
+    }
+    if (![pageURL.get() length])
+        return;
+
+    [[NSNotificationCenter defaultCenter] postNotificationName:WebViewDidLoadMainFrameIconNotification
+        object:webView.get()
+        userInfo:@{ WebViewMainFrameIconDataKey: data.get(), WebViewMainFrameIconPageURLKey: pageURL.get() }];
+#elif !PLATFORM(IOS_FAMILY)
     ASSERT(m_loadingIcon);
     m_loadingIcon = false;
 
