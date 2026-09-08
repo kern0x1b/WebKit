@@ -5621,7 +5621,7 @@ Expected<bool, RemoteFrameGeometryTransformer> EventHandler::handleTouchEvent(co
         if (!targetFrame)
             continue;
 
-#if PLATFORM(WPE) || PLATFORM(GTK)
+#if PLATFORM(WPE) || PLATFORM(GTK) || defined(WEBKIT_IOS6)
         RefPtr<EventTarget> pointerTarget = touchTarget;
 
         if (pointState != PlatformTouchPoint::TouchPressed) {

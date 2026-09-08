@@ -109,8 +109,11 @@ class AutoHideController
             this._pointerIdentifiersPreventingAutoHideForHover.delete(event.pointerId);
 
             // If the pointer is a mouse (supports hover), see if we can
-            // immediately hide without waiting for the auto-hide timer.
-            if (event.pointerType == "mouse")
+            // immediately hide without waiting for the auto-hide timer. Guard on
+            // real hover support: a touch device can synthesize a mouse-typed
+            // pointerleave right after a tap, which would hide the controls a
+            // fraction of a second after they appear.
+            if (event.pointerType == "mouse" && window.matchMedia && window.matchMedia("(hover: hover)").matches)
                 this._autoHideTimerFired();
 
             this._resetAutoHideTimer();
