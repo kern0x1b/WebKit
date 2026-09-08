@@ -442,6 +442,15 @@ bool hasCapacityToUseLargeGigacage();
     v(Unsigned, minNumberOfWorklistThreads, WEBKIT_IOS6_WORKLIST_THREADS, Normal, nullptr) \
     v(Unsigned, maxNumberOfWorklistThreads, WEBKIT_IOS6_WORKLIST_THREADS, Normal, nullptr) \
     v(Unsigned, numberOfBaselineCompilerThreads, computeNumberOfWorkerThreads(3, 2), Normal, nullptr) \
+    /* One thread on this device, since the Darwin thread tuning in Options.cpp is
+       gated on CPU(ARM64) and does not compile for armv7. That gate looked accidental
+       - the reasoning there is about core counts, and on two cores it would ask for
+       two DFG threads - so it was measured. Two threads is worse: over SoundCloud,
+       The Verge and Hacker News the mean age of a plan waiting in the queue rose from
+       267ms to 330ms, and the number waiting longer than half a second went from 82
+       to 195. With two cores and a busy main thread, a second compiler takes the time
+       the first one needed. Left at one; this matches the earlier finding that
+       reordering the same queue also hurts. */
     v(Unsigned, numberOfDFGCompilerThreads, computeNumberOfWorkerThreads(3, 2) - 1, Normal, nullptr) \
     v(Unsigned, numberOfFTLCompilerThreads, computeNumberOfWorkerThreads(MAXIMUM_NUMBER_OF_FTL_COMPILER_THREADS, 2) - 1, Normal, nullptr) \
     v(Unsigned, numberOfWasmCompilerThreads, computeNumberOfWorkerThreads(INT32_MAX, 2) - 1, Normal, nullptr) \
