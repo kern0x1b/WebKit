@@ -10,6 +10,7 @@
 #import "VideoTrackPrivate.h"
 #import <AVFoundation/AVFoundation.h>
 #import <pal/avfoundation/MediaTimeAVFoundation.h>
+#import <wtf/BlockPtr.h>
 #import <wtf/MainThread.h>
 #import <wtf/RetainPtr.h>
 #import <wtf/ThreadSafeRefCounted.h>
@@ -277,11 +278,60 @@ private:
     {
         if (!m_avPlayer)
             return MediaTimePromise::createAndReject(PlatformMediaError::Cancelled);
+
+        MediaTimePromise::Producer producer;
+        Ref promise = producer.promise();
+
+        // A seek is asynchronous, so the promise has to be settled from the
+        // completion handler; resolving it up front leaves the element believing
+        // the seek is finished while currentTime still reports the old position,
+        // which is why replaying a finished video, the skip buttons and dragging
+        // the scrubber all appeared to do nothing.
         MediaTime time = target.time;
-        [m_avPlayer.get() seekToTime:PAL::toCMTime(time)];
-        if (RefPtr player = m_player.get())
-            player->timeChanged();
-        return MediaTimePromise::createAndResolve(time);
+        [m_avPlayer.get() seekToTime:PAL::toCMTime(time)
+            toleranceBefore:PAL::toCMTime(target.negativeThreshold)
+            toleranceAfter:PAL::toCMTime(target.positiveThreshold)
+            completionHandler:makeBlockPtr([this, protectedThis = Ref { *this }, producer = WTF::move(producer), time] (BOOL finished) mutable {
+                callOnMainThread([this, protectedThis = WTF::move(protectedThis), producer = WTF::move(producer), time, finished] () mutable {
+                    if (!finished) {
+                        producer.reject(PlatformMediaError::Cancelled);
+                        return;
+                    }
+                    if (RefPtr player = m_player.get())
+                        player->timeChanged();
+                    producer.resolve(time);
+                });
+            }).get()];
+
+        return promise;
+    }
+
+    // Without a seekable range the element rejects every seek before it reaches
+    // the player, so nothing can be scrubbed, skipped or replayed. AVPlayerItem
+    // publishes the ranges it can seek within; report them.
+    const PlatformTimeRanges& seekable() const final
+    {
+        m_seekableRanges.clear();
+        if (m_item) {
+            for (NSValue *value in [m_item.get() seekableTimeRanges]) {
+                CMTimeRange range = [value CMTimeRangeValue];
+                if (CMTIMERANGE_IS_VALID(range) && !CMTIMERANGE_IS_EMPTY(range))
+                    m_seekableRanges.add(PAL::toMediaTime(range.start), PAL::toMediaTime(CMTimeRangeGetEnd(range)));
+            }
+        }
+        return m_seekableRanges;
+    }
+
+    MediaTime maxTimeSeekable() const final
+    {
+        const auto& ranges = seekable();
+        return ranges.length() ? ranges.maximumBufferedTime() : MediaTime::zeroTime();
+    }
+
+    MediaTime minTimeSeekable() const final
+    {
+        const auto& ranges = seekable();
+        return ranges.length() ? ranges.minimumBufferedTime() : MediaTime::zeroTime();
     }
 
     MediaPlayer::NetworkState networkState() const final { return m_networkState; }
@@ -353,6 +403,7 @@ private:
     bool m_durationKnown { false };
     mutable bool m_didProgress { false };
     mutable PlatformTimeRanges m_buffered;
+    mutable PlatformTimeRanges m_seekableRanges;
     Vector<Ref<RevVideoTrack>> m_videoTracks;
     Vector<Ref<RevAudioTrack>> m_audioTracks;
     bool m_tracksReported { false };
