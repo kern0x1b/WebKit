@@ -50,7 +50,16 @@ WTF_MAKE_TZONE_ALLOCATED_IMPL(CodeCache);
 
 void CodeCacheMap::pruneSlowCase()
 {
+#if defined(WEBKIT_IOS6)
+    // The largest single burst of growth would otherwise become a floor the
+    // capacity can never fall below again, so one heavy page keeps its cost for
+    // the rest of the session. Let the floor decay towards the current burst
+    // instead of ratcheting up to the worst one ever seen.
+    int64_t burst = std::max(m_size - m_sizeAtLastPrune, static_cast<int64_t>(0));
+    m_minCapacity = std::max(burst, (m_minCapacity * 3) / 4);
+#else
     m_minCapacity = std::max(m_size - m_sizeAtLastPrune, static_cast<int64_t>(0));
+#endif
     m_sizeAtLastPrune = m_size;
     m_timeAtLastPrune = ApproximateTime::now();
 

@@ -106,8 +106,12 @@ void BitmapImageSource::encodedDataStatusChanged(EncodedDataStatus status)
     if (status >= EncodedDataStatus::SizeAvailable)
         m_frames.resizeToFit(protect(m_decoder)->frameCount());
 
+    RefPtr bitmapImage = m_bitmapImage.get();
+    if (!bitmapImage)
+        return;
+
     if (auto imageObserver = this->imageObserver())
-        imageObserver->encodedDataStatusChanged(protect(*m_bitmapImage), status);
+        imageObserver->encodedDataStatusChanged(*bitmapImage, status);
 }
 
 EncodedDataStatus BitmapImageSource::dataChanged(FragmentedSharedBuffer* data, bool allDataReceived)
@@ -162,8 +166,12 @@ void BitmapImageSource::decodedSizeChanged(long long decodedSize)
     if (!decodedSize)
         return;
 
+    RefPtr bitmapImage = m_bitmapImage.get();
+    if (!bitmapImage)
+        return;
+
     if (auto imageObserver = this->imageObserver())
-        imageObserver->decodedSizeChanged(protect(*m_bitmapImage), decodedSize);
+        imageObserver->decodedSizeChanged(*bitmapImage, decodedSize);
 }
 
 void BitmapImageSource::decodedSizeIncreased(unsigned decodedSize)
@@ -220,8 +228,12 @@ bool BitmapImageSource::canDestroyDecodedData() const
     if (!isLargeForDecoding())
         return true;
 
+    RefPtr bitmapImage = m_bitmapImage.get();
+    if (!bitmapImage)
+        return true;
+
     if (auto imageObserver = this->imageObserver())
-        return imageObserver->canDestroyDecodedData(protect(*m_bitmapImage));
+        return imageObserver->canDestroyDecodedData(*bitmapImage);
 
     return true;
 }
@@ -325,8 +337,12 @@ bool BitmapImageSource::isAnimationAllowed() const
         return false;
 
     // ImageObserver may disallow animation.
+    RefPtr bitmapImage = m_bitmapImage.get();
+    if (!bitmapImage)
+        return true;
+
     if (auto imageObserver = this->imageObserver())
-        return imageObserver->allowsAnimation(protect(*m_bitmapImage));
+        return imageObserver->allowsAnimation(*bitmapImage);
 
     return true;
 }
@@ -451,8 +467,12 @@ void BitmapImageSource::imageFrameAtIndexAvailable(unsigned index, ImageAnimatin
     if (decodingStatus == DecodingStatus::Invalid)
         return;
 
+    RefPtr bitmapImage = m_bitmapImage.get();
+    if (!bitmapImage)
+        return;
+
     if (auto imageObserver = this->imageObserver())
-        imageObserver->imageFrameAvailable(protect(*m_bitmapImage), animatingState, nullptr, decodingStatus);
+        imageObserver->imageFrameAvailable(*bitmapImage, animatingState, nullptr, decodingStatus);
 }
 
 void BitmapImageSource::imageFrameDecodeAtIndexHasFinished(unsigned index, ImageAnimatingState animatingState, DecodingStatus decodingStatus)
@@ -762,8 +782,12 @@ void BitmapImageSource::setHasHDRContentForTesting()
 
     m_hasHDRContentForTesting = true;
 
+    RefPtr bitmapImage = m_bitmapImage.get();
+    if (!bitmapImage)
+        return;
+
     if (auto imageObserver = this->imageObserver())
-        imageObserver->imageContentChanged(protect(*m_bitmapImage));
+        imageObserver->imageContentChanged(*bitmapImage);
 }
 
 DecodingStatus BitmapImageSource::frameDecodingStatusAtIndex(unsigned index) const
