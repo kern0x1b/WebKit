@@ -108,6 +108,18 @@ EncodedDataStatus BitmapImageDescriptor::encodedDataStatus() const
 
 IntSize BitmapImageDescriptor::size(ImageOrientation orientation) const
 {
+#if defined(WEBKIT_IOS6)
+    // Same state the guard in sourceSize() below is written for: metadata is
+    // decoded but no frame is cached yet. Asking for the density corrected size
+    // first would reach the primary frame, re-enter through primaryFrameIndex()
+    // and come straight back here, and the recursion runs until the stack is
+    // gone. sourceSize() answers from the decoder in that state, so go there
+    // directly rather than through a frame that does not exist. This crashed on
+    // image-heavy pages with two identical frames at the top of the trace.
+    if (RefPtr decoder = m_source->decoderIfExists(); decoder && m_source->frames().isEmpty())
+        return sourceSize(orientation);
+#endif
+
     auto densityCorrectedSize = this->densityCorrectedSize();
     if (!densityCorrectedSize)
         return sourceSize(orientation);

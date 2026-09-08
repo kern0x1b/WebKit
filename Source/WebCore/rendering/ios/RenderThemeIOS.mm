@@ -1255,6 +1255,12 @@ static CSSValueID standardEquivalentOfAppleSystemColor(CSSValueID cssValueID)
     case CSSValueAppleSystemSecondaryGroupedBackground:
     case CSSValueAppleSystemTertiaryGroupedBackground:
     case CSSValueAppleSystemTextBackground:
+    // LocalFrameView::updateBackgroundRecursively reads this one to decide a
+    // frame view's base background, and calls setTransparent when it comes back
+    // invisible. It was dropped from this list by accident while fixing a
+    // duplicate case; no visible symptom was traced to it, but a frame whose
+    // base background is invisible is wrong either way.
+    case CSSValueAppleSystemControlBackground:
         return CSSValueCanvas;
 
     case CSSValueAppleSystemSeparator:
