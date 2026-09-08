@@ -66,6 +66,16 @@ WEBKIT_OPTION_DEFAULT_PORT_VALUE(USE_JPEGXL PRIVATE OFF)
 WEBKIT_OPTION_DEFAULT_PORT_VALUE(USE_LCMS PRIVATE OFF)
 WEBKIT_OPTION_DEFAULT_PORT_VALUE(USE_WOFF2 PRIVATE OFF)
 
+# Off by default because the system font parser handles WOFF2 from iOS 7 onward.
+# It does not on the release this port targets, so the build turns it on and
+# supplies the library; every other port that does this calls find_package here.
+if (USE_WOFF2)
+    find_package(WOFF2 1.0.2 COMPONENTS dec)
+    if (NOT WOFF2_FOUND)
+        message(FATAL_ERROR "libwoff2dec is required for USE_WOFF2")
+    endif ()
+endif ()
+
 # FIXME: Derived features manually mirrored from PlatformEnableCocoa.h because
 # IDL/CSS generators don't evaluate it. https://bugs.webkit.org/show_bug.cgi?id=312033
 WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_MEDIA_SOURCE_IN_WORKERS PRIVATE ON)
