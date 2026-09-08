@@ -462,6 +462,13 @@ bool hasCapacityToUseLargeGigacage();
     \
     v(Bool, breakOnThrow, false, Normal, nullptr) \
     \
+    /* Upstream lowers this to 42403 for 32-bit ARM, in a Linux-gated block whose
+       reasoning is about the architecture rather than the operating system, so it
+       looked like it should apply here too. Measured with WEBKIT_IOS6_OPT_CEILING_LOG
+       (see JIT.cpp) at the lower value across SoundCloud, The Verge, Google and Hacker
+       News: 1629 DFG dispatches, refusedForCost=0. Not one code block on the real web
+       is anywhere near either ceiling, so neither value changes anything. Left at the
+       upstream default; do not spend time on it again. */
     v(Unsigned, maximumOptimizationCandidateBytecodeCost, 100000, Normal, nullptr) \
     \
     v(Unsigned, maximumFunctionForCallInlineCandidateBytecodeCostForDFG, 80, Normal, nullptr) \
