@@ -8374,11 +8374,11 @@ SpeculationRulesPrefetchEnabled:
   humanReadableDescription: "SpeculationRules prefetch"
   defaultValue:
     WebKitLegacy:
-      default: true
+      default: false
     WebKit:
       default: true
     WebCore:
-      default: true
+      default: false
   disableInLockdownMode: true
   sharedPreferenceForWebProcess: true
   richJavaScript: true

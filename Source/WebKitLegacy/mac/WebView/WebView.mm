@@ -10275,9 +10275,25 @@ void WebInstallMemoryPressureHandler(void)
             // the kern.memorystatus_level poller installed below cannot make the
             // compositor stop backing new layers.
             //
-            constexpr uint64_t processMemoryCeiling = 300 * MB;
+            // The ceiling has to bracket the range the process actually runs in,
+            // not sit below it. Measured with a page open: 240 MB resident, which
+            // is what memoryFootprint() reports here - above the 195 MB the old
+            // 300 MB ceiling put the Strict threshold at. The policy was therefore
+            // pinned at Strict for the whole life of a page, so
+            // isUnderMemoryPressure() never returned false: the glyph display
+            // list cache and the text measurement cache stored nothing, the back
+            // forward cache refused every page, the font cache ran on its reduced
+            // limits and releaseNoncriticalMemory() emptied everything every ten
+            // seconds. The two jetsam figures in the comments above (122 MB and
+            // 180 MB) are both wrong; the process demonstrably runs at 240 MB.
+            // Conservative is not a resting place either: measurementTimerFired()
+            // calls releaseMemory() for it as well, so the ten second cache flush
+            // continues there. The bands are therefore placed above the measured
+            // working set: Unrestricted below 260 MB so ordinary browsing costs
+            // nothing, Conservative from 260 MB, Strict from 300 MB.
+            constexpr uint64_t processMemoryCeiling = 400 * MB;
             memoryPressureHandler.setConfiguration(MemoryPressureHandler::Configuration {
-                processMemoryCeiling, 0.5, 0.65, std::nullopt, 10_s });
+                processMemoryCeiling, 0.65, 0.75, std::nullopt, 10_s });
 #endif
             memoryPressureHandler.setLowMemoryHandler([] (Critical critical, Synchronous synchronous) {
 #if PLATFORM(IOS_FAMILY)
