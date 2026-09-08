@@ -135,6 +135,18 @@ private:
         [m_avPlayer.get() addObserver:m_observer.get() forKeyPath:@"rate" options:NSKeyValueObservingOptionInitial context:nullptr];
         [[NSNotificationCenter defaultCenter] addObserver:m_observer.get() selector:@selector(didEnd:) name:AVPlayerItemDidPlayToEndTimeNotification object:m_item.get()];
 
+        // The element asks hasVideo() and hasAudio() from layout, before anything
+        // is ready. Reading the asset's tracks then blocks the calling thread on
+        // whatever loading the asset still has to do, which on a slow connection
+        // is the whole download. Ask for the keys asynchronously instead and
+        // answer from what came back.
+        RefPtr<RevMediaPlayerAVF> protectedThis = this;
+        [m_asset.get() loadValuesAsynchronouslyForKeys:@[@"tracks"] completionHandler:^{
+            callOnMainThread([protectedThis] {
+                protectedThis->metadataLoaded();
+            });
+        }];
+
         m_networkState = MediaPlayer::NetworkState::Loading;
         if (RefPtr player = m_player.get())
             player->networkStateChanged();
@@ -269,18 +281,39 @@ private:
         return FloatSize();
     }
 
-    bool hasVideo() const final
-    {
-        if (!m_asset)
-            return false;
-        return [[m_asset.get() tracksWithMediaType:AVMediaTypeVideo] count] > 0;
-    }
+    bool hasVideo() const final { return m_cachedHasVideo; }
+    bool hasAudio() const final { return m_cachedHasAudio; }
 
-    bool hasAudio() const final
+    void metadataLoaded()
     {
         if (!m_asset)
-            return false;
-        return [[m_asset.get() tracksWithMediaType:AVMediaTypeAudio] count] > 0;
+            return;
+
+        NSError *error = nil;
+        if ([m_asset.get() statusOfValueForKey:@"tracks" error:&error] != AVKeyValueStatusLoaded) {
+            // A failure to load the asset's own description is a load failure,
+            // which is not the same thing as a file the decoder cannot read.
+            // Reporting every failure as a decode error told a page that a
+            // missing file was a corrupt one.
+            m_networkState = MediaPlayer::NetworkState::NetworkError;
+            m_readyState = MediaPlayer::ReadyState::HaveNothing;
+            if (RefPtr player = m_player.get()) {
+                player->networkStateChanged();
+                player->readyStateChanged();
+            }
+            return;
+        }
+
+        bool hadVideo = m_cachedHasVideo;
+        bool hadAudio = m_cachedHasAudio;
+        m_cachedHasVideo = [[m_asset.get() tracksWithMediaType:AVMediaTypeVideo] count] > 0;
+        m_cachedHasAudio = [[m_asset.get() tracksWithMediaType:AVMediaTypeAudio] count] > 0;
+
+        if (RefPtr player = m_player.get()) {
+            if (m_cachedHasVideo != hadVideo || m_cachedHasAudio != hadAudio)
+                player->characteristicChanged();
+            player->sizeChanged();
+        }
     }
 
     void setPageIsVisible(bool visible) final { m_visible = visible; }
@@ -419,6 +452,8 @@ private:
     RetainPtr<AVPlayer> m_avPlayer;
     mutable RetainPtr<AVPlayerLayer> m_videoLayer;
     RetainPtr<AVAssetImageGenerator> m_imageGenerator;
+    bool m_cachedHasVideo { false };
+    bool m_cachedHasAudio { false };
     MediaPlayer::NetworkState m_networkState { MediaPlayer::NetworkState::Empty };
     MediaPlayer::ReadyState m_readyState { MediaPlayer::ReadyState::HaveNothing };
     FloatSize m_naturalSize;
