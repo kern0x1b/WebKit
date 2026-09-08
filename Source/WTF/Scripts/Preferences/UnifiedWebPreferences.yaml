@@ -3458,13 +3458,13 @@ FullScreenEnabled:
   hidden: EXPERIMENTAL_FULLSCREEN_API_HIDDEN
   defaultValue:
     WebKitLegacy:
-      default: false
+      default: true
     WebKit:
       "PLATFORM(GTK) || PLATFORM(WPE)": true
       default: false
     WebCore:
       "PLATFORM(GTK) || PLATFORM(WPE)": true
-      default: false
+      default: true
   sharedPreferenceForWebProcess: true
 
 FullScreenKeyboardLock:
@@ -9529,11 +9529,11 @@ VideoFullscreenRequiresElementFullscreen:
   condition: ENABLE(FULLSCREEN_API)
   defaultValue:
     WebKitLegacy:
-      default: false
+      default: true
     WebKit:
       default: defaultVideoFullscreenRequiresElementFullscreen()
     WebCore:
-      default: false
+      default: true
   sharedPreferenceForWebProcess: true
 
 VideoPresentationManagerEnabled:

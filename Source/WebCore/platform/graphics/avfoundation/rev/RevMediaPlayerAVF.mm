@@ -1,11 +1,13 @@
 #import "config.h"
 #import "RevMediaPlayerAVF.h"
 
+#import "AudioTrackPrivate.h"
 #import "DestinationColorSpace.h"
 #import "GraphicsContext.h"
 #import "MediaPlayerPrivate.h"
 #import "NativeImage.h"
 #import "PlatformTimeRanges.h"
+#import "VideoTrackPrivate.h"
 #import <AVFoundation/AVFoundation.h>
 #import <pal/avfoundation/MediaTimeAVFoundation.h>
 #import <wtf/MainThread.h>
@@ -25,6 +27,51 @@ class RevMediaPlayerAVF;
 @end
 
 namespace WebCore {
+
+// The upstream AVFObjC track classes read track metadata through soft-linked
+// AVFoundation symbols that iOS 6 does not export, and a missing soft-link is a
+// release assertion, so they trap on this platform. WebCore only needs a track
+// object that reports its identity, so these report exactly that, reading only
+// properties AVAssetTrack has had since iOS 4.
+class RevVideoTrack final : public VideoTrackPrivate {
+public:
+    static Ref<RevVideoTrack> create(AVAssetTrack *track) { return adoptRef(*new RevVideoTrack(track)); }
+
+    TrackID id() const final { return m_id; }
+    String label() const final { return emptyString(); }
+    String language() const final { return m_language; }
+    Kind kind() const final { return Kind::Main; }
+
+private:
+    explicit RevVideoTrack(AVAssetTrack *track)
+        : m_id(static_cast<TrackID>([track trackID]))
+        , m_language(String::fromLatin1([[track languageCode] UTF8String]))
+    {
+    }
+
+    TrackID m_id;
+    String m_language;
+};
+
+class RevAudioTrack final : public AudioTrackPrivate {
+public:
+    static Ref<RevAudioTrack> create(AVAssetTrack *track) { return adoptRef(*new RevAudioTrack(track)); }
+
+    TrackID id() const final { return m_id; }
+    String label() const final { return emptyString(); }
+    String language() const final { return m_language; }
+    Kind kind() const final { return Kind::Main; }
+
+private:
+    explicit RevAudioTrack(AVAssetTrack *track)
+        : m_id(static_cast<TrackID>([track trackID]))
+        , m_language(String::fromLatin1([[track languageCode] UTF8String]))
+    {
+    }
+
+    TrackID m_id;
+    String m_language;
+};
 
 class RevMediaPlayerAVF final
     : public MediaPlayerPrivateInterface
@@ -99,6 +146,16 @@ private:
             [m_observer.get() disconnect];
             m_observer = nullptr;
         }
+        if (RefPtr player = m_player.get()) {
+            for (auto& track : m_videoTracks)
+                player->removeVideoTrack(track.get());
+            for (auto& track : m_audioTracks)
+                player->removeAudioTrack(track.get());
+        }
+        m_videoTracks.clear();
+        m_audioTracks.clear();
+        m_tracksReported = false;
+
         if (m_videoLayer)
             [m_videoLayer.get() setPlayer:nil];
         m_avPlayer = nullptr;
@@ -120,6 +177,7 @@ private:
             if (!m_durationKnown) {
                 m_durationKnown = true;
                 if (RefPtr player = m_player.get()) {
+                    updateTracks();
                     player->durationChanged();
                     player->sizeChanged();
                     player->firstVideoFrameAvailable();
@@ -137,6 +195,26 @@ private:
                 player->networkStateChanged();
             if (m_readyState != oldReady)
                 player->readyStateChanged();
+        }
+    }
+
+    void updateTracks()
+    {
+        RefPtr player = m_player.get();
+        if (!player || !m_asset || m_tracksReported)
+            return;
+        m_tracksReported = true;
+
+        for (AVAssetTrack *track in [m_asset.get() tracksWithMediaType:AVMediaTypeVideo]) {
+            auto videoTrack = RevVideoTrack::create(track);
+            m_videoTracks.append(videoTrack.copyRef());
+            player->addVideoTrack(videoTrack.get());
+        }
+
+        for (AVAssetTrack *track in [m_asset.get() tracksWithMediaType:AVMediaTypeAudio]) {
+            auto audioTrack = RevAudioTrack::create(track);
+            m_audioTracks.append(audioTrack.copyRef());
+            player->addAudioTrack(audioTrack.get());
         }
     }
 
@@ -234,7 +312,7 @@ private:
     }
     bool supportsAcceleratedRendering() const final { return true; }
     void acceleratedRenderingStateChanged() final { }
-    bool supportsFullscreen() const final { return false; }
+    bool supportsFullscreen() const final { return true; }
     bool supportsPictureInPicture() const final { return false; }
 
     void paint(GraphicsContext& context, const FloatRect& destRect) final
@@ -275,6 +353,9 @@ private:
     bool m_durationKnown { false };
     mutable bool m_didProgress { false };
     mutable PlatformTimeRanges m_buffered;
+    Vector<Ref<RevVideoTrack>> m_videoTracks;
+    Vector<Ref<RevAudioTrack>> m_audioTracks;
+    bool m_tracksReported { false };
 };
 
 class RevAVFPlayerFactory final : public MediaPlayerFactory {
