@@ -10291,8 +10291,8 @@ void WebInstallMemoryPressureHandler(void)
             // 282 MB, for vm-pageshortage; anything at or above that is fatal, so
             // Strict has to act well before it. Measured page footprints: an
             // ordinary site sits at about 208 MB, a heavy one at 256 MB.
-            // Measured, twice, that these thresholds are load bearing and must
-            // stay where they are.
+            // These thresholds are kept low because the margin above a heavy page
+            // is too thin to spend, not because raising them cannot work.
             //
             // The policy does sit at Strict for the whole life of a page, and
             // that does mean the glyph display list cache, the text measurement
@@ -10302,13 +10302,13 @@ void WebInstallMemoryPressureHandler(void)
             // process alive.
             //
             // The system kills this process at 282 MB - a LowMemory report names
-            // 72246 pages for vm-pageshortage. Letting the caches retain raises
-            // the footprint straight into that: with Strict moved to 256 MB, and
-            // again at 236 MB, browsing The Verge, Google and SoundCloud in turn
-            // got the browser jettisoned both times, and SoundCloud alone went
-            // from 90 MB dirty to 215 MB dirty once the caches stopped being
-            // flushed. There is no band arrangement that both retains caches and
-            // survives, because the retained memory is most of the headroom.
+            // 72246 pages for vm-pageshortage. Measured with Strict at 256 MB,
+            // after the null resource crash in willCacheResponseAsync was fixed:
+            // the same browsing run survives, but the footprint peaks at 270 MB,
+            // twelve short of the kill, and repeating a load in that state still
+            // produced a jettison. At these thresholds the same run peaks at
+            // 258 MB. The gain measured about 4.3 s to 3.5 s to domInteractive on
+            // a markup heavy page, which is not worth an intermittent death.
             //
             // So the ten second flush is the price of staying alive on 512 MB,
             // and the caches below are deliberately left inert.

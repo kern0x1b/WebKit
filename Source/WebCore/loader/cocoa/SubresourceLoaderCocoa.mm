@@ -38,6 +38,14 @@ namespace WebCore {
 void SubresourceLoader::willCacheResponseAsync(ResourceHandle* handle, NSCachedURLResponse* response, CompletionHandler<void(NSCachedURLResponse *)>&& completionHandler)
 {
     RefPtr resource = m_resource;
+    if (!resource) {
+        // This arrives from the operation queue delegate, which only checks that
+        // the handle and its client are still there, not that the loader still
+        // has its resource. Closing a tab tears the resource down while a cache
+        // decision is in flight, and dereferencing it here crashed the browser.
+        // With no resource there is nothing to decide for, so decline to cache.
+        return completionHandler(nullptr);
+    }
     DiskCacheMonitor::monitorFileBackingStoreCreation(request(), resource->sessionID(), [response _CFCachedURLResponse]);
     if (!resource->shouldCacheResponse(response.response))
         return completionHandler(nullptr);
