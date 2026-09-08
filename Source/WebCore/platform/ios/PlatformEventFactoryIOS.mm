@@ -96,6 +96,9 @@ public:
         m_button = MouseButton::Left; // This has always been the LeftButton on iOS.
         m_clickCount = 1; // This has always been 1 on iOS.
         m_modifiers = modifiersForEvent(event);
+#if defined(WEBKIT_IOS6)
+        m_syntheticClickType = SyntheticClickType::OneFingerTap;
+#endif
     }
 };
 
