@@ -1211,6 +1211,68 @@ static std::optional<Color> systemColorFromCSSValueID(CSSValueID cssValueID, boo
     return std::nullopt;
 }
 
+#if defined(WEBKIT_IOS6)
+// The semantic colours above arrived with iOS 13 and this system has none of
+// them, so systemColorFromCSSValueSystemColorInformation declines and the base
+// RenderTheme is asked instead. It knows only the colours the CSS specification
+// names, and answers anything else with an invalid colour - which is fully
+// transparent. That is how every form control on the web came to be painted with
+// transparent text on a transparent background: the user agent stylesheet asks
+// for -apple-system-blue and -apple-system-opaque-secondary-fill, and got
+// nothing back for both.
+//
+// Each name below is answered with the specification colour that fills the same
+// role, so every value still comes from WebKit's own table and none is invented
+// here. Accentcolor in particular is already defined as 0, 122, 255, which is
+// exactly the blue the missing selector would have returned.
+static CSSValueID standardEquivalentOfAppleSystemColor(CSSValueID cssValueID)
+{
+    switch (cssValueID) {
+    case CSSValueAppleSystemBlue:
+        return CSSValueAccentcolor;
+
+    case CSSValueWebkitControlBackground:
+    case CSSValueAppleSystemOpaqueFill:
+    case CSSValueAppleSystemOpaqueSecondaryFill:
+    case CSSValueAppleSystemOpaqueSecondaryFillDisabled:
+    case CSSValueAppleSystemOpaqueTertiaryFill:
+        return CSSValueButtonface;
+
+    case CSSValueAppleSystemLabel:
+    case CSSValueAppleSystemHeaderText:
+        return CSSValueCanvastext;
+
+    case CSSValueAppleSystemSecondaryLabel:
+    case CSSValueAppleSystemTertiaryLabel:
+    case CSSValueAppleSystemQuaternaryLabel:
+    case CSSValueAppleSystemPlaceholderText:
+        return CSSValueGraytext;
+
+    case CSSValueAppleSystemBackground:
+    case CSSValueAppleSystemSecondaryBackground:
+    case CSSValueAppleSystemTertiaryBackground:
+    case CSSValueAppleSystemGroupedBackground:
+    case CSSValueAppleSystemSecondaryGroupedBackground:
+    case CSSValueAppleSystemTertiaryGroupedBackground:
+    case CSSValueAppleSystemTextBackground:
+        return CSSValueCanvas;
+
+    case CSSValueAppleSystemSeparator:
+    case CSSValueAppleSystemOpaqueSeparator:
+    case CSSValueAppleSystemContainerBorder:
+    case CSSValueAppleSystemGrid:
+        return CSSValueButtonborder;
+
+    case CSSValueAppleSystemSelectedContentBackground:
+    case CSSValueAppleSystemUnemphasizedSelectedContentBackground:
+        return CSSValueHighlight;
+
+    default:
+        return CSSValueInvalid;
+    }
+}
+#endif
+
 static RenderThemeIOS::CSSValueToSystemColorMap& globalCSSValueToSystemColorMap()
 {
     static NeverDestroyed<RenderThemeIOS::CSSValueToSystemColorMap> colorMap;
@@ -1280,6 +1342,10 @@ Color RenderThemeIOS::systemColor(CSSValueID cssValueID, OptionSet<StyleColorOpt
         auto color = systemColorFromCSSValueID(cssValueID, useDarkAppearance, useElevatedUserInterfaceLevel);
         if (color)
             return *color;
+#if defined(WEBKIT_IOS6)
+        if (auto standardValueID = standardEquivalentOfAppleSystemColor(cssValueID); standardValueID != CSSValueInvalid)
+            return RenderTheme::systemColor(standardValueID, options);
+#endif
         return RenderTheme::systemColor(cssValueID, options);
     }();
 
