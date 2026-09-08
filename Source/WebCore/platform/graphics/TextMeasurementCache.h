@@ -201,8 +201,13 @@ private:
 
     CachedType* addSlowCase(StringView text, CachedType&& entry)
     {
+#if !defined(WEBKIT_IOS6)
+        // Kept on this port: the footprint policy here is permanently Strict by
+        // design, and this cache is bounded to 20000 entries, so refusing to
+        // store would mean never caching a measurement at all.
         if (MemoryPressureHandler::singleton().isUnderMemoryPressure())
             return nullptr;
+#endif
 
         unsigned length = text.length();
         bool isNewEntry;

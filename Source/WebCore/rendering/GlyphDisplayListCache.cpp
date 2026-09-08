@@ -97,6 +97,10 @@ unsigned GlyphDisplayListCache::size() const
 template<typename LayoutRun>
 RefPtr<const DisplayList::DisplayList> GlyphDisplayListCache::getDisplayList(const LayoutRun& run, const FontCascade& font, GraphicsContext& context, const TextRun& textRun, const PaintInfo& paintInfo)
 {
+#if !defined(WEBKIT_IOS6)
+    // Kept on this port for the same reason as the text measurement cache: the
+    // policy sits at Strict for the life of a page, and what this holds is a
+    // twenty entry share list plus display lists owned by live layout runs.
     if (MemoryPressureHandler::singleton().isUnderMemoryPressure()) {
         if (!m_entries.isEmpty()) {
             LOG(MemoryPressure, "GlyphDisplayListCache::%s - Under memory pressure - size: %d", __FUNCTION__, size());
@@ -104,6 +108,7 @@ RefPtr<const DisplayList::DisplayList> GlyphDisplayListCache::getDisplayList(con
         }
         return nullptr;
     }
+#endif
 
     if (font.isLoadingCustomFonts() || !font.fonts())
         return nullptr;
