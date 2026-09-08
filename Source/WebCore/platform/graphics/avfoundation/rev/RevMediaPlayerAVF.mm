@@ -123,8 +123,14 @@ private:
         m_avPlayer = adoptNS([[AVPlayer alloc] init]);
         [m_avPlayer.get() replaceCurrentItemWithPlayerItem:m_item.get()];
 
-        [m_item.get() addObserver:m_observer.get() forKeyPath:@"status" options:0 context:nullptr];
-        [m_avPlayer.get() addObserver:m_observer.get() forKeyPath:@"rate" options:0 context:nullptr];
+        // NSKeyValueObservingOptionInitial, not 0: an item served from a fast
+        // enough source is already ReadyToPlay by the time observation starts,
+        // and a change notification never arrives for a value that has already
+        // settled. Without the initial delivery the element kept reporting
+        // readyState 0 and a natural size of zero while the movie played, so
+        // videoWidth was zero and nothing waiting on canplay ever ran.
+        [m_item.get() addObserver:m_observer.get() forKeyPath:@"status" options:NSKeyValueObservingOptionInitial context:nullptr];
+        [m_avPlayer.get() addObserver:m_observer.get() forKeyPath:@"rate" options:NSKeyValueObservingOptionInitial context:nullptr];
         [[NSNotificationCenter defaultCenter] addObserver:m_observer.get() selector:@selector(didEnd:) name:AVPlayerItemDidPlayToEndTimeNotification object:m_item.get()];
 
         m_networkState = MediaPlayer::NetworkState::Loading;
@@ -241,6 +247,22 @@ private:
             CGSize size = [m_item.get() presentationSize];
             if (size.width > 0 && size.height > 0)
                 return FloatSize(size.width, size.height);
+        }
+
+        // presentationSize is only populated once the item is ready to play,
+        // and the element asks for the size before that to lay the video out.
+        // The track carries it from the moment the asset's metadata is loaded,
+        // through its own transform, which is where a rotated recording says so.
+        if (m_asset) {
+            NSArray *videoTracks = [m_asset.get() tracksWithMediaType:AVMediaTypeVideo];
+            if ([videoTracks count]) {
+                AVAssetTrack *track = [videoTracks objectAtIndex:0];
+                CGSize size = CGSizeApplyAffineTransform([track naturalSize], [track preferredTransform]);
+                size.width = std::abs(size.width);
+                size.height = std::abs(size.height);
+                if (size.width > 0 && size.height > 0)
+                    return FloatSize(size.width, size.height);
+            }
         }
         return FloatSize();
     }
