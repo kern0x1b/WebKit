@@ -4870,6 +4870,21 @@ bool GraphicsLayerCA::requiresTiledLayer(float pageScaleFactor) const
 
     // FIXME: catch zero-size height or width here (or earlier)?
 #if defined(WEBKIT_IOS6) && PLATFORM(IOS_FAMILY)
+    // The limits below are pixel dimensions of the backing store, and the backing
+    // store is allocated at page scale times device scale, so testing page scale
+    // alone lets a layer through at twice the intended size on this 2x screen.
+    // Folding the device scale into the test below was tried and measured worse:
+    // it sends many more layers down the tiled path, and a tile grid costs more
+    // here than the single buffer it replaces. Footprints rose from 185/185/232 MB
+    // to 218/227/257 MB on SoundCloud, The Verge and Google. So the ordinary test
+    // stays in page-scale pixels, as upstream has it.
+    //
+    // Catching only the extreme - forcing tiling above 2048 device pixels, well
+    // above where rank and file layers sit - was tried as a middle ground and
+    // measured no better: 223/227/259 MB against 185/185/232 MB, plus a crash and
+    // two jettisons. Layers reach that size often enough, and tiling them costs
+    // more here than the single buffer does. Tiling on this port is simply the
+    // more expensive option, which is why the plain test is right.
     float scaledWidth = m_size.width() * pageScaleFactor;
     float scaledHeight = m_size.height() * pageScaleFactor;
     if (!(scaledWidth > cMaxPixelDimensionLowMemory) && !(scaledHeight > cMaxPixelDimensionLowMemory))
