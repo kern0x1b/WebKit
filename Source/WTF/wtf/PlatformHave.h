@@ -376,7 +376,7 @@
 #define HAVE_THREAD_TIME_CONSTRAINTS 1
 #endif
 
-#if PLATFORM(COCOA)
+#if PLATFORM(COCOA) && !defined(WEBKIT_IOS6)
 #define HAVE_AVASSETREADER 1
 #endif
 

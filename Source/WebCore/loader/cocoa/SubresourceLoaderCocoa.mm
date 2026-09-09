@@ -46,7 +46,9 @@ void SubresourceLoader::willCacheResponseAsync(ResourceHandle* handle, NSCachedU
         // With no resource there is nothing to decide for, so decline to cache.
         return completionHandler(nullptr);
     }
+#if !defined(WEBKIT_IOS6)
     DiskCacheMonitor::monitorFileBackingStoreCreation(request(), resource->sessionID(), [response _CFCachedURLResponse]);
+#endif
     if (!resource->shouldCacheResponse(response.response))
         return completionHandler(nullptr);
     ResourceLoader::willCacheResponseAsync(handle, response, WTF::move(completionHandler));
