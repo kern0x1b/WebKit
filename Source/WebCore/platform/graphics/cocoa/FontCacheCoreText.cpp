@@ -72,10 +72,20 @@ static RetainPtr<CFArrayRef> variationAxesWithNonLocalizedAxesNames(CTFontDescri
 
 static RetainPtr<CFArrayRef> variationAxes(CTFontRef font, ShouldLocalizeAxisNames shouldLocalizeAxisNames)
 {
+#if defined(WEBKIT_IOS6)
+    // This CoreText predates variable fonts: it has no kCTFontVariationAxesAttribute
+    // and no CTFontCopyVariationAxes, and the attribute it does have holds a
+    // dictionary, not the array of axis dictionaries the caller walks. There is
+    // nothing to read, so say so rather than hand back the wrong shape.
+    UNUSED_PARAM(font);
+    UNUSED_PARAM(shouldLocalizeAxisNames);
+    return nullptr;
+#else
     if (shouldLocalizeAxisNames == ShouldLocalizeAxisNames::Yes)
         return adoptCF(CTFontCopyVariationAxes(font));
     RetainPtr fontDescriptor = adoptCF(CTFontCopyFontDescriptor(font));
     return variationAxesWithNonLocalizedAxesNames(fontDescriptor.get());
+#endif
 }
 
 VariationDefaultsMap defaultVariationValues(CTFontRef font, ShouldLocalizeAxisNames shouldLocalizeAxisNames)

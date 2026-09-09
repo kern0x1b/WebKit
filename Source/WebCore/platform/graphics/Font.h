@@ -377,13 +377,13 @@ private:
     mutable std::unique_ptr<DerivedFonts> m_derivedFontData;
 
     struct NoEmojiGlyphs { };
-#if USE(SKIA)
+#if USE(SKIA) || defined(WEBKIT_IOS6)
     struct AllEmojiGlyphs { };
 #endif
     struct SomeEmojiGlyphs {
         BitVector colorGlyphs;
     };
-#if USE(SKIA)
+#if USE(SKIA) || defined(WEBKIT_IOS6)
     using EmojiType = Variant<NoEmojiGlyphs, AllEmojiGlyphs, SomeEmojiGlyphs>;
 #else
     using EmojiType = Variant<NoEmojiGlyphs, SomeEmojiGlyphs>;

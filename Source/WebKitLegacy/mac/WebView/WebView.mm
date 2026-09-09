@@ -8955,6 +8955,18 @@ FORWARD(toggleUnderline)
     cacheMaxDeadCapacity = std::min<unsigned>(cacheMaxDeadCapacity, 4 * 1024 * 1024);
     cacheMinDeadCapacity = 0;
     deadDecodedDataDeletionInterval = 1_s;
+
+    // Foundation keeps its own copy of the same response bytes. The table above
+    // gives a phone eight megabytes of it on top of the eight WebCore is now
+    // allowed, which is the comment two branches up - "these values are small
+    // because WebCore does most caching itself" - applied everywhere except iOS.
+    nsurlCacheMemoryCapacity = std::min<unsigned>(nsurlCacheMemoryCapacity, 1 * 1024 * 1024);
+
+    // A suspended page in the back/forward cache holds its whole DOM, render
+    // tree and decoded images. Two of them is what a 512 MB phone was given in
+    // 2012; here the engine alone is bigger than that machine's whole browser.
+    // One is kept, so going back is still instant on the page just left.
+    pageCacheSize = std::min<unsigned>(pageCacheSize, 1);
 #endif
 
     auto& memoryCache = WebCore::MemoryCache::singleton();
@@ -8964,7 +8976,11 @@ FORWARD(toggleUnderline)
     auto& pageCache = WebCore::BackForwardCache::singleton();
     pageCache.setMaxSize(pageCacheSize);
 #if PLATFORM(IOS_FAMILY)
+#if !defined(WEBKIT_IOS6)
+    // Taking the larger of the two can only ever raise this, never lower it,
+    // which would undo the ceiling set above.
     nsurlCacheMemoryCapacity = std::max(nsurlCacheMemoryCapacity, [nsurlCache memoryCapacity]);
+#endif
     CFURLCacheRef cfCache;
     if ((cfCache = [nsurlCache _CFURLCache]))
         CFURLCacheSetMemoryCapacity(cfCache, nsurlCacheMemoryCapacity);

@@ -212,10 +212,20 @@ void Font::platformInit()
     }
 
     if (CTFontGetSymbolicTraits(ctFont.get()) & kCTFontTraitColorGlyphs) {
+#if defined(WEBKIT_IOS6)
+        // This CoreText cannot say which glyphs of a colour font are coloured.
+        // WebKit's own answer to not being told, until the query became
+        // unconditional in 2025, was to take the font's word for it: a font that
+        // declares the colour-glyph trait has colour glyphs. Answering "none"
+        // instead - which is what the missing query returns - makes every emoji
+        // look like a text glyph to the presentation code.
+        m_emojiType = AllEmojiGlyphs { };
+#else
         if (RetainPtr cfBitVector = adoptCF(CTFontCopyColorGlyphCoverage(ctFont.get())))
             m_emojiType = SomeEmojiGlyphs { BitVector(cfBitVector.get()) };
         else
             m_emojiType = NoEmojiGlyphs { };
+#endif
     } else
         m_emojiType = NoEmojiGlyphs { };
 

@@ -26,7 +26,7 @@
 #include "config.h"
 #include "FEBlendSoftwareApplier.h"
 
-#if !HAVE(ARM_NEON_INTRINSICS)
+#if !HAVE(ARM_NEON_INTRINSICS) || defined(WEBKIT_IOS6)
 
 #include "FEBlend.h"
 #include "FloatPoint.h"

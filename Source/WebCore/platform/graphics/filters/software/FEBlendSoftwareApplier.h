@@ -23,7 +23,7 @@
 
 #pragma once
 
-#if !HAVE(ARM_NEON_INTRINSICS)
+#if !HAVE(ARM_NEON_INTRINSICS) || defined(WEBKIT_IOS6)
 
 #include "FilterEffectApplier.h"
 #include <wtf/TZoneMalloc.h>

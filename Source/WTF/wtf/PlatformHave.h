@@ -613,7 +613,10 @@
 #define HAVE_AVPLAYER_VIDEORANGEOVERRIDE 1
 #endif
 
-#if PLATFORM(COCOA) && !PLATFORM(WATCHOS) && !PLATFORM(APPLETV)
+// This CoreGraphics has neither entry point. The shims for them draw a corner as
+// a parabola rather than the circle approximation, so WebKit's own beziers - the
+// same ones every non-CG port draws - are both more correct and one less shim.
+#if PLATFORM(COCOA) && !PLATFORM(WATCHOS) && !PLATFORM(APPLETV) && !defined(WEBKIT_IOS6)
 #define HAVE_CG_PATH_UNEVEN_CORNERS_ROUNDEDRECT 1
 #endif
 
@@ -1746,7 +1749,7 @@
 #define HAVE_X25519_ZERO_CHECKS 1
 #endif
 
-#if !defined(HAVE_CG_PATH_CONTINUOUS_ROUNDED_RECT) && PLATFORM(COCOA)
+#if !defined(HAVE_CG_PATH_CONTINUOUS_ROUNDED_RECT) && PLATFORM(COCOA) && !defined(WEBKIT_IOS6)
 #define HAVE_CG_PATH_CONTINUOUS_ROUNDED_RECT 1
 #endif
 

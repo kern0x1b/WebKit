@@ -702,7 +702,7 @@ ColorGlyphType Font::colorGlyphType(Glyph glyph) const
 
     return WTF::switchOn(m_emojiType, [](NoEmojiGlyphs) {
         return ColorGlyphType::Outline;
-#if USE(SKIA)
+#if USE(SKIA) || defined(WEBKIT_IOS6)
     }, [](AllEmojiGlyphs) {
         return ColorGlyphType::Color;
 #endif
