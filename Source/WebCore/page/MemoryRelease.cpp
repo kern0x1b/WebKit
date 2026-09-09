@@ -55,6 +55,8 @@
 #include "LocalFrame.h"
 #include "Logging.h"
 #include "MemoryCache.h"
+#include "CachedResource.h"
+#include "SharedBuffer.h"
 #include "Page.h"
 #include "PerformanceLogging.h"
 #include "PlatformRenderTheme.h"
@@ -74,6 +76,8 @@
 #include "WorkerGlobalScope.h"
 #include "WorkerThread.h"
 #include <JavaScriptCore/VM.h>
+#include <wtf/FileHandle.h>
+#include <wtf/FileSystem.h>
 #include <wtf/ResourceUsage.h>
 #include <wtf/SystemTracing.h>
 #include <wtf/text/MakeString.h>
@@ -172,8 +176,63 @@ bool shouldDeleteAllCodeForMemoryPressure()
 }
 #endif
 
+#if defined(WEBKIT_IOS6)
+static void mapEncodedImageDataToFiles()
+{
+    static constexpr size_t leastWorthMapping = 16 * 1024;
+    static constexpr size_t mostPerPass = 6 * 1024 * 1024;
+
+    static const bool enabled = !FileSystem::fileExists("/var/mobile/.rev-no-image-file-backing"_s);
+    if (!enabled)
+        return;
+
+    size_t mapped = 0;
+    MemoryCache::singleton().forEachResource([&mapped](CachedResource& resource) {
+        if (mapped >= mostPerPass || !resource.isImage())
+            return;
+
+        RefPtr fragmented = resource.resourceBuffer();
+        if (!fragmented || fragmented->size() < leastWorthMapping)
+            return;
+
+        for (auto& entry : *fragmented) {
+            if (entry.segment->containsMappedFileData())
+                return;
+        }
+
+        Ref contiguous = fragmented->makeContiguous();
+
+        auto [path, handle] = FileSystem::openTemporaryFile("revimage"_s);
+        if (!handle)
+            return;
+        auto written = handle.write(contiguous->span());
+        handle = { };
+        if (written != contiguous->size()) {
+            FileSystem::deleteFile(path);
+            return;
+        }
+
+        RefPtr fileBacked = SharedBuffer::createWithContentsOfFile(path, FileSystem::MappedFileMode::Shared);
+        FileSystem::deleteFile(path);
+        if (!fileBacked)
+            return;
+
+        auto size = contiguous->size();
+        resource.tryReplaceEncodedData(*fileBacked);
+        mapped += size;
+    });
+
+    if (mapped)
+        WTFLogAlways("[ios6] mapped %zu KB of encoded image data to files", mapped / 1024);
+}
+#endif
+
 static void releaseNoncriticalMemory(MaintainMemoryCache maintainMemoryCache)
 {
+#if defined(WEBKIT_IOS6)
+    mapEncodedImageDataToFiles();
+#endif
+
     RenderTheme::singleton().purgeCaches();
 
     FontCache::releaseNoncriticalMemoryInAllFontCaches();
