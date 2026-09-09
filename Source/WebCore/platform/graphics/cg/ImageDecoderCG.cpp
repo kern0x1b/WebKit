@@ -786,7 +786,32 @@ PlatformImagePtr ImageDecoderCG::createFrameImageAtIndex(size_t index, Subsampli
     // CGContextDrawImage. We now tell CG to cache the drawn images. See also <rdar://problem/14366755> -
     // CoreGraphics needs to un-deprecate kCGImageCachingTemporary since it's still not the default.
 ALLOW_DEPRECATED_DECLARATIONS_BEGIN
+#if defined(WEBKIT_IOS6)
+    // Temporary keeps the decoded bytes until the cache is trimmed; transient
+    // lets CoreGraphics mark them purgeable soon after they are drawn, so the
+    // kernel can take them back instead of jetsam taking the process. Upstream
+    // landed transient twice and rolled it out twice, both times for CPU - the
+    // subimage cache is skipped for transient images, so cropped draws recreate
+    // the image - never for memory. This device fails on memory, so it was
+    // measured here rather than assumed.
+    //
+    // Measured, three cold runs of four heavy sites each: 160.9 MB of dirty
+    // memory against 203.4 MB, a median saving of 42 MB, with the worst
+    // transient run equal to the best temporary one. But the page that draws one
+    // decoded image six hundred times cropped - tests/device/image-draw-cost.html
+    // - takes the process down with it under transient, in the image decode
+    // path, and a saving bought with a crash is not a saving. So: off, with the
+    // measurement recorded and the switch kept, because the crash is worth
+    // understanding and this is how to reproduce it.
+    static const bool transient = [] {
+        if (const char* override = getenv("WEBKIT_IOS6_TRANSIENT_IMAGE_CACHE"))
+            return override[0] == '1';
+        return false;
+    }();
+    CGImageSetCachingFlags(image.get(), transient ? kCGImageCachingTransient : kCGImageCachingTemporary);
+#else
     CGImageSetCachingFlags(image.get(), kCGImageCachingTemporary);
+#endif
 ALLOW_DEPRECATED_DECLARATIONS_END
 #endif // PLATFORM(IOS_FAMILY)
 

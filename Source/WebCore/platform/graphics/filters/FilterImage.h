@@ -108,6 +108,7 @@ private:
     DestinationColorSpace m_colorSpace;
 
     RefPtr<ImageBuffer> m_imageBuffer;
+
     RefPtr<PixelBuffer> m_unpremultipliedPixelBuffer;
     RefPtr<PixelBuffer> m_premultipliedPixelBuffer;
 

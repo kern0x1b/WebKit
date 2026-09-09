@@ -163,7 +163,12 @@ static double codeDeletionThresholdMegabytes()
 
 bool shouldDeleteAllCodeForMemoryPressure()
 {
-    return residentMegabytes() >= codeDeletionThresholdMegabytes();
+    // On the collector's scale, as the paragraphs above conclude: the threshold
+    // was derived against WTF::memoryFootprint(), which is the task's own
+    // anonymous memory, while this had gone on reading resident size - three
+    // fifths of which is shared cache and framework text that deleting code
+    // cannot release. Two related valves on two different scales.
+    return WTF::memoryFootprint() / 1048576.0 >= codeDeletionThresholdMegabytes();
 }
 #endif
 
@@ -228,6 +233,19 @@ static void releaseCriticalMemory(Synchronous synchronous, MaintainBackForwardCa
     Page::forEachPage([](auto& page) {
         page.cookieJar().clearCache();
     });
+
+#if defined(WEBKIT_IOS6)
+    // Critical only. The noncritical path runs constantly under this port's
+    // permanent strict policy, and dropping the matched-declarations cache there
+    // was measured at 12% on domInteractive - the reason its size was raised back
+    // in the first place.
+    Page::forEachPage([](auto& page) {
+        if (RefPtr localMainFrame = page.localMainFrame()) {
+            if (RefPtr document = localMainFrame->document())
+                document->styleScope().invalidateMatchedDeclarationsCache();
+        }
+    });
+#endif
 
     auto allDocuments = Document::allDocuments();
     auto protectedDocuments = WTF::map(allDocuments, [](auto& document) -> Ref<Document> {

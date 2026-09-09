@@ -1921,6 +1921,12 @@ static void webViewStartupMark(const char* what, double& last)
     WebThreadRun(^{
         WebCore::releaseMemory(Critical::Yes, Synchronous::Yes);
     });
+#if defined(WEBKIT_IOS6)
+    // Every open local storage connection carries a SQLite page cache. This used
+    // to be part of the memory-warning path and lost its caller when that path
+    // was rewritten; the method is still here and still does what it says.
+    [WebStorageManager closeIdleLocalStorageDatabases];
+#endif
 }
 
 - (void)_setLayoutViewportRect:(CGRect)rect
