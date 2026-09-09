@@ -34,6 +34,10 @@ namespace WebCore {
 
 class SharedBuffer;
 
+#if defined(WEBKIT_IOS6)
+void fileBackEncodedImageData(const ResourceRequest&, PAL::SessionID, Ref<SharedBuffer>&&);
+#endif
+
 class DiskCacheMonitor {
 public:
     static void monitorFileBackingStoreCreation(const ResourceRequest&, PAL::SessionID, CFCachedURLResponseRef);

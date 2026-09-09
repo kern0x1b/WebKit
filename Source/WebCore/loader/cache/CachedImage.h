@@ -183,6 +183,9 @@ private:
     void updateBufferInternal(const FragmentedSharedBuffer&);
 
     void didReplaceSharedBufferContents() override;
+#if defined(WEBKIT_IOS6)
+    void fileBackEncodedDataIfWorthwhile();
+#endif
 
     struct ContainerContext {
         LayoutSize containerSize;

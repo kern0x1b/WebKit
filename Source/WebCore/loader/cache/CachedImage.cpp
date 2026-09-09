@@ -64,6 +64,10 @@
 #include "MultiRepresentationHEICMetrics.h"
 #endif
 
+#if defined(WEBKIT_IOS6) && PLATFORM(COCOA)
+#include "DiskCacheMonitorCocoa.h"
+#endif
+
 namespace WebCore {
 
 CachedImage::CachedImage(CachedResourceRequest&& request, PAL::SessionID sessionID, const CookieJar* cookieJar)
@@ -641,9 +645,30 @@ void CachedImage::finishLoading(const FragmentedSharedBuffer* data, const Networ
     setLoading(false);
     setAllowsOrientationOverride(isCORSSameOrigin() || protect(m_image)->sourceURL().protocolIsData());
 
+#if defined(WEBKIT_IOS6)
+    fileBackEncodedDataIfWorthwhile();
+#endif
+
     notifyObservers();
     CachedResource::finishLoading(data, metrics);
 }
+
+#if defined(WEBKIT_IOS6)
+void CachedImage::fileBackEncodedDataIfWorthwhile()
+{
+    static constexpr size_t leastWorthMapping = 16 * 1024;
+
+    if (!m_data || m_data->size() < leastWorthMapping)
+        return;
+
+    for (auto& entry : *m_data) {
+        if (entry.segment->containsMappedFileData())
+            return;
+    }
+
+    fileBackEncodedImageData(resourceRequest(), sessionID(), m_data->makeContiguous());
+}
+#endif
 
 void CachedImage::didReplaceSharedBufferContents()
 {
