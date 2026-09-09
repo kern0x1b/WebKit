@@ -89,7 +89,7 @@ void ImageBufferContextSwitcher::endDrawSourceImage(GraphicsContext& destination
     }
 
     FilterResults results;
-#if USE(CAIRO)
+#if USE(CAIRO) || defined(WEBKIT_IOS6)
     // Cairo operates in SRGB which is why the SourceImage initially is in SRGB color space,
     // but before applying all filters it has to be transformed to LinearRGB to comply with
     // specification (https://www.w3.org/TR/filter-effects-1/#attr-valuedef-in-sourcegraphic).
