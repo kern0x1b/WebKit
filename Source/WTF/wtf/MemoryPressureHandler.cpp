@@ -224,7 +224,13 @@ void MemoryPressureHandler::setMemoryFootprintNotificationThresholds(Vector<uint
 void MemoryPressureHandler::measurementTimerFired()
 {
     size_t footprint = memoryFootprint();
-#if PLATFORM(COCOA)
+#if defined(WEBKIT_IOS6)
+    // os_log does not exist here; the compatibility layer answers the import and
+    // returns, which is not something to call from a timer that fires every ten
+    // seconds. WTFLogAlways goes to stderr, which this port reads anyway.
+    if (MemoryPressureHandler::singleton().m_shouldLogMemoryMemoryPressureEvents)
+        WTFLogAlways("[memory] footprint %zu MB", footprint / MB);
+#elif PLATFORM(COCOA)
     RELEASE_LOG(MemoryPressure, "Current memory footprint: %zu MB", footprint / MB);
 #endif
 
