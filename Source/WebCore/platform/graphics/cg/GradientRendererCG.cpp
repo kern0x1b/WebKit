@@ -109,6 +109,18 @@ static bool anyComponentIsNone(const GradientColorStops& stops)
 
 GradientRendererCG::Gradient GradientRendererCG::makeGradient(ColorInterpolationMethod colorInterpolationMethod, const GradientColorStops& stops) const
 {
+#if defined(WEBKIT_IOS6)
+    // Premultiplied interpolation is asked for through an options dictionary,
+    // and CGGradientCreateWithColorComponentsAndOptions does not exist on this
+    // release - the shim for it drops the dictionary, and the key itself is one
+    // of the invented constants, so it would miss anyway. Every CSS gradient
+    // asks for premultiplied, and unpremultiplied interpolation is what makes a
+    // fade to transparent travel through grey. Sampling does the interpolation
+    // in the engine, correctly, and then needs only the plain CGGradient call.
+    if (colorInterpolationMethod.alphaPremultiplication == AlphaPremultiplication::Premultiplied)
+        return makeGradientBySampling(colorInterpolationMethod, stops);
+#endif
+
     // For non-sRGB color spaces, or sRGB with 'none' components, fall back to sampling.
     bool needsSampling = WTF::switchOn(colorInterpolationMethod.colorSpace,
         [&] (const ColorInterpolationMethod::SRGB&) {

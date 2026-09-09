@@ -426,7 +426,10 @@ static inline std::optional<CFStringRef> openTypeFeature(CFDictionaryRef feature
 {
     ASSERT(isOpenTypeFeature(feature));
     RetainPtr tag = static_cast<CFStringRef>(CFDictionaryGetValue(feature, kCTFontOpenTypeFeatureTag));
-    int rawValue;
+    // Zero, not whatever was on the stack: the only check on the read is an
+    // assertion, which release builds drop, and a failed read then decides
+    // whether a feature is applied from uninitialised memory.
+    int rawValue = 0;
     RetainPtr value = static_cast<CFNumberRef>(CFDictionaryGetValue(feature, kCTFontOpenTypeFeatureValue));
     auto success = CFNumberGetValue(value.get(), kCFNumberIntType, &rawValue);
     ASSERT_UNUSED(success, success);
@@ -436,11 +439,11 @@ static inline std::optional<CFStringRef> openTypeFeature(CFDictionaryRef feature
 static inline std::pair<int, int> trueTypeFeature(CFDictionaryRef feature)
 {
     ASSERT(isTrueTypeFeature(feature));
-    int rawType;
+    int rawType = 0;
     RetainPtr type = static_cast<CFNumberRef>(CFDictionaryGetValue(feature, kCTFontFeatureTypeIdentifierKey));
     auto success = CFNumberGetValue(type.get(), kCFNumberIntType, &rawType);
     ASSERT_UNUSED(success, success);
-    int rawSelector;
+    int rawSelector = 0;
     RetainPtr selector = static_cast<CFNumberRef>(CFDictionaryGetValue(feature, kCTFontFeatureSelectorIdentifierKey));
     success = CFNumberGetValue(selector.get(), kCFNumberIntType, &rawSelector);
     ASSERT_UNUSED(success, success);
