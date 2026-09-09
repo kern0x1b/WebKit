@@ -26,6 +26,8 @@
 #include "config.h"
 #include "ImageBufferCGBitmapBackend.h"
 
+#include "ColorTransferFunctions.h"
+
 #if USE(CG)
 
 #include "GraphicsContext.h"
@@ -125,6 +127,71 @@ RefPtr<NativeImage> ImageBufferCGBitmapBackend::createNativeImageReference()
         colorSpace().platformColorSpace(), static_cast<uint32_t>(kCGImageAlphaPremultipliedFirst) | static_cast<uint32_t>(kCGBitmapByteOrder32Host), m_dataProvider.get(),
         0, true, kCGRenderingIntentDefault)));
 }
+
+#if defined(WEBKIT_IOS6)
+// This CoreGraphics matches colour by primaries and ignores the transfer
+// function, so asking it for linear light does nothing except tint what it
+// touches. WebKit carried the answer to that until 2020: ImageBuffer built a
+// 256 entry table from its own sRGB transfer function and handed it to the
+// port's platformTransformColorSpace. CG never needed one, because its colour
+// management did the work; this one has none, so the table comes back.
+static const std::array<uint8_t, 256>& transferTable(bool toLinear)
+{
+    using Transfer = SRGBTransferFunction<float, TransferFunctionMode::Clamped>;
+
+    static NeverDestroyed<std::array<uint8_t, 256>> toLinearTable = [] {
+        std::array<uint8_t, 256> table;
+        for (unsigned i = 0; i < 256; ++i)
+            table[i] = static_cast<uint8_t>(Transfer::toLinear(i / 255.0f) * 255.0f + 0.5f);
+        return table;
+    }();
+
+    static NeverDestroyed<std::array<uint8_t, 256>> toGammaEncodedTable = [] {
+        std::array<uint8_t, 256> table;
+        for (unsigned i = 0; i < 256; ++i)
+            table[i] = static_cast<uint8_t>(Transfer::toGammaEncoded(i / 255.0f) * 255.0f + 0.5f);
+        return table;
+    }();
+
+    return toLinear ? toLinearTable.get() : toGammaEncodedTable.get();
+}
+
+void ImageBufferCGBitmapBackend::transformToColorSpace(const DestinationColorSpace& newColorSpace)
+{
+    if (newColorSpace == colorSpace())
+        return;
+
+    // Only sRGB and linearRGB are a pair this can be done for, which is what
+    // the transform upstream carried was limited to as well.
+    bool toLinear = !colorSpace().isLinearSRGB() && newColorSpace.isLinearSRGB();
+    bool toGammaEncoded = colorSpace().isLinearSRGB() && !newColorSpace.isLinearSRGB();
+    if (!toLinear && !toGammaEncoded)
+        return;
+
+    auto& table = transferTable(toLinear);
+    auto backendSize = size();
+
+    for (int y = 0; y < backendSize.height(); ++y) {
+        auto row = m_data.subspan(static_cast<size_t>(y) * bytesPerRow());
+        for (int x = 0; x < backendSize.width(); ++x) {
+            auto pixel = row.subspan(static_cast<size_t>(x) * 4);
+            uint8_t alpha = pixel[3];
+            if (!alpha)
+                continue;
+
+            for (size_t channel = 0; channel < 3; ++channel) {
+                // The transfer function is not linear, so it acts on the colour
+                // itself rather than on the colour multiplied by its alpha.
+                unsigned value = alpha == 255 ? pixel[channel] : std::min<unsigned>(255, (pixel[channel] * 255 + alpha / 2) / alpha);
+                value = table[value];
+                pixel[channel] = static_cast<uint8_t>(alpha == 255 ? value : (value * alpha + 127) / 255);
+            }
+        }
+    }
+
+    m_parameters.colorSpace = newColorSpace;
+}
+#endif
 
 void ImageBufferCGBitmapBackend::getPixelBuffer(const IntRect& srcRect, PixelBuffer& destination)
 {

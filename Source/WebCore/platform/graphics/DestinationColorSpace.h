@@ -61,6 +61,20 @@ public:
 #endif
     }
 
+#if defined(WEBKIT_IOS6)
+    // This CoreGraphics has one RGB colour space, so linearRGB and sRGB carry
+    // the same CGColorSpace and this tag is the only thing that tells them
+    // apart. The engine applies the transfer function itself; see
+    // ImageBufferCGBitmapBackend::transformToColorSpace.
+    DestinationColorSpace(PlatformColorSpace platformColorSpace, bool isLinearSRGB)
+        : m_platformColorSpace { WTF::move(platformColorSpace) }
+        , m_isLinearSRGB { isLinearSRGB }
+    {
+    }
+
+    bool isLinearSRGB() const { return m_isLinearSRGB; }
+#endif
+
 #if USE(SKIA)
     PlatformColorSpaceValue platformColorSpace() const { return m_platformColorSpace; }
 #else
@@ -79,6 +93,9 @@ public:
 
 private:
     PlatformColorSpace m_platformColorSpace;
+#if defined(WEBKIT_IOS6)
+    bool m_isLinearSRGB { false };
+#endif
 };
 
 WEBCORE_EXPORT bool operator==(const DestinationColorSpace&, const DestinationColorSpace&);
