@@ -650,10 +650,6 @@ ApplePayEnabled:
   sharedPreferenceForWebProcess: true
   richJavaScript: true
 
-# Off on this port: the API is complete, but writing goes through NSItemProvider
-# and -[UIPasteboard setItemProviders:], which are iOS 11, and calling writeText
-# takes the process down. The item-dictionary fallback macCatalyst uses was tried
-# here and the crash survived it, so the write path needs writing, not routing.
 AsyncClipboardAPIEnabled:
   type: bool
   status: mature
@@ -661,12 +657,12 @@ AsyncClipboardAPIEnabled:
   humanReadableDescription: "Enable the async clipboard API"
   defaultValue:
     WebKitLegacy:
-      default: false
+      default: true
     WebKit:
       "PLATFORM(COCOA) || PLATFORM(GTK) || PLATFORM(WPE)" : true
       default: false
     WebCore:
-      default: false
+      default: true
 
 AsyncFrameScrollingEnabled:
   type: bool

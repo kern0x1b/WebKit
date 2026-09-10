@@ -866,7 +866,23 @@ static PlatformFont *_font(Element& element)
     Ref primaryFont = renderer->style().fontCascade().primaryFont();
     if (primaryFont->attributes().origin == FontOrigin::Remote)
         return [PlatformFontClass systemFontOfSize:defaultFontSize];
+#if defined(WEBKIT_IOS6)
+    // UIFont and CTFont were unified in iOS 7; on this release they are separate
+    // classes, so the cast below hands UIKit a CTFontRef that answers none of its
+    // selectors and the first -fontWithSize: takes the process down - which is
+    // every copy of a selection, since this converter builds what goes on the
+    // pasteboard. Rebuild a real UIFont from the CoreText font instead.
+    RetainPtr coreTextFont = primaryFont->ctFont();
+    if (!coreTextFont)
+        return [PlatformFontClass systemFontOfSize:defaultFontSize];
+    CGFloat size = CTFontGetSize(coreTextFont.get());
+    RetainPtr postScriptName = adoptCF(CTFontCopyPostScriptName(coreTextFont.get()));
+    if (RetainPtr platformFont = [PlatformFontClass fontWithName:(__bridge NSString *)postScriptName.get() size:size])
+        return platformFont.autorelease();
+    return [PlatformFontClass systemFontOfSize:size];
+#else
     return (__bridge PlatformFont *)primaryFont->ctFont();
+#endif
 }
 
 NSDictionary *HTMLConverter::computedAttributesForElement(Element& element)
