@@ -10537,12 +10537,12 @@ WebShareEnabled:
   humanReadableDescription: "Enable support for share sheet via Web Share API"
   defaultValue:
     WebKitLegacy:
-      default: false
+      default: true
     WebKit:
       "PLATFORM(COCOA) && !PLATFORM(WATCHOS) && !PLATFORM(APPLETV)": true
       default: false
     WebCore:
-      default: false
+      default: true
   sharedPreferenceForWebProcess: true
   richJavaScript: true
   disableInLockdownMode: true

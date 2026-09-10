@@ -24,6 +24,10 @@
  */
 
 #import "WebChromeClientIOS.h"
+#import <WebCore/ShareData.h>
+#import <WebCore/WebCoreThreadRun.h>
+#import <wtf/BlockPtr.h>
+#import <UIKit/UIKit.h>
 #import <WebCore/UserGestureIndicator.h>
 #import <WebCore/HTMLSelectElement.h>
 #import <WebCore/HTMLTextFormControlElement.h>
@@ -195,8 +199,57 @@ void WebChromeClientIOS::runOpenPanel(LocalFrame&, FileChooser& chooser)
         [[webView() _UIKitDelegateForwarder] webView:webView() runOpenPanelForFileButtonWithResultListener:listener.get() configuration:configuration];
 }
 
-void WebChromeClientIOS::showShareSheet(ShareDataWithParsedURL&&, CompletionHandler<void(bool)>&&)
+#if defined(WEBKIT_IOS6)
+static UIViewController *viewControllerToPresentFrom()
 {
+    UIViewController *presenter = [[[UIApplication sharedApplication] keyWindow] rootViewController];
+    while (presenter.presentedViewController)
+        presenter = presenter.presentedViewController;
+    return presenter;
+}
+#endif
+
+void WebChromeClientIOS::showShareSheet(ShareDataWithParsedURL&& data, CompletionHandler<void(bool)>&& completionHandler)
+{
+#if defined(WEBKIT_IOS6)
+    auto items = adoptNS([[NSMutableArray alloc] init]);
+    if (!data.shareData.text.isEmpty())
+        [items addObject:data.shareData.text.createNSString().get()];
+    if (data.url)
+        [items addObject:data.url->createNSURL().get()];
+    if (![items count] && !data.shareData.title.isEmpty())
+        [items addObject:data.shareData.title.createNSString().get()];
+
+    if (![items count]) {
+        completionHandler(false);
+        return;
+    }
+
+    dispatch_async(dispatch_get_main_queue(), makeBlockPtr([items = WTF::move(items), completionHandler = WTF::move(completionHandler)] () mutable {
+        auto finish = [completionHandler = WTF::move(completionHandler)] (bool completed) mutable {
+            WebThreadRun(makeBlockPtr([completionHandler = WTF::move(completionHandler), completed] () mutable {
+                completionHandler(completed);
+            }).get());
+        };
+
+        UIViewController *presenter = viewControllerToPresentFrom();
+        if (!presenter) {
+            finish(false);
+            return;
+        }
+
+        auto controller = adoptNS([[UIActivityViewController alloc] initWithActivityItems:items.get() applicationActivities:nil]);
+ALLOW_DEPRECATED_DECLARATIONS_BEGIN
+        [controller setCompletionHandler:makeBlockPtr([finish = WTF::move(finish)] (NSString *, BOOL completed) mutable {
+            finish(completed);
+        }).get()];
+ALLOW_DEPRECATED_DECLARATIONS_END
+        [presenter presentViewController:controller.get() animated:YES completion:nil];
+    }).get());
+#else
+    UNUSED_PARAM(data);
+    completionHandler(false);
+#endif
 }
 
 #if ENABLE(IOS_TOUCH_EVENTS) || ENABLE(TOUCH_EVENTS)
