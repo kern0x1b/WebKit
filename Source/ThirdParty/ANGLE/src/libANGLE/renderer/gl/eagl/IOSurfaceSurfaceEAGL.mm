@@ -114,6 +114,7 @@ IOSurfaceSurfaceEAGL::~IOSurfaceSurfaceEAGL()
     }
     if (mTextureCache != nullptr)
     {
+        CVOpenGLESTextureCacheFlush(mTextureCache, 0);
         CFRelease(mTextureCache);
         mTextureCache = nullptr;
     }
@@ -226,6 +227,15 @@ egl::Error IOSurfaceSurfaceEAGL::bindTexImage(const gl::Context *context,
 egl::Error IOSurfaceSurfaceEAGL::releaseTexImage(const gl::Context *context, EGLint buffer)
 {
     GetFunctionsGL(context)->flush();
+
+    if (mSurfaceTexture != nullptr && mFramebufferID == 0)
+    {
+        CFRelease(mSurfaceTexture);
+        mSurfaceTexture   = nullptr;
+        mSurfaceTextureID = 0;
+        CVOpenGLESTextureCacheFlush(mTextureCache, 0);
+    }
+
     return egl::NoError();
 }
 
