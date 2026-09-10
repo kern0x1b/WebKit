@@ -252,3 +252,14 @@ if (CMAKE_OSX_SYSROOT AND EXISTS "${CMAKE_OSX_SYSROOT}/usr/local/include")
     add_compile_options("$<$<NOT:$<COMPILE_LANGUAGE:Swift>>:-isystem${CMAKE_OSX_SYSROOT}/usr/local/include>")
     add_compile_options("$<$<COMPILE_LANGUAGE:Swift>:SHELL:-Xcc -isystem${CMAKE_OSX_SYSROOT}/usr/local/include>")
 endif ()
+
+if (ENABLE_WEBGL AND NOT TARGET OpenGL::GLES)
+    # WebCore links OpenGL::GLES when WebGL is on, and the finder that defines
+    # that target looks for a pkg-config glesv2 and a GLES2/gl2.h - a Linux
+    # install. Here GLES is a framework, and its headers are under OpenGLES/ES2.
+    find_library(OPENGLES_FRAMEWORK OpenGLES)
+    if (OPENGLES_FRAMEWORK)
+        add_library(OpenGL::GLES INTERFACE IMPORTED)
+        set_target_properties(OpenGL::GLES PROPERTIES INTERFACE_LINK_LIBRARIES "${OPENGLES_FRAMEWORK}")
+    endif ()
+endif ()
