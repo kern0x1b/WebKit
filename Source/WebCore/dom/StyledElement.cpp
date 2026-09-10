@@ -131,9 +131,6 @@ CSSStyleProperties* StyledElement::inlineStyleCSSOMWrapper()
 static bool usesStyleBasedEditability(const StyleProperties& properties)
 {
 #if defined(WEBKIT_IOS6)
-    // Every single inline-style write runs this probe. getPropertyCSSValue() is an exported out-of-line
-    // call that takes a ref on the value it finds and re-checks the system-font shorthand quirk; all this
-    // predicate wants to know is whether the declaration carries the property at all.
     int index = properties.findPropertyIndex(CSSPropertyWebkitUserModify);
     return index != -1 && properties.propertyAt(static_cast<unsigned>(index)).value();
 #else

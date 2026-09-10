@@ -181,8 +181,6 @@ Invalidator::CheckDescendants Invalidator::invalidateIfNeeded(Element& element, 
     case Validity::InlineStyleInvalid: {
 #if defined(WEBKIT_IOS6)
         if (!m_ruleSets.isEmpty()) {
-            // One collector for the whole element instead of one per rule set: it carries a
-            // Vector<MatchedRule, 64>, about a kilobyte, on a machine with a 32 KB L1 data cache.
             ElementRuleCollector ruleCollector(element, *m_ruleSets[0].ruleSet, selectorMatchingState, SelectorChecker::Mode::StyleInvalidation);
             for (auto& ruleSet : m_ruleSets) {
                 auto matches = ruleCollector.matchesAnyAuthorRules(*ruleSet.ruleSet);

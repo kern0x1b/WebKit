@@ -2021,8 +2021,6 @@ void WebFrameLoaderClient::getLoadDecisionForIcons(const Vector<std::pair<WebCor
 
 #if !PLATFORM(IOS_FAMILY) || defined(WEBKIT_IOS6)
     ASSERT(!m_loadingIcon);
-    // WebKit 1, which only supports one icon per page URL, traditionally has preferred the last icon in case of multiple icons listed.
-    // To preserve that behavior we walk the list backwards.
     for (auto icon = icons.rbegin(); icon != icons.rend(); ++icon) {
         if (icon->first.type != WebCore::LinkIconType::Favicon || m_loadingIcon) {
             documentLoader->didGetLoadDecisionForIcon(false, icon->second, [](auto) { });
@@ -2036,8 +2034,6 @@ void WebFrameLoaderClient::getLoadDecisionForIcons(const Vector<std::pair<WebCor
         });
     }
 #else
-    // No WebCore icon loading on iOS. This port does load them: see
-    // finishedLoadingIcon below, which hands the bytes to the application.
     for (auto& icon : icons)
         documentLoader->didGetLoadDecisionForIcon(false, icon.second, [](auto) { });
 #endif
@@ -2064,11 +2060,6 @@ static NSImage *webGetNSImage(WebCore::Image* image, NSSize size)
 #endif // !PLATFORM(IOS_FAMILY)
 
 #if defined(WEBKIT_IOS6)
-// Posted when a page's declared icon has been fetched, with the icon's bytes and
-// the page URL it belongs to. There is no icon delegate message on this platform
-// - the icon store on iOS lived inside the browser, not in WebKit - and adding a
-// selector to the embedder's frame load delegate class stops it from finishing
-// any load, so a notification is how the bytes travel.
 NSString * const WebViewDidLoadMainFrameIconNotification = @"WebViewDidLoadMainFrameIconNotification";
 NSString * const WebViewMainFrameIconDataKey = @"WebViewMainFrameIconData";
 NSString * const WebViewMainFrameIconPageURLKey = @"WebViewMainFrameIconPageURL";

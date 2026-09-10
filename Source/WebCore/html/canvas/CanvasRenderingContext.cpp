@@ -219,20 +219,10 @@ void CanvasRenderingContext::checkOrigin(const CSSStyleImageValue&)
 }
 
 #if defined(WEBKIT_IOS6)
-// The aggregate limit on canvas backing store was removed upstream in 2023 for
-// devices with memory to spare; the commit that removed it says plainly that it
-// "might mean more pages crash (jetsam) than break". This device has 512 MB and
-// jetsam is exactly the failure it was protecting against, so the limit is kept
-// here. Only the total is capped: each canvas is still checked individually by
-// validateArea().
 static std::atomic<size_t> s_activeCanvasPixelMemory { 0 };
 
 size_t CanvasRenderingContext::maxActiveCanvasPixelMemory()
 {
-    // Deliberately not ramSize(): this port forces that value down for the sake
-    // of the JavaScript heap, and sizing canvas from it leaves about 16 MB, which
-    // is too little for ordinary pages. The physical memory is what the removed
-    // upstream check meant, and gives 128 MB here.
     return WTF::ramSizeDisregardingJetsamLimit() / 4;
 }
 

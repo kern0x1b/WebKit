@@ -51,10 +51,6 @@ namespace JSC {
 template<typename DetailsFunc>
 void Structure::checkOffsetConsistency(PropertyTable* propertyTable, const DetailsFunc& detailsFunc) const
 {
-    // We cannot reliably assert things about the property table in the concurrent
-    // compilation thread. It is possible for the table to be stolen and then have
-    // things added to it, which leads to the offsets being all messed up. We could
-    // get around this by grabbing a lock here, but I think that would be overkill.
     if (isCompilationThread())
         return;
 
@@ -287,15 +283,6 @@ Structure::Structure(VM& vm, JSGlobalObject* globalObject, JSValue prototype, co
 const ClassInfo Structure::s_info = { "Structure"_s, nullptr, nullptr, nullptr, CREATE_METHOD_TABLE(Structure) };
 
 #if defined(WEBKIT_IOS6)
-// ios6/armv7: the fallback here used to read s_maxTransitionLength (128, the eval-context
-// cap) instead of s_maxTransitionLengthForNonEvalPutById (512, what upstream's #else branch
-// in shouldDoCacheableDictionaryTransitionForAdd() actually uses for PutById). With no
-// WEBKIT_IOS6_MAX_PUT_BY_ID_TRANSITIONS override set, that made every ordinary `obj.x = y`
-// property add - by far the most common transition context - hit the give-up-and-convert-
-// to-dictionary threshold 4x sooner than upstream default, on every build, undocumented.
-// Once a structure is converted, every future property access on that object skips inline
-// caching for good. Restored to match the upstream default; the env var still overrides it
-// for A/B, unchanged.
 int Structure::maxTransitionLengthForNonEvalPutById()
 {
     static const int limit = [] -> int {
@@ -309,12 +296,6 @@ int Structure::maxTransitionLengthForNonEvalPutById()
     return limit;
 }
 
-// Counts, for the whole session, how many times addNewPropertyTransition() below converted
-// a structure to an uncacheable dictionary because it exceeded the transition cap above -
-// the answer to "how often does the PutById cap above actually bite". Off unless
-// WEBKIT_IOS6_DICTIONARY_TRANSITION_LOG names a file, in which case one line is appended per
-// conversion with a running total and whether it came through the PutById context this fix
-// touches.
 void Structure::logCacheableDictionaryTransitionForAdd(PropertyName propertyName, PutPropertySlot::Context context)
 {
     static const char* path = [] () -> const char* {

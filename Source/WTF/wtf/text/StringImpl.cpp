@@ -753,10 +753,6 @@ ALWAYS_INLINE Ref<StringImpl> StringImpl::convertASCIICase(StringImpl& impl, std
     size_t scanStart = 0;
 
 #if defined(WEBKIT_IOS6)
-    // Scan four Latin-1 units per word instead of one. For bytes below 0x80 neither the
-    // add nor the subtract below can carry or borrow across a byte lane, so
-    // (b + 0x80 - low) & (high + 0x80 - b) & 0x80 is exactly "low <= b <= high" per lane.
-    // Words holding a byte at or above 0x80 fall back to the per-character test.
     if constexpr (sizeof(CharacterType) == 1) {
         constexpr uint32_t lowBias = type == CaseConvertType::Lower ? 0x3f3f3f3fU : 0x1f1f1f1fU;
         constexpr uint32_t highBias = type == CaseConvertType::Lower ? 0xdadadadaU : 0xfafafafaU;

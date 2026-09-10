@@ -51,13 +51,6 @@ TextBreakIterator::Backing TextBreakIterator::mapModeToBackingIterator(StringVie
 #endif
     }, [string, priorContext, &locale](TextBreakIterator::CharacterMode) -> TextBreakIterator::Backing {
 #if defined(WEBKIT_IOS6)
-        // A grapheme cluster here is CoreFoundation's idea of one, and this
-        // CoreFoundation is from 2012: kCFStringComposedCharacterCluster knows
-        // nothing of the joined emoji sequences added to Unicode from 2015 on,
-        // so it breaks a family or a profession into its parts and each part is
-        // then shaped separately - the joiner ends up alone, in the page's text
-        // font. The ICU this port builds is 74 and has those rules, and its
-        // character iterator is the backing every non-Cocoa port already uses.
         return TextBreakIteratorICU(string, priorContext, TextBreakIteratorICU::CharacterMode { }, locale);
 #else
         return TextBreakIteratorCF(string, priorContext, TextBreakIteratorCF::Mode::ComposedCharacter, locale);

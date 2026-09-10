@@ -631,8 +631,6 @@ void HTMLPreloadScanner::scan(HTMLResourcePreloader& preloader, Document& docume
 
     while (true) {
 #if defined(WEBKIT_IOS6)
-        // Buffering the document's text a second time only to throw it away costs more than the
-        // scan itself on a small device. Keep the payload only while it can reach the CSS scanner.
         m_tokenizer.setShouldDiscardCharacterData(!m_scanner.inStyle());
 #endif
         auto token = m_tokenizer.nextToken(m_source);

@@ -50,9 +50,6 @@ template<typename T> static void dispatchWorkItem(void* dispatchContext)
 }
 
 #if defined(WEBKIT_IOS6)
-// USE(SYSTEM_MALLOC) on this port, so the DispatchWorkItem box is a second libsystem_malloc
-// round trip on top of the one the Function's callable wrapper already paid for. The wrapper
-// is itself a heap object with the right lifetime, so hand it to dispatch directly.
 static void dispatchLeakedFunction(void* dispatchContext)
 {
     auto function = adopt(static_cast<Function<void()>::Impl*>(dispatchContext));

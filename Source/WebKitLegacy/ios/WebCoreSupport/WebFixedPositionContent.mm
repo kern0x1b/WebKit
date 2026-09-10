@@ -182,10 +182,6 @@ WebFixedPositionContentData::~WebFixedPositionContentData() = default;
     Locker locker { webFixedPositionContentDataLock };
 
 #if defined(WEBKIT_IOS6)
-    // Whether the bars are pinned at all comes down to whether the engine ever
-    // handed their layers over. An empty map means every fixed element is being
-    // painted from the render tree at a stale offset, which is what drifting
-    // bars look like.
     {
         static int recordFixed = -1;
         if (recordFixed < 0)
@@ -268,10 +264,6 @@ WebFixedPositionContentData::~WebFixedPositionContentData() = default;
             [layer setPosition:newPosition];
 
 #if defined(WEBKIT_IOS6)
-            // Every move of every pinned layer, with the terms that produced it.
-            // A bar that shakes is a position that is not a straight function of
-            // the scroll offset, and the only way to see which term is moving is
-            // to record them all, on every change.
             {
                 static int recordBars = -1;
                 if (recordBars < 0)
@@ -298,14 +290,6 @@ WebFixedPositionContentData::~WebFixedPositionContentData() = default;
                         fprintf(barLog, "\n");
                     }
                     if (barLog) {
-                        // Where the bar actually ends up on the screen, in the
-                        // window's own coordinates, by walking the layer chain
-                        // and adding up what each ancestor contributes. The
-                        // relative arithmetic can be perfect while the bar is
-                        // still in the wrong place, because an ancestor carries
-                        // an offset nobody accounted for - this is the only
-                        // figure that can be compared against where a finger
-                        // sees it.
                         CGFloat absoluteY = newPosition.y - anchorPoint.y * layerBounds.size.height;
                         for (CALayer *walk = [layer superlayer]; walk; walk = [walk superlayer]) {
                             CGRect walkFrame = [walk frame];

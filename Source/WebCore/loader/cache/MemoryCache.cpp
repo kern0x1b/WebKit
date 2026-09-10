@@ -213,14 +213,8 @@ CachedResource* MemoryCache::resourceForRequestImpl(const ResourceRequest& reque
 unsigned MemoryCache::deadCapacity() const
 {
 #if defined(WEBKIT_IOS6)
-    // m_liveSize counts the encoded bytes of every image still in the document, and
-    // an endless feed puts that over any total capacity within a screen or two. The
-    // upstream formula then reports a dead capacity of zero forever, so a resource is
-    // evicted the moment its element goes away and has to come back over a link that
-    // moves 392 KB/s. Give dead resources their own budget instead.
     return std::max(m_minDeadCapacity, m_maxDeadCapacity);
 #else
-    // Dead resource capacity is whatever space is not occupied by live resources, bounded by an independent minimum and maximum.
     unsigned capacity = m_capacity - std::min(m_liveSize, m_capacity); // Start with available capacity.
     capacity = std::max(capacity, m_minDeadCapacity); // Make sure it's above the minimum.
     capacity = std::min(capacity, m_maxDeadCapacity); // Make sure it's below the maximum.
@@ -263,10 +257,6 @@ void MemoryCache::pruneLiveResources(bool shouldDestroyDecodedDataForAllLiveReso
 {
     RELEASE_ASSERT(isMainThread());
 #if defined(WEBKIT_IOS6)
-    // Only decoded data can be released here, so budget only decoded data. Measured
-    // against m_liveSize the budget is always exceeded and every paint throws away
-    // every frame older than a second, which the very next paint decodes again on
-    // the web thread.
     unsigned capacity = shouldDestroyDecodedDataForAllLiveResources ? 0 : liveDecodedCapacity();
     if (capacity && liveDecodedSize() <= capacity)
         return;
@@ -867,8 +857,6 @@ void MemoryCache::pruneSoon()
 {
     RELEASE_ASSERT(isMainThread());
 #if defined(WEBKIT_IOS6)
-    // Every drawn image reaches here through didAccessDecodedData(), and needsPruning()
-    // now walks the live decoded list. The timer check answers without walking anything.
     if (m_pruneTimer.isActive())
         return;
     if (!needsPruning())

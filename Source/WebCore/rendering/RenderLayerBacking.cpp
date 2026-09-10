@@ -1662,8 +1662,6 @@ void RenderLayerBacking::updateGeometry(const RenderLayer* compositedAncestor)
 
     m_graphicsLayer->setPosition(primaryLayerPosition);
 #if defined(WEBKIT_IOS6)
-    // Recorded with the position, so a viewport constraint built from this layer
-    // later pairs the two correctly. See viewportRectWhenPositioned().
     m_viewportRectWhenPositioned = renderer().view().frameView().rectForFixedPositionLayout();
 #endif
     m_graphicsLayer->setSize(primaryGraphicsLayerRect.size());

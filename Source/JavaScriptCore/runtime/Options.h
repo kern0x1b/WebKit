@@ -175,14 +175,6 @@ private:
     static unsigned computeNumberOfWorkerThreads(int maxNumberOfWorkerThreads, int minimum = 1);
     static int32_t computePriorityDeltaOfWorkerThreads(int32_t twoCorePriorityDelta, int32_t multiCorePriorityDelta);
 #if defined(WEBKIT_IOS6)
-    // The runtime twin of the ENABLE(JIT) predicate in PlatformEnable.h. Upstream
-    // ties the default to the pointer width because no 32-bit port has shipped a
-    // JIT for years; this one builds the baseline JIT for armv7, so the default
-    // has to follow what was actually built. Left as-is, Options::useJIT() is
-    // false from the first line of JSC::initialize(), VM never calls
-    // ExecutableAllocator::initializeUnderlyingAllocator(), and the engine runs
-    // the LLInt for the life of the process while still linking every
-    // MacroAssemblerARMv7 symbol.
 #if ENABLE(JIT)
     static constexpr bool jitEnabledByDefault() { return true; }
 #else
@@ -197,14 +189,6 @@ private:
     static constexpr bool dfgJITEnabledByDefault() { return is64Bit(); }
 #endif
 #if defined(WEBKIT_IOS6)
-    // The same gate again, one tier down. useRegExpJIT defaults to
-    // `jitEnabledByDefault() && is64Bit()`, and the second half is the same "no 32-bit
-    // port ships a JIT any more" assumption - it has nothing to do with what YARR can
-    // compile. ENABLE(YARR_JIT) follows ENABLE(JIT), which this port turns on for armv7,
-    // so the default has to follow what was actually built or the whole YARR backend is
-    // compiled, linked and never entered. Measured on the device: 200 passes of the
-    // benchmark's match loop take 13.5 s interpreted and 2.1 s compiled, unchanged
-    // results either way.
 #if ENABLE(YARR_JIT)
     static constexpr bool regExpJITEnabledByDefault() { return jitEnabledByDefault(); }
 #else

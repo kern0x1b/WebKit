@@ -145,7 +145,6 @@ static OverridingPreferredSizeMap* gOverridingLogicalHeightMapForFlexBasisComput
 static OverridingPreferredSizeMap* gOverridingLogicalWidthMapForFlexBasisComputation = nullptr;
 
 #if !defined(WEBKIT_IOS6)
-// FIXME: We should store these based on physical direction.
 using OverrideOptionalSizeMap = SingleThreadWeakHashMap<const RenderBox, RenderBox::GridAreaSize>;
 static OverrideOptionalSizeMap* gGridAreaContentLogicalHeightMap = nullptr;
 static OverrideOptionalSizeMap* gGridAreaContentLogicalWidthMap = nullptr;

@@ -3092,10 +3092,6 @@ void EventHandler::updateMouseEventTargetNode(const AtomString& eventType, Node*
     if (RefPtr page = frame->page())
         protect(page->imageOverlayController())->elementUnderMouseDidChange(frame, m_elementUnderMouse);
 #else
-    // ImageOverlayController::elementUnderMouseDidChange has an empty body off
-    // Mac, and imageOverlayController() is the lazily-creating accessor, so this
-    // built the controller on the first mouse move and then called into nothing
-    // for every move after it.
 #endif
 
     ASSERT_IMPLIES(m_elementUnderMouse, &m_elementUnderMouse->document() == frame->document());
@@ -5463,15 +5459,6 @@ static HitTestResult hitTestResultInFrame(LocalFrame* frame, const LayoutPoint& 
 }
 
 #if defined(WEBKIT_IOS6)
-// Finger-to-handler latency, end to end. event.timestamp() is the WebEvent's own
-// timestamp, stamped in app/main.m's touchEvent() at the point UIKit's touchesBegan:
-// handed the touch to app code - the earliest moment on this side of the glass.
-// touchHandleEntry is stamped here, before the hit test, on whichever thread and
-// whichever moment this function actually got to run - so touchHandleEntry minus
-// the WebEvent timestamp is exactly the time a touch spent queued on WebThreadRun's
-// runQueue plus whatever the web thread's run loop was doing (JS, layout, GC) before
-// it reached the point of taking WebRunLoopLock and running the queue. See
-// project_legacy_webkit_uikit_takes_web_lock: that lock is the same one this waits on.
 static FILE* touchLatencyLog()
 {
     static FILE* file = [] () -> FILE* {
@@ -5636,16 +5623,10 @@ Expected<bool, RemoteFrameGeometryTransformer> EventHandler::handleTouchEvent(co
             }
         }
 
-        // FIXME: Pass the touch delta for pointermove events by remembering the position per pointerID similar to
-        // Apple's m_touchLastGlobalPositionAndDeltaMap
         Ref page = *document->page();
         page->pointerCaptureController().dispatchEventForTouchAtIndex(
             *pointerTarget, event, index, !index, *document->windowProxy(), { 0, 0 });
 
-        // https://w3c.github.io/pointerevents/#suppressing-a-compatibility-mouse-event
-        // If pointerdown was canceled via preventDefault(), suppress compatibility mouse events
-        // by marking the touch event as handled. This propagates to the UIProcess via
-        // doneWithTouchEvent(wasEventHandled=true), preventing gesture-based mouse synthesis.
         if (page->pointerCaptureController().preventsCompatibilityMouseEventsForIdentifier(PointerEvent::pointerIdForTouchPoint(point)))
             swallowedEvent = true;
 #endif

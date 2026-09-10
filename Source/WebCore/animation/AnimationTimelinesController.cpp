@@ -212,8 +212,6 @@ void AnimationTimelinesController::updateAnimationsAndSendEvents(ReducedResoluti
                     continue;
             }
 
-            // This will notify the animation that timing has changed and will call automatically
-            // schedule invalidation if required for this animation.
 #if defined(WEBKIT_IOS6)
             if (animation->needsTickForRenderingUpdate())
                 animation->tick();

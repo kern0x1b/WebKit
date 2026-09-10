@@ -249,7 +249,6 @@ class WebSelectionServiceController;
     WTF::Lock pendingFixedPositionLayoutRectMutex;
     CGRect pendingFixedPositionLayoutRect;
 #if defined(WEBKIT_IOS6)
-    // The last rectangle actually handed to the engine; see -_flushCompositingChanges.
     CGRect lastAppliedFixedPositionLayoutRect;
 
     WTF::Lock pendingLayoutViewportRectMutex;

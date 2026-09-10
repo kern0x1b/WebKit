@@ -578,9 +578,6 @@ GlyphData FontCascadeFonts::glyphDataForCharacter(char32_t c, const FontCascadeD
     GlyphData glyphData = cacheEntry.glyphDataForCharacter(c);
 
 #if defined(WEBKIT_IOS6)
-    // A character no font in the cascade covers used to walk the whole cascade and then ask
-    // Core Text for a system fallback again on every single measurement of every layout
-    // pass. The walk is remembered with the same lifetime as its positive results.
     bool needsResolution = !glyphData.isValid() && !cacheEntry.isKnownMissing(c);
 #else
     bool needsResolution = !glyphData.isValid();

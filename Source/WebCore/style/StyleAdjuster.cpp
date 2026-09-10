@@ -449,19 +449,6 @@ static bool viewportBoundedLayoutEnabled()
 
 static bool shouldBoundLayoutToViewport(const Style::ComputedStyle& style, const Element& element)
 {
-    // Off unless asked for, and this is why.
-    //
-    // Bounding layout to the viewport is a real and large win on paper - at a
-    // document of 8000 to 10000 px it walked 671 blocks per pass against 5272,
-    // and the cost stopped growing with the feed. But what it buys with that is
-    // blank space: a post that has not been laid out yet is a placeholder, and a
-    // reader who scrolls faster than the engine un-skips them sees white
-    // rectangles where posts should be. Reported twice from the device by the
-    // person using it, both times as the worst thing about the page.
-    //
-    // The measurement that said otherwise was mine and it was wrong: it counted
-    // a hole only when the box had no height, and a placeholder has height. An
-    // empty box of the right size is still an empty box on the screen.
     if (style.position() != PositionType::Static && style.position() != PositionType::Relative)
         return false;
     if (style.floating() != Float::None)
@@ -472,29 +459,17 @@ static bool shouldBoundLayoutToViewport(const Style::ComputedStyle& style, const
         || display == DisplayType::BlockFlex || display == DisplayType::BlockGrid))
         return false;
 
-    // Already asking for containment, or being told not to have it.
     if (style.contain().toRaw())
         return false;
 
     RefPtr parent = element.parentElement();
     if (!parent)
         return false;
-    // A list, not a wrapper: several siblings that look like each other. A
-    // wrapper chain is one child deep and must keep laying out, or the skipping
-    // would swallow the whole page.
     if (parent->childElementCount() < 8)
         return false;
     if (parent->hasTagName(HTMLNames::bodyTag) || parent->hasTagName(HTMLNames::htmlTag))
         return false;
 
-    // Never the tail of the list.
-    //
-    // An infinite feed loads more when a sentinel near the bottom comes into
-    // view, and a skipped subtree is not observed - so containing the last
-    // children stops the feed loading altogether. Measured twice, once through
-    // injected CSS and once here: the document stopped growing at about 4000 px
-    // where it otherwise reaches 8000 and more. Three following siblings is
-    // enough to keep any sentinel live, and costs three pointer hops.
     unsigned following = 0;
     for (RefPtr sibling = element.nextElementSibling(); sibling && following < 3; sibling = sibling->nextElementSibling())
         ++following;
@@ -508,16 +483,6 @@ static bool shouldBoundLayoutToViewport(const Style::ComputedStyle& style, const
 void Adjuster::adjust(Style::ComputedStyle& style) const
 {
 #if defined(WEBKIT_IOS6)
-    // A backdrop filter cannot be honoured on this system: the layer class that
-    // samples what is behind an element does not exist, so the filter is dropped
-    // and the element is left with whatever translucent background it declared.
-    // Both spellings reach here: the unprefixed property is enabled in this port
-    // precisely so that a site declaring only the modern one is adjusted too.
-    // The result is a bar you can read the page through - and while the page is
-    // scrolling, what shows through is the tile behind it, still holding the
-    // previous frame, so the bar appears to double and smear. An opaque bar is
-    // the nearest honest rendering of a blurred one, and it costs the compositor
-    // nothing.
     if (style.display() != DisplayType::None && !style.backdropFilter().isNone()) {
         auto& declared = style.backgroundColor();
         if (declared.isResolvedColor()) {
@@ -526,18 +491,6 @@ void Adjuster::adjust(Style::ComputedStyle& style) const
                 style.setBackgroundColor({ background.opaqueColor() });
         }
 
-        // And then the filter goes, which the first version of this did not do.
-        //
-        // Leaving it set still makes the element composited -
-        // requiresCompositingForFilters promotes anything with a backdrop filter
-        // regardless of policy - and the layer that would sample what is behind
-        // it does not exist here, so the bar ended up composited with nothing
-        // painted into it: the page's own header and footer were invisible on
-        // screen while the engine reported their layers in exactly the right
-        // place. Measured on the device by asking the page where its fixed bars
-        // were (0..74 and 410..460, both opaque white) and the engine where it
-        // had put those layers (37 and 435, their centres - correct), while the
-        // screen showed neither.
         style.setBackdropFilter(Style::Filter { CSS::Keyword::None { } });
     }
 #endif
@@ -897,46 +850,9 @@ void Adjuster::adjust(Style::ComputedStyle& style) const
     }
 
 #if defined(WEBKIT_IOS6)
-    // Viewport-bounded layout, applied by the engine rather than by the page.
-    //
-    // Every layout on this port is a whole-document layout, and its cost is the
-    // number of blocks walked - about 0.3 ms each on an 800 MHz A5. On a feed
-    // that only grows, that makes the cost of laying out one new post a function
-    // of how much has been read, which is the wrong shape: a reader who scrolls
-    // for a minute pays seconds per frame.
-    //
-    // content-visibility: auto gives the engine permission to skip layout, paint
-    // and style for a subtree while it is far from the viewport, and to lay it
-    // out normally when it comes near - the relevancy is decided by the engine's
-    // own IntersectionObserver in ContentVisibilityDocumentState. Applying it to
-    // the repeated children of a long list turns the cost of a layout from the
-    // size of the document into the size of the screen. Measured on the device by
-    // document-size band: with it, 2138 blocks per pass at a 2-4k document and
-    // 2448 at 10-12k - flat; without it, 1489 at 4-5k rising to 3750 at 10-11k.
-    //
-    // Applied here rather than through injected CSS so that it holds for any site
-    // and survives the page rebuilding its own subtrees, which is what defeated
-    // the injected version.
-    //
-    // The conditions are deliberately narrow: an in-flow block-level child of an
-    // element that has many similar children, with no containment or
-    // content-visibility of its own, no fixed or sticky position, and not a
-    // replaced or form element. contain-intrinsic-size gains "auto" below, so a
-    // skipped child keeps the size it last had and the scroll bar does not jump.
     if (viewportBoundedLayoutEnabled() && m_element && style.contentVisibility() == ContentVisibility::Visible && shouldBoundLayoutToViewport(style, *m_element)) {
         style.setContentVisibility(ContentVisibility::Auto);
 
-        // A size to stand in until the box has been laid out once.
-        //
-        // "auto" remembers the size a box had last time, which is exact - but a
-        // post that has only just arrived has no last time, so it collapses to
-        // nothing and the reader gets a white hole where a post should be.
-        // Sampled during a flick on the device, one frame in twelve had every
-        // box on screen in that state.
-        //
-        // A plain placeholder height costs nothing when the real size is known,
-        // because the remembered value wins, and keeps the page the right shape
-        // when it is not.
         if (style.containIntrinsicHeight().isNone())
             style.setContainIntrinsicHeight({ CSS::Keyword::Auto { }, Style::ContainIntrinsicSize::Length { 320 } });
         if (style.containIntrinsicWidth().isNone())

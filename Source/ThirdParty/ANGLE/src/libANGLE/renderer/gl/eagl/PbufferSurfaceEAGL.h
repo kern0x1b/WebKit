@@ -58,8 +58,6 @@ class PbufferSurfaceEAGL : public SurfaceGL
     unsigned mWidth;
     unsigned mHeight;
 
-    // TODO(geofflang): Don't store these, they are potentially specific to a single GL context.
-    // http://anglebug.com/40096492
     const FunctionsGL *mFunctions;
     StateManagerGL *mStateManager;
 

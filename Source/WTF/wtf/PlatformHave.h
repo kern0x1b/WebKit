@@ -584,19 +584,6 @@
 #define HAVE_APP_SSO 1
 #endif
 
-// -_setCookiesChangedHandler:onQueue:, -_setCookiesRemovedHandler:onQueue: and
-// -_setSubscribedDomainsForCookieChanges: are all absent from this Foundation.
-// What this release has in their place is NSHTTPCookieManagerCookiesChangedNotification:
-// one notification for the whole jar, carrying no cookie list, no domain, and no
-// distinction between an addition and a removal. Those three things are the entire
-// contract of the listener API, so there is nothing here to map it onto. The only
-// way to synthesise them would be to keep a shadow copy of the jar and diff it,
-// which would report a cookie CFNetwork merely rewrote as a fresh addition - a
-// fallback layer that lies. So state that the capability is absent and let
-// WebCore's existing "this platform has no cookie change listeners" path run;
-// on this port CookieJar::addChangeListener is already the do-nothing base
-// implementation, so nothing observable changes. The coarse notification is
-// still used, correctly, by CookieStorageObserver for "the jar changed, re-read".
 #if (PLATFORM(COCOA) && !defined(WEBKIT_IOS6)) || PLATFORM(GTK) || PLATFORM(WPE)
 #define HAVE_COOKIE_CHANGE_LISTENER_API 1
 #endif
@@ -613,9 +600,6 @@
 #define HAVE_AVPLAYER_VIDEORANGEOVERRIDE 1
 #endif
 
-// This CoreGraphics has neither entry point. The shims for them draw a corner as
-// a parabola rather than the circle approximation, so WebKit's own beziers - the
-// same ones every non-CG port draws - are both more correct and one less shim.
 #if PLATFORM(COCOA) && !PLATFORM(WATCHOS) && !PLATFORM(APPLETV) && !defined(WEBKIT_IOS6)
 #define HAVE_CG_PATH_UNEVEN_CORNERS_ROUNDEDRECT 1
 #endif
@@ -652,17 +636,6 @@
 #define HAVE_UISCENE_BASED_VIEW_SERVICE_STATE_NOTIFICATIONS 1
 #endif
 
-// The entitlement gate this turns on - isJITEnabled() requiring
-// "dynamic-codesigning" or "com.apple.developer.cs.allow-jit" - describes an OS
-// that enforces code signing on writable-executable pages. This one does not:
-// mmap of RWX and mprotect RW->RX both succeed and the written code executes,
-// verified directly on the device as root and as mobile. Neither entitlement
-// name existed in 2012 either, so the check can only ever answer false here, and
-// when it does ExecutableAllocator hands back an empty reservation, isValid()
-// goes false, and disableJIT() sets Options::useJIT() = false. The engine then
-// runs the LLInt for the life of the process while still reporting itself as a
-// JIT build - which is exactly what was measured before this was turned off:
-// useJIT=0, execAllocValid=0, and interpreter-shaped benchmark numbers.
 #if PLATFORM(IOS_FAMILY) && !PLATFORM(IOS_FAMILY_SIMULATOR) && !PLATFORM(MACCATALYST) && !defined(WEBKIT_IOS6)
 #define HAVE_IOS_JIT_RESTRICTIONS 1
 #endif
@@ -910,8 +883,6 @@
 #endif
 
 #if (PLATFORM(IOS) || PLATFORM(MACCATALYST) || PLATFORM(MAC) || PLATFORM(VISION)) && !defined(WEBKIT_IOS6)
-// App SSO, and this variant of the lookup, arrived long after iOS 6. The older
-// -_protocolClassForRequest: is still there and does the same job.
 #define HAVE_NSURLPROTOCOL_WITH_SKIPAPPSSO 1
 #endif
 
@@ -921,10 +892,6 @@
 
 #if PLATFORM(COCOA)
 #define HAVE_CORE_TEXT_SBIX_IMAGE_SIZE_FUNCTIONS 1
-// This says the system font parser understands WOFF itself, so WebKit compiles
-// its own converter out. That holds from iOS 7 onward; the parser on this
-// release rejects a WOFF file outright, which left every WOFF web font failing
-// to load. Turning it off restores the converter that WebKit still carries.
 #if !defined(WEBKIT_IOS6)
 #define HAVE_WOFF_SUPPORT 1
 #endif
@@ -1120,10 +1087,6 @@
 #define HAVE_APPLE_PUSH_SERVICE_URL_TOKEN_SUPPORT 1
 #endif
 
-// ImageIO decodes AVIF from iOS 16, JPEG-XL never shipped in it, and HEIC needs
-// both iOS 11 and the HEVC hardware this device does not have. Claiming any of
-// them in the image Accept header makes servers negotiate a format that then
-// renders as nothing.
 #if PLATFORM(COCOA) && !defined(WEBKIT_IOS6)
 #define HAVE_AVIF 1
 #endif
@@ -1153,19 +1116,10 @@
 #define HAVE_SHARED_REGION_SPI 1
 #endif
 
-// CarPlay, and with it AVAudioSessionPortCarAudio, arrived in iOS 7. Asking this
-// AVFoundation for that constant gets nothing, and PAL's soft-link asserts
-// rather than returning nil, so the question kills the process the first time a
-// page creates a media element. There is no car head unit to be connected to
-// here, which is what the guarded code concludes anyway.
 #if !defined(WEBKIT_IOS6)
 #define HAVE_AVAUDIOSESSION_CARAUDIO_PORT 1
 #endif
 
-// MediaExperience.framework postdates this OS by years, so AVSystemController
-// and its notifications are not there to soft-link against. The two use sites
-// are already guarded by this HAVE; without it the constant accessors assert
-// and the process dies the first time a script touches a media element.
 #if PLATFORM(IOS_FAMILY) && !PLATFORM(MACCATALYST) && !defined(WEBKIT_IOS6)
 #define HAVE_MEDIAEXPERIENCE_AVSYSTEMCONTROLLER 1
 #endif
@@ -1459,8 +1413,6 @@
 #endif
 
 #if PLATFORM(COCOA) && !defined(WEBKIT_IOS6)
-// CGStyle is a decade newer than this CoreGraphics. Calling CGContextSetStyle
-// on a context that has never heard of styles aborts the process.
 #define HAVE_CGSTYLE_COLORMATRIX_BLUR 1
 #endif
 
@@ -2066,12 +2018,8 @@
 #define HAVE_SUPPORT_HDR_DISPLAY_APIS 0
 #undef HAVE_TASK_IDENTITY_TOKEN
 #define HAVE_TASK_IDENTITY_TOKEN 0
-// Ownership identity is the task identity token above by another name: without
-// one there is nothing to hand CGContextSetOwnerIdentity.
 #undef HAVE_CG_CONTEXT_SET_OWNER_IDENTITY
 #define HAVE_CG_CONTEXT_SET_OWNER_IDENTITY 0
-// IOSurfaceAccelerator is an iOS 8 framework; linking it stops the engine from
-// loading at all on this release.
 #undef HAVE_IOSURFACE_ACCELERATOR
 #define HAVE_IOSURFACE_ACCELERATOR 0
 #undef HAVE_IOSURFACE_COREIMAGE_SUPPORT

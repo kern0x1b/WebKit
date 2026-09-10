@@ -56,9 +56,6 @@ private:
     Element& m_element;
 
 #if defined(WEBKIT_IOS6)
-    // Resolved once per instance instead of once per invalidation key. An element carrying
-    // machine-generated atomic classes produces one key per class, and hover flips a whole ancestor
-    // chain per pointer event, so this walked to the scope and back dozens of times per element.
     const ScopeRuleSets* m_ownRuleSets { nullptr };
     const ScopeRuleSets* m_shadowRuleSets { nullptr };
     bool m_didResolveRuleSets { false };

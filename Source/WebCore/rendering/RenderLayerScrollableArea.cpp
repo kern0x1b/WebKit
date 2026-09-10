@@ -533,30 +533,7 @@ bool RenderLayerScrollableArea::canUseCompositedScrolling() const
     if (renderer.settings().asyncOverflowScrollingEnabled())
         return isVisible && scrollsOverflow() && !m_layer.isInsideSVGForeignObject();
 
-    // Promoting every scrollable overflow area here looked right - repaint
-    // scrolling costs a full compositing update per frame - but it is not
-    // survivable: RenderLayerBacking::updateConfiguration reaches for a
-    // scrolling coordinator that WebKitLegacy does not have and takes the
-    // process down with SIGSEGV about forty seconds into the feed. The property
-    // is left as the only way in, so nothing is promoted unless a page asks.
 #if defined(WEBKIT_IOS6)
-    // Without promotion a scrollable overflow area never gets a scrolling
-    // layer, so the embedder is never handed one, never builds the
-    // UIWebOverflowScrollView that scrolls it, and the area cannot be moved by
-    // touch at all. That is every cookie dialog on the web, and it is why they
-    // read as frozen.
-    //
-    // An earlier attempt at this was abandoned after a SIGSEGV blamed on a
-    // missing scrolling coordinator. Re-tried with the crash log now
-    // symbolicable: no crash appears, on this page or across SoundCloud, The
-    // Verge and Hacker News. Nor is there a memory cost, measured with a fresh
-    // process per reading - The Verge 88.8 MB dirty before and 78.1 after,
-    // SoundCloud 133.2 and 137.3, Hacker News 33.5 and 31.3. The scrolling
-    // layers themselves are small, a few hundred KB each.
-    //
-    // This is the same condition upstream applies when async overflow
-    // scrolling is on, minus the async part: here the embedder scrolls the
-    // layer and reports back through _overflowScrollPositionChangedTo:forNode:.
     return isVisible && scrollsOverflow() && !m_layer.isInsideSVGForeignObject();
 #elif PLATFORM(IOS_FAMILY) && ENABLE(WEBKIT_OVERFLOW_SCROLLING_CSS_PROPERTY)
     return isVisible && scrollsOverflow() && renderer.style().overflowScrolling() == Style::WebkitOverflowScrolling::Touch;

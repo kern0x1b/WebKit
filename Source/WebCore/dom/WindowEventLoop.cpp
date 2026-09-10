@@ -135,13 +135,6 @@ void WindowEventLoop::scheduleIdlePeriod()
 void WindowEventLoop::opportunisticallyRunIdleCallbacks(std::optional<MonotonicTime> deadline)
 {
 #if defined(WEBKIT_IOS6)
-    // This runs after every turn of the event loop and after every opportunistic
-    // task, and on a page that never calls requestIdleCallback every one of those
-    // turns walked the associated contexts and the microtask queue to conclude
-    // there was nothing to do. IdleCallbackController::queueIdleCallback is the
-    // only thing that can create an idle callback, and it always calls
-    // scheduleIdlePeriod() on this loop; the flag is cleared again below as soon
-    // as the walk finds nothing pending, so it stays honest.
     if (!m_maybeHasPendingIdleCallbacks)
         return;
 #endif

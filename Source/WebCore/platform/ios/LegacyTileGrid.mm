@@ -43,9 +43,6 @@
 
 #if defined(WEBKIT_IOS6)
 #include <unistd.h>
-// Our own running commentary. WTFLogAlways reaches a file through stderr, so
-// every one of these is a synchronous write on whichever thread the engine is
-// on - and some of them sit on paths that run for every frame of a scroll.
 static bool engineChatterEnabled()
 {
     static int enabled = -1;
@@ -451,14 +448,6 @@ bool LegacyTileGrid::shouldUseMinimalTileCoverage() const
     bool minimalMode = m_tileCache->tilingMode() == LegacyTileCache::Minimal;
     bool noSpeculative = !m_tileCache->isSpeculativeTileCreationEnabled();
 #if defined(WEBKIT_IOS6)
-    // Only when the process is actually near the kill, not merely warned.
-    //
-    // A warning is the normal state here - the page's own memory keeps the
-    // process above three quarters of its budget for as long as it is open - and
-    // answering it by painting only what is on screen means a flick lands on
-    // page that was laid out and never painted. Photographed over six flicks,
-    // the longest unpainted run averaged 263 px of a 480 px screen and five
-    // frames in six ended blank.
     static const bool coverageFollowsPolicy = !!getenv("WEBKIT_IOS6_MINIMAL_TILES");
     bool underPressure = coverageFollowsPolicy
         ? MemoryPressureHandler::singleton().isUnderMemoryPressure()

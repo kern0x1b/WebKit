@@ -76,15 +76,6 @@ class RenderLayerBacking final : public GraphicsLayerClient {
     WTF_MAKE_NONCOPYABLE(RenderLayerBacking);
 public:
 #if defined(WEBKIT_IOS6)
-    // The viewport rectangle in force when this layer's position was last set.
-    //
-    // A viewport constraint pairs a layer position with the rectangle that
-    // position was computed against. Pairing them by a single frame-wide
-    // snapshot is not enough: a layout updates the snapshot but does not
-    // necessarily recompute every layer's geometry, so a layer whose position
-    // came from an earlier pass gets matched with a newer rectangle and is moved
-    // by the difference - measured on the device as a bar exactly one flick out
-    // of place. Kept per layer, the two always describe the same moment.
     WebCore::LayoutRect viewportRectWhenPositioned() const { return m_viewportRectWhenPositioned; }
 #endif
 

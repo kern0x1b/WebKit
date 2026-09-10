@@ -58,9 +58,6 @@ namespace WebCore {
 static const Seconds maximumDelayForTimers { 400_ms };
 
 #if defined(WEBKIT_IOS6)
-// UIKit holds the click until didFinishContentChangeObserving answers, and the
-// answer is withheld while any 400 ms timer installed during the mouse move is
-// outstanding. A visibility change the move itself produced is still reported.
 static bool waitForSpeculativeContentChange()
 {
     static int wait = -1;
@@ -605,7 +602,6 @@ void ContentChangeObserver::adjustObservedState(Event event)
             return;
         }
 
-        // The fixed observation window (which is the final step in content observation) is closed and now we check if are still waiting for timers or animations to finish.
 #if defined(WEBKIT_IOS6)
         if (hasPendingActivity() && waitForSpeculativeContentChange()) {
             LOG(ContentObservation, "notifyClientIfNeeded: We are still waiting on some events.");

@@ -347,8 +347,6 @@ void RuleSetBuilder::addStyleRuleWithSelectorList(const CSSSelectorList& selecto
         RuleData ruleData(rule, selectorList.indexOfSelector(selector), selectorListIndex++, m_ruleSet->ruleCount(), m_isStartingStyle);
         m_mediaQueryCollector.addRuleIfNeeded(ruleData);
 #if defined(WEBKIT_IOS6)
-        // RuleSet is ThreadSafeRefCounted, so protect() costs a pair of atomic read-modify-writes plus
-        // a barrier for every selector of every rule. The builder holds a strong reference throughout.
         m_ruleSet->addRule(WTF::move(ruleData), m_currentCascadeLayerIdentifier, m_currentContainerQueryIdentifier, m_currentScopeIdentifier, &m_featureCollectionContext);
 #else
         protect(m_ruleSet)->addRule(WTF::move(ruleData), m_currentCascadeLayerIdentifier, m_currentContainerQueryIdentifier, m_currentScopeIdentifier, &m_featureCollectionContext);

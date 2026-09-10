@@ -34,11 +34,6 @@ namespace WebCore {
 namespace Style {
 
 #if defined(WEBKIT_IOS6)
-// Every key retains the whole CSS source string, and the sheets here are hundreds of kilobytes
-// each, so 24 of them is a multi-megabyte floor on a 512 MB device. The count stays high on
-// purpose - reparsing one of these sheets is the single most expensive thing the style system
-// does here, so evicting one to save memory loses badly - but the total retained source is now
-// capped as well, so a handful of huge sheets cannot push the whole budget on their own.
 static size_t maximumCacheEntries()
 {
     static size_t value = [] -> size_t {

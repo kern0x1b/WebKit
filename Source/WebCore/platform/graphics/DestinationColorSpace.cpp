@@ -197,7 +197,6 @@ std::optional<DestinationColorSpace> DestinationColorSpace::asExtended() const
     if (usesExtendedRange())
         return *this;
 #if USE(CG) && !defined(WEBKIT_IOS6)
-    // Avoid refing color space here as this is performance-sensitive.
     SUPPRESS_UNRETAINED_ARG if (RetainPtr colorSpace = adoptCF(CGColorSpaceCreateExtended(platformColorSpace())))
         return DestinationColorSpace(WTF::move(colorSpace));
 #endif
@@ -239,7 +238,6 @@ bool DestinationColorSpace::usesExtendedRange() const
 bool DestinationColorSpace::usesITUR_2100TF() const
 {
 #if USE(CG) && !defined(WEBKIT_IOS6)
-    // Avoid refing color space here as this is performance-sensitive.
     SUPPRESS_UNRETAINED_ARG return CGColorSpaceUsesITUR_2100TF(platformColorSpace());
 #else
     notImplemented();

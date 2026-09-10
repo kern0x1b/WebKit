@@ -75,8 +75,6 @@ extern "C" unsigned g_webkitIOS6LayoutCount;
 namespace WebCore {
 
 #if defined(WEBKIT_IOS6)
-// Counts the blocks a single layout pass walks. Declared where it is used, in
-// RenderBlockFlow::layoutBlock; both live in this namespace.
 unsigned g_webkitIOS6BlocksLaidOut;
 unsigned g_webkitIOS6BlocksForced;
 unsigned g_webkitIOS6BlocksDirty;
@@ -95,8 +93,6 @@ unsigned long long g_webkitIOS6BoxGeometryNs;
 unsigned g_webkitIOS6BoxGeometryCount;
 }
 
-// A tiny fixed histogram of return addresses; no allocation, no locking beyond
-// the web lock that is already held whenever the render tree is touched.
 static constexpr unsigned needsLayoutSlots = 24;
 static void* needsLayoutCallers[needsLayoutSlots];
 static unsigned needsLayoutCounts[needsLayoutSlots];
@@ -288,36 +284,10 @@ void LocalFrameViewLayoutContext::performLayout(bool canDeferUpdateLayerPosition
     if (protect(view())->updateFixedPositionLayoutRect() && subtreeLayoutRoot())
         convertSubtreeLayoutToFullLayout();
 #if defined(WEBKIT_IOS6)
-    // One rectangle for this layout, not two.
-    //
-    // The application publishes where the window is twice: as the custom
-    // fixed-position rectangle, stored under a mutex and read here, and as the
-    // layout viewport override, queued onto the web thread and applied whenever
-    // that thread reaches it. Behind a layout that takes a second or more the
-    // queued one is stale, so the engine laid a fixed element out against one
-    // rectangle and recorded its constraint against the other. The difference is
-    // whatever the finger covered in between - measured on the device, the top
-    // bar sat exactly one flick out of place, 430 px, on 27% of the frames of a
-    // scroll. Taking the layout viewport from the same rectangle, here, removes
-    // the race rather than narrowing it.
     if (protect(view())->useCustomFixedPositionLayoutRect())
         protect(view())->setLayoutViewportOverrideRect(LayoutRect(protect(view())->customFixedPositionLayoutRect()),
             LocalFrameView::TriggerLayoutOrNot::No);
 
-    // The rectangle this layout is running against, kept for the viewport
-    // constraints recorded from its results.
-    //
-    // A constraint pairs "the layer position at the last layout" with "the
-    // viewport rectangle at the last layout" and moves the layer by the
-    // difference between that rectangle and the current one, so the two have to
-    // describe the same instant. They did not: the position came from this
-    // layout and the rectangle was read afterwards, at flush time, and a
-    // whole-document layout of this feed takes up to two and a half seconds
-    // while a flick covers four hundred and thirty pixels.
-    //
-    // Taking it at the start of the compositing update instead was tried and is
-    // worse - 74% of frames right against 91% - because the layer positions come
-    // from the layout, not from that pass.
     protect(view())->setFixedPositionRectAtLastLayout(protect(view())->rectForFixedPositionLayout());
 #endif
 #endif
@@ -361,11 +331,6 @@ void LocalFrameViewLayoutContext::performLayout(bool canDeferUpdateLayerPosition
         RenderTreeNeedsLayoutChecker checker(*renderView());
 #endif
 #if defined(WEBKIT_IOS6)
-        // Every layout, with its root and what it cost.
-        //
-        // "Layout is expensive" is not actionable; whether the engine is laying
-        // out one post or the whole feed, and how often, is. Off unless the flag
-        // file is there, and the check is cached.
         static int logLayouts = -1;
         if (logLayouts < 0)
             logLayouts = !access("/tmp/native-layout-log", F_OK);
@@ -390,10 +355,6 @@ void LocalFrameViewLayoutContext::performLayout(bool canDeferUpdateLayerPosition
             g_webkitIOS6BoxGeometryCount = 0;
             g_webkitIOS6StylesSet = 0;
             g_webkitIOS6StyleResolves = 0;
-            // How much of the tree is already dirty on the way in. If the count
-            // is large here the dirtying came from outside the layout; if it is
-            // small yet thousands of blocks get laid out, the layout is dirtying
-            // the tree as it runs.
             g_webkitIOS6DirtyOnEntry = 0;
             if (CheckedPtr root = renderView()) {
                 for (CheckedPtr walk = static_cast<RenderObject*>(root.get()); walk; walk = walk->nextInPreOrder()) {
@@ -879,7 +840,6 @@ void LocalFrameViewLayoutContext::disableSetNeedsLayout()
 void LocalFrameViewLayoutContext::scheduleLayout()
 {
 #if defined(WEBKIT_IOS6)
-    // See LegacyTileCache::mainThreadShouldWaitForEngine.
     g_webkitIOS6PendingDrawWork = 1;
 #endif
     // FIXME: We should assert the page is not in the back/forward cache, but that is causing

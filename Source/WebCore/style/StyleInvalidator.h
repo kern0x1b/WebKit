@@ -92,9 +92,6 @@ private:
 
     RefPtr<RuleSet> m_ownedRuleSet;
 #if defined(WEBKIT_IOS6)
-    // RuleSet is ThreadSafeRefCounted, so copying the vector costs an atomic pair per entry, and the
-    // Invalidator is built inside a loop, once per changed element. Both callers that pass a vector
-    // own storage that outlives the Invalidator.
     InvalidationRuleSetVector m_ownedRuleSetVector;
     const InvalidationRuleSetVector& m_ruleSets;
 #else

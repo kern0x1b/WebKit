@@ -584,8 +584,6 @@ static BOOL s_didSetCacheModel;
 static WebCacheModel s_cacheModel = WebCacheModelDocumentViewer;
 
 #if defined(WEBKIT_IOS6)
-// Defined in LegacyTileCache.mm. Raised while a _dispatchTileDidDraw: perform is
-// in flight so the tile cache schedules one per pass instead of one per tile.
 extern "C" int g_webkitIOS6TileDidDrawPending;
 #endif
 
@@ -1922,27 +1920,12 @@ static void webViewStartupMark(const char* what, double& last)
         WebCore::releaseMemory(Critical::Yes, Synchronous::Yes);
     });
 #if defined(WEBKIT_IOS6)
-    // Every open local storage connection carries a SQLite page cache. This used
-    // to be part of the memory-warning path and lost its caller when that path
-    // was rewritten; the method is still here and still does what it says.
     [WebStorageManager closeIdleLocalStorageDatabases];
 #endif
 }
 
 - (void)_setLayoutViewportRect:(CGRect)rect
 {
-    // The rectangle the engine measures visibility against.
-    //
-    // LocalFrameView::layoutViewportRect() is the root an IntersectionObserver
-    // without an explicit root intersects with, and it is also what
-    // viewport-constrained layout is anchored to. Without an override it is
-    // LayoutRect(m_layoutViewportOrigin, ...), and that origin is only moved by
-    // LocalFrameView::scrollPositionChanged - which never runs on this port,
-    // because UIKit owns the scroll view and ScrollView::scrollTo is never
-    // reached. So the origin stayed at zero for the life of the page: an element
-    // scrolled to the middle of the screen reported isIntersecting false with a
-    // ratio of zero, measured on the device, and a feed that loads on
-    // intersection never loaded anything.
 #if defined(WEBKIT_IOS6)
     {
         Locker locker { _private->pendingLayoutViewportRectMutex };
@@ -1966,12 +1949,6 @@ static void webViewStartupMark(const char* what, double& last)
         RefPtr frameView = frame->view();
         if (!frameView)
             return;
-        // Without TriggerLayoutOrNot::No this marks every viewport-constrained
-        // object for layout on each call, and called once per frame of a scroll
-        // that took the interface to 1.5 frames per second and threw the bars 386
-        // pixels off. The size is unchanged while scrolling, which is the only
-        // case that genuinely needs a layout, and the function forces one itself
-        // when the height changes.
         frameView->setLayoutViewportOverrideRect(WebCore::LayoutRect(latestRect.origin.x, latestRect.origin.y, latestRect.size.width, latestRect.size.height),
             WebCore::LocalFrameView::TriggerLayoutOrNot::No);
     });
@@ -1983,12 +1960,6 @@ static void webViewStartupMark(const char* what, double& last)
         RefPtr frameView = frame->view();
         if (!frameView)
             return;
-        // Without TriggerLayoutOrNot::No this marks every viewport-constrained
-        // object for layout on each call, and called once per frame of a scroll
-        // that took the interface to 1.5 frames per second and threw the bars 386
-        // pixels off. The size is unchanged while scrolling, which is the only
-        // case that genuinely needs a layout, and the function forces one itself
-        // when the height changes.
         frameView->setLayoutViewportOverrideRect(WebCore::LayoutRect(rect.origin.x, rect.origin.y, rect.size.width, rect.size.height),
             WebCore::LocalFrameView::TriggerLayoutOrNot::No);
     });
@@ -2513,7 +2484,6 @@ static NSMutableSet *knownPluginMIMETypes()
 - (void)_dispatchTileDidDraw:(CALayer*)tile
 {
 #if defined(WEBKIT_IOS6)
-    // Lowered here so LegacyTileCache::drawLayer() can schedule the next one.
     g_webkitIOS6TileDidDrawPending = 0;
 #endif
 
@@ -3101,8 +3071,6 @@ ALLOW_DEPRECATED_DECLARATIONS_END
         });
 #else
         WebThreadRun(^{
-            // It is possible that the prefs object has already changed before the invocation could be called
-            // on the web thread. This is not possible on TOT which is why they have a simple ASSERT.
             WebPreferences *preferences = (WebPreferences *)[notification object];
             if (preferences != [self preferences])
                 return;
@@ -4189,7 +4157,6 @@ IGNORE_WARNINGS_END
         mainFrame->view()->setCustomFixedPositionLayoutRect(newRect);
 
 #if defined(WEBKIT_IOS6)
-    // Remembered so the compositing flush can put the bars back with it.
     {
         Locker locker { _private->pendingFixedPositionLayoutRectMutex };
         _private->lastAppliedFixedPositionLayoutRect = newRect;
@@ -8951,27 +8918,13 @@ FORWARD(toggleUnderline)
     nsurlCacheDiskCapacity = std::max(nsurlCacheDiskCapacity, [nsurlCache diskCapacity]);
 
 #if defined(WEBKIT_IOS6)
-    // The table above reads the machine's memory and picks 32 MB of resource
-    // cache for a 512 MB device. That was written when the engine itself was a
-    // few megabytes; here the frameworks hold twenty and the tiles sixty before
-    // a single image is cached, and the system takes the app away at around a
-    // hundred and eighty. Measured across repeated navigations, the malloc heap
-    // is the block that grows, so this is where it gets a ceiling.
     cacheTotalCapacity = std::min<unsigned>(cacheTotalCapacity, 8 * 1024 * 1024);
     cacheMaxDeadCapacity = std::min<unsigned>(cacheMaxDeadCapacity, 4 * 1024 * 1024);
     cacheMinDeadCapacity = 0;
     deadDecodedDataDeletionInterval = 1_s;
 
-    // Foundation keeps its own copy of the same response bytes. The table above
-    // gives a phone eight megabytes of it on top of the eight WebCore is now
-    // allowed, which is the comment two branches up - "these values are small
-    // because WebCore does most caching itself" - applied everywhere except iOS.
     nsurlCacheMemoryCapacity = std::min<unsigned>(nsurlCacheMemoryCapacity, 1 * 1024 * 1024);
 
-    // A suspended page in the back/forward cache holds its whole DOM, render
-    // tree and decoded images. Two of them is what a 512 MB phone was given in
-    // 2012; here the engine alone is bigger than that machine's whole browser.
-    // One is kept, so going back is still instant on the page just left.
     pageCacheSize = std::min<unsigned>(pageCacheSize, 1);
 #endif
 
@@ -8983,8 +8936,6 @@ FORWARD(toggleUnderline)
     pageCache.setMaxSize(pageCacheSize);
 #if PLATFORM(IOS_FAMILY)
 #if !defined(WEBKIT_IOS6)
-    // Taking the larger of the two can only ever raise this, never lower it,
-    // which would undo the ceiling set above.
     nsurlCacheMemoryCapacity = std::max(nsurlCacheMemoryCapacity, [nsurlCache memoryCapacity]);
 #endif
     CFURLCacheRef cfCache;
@@ -10286,59 +10237,6 @@ void WebInstallMemoryPressureHandler(void)
         std::call_once(onceFlag, [] {
             auto& memoryPressureHandler = MemoryPressureHandler::singleton();
 #if defined(WEBKIT_IOS6)
-            // The default configuration bases every threshold on min(3GB, ramSize()).
-            // computeAvailableMemory() rounds max_mem up to a 128MB multiple and
-            // jetsamLimit() cannot be read here at all - memorystatus_control is
-            // refused to a non-root process on this release, so it returns its 840MB
-            // fallback and the min() picks 512MB. The thresholds that follow from
-            // that are conservative 256MB and strict 332.8MB, while jetsam ends the
-            // process at about 122MB: the policy can never leave Unrestricted.
-            //
-            // Two mechanisms depend on it. measurementTimerFired() calls
-            // releaseMemory() once the footprint passes a threshold, and
-            // RenderLayerCompositor::updateCompositingPolicy() reads
-            // currentMemoryUsagePolicy() when a pressure event arrives and keeps
-            // CompositingPolicy::Normal for anything short of Conservative - so even
-            // the kern.memorystatus_level poller installed below cannot make the
-            // compositor stop backing new layers.
-            //
-            // The ceiling has to bracket the range the process actually runs in,
-            // not sit below it. Measured with a page open: 240 MB resident, which
-            // is what memoryFootprint() reports here - above the 195 MB the old
-            // 300 MB ceiling put the Strict threshold at. The policy was therefore
-            // pinned at Strict for the whole life of a page, so
-            // isUnderMemoryPressure() never returned false: the glyph display
-            // list cache and the text measurement cache stored nothing, the back
-            // forward cache refused every page, the font cache ran on its reduced
-            // limits and releaseNoncriticalMemory() emptied everything every ten
-            // seconds. The two jetsam figures in the comments above (122 MB and
-            // 180 MB) are both wrong; the process demonstrably runs at 240 MB.
-            // The bands are calibrated against a jetsam report rather than a
-            // guess. The system killed this process at 72246 pages, which is
-            // 282 MB, for vm-pageshortage; anything at or above that is fatal, so
-            // Strict has to act well before it. Measured page footprints: an
-            // ordinary site sits at about 208 MB, a heavy one at 256 MB.
-            // These thresholds are kept low because the margin above a heavy page
-            // is too thin to spend, not because raising them cannot work.
-            //
-            // The policy does sit at Strict for the whole life of a page, and
-            // that does mean the glyph display list cache, the text measurement
-            // cache and the back forward cache never retain anything, and that
-            // releaseNoncriticalMemory() empties the rest every ten seconds. That
-            // reads like a misconfiguration. It is not: it is what keeps the
-            // process alive.
-            //
-            // The system kills this process at 282 MB - a LowMemory report names
-            // 72246 pages for vm-pageshortage. Measured with Strict at 256 MB,
-            // after the null resource crash in willCacheResponseAsync was fixed:
-            // the same browsing run survives, but the footprint peaks at 270 MB,
-            // twelve short of the kill, and repeating a load in that state still
-            // produced a jettison. At these thresholds the same run peaks at
-            // 258 MB. The gain measured about 4.3 s to 3.5 s to domInteractive on
-            // a markup heavy page, which is not worth an intermittent death.
-            //
-            // So the ten second flush is the price of staying alive on 512 MB,
-            // and the caches below are deliberately left inert.
             constexpr uint64_t processMemoryCeiling = 300 * MB;
             memoryPressureHandler.setConfiguration(MemoryPressureHandler::Configuration {
                 processMemoryCeiling, 0.5, 0.65, std::nullopt, 10_s });
@@ -10354,11 +10252,6 @@ void WebInstallMemoryPressureHandler(void)
             });
             memoryPressureHandler.install();
 #if defined(WEBKIT_IOS6)
-            // WebKitLegacy never turned the footprint monitor on - only
-            // WebProcess::initializeWebProcess does - so nothing in this process
-            // has ever looked at its own footprint. It is the only signal tied to
-            // the per-process limit; kern.memorystatus_level answers for the whole
-            // system and can read healthy while this process alone is over budget.
             memoryPressureHandler.setShouldUsePeriodicMemoryMonitor(true);
 #endif
         });

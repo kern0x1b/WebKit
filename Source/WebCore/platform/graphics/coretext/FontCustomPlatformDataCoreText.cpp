@@ -117,22 +117,6 @@ static RetainPtr<CFDataRef> extractFontCustomPlatformDataMemorySafe(const Shared
 RefPtr<FontCustomPlatformData> FontCustomPlatformData::create(SharedBuffer& buffer, const String& itemInCollection)
 {
 #if defined(WEBKIT_IOS6)
-    // Neither of the two calls this function is built on exists here:
-    // FPFontCreateFontsFromData is a private CoreText parser and
-    // CTFontManagerCreateFontDescriptorFromData arrived in iOS 7. With both
-    // absent every @font-face silently produced no font, so no page on the web
-    // ever loaded a web font - including icon fonts, which then draw as blanks.
-    //
-    // The documented route that predates them is present in full, and was the
-    // only way to load a font from data on this release: wrap the bytes in a
-    // data provider, build a CGFont, lift it into CoreText and ask it for its
-    // descriptor. By this point the buffer is already sfnt, since CachedFont
-    // has run the WOFF conversion.
-    //
-    // itemInCollection selects one face out of a collection file, which this
-    // route cannot address; a collection therefore yields its first face. Web
-    // fonts are single faces in practice, and the alternative here is no font
-    // at all.
     RetainPtr sfntData = buffer.createCFData();
     if (!sfntData)
         return nullptr;
@@ -155,7 +139,6 @@ RefPtr<FontCustomPlatformData> FontCustomPlatformData::create(SharedBuffer& buff
 #else
     RetainPtr extractedData = extractFontCustomPlatformDataSystemParser(buffer, itemInCollection);
     if (!extractedData) {
-        // Something is wrong with the font.
         return nullptr;
     }
 

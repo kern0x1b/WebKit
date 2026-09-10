@@ -42,14 +42,6 @@ void EdenGCActivityCallback::doCollection(VM& vm)
     setDidGCRecently(false);
 #if defined(WEBKIT_IOS6)
     if (vm.heap.consumeEdenAllocationFloorSkip(0)) {
-        // Reschedule to the time remaining until the skip episode's deadline, not to a flat
-        // edenFloorRescheduleSeconds() every time. scheduleTimer can only shorten the timer's
-        // delay (see its comment); didAllocate keeps shortening it too as the mutator keeps
-        // allocating, so a flat reschedule request is silently dropped whenever didAllocate has
-        // already pulled the delay below it, and the timer fires again almost immediately
-        // instead of waiting. The remaining-time-to-deadline value only shrinks as real time
-        // passes, so scheduleTimer can always honor it - if we get called again before the
-        // deadline, we're just re-clamping to a smaller number.
         scheduleTimer(vm.heap.edenAllocationFloorSkipRemaining());
         return;
     }

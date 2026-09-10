@@ -144,9 +144,6 @@ static String acceptHeaderValueForImageResource(bool usingSecureProtocol)
     static MainThreadNeverDestroyed<String> staticPrefix = [] {
         StringBuilder builder;
 #if !defined(WEBKIT_IOS6) || USE(WEBP)
-        // Unconditional upstream, where ImageIO decodes WebP. Here it depends on
-        // the decoder WebKit carries for ports whose platform does not, so the
-        // claim follows whether that decoder is built.
         builder.append("image/webp,"_s);
 #endif
 #if HAVE(AVIF) || USE(AVIF)

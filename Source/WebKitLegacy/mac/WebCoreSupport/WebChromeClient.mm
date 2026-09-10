@@ -564,20 +564,6 @@ void WebChromeClient::invalidateRootView(const WebCore::IntRect&)
 void WebChromeClient::invalidateContentsAndRootView(const WebCore::IntRect& rect)
 {
 #if defined(WEBKIT_IOS6)
-    // This is how WebCore says "this part of the page no longer looks like what
-    // is on screen". Upstream leaves it empty because the clients WebKitLegacy
-    // still has on iOS drive their own painting; an embedder that draws through
-    // WAKWindow's tile cache is told nothing, so the tiles keep showing whatever
-    // they were painted with and the page becomes a photograph of itself.
-    //
-    // That one empty function is the whole of it: a dialog dismissed in the DOM
-    // stays on screen, a feed that has appended posts never shows them, a
-    // position:fixed bar re-laid-out for a new scroll position is still painted
-    // at the old one, and a tap that did exactly what it should appears to have
-    // done nothing. Every one of those was reported as a separate fault.
-    //
-    // The rect is in root-view coordinates, and this embedder's host layer is
-    // the document, so it is already the coordinate system the tiles are in.
     if (auto window = [m_webView window])
         [window setNeedsDisplayInRect:rect];
 #else
@@ -964,14 +950,6 @@ bool WebChromeClient::canEnterVideoFullscreen(WebCore::HTMLVideoElement&, WebCor
 
 #if PLATFORM(IOS_FAMILY) && defined(WEBKIT_IOS6) && ENABLE(VIDEO)
 
-// Full-screen video on this system is the movie player the platform ships, not
-// the AVKit presentation the modern code path expects: AVKit does not exist here.
-// The player is handed the element's current source and position, and the element
-// is told when it begins and stops being the fullscreen element so the page stays
-// in step with what the viewer sees.
-// The movie player ships with the system but is not in this SDK's headers as a
-// weakly-linked class, so its interface is declared here for the few selectors
-// used, and the class itself is looked up at runtime.
 @protocol RevMoviePlayer <NSObject>
 - (double)currentPlaybackTime;
 - (void)setCurrentPlaybackTime:(double)time;
@@ -1074,10 +1052,6 @@ static RetainPtr<RevFullscreenVideoPresenter>& currentFullscreenVideoPresenter()
     if (RefPtr element = _element) {
         if (std::isfinite(resumeTime) && resumeTime > 0)
             element->setCurrentTime(resumeTime);
-        // didStopBeingFullscreenElement only clears the in-transition flag; the
-        // element still believes it is fullscreen, which leaves the inline
-        // controls hidden after the player is dismissed. Take it out of
-        // fullscreen properly first.
         element->exitFullscreen();
         element->didStopBeingFullscreenElement();
     }
@@ -1190,10 +1164,6 @@ bool WebChromeClient::supportsFullScreenForElement(const WebCore::Element& eleme
 #if !PLATFORM(IOS_FAMILY)
     return [m_webView _supportsFullScreenForElement:const_cast<WebCore::Element*>(&element) withKeyboard:withKeyboard];
 #elif defined(WEBKIT_IOS6)
-    // There is no UI delegate to ask on this platform: the host application is not
-    // a WebKitLegacy client. Element fullscreen needs nothing from the embedder
-    // beyond permission and the completion callbacks, because WebCore's own
-    // fullscreen renderer expands the element to fill the view.
     UNUSED_PARAM(element);
     return !withKeyboard;
 #else
@@ -1218,10 +1188,6 @@ void WebChromeClient::enterFullScreenForElement(WebCore::Element& element, WebCo
         }];
 #elif defined(WEBKIT_IOS6)
     else {
-        // Drive the sequence the embedder is responsible for: tell WebCore to
-        // install the fullscreen element, hand its result to the request's
-        // completion handler, then report that the presentation is up. WebCore's
-        // fullscreen renderer expands the element to fill the view from there.
         callOnMainThread([element = Ref { element }, mode, willEnterFullscreen = WTF::move(willEnterFullscreen), didEnterFullscreen = WTF::move(didEnterFullscreen)] () mutable {
             Ref fullscreen = element->document().fullscreen();
             auto result = fullscreen->willEnterFullscreen(element.get(), mode);

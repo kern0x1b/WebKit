@@ -2229,9 +2229,6 @@ void Page::syncLocalFrameInfoToRemote()
 }
 
 #if defined(WEBKIT_IOS6)
-// The renderable filter is applied per step by documentIsStillRenderable() anyway, so the
-// collection itself does not filter: one walk then serves both the renderable steps and the
-// steps that want every document, instead of one walk each.
 static void collectDocuments(const Frame& mainFrame, Vector<Ref<Document>, 8>& documents)
 {
     for (RefPtr frame = &mainFrame; frame; frame = frame->tree().traverseNext()) {
@@ -2281,18 +2278,6 @@ void Page::updateRendering()
     layoutIfNeeded();
 
 #if defined(WEBKIT_IOS6)
-    // Upstream walks the whole frame tree, downcasts every frame and builds a
-    // fresh Vector<Ref<Document>> once per step - about twenty times per update,
-    // 350-650 updates a minute - and materialises each step's lambda as a
-    // WTF::Function, which is a heap allocation and an indirect call per step
-    // because WTF::Function has no inline storage. The set of documents is
-    // collected once here and the per-document predicate the walk applies is
-    // re-checked per step, so a document that a step detaches or suppresses is
-    // still skipped by the steps that follow. A document created *during* the
-    // update is picked up by the next update rather than by the remaining steps
-    // of this one; the only documents that can appear mid-update are the initial
-    // empty documents of just-inserted iframes, which have nothing for any step
-    // to do.
     Vector<Ref<Document>, 8> documents;
     collectDocuments(mainFrame(), documents);
 #endif
@@ -2319,15 +2304,10 @@ void Page::updateRendering()
         scrollingCoordinator->willStartRenderingUpdate();
 #endif
 
-    // Timestamps should not change while serving the rendering update steps.
 #if defined(WEBKIT_IOS6)
-    // The documents were already gathered above; walking the frame tree a second
-    // time, allocating a WTF::Function for the walk and then a second vector of
-    // weak pointers to hold what the first vector already holds was all waste.
     for (auto& document : documents)
         protect(document->window())->freezeNowTimestamp();
 #else
-    // The inline capacity keeps this off the heap: it is rebuilt on every update.
     Vector<WeakPtr<Document, WeakPtrImplWithEventTargetData>, 8> initialDocuments;
     forEachDocument([&initialDocuments] (Document& document) {
         protect(document.window())->freezeNowTimestamp();
@@ -2400,11 +2380,7 @@ void Page::updateRendering()
         document.updateResizeObservations(*this);
     });
 
-    // https://drafts.csswg.org/scroll-animations-1/#event-loop
 #if defined(WEBKIT_IOS6)
-    // Same set of documents the timestamp freeze above walked for - no second
-    // walk of the frame tree, no Function. The page check stands in for the
-    // re-walk: a document a step in between detached is skipped, as it would be.
     for (auto& document : documents) {
         if (document->page() == this)
             document->updateStaleScrollTimelines();
@@ -2495,8 +2471,6 @@ void Page::doAfterUpdateRendering()
     // layout to be up-to-date. It should not run script, trigger layout, or dirty layout.
 
 #if defined(WEBKIT_IOS6)
-    // See updateRendering(): one walk for the whole tail of the update instead of
-    // one per step, and no WTF::Function allocation per step.
     Vector<Ref<Document>, 8> documents;
     collectDocuments(mainFrame(), documents);
 #endif
@@ -2573,9 +2547,6 @@ void Page::doAfterUpdateRendering()
         document->updateTouchEventRegions();
 #endif
 #if defined(WEBKIT_IOS6)
-    // Third walk of the same frame tree in this function; the collection above
-    // already holds every document, and the Function the walk needed was a heap
-    // allocation of its own.
     for (auto& document : documents) {
         if (document->page() == this)
             document->updateEventRegions();
@@ -2632,9 +2603,6 @@ void Page::doAfterUpdateRendering()
     computeSampledPageTopColorIfNecessary();
 
 #if defined(WEBKIT_IOS6)
-    // One process, one Page, no remote frames: the setting cannot be on here,
-    // and this walks every local frame and builds a map of layout info per child
-    // when it is.
     ASSERT(!settings().siteIsolationEnabled());
 #else
     if (settings().siteIsolationEnabled())
@@ -2743,8 +2711,6 @@ void Page::didUpdateRendering()
 {
     LOG_WITH_STREAM(EventLoop, stream << "Page " << this << " didUpdateRendering()");
 #if defined(WEBKIT_IOS6)
-    // forEachDocument() has to materialise its functor as a WTF::Function, which has no inline
-    // storage: one heap allocation and one free per rendering update to call one method.
     Vector<Ref<Document>, 8> documents;
     collectDocuments(mainFrame(), documents);
     for (auto& document : documents)
@@ -2767,9 +2733,6 @@ void Page::prioritizeVisibleResources()
     Vector<CachedResourceHandle<CachedResource>> toPrioritize;
 
 #if defined(WEBKIT_IOS6)
-    // This runs on every rendering update for as long as anything is still loading, and the
-    // capturing lambda forEachRenderableDocument() takes becomes a heap-allocated WTF::Function
-    // each time. The walk itself is the same one, written out.
     Vector<Ref<Document>, 8> documents;
     collectDocuments(mainFrame(), documents);
     for (auto& document : documents) {

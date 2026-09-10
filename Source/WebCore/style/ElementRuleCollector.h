@@ -62,8 +62,6 @@ public:
 
     bool matchesAnyAuthorRules();
 #if defined(WEBKIT_IOS6)
-    // Retargets this collector at another author rule set and resets the per-rule-set output, so
-    // style invalidation can reuse one collector across the whole rule set vector.
     bool matchesAnyAuthorRules(const RuleSet&);
 #endif
 
@@ -132,9 +130,6 @@ private:
 
     const Ref<const Element> m_element;
 #if defined(WEBKIT_IOS6)
-    // RuleSet is ThreadSafeRefCounted: holding these as Refs costs eight atomic read-modify-writes
-    // (two of them with a barrier) per element resolved. The rule sets are owned by the resolver,
-    // which outlives every collector.
     const RuleSet* m_authorStyle;
     const RuleSet* m_userStyle { nullptr };
     const RuleSet* m_userAgentMediaQueryStyle { nullptr };

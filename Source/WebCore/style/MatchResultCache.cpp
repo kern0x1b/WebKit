@@ -77,12 +77,6 @@ struct MatchResultCache::Entry : CanMakeCheckedPtr<MatchResultCache::Entry> {
 };
 
 #if defined(WEBKIT_IOS6)
-// Five hundred and twelve, not sixty four.
-//
-// A miss here means matching selectors again for an element the page is mutating repeatedly, which
-// is what a React feed does constantly. Measured by domInteractive over four pairs: 6058-7159 ms
-// against 6176-8087, better on average though the two sets overlap. Kept because it is never worse
-// and the entries are small.
 MatchResultCache::MatchResultCache()
     : m_maximumEntries(access("/tmp/native-small-match-cache", F_OK) == 0 ? 64 : 512)
 {

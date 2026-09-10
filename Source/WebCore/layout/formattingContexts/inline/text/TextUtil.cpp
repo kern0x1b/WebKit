@@ -69,9 +69,6 @@ InlineLayoutUnit TextUtil::width(const InlineTextBox& inlineTextBox, const FontC
 
     auto& text = inlineTextBox.content();
     ASSERT(to <= text.length());
-    // The "non-whitespace" + "whitespace" pattern is very common for inline content and since most of the "non-whitespace" runs end up with
-    // their "whitespace" pair on the line (notable exception is when trailing whitespace is trimmed).
-    // Including the trailing whitespace here enables us to cut the number of text measures when placing content on the line.
 #if defined(WEBKIT_IOS6)
     UNUSED_PARAM(useTrailingWhitespaceMeasuringOptimization);
     auto extendedMeasuring = false;

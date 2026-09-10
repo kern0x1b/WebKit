@@ -68,8 +68,6 @@ CSSParserTokenRange CSSParserTokenRange::consumeBlock()
 CSSParserTokenRange CSSParserTokenRange::consumeBlockCheckingForEditability(StyleSheetContents* styleSheet)
 {
 #if defined(WEBKIT_IOS6)
-    // This port has no editing, so style-based editability never affects anything; skip comparing
-    // every ident token in the sheet against "-webkit-user-modify".
     UNUSED_PARAM(styleSheet);
     return consumeBlock();
 #else

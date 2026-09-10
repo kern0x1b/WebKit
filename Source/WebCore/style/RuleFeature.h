@@ -192,9 +192,6 @@ private:
 };
 
 #if defined(WEBKIT_IOS6)
-// Snapshot of everything RuleFeatureSet::clear() throws away, taken once the user agent default
-// sheet has been merged in. Restoring it truncates the author contributions back off instead of
-// deep-copying every user agent feature - and its two selector lists - again per stylesheet append.
 struct RuleFeatureBaseline {
     bool isValid { false };
 

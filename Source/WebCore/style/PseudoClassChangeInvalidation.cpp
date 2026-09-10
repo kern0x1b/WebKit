@@ -99,11 +99,6 @@ void PseudoClassChangeInvalidation::computeInvalidation(CSSSelector::PseudoClass
             m_shadowRuleSets = &shadowRoot->styleScope().resolver().ruleSets();
     }
 
-    // pseudoClasses holds exactly the pseudo classes for which a pseudoClassRules key was created,
-    // so if neither scope queried below uses this one, every lookup is guaranteed to miss. Hover and
-    // active flip a whole ancestor chain on each pointer event, and the key vector alone is one
-    // entry per class on the element, so this replaces a heap allocation plus dozens of hash probes
-    // per element with two set probes.
     bool anyScopeUsesPseudoClass = m_ownRuleSets->features().pseudoClasses.contains(pseudoClass)
         || (m_shadowRuleSets && m_shadowRuleSets->features().pseudoClasses.contains(pseudoClass));
     if (pseudoClassInvalidationFastPathEnabled() && !anyScopeUsesPseudoClass)

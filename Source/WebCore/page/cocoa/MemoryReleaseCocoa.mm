@@ -53,7 +53,6 @@ void platformReleaseMemory(Critical critical)
 #if defined(WEBKIT_IOS6)
     (void)critical;
 #else
-    // FIXME: Remove this call to GSFontInitialize() once <rdar://problem/32886715> is fixed.
     GSFontInitialize();
     GSFontPurgeFontCache();
 #endif
@@ -106,8 +105,6 @@ void jettisonExpensiveObjectsOnTopLevelNavigation()
     if (shouldDeleteAllCodeForMemoryPressure())
         GarbageCollectionController::singleton().deleteAllLinkedCode(JSC::DeleteAllCodeIfNotCollecting);
 #elif PLATFORM(IOS_FAMILY)
-    // Throw away linked JS code. Linked code is tied to a global object and is not reusable.
-    // The immediate memory savings outweigh the cost of recompilation in case we go back again.
     GarbageCollectionController::singleton().deleteAllLinkedCode(JSC::DeleteAllCodeIfNotCollecting);
 #endif
 

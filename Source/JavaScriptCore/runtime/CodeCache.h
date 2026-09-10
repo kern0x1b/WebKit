@@ -182,11 +182,6 @@ private:
     // working set to enter the cache before it starts evicting.
     static constexpr Seconds workingSetTime = 10_s;
 #if defined(WEBKIT_IOS6)
-    // 16 MB and 2000 entries are desktop figures, unchanged since 2013 and never
-    // scaled for a device with 512 MB that is killed at 282 MB. Sizes here are in
-    // source characters, and every retained entry pins an UnlinkedCodeBlock, in
-    // each VM separately. Nothing is evicted at all while under these, so they
-    // set the floor of what the cache costs.
     static constexpr int64_t workingSetMaxBytes = 2000000;
     static constexpr size_t workingSetMaxEntries = 300;
 #else
@@ -275,11 +270,6 @@ UnlinkedProgramCodeBlock* recursivelyGenerateUnlinkedCodeBlockForProgram(VM&, co
 UnlinkedModuleProgramCodeBlock* recursivelyGenerateUnlinkedCodeBlockForModuleProgram(VM&, const SourceCode&, LexicallyScopedFeatures, JSParserScriptMode, OptionSet<CodeGenerationMode>, ParserError&, EvalContextType);
 
 #if defined(WEBKIT_IOS6)
-// Hands a program that was just compiled from source to a background thread which
-// regenerates it - and every function inside it - in a VM of its own, and gives the
-// serialized result to the source provider's bytecode cache. Returns true if the job
-// was accepted, in which case the caller must not encode the program itself: the
-// provider keeps only the first blob it is given.
 bool enqueueAheadOfTimeBytecodeGeneration(VM&, const SourceCode&, LexicallyScopedFeatures, JSParserScriptMode, OptionSet<CodeGenerationMode>);
 #endif
 

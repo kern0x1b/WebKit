@@ -1534,10 +1534,6 @@ void JIT::emit_op_enter(const JSInstruction*)
             store32(argumentGPR2, Address(GPRInfo::jitDataRegister, BaselineJITData::offsetOfJITExecuteCounter()));
         }
 #if defined(WEBKIT_IOS6)
-        // This CodeBlock was refused DFG compilation solely for exceeding
-        // maximumOptimizationCandidateBytecodeCost (see JIT.cpp), and WEBKIT_IOS6_OPT_CEILING_LOG
-        // instrumentation is on: bump its persistent call counter. Normally such a block emits no
-        // counter at all above, so without this it is invisible to the tier-up machinery forever.
         else if (m_costCeilingCounterSlot)
             add32(TrustedImm32(1), AbsoluteAddress(m_costCeilingCounterSlot));
 #endif

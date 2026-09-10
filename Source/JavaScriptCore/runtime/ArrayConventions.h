@@ -66,8 +66,6 @@ namespace JSC {
 // could probably make this smaller (it's large because it used to be conflated with
 // MIN_ARRAY_STORAGE_CONSTRUCTION_LENGTH).
 #define MIN_SPARSE_ARRAY_INDEX 100000U
-// If you try to allocate a contiguous array larger than this, then we will allocate an ArrayStorage
-// array instead. We allow for an array that occupies 1GB of VM.
 #if defined(WEBKIT_IOS6)
 #define MIN_ARRAY_STORAGE_CONSTRUCTION_LENGTH (8 * 1024 * 1024 / 8)
 #else

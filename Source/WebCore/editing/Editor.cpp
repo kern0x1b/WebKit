@@ -1442,8 +1442,6 @@ bool Editor::insertTextWithoutSendingTextEvent(const String& text, bool selectIn
     if (!shouldInsertText(text, selection.toNormalizedRange(), EditorInsertAction::Typed))
         return true;
 
-    // FIXME: Should pass false to updateMarkersForWordsAffectedByEditing() to not remove markers if
-    // a leading or trailing no-break space is being inserted. See <https://webkit.org/b/212098>.
 #if defined(WEBKIT_IOS6)
     CheckedPtr markersBeforeTyping = document().markersIfExists();
     if (markersBeforeTyping && markersBeforeTyping->hasMarkers()) {

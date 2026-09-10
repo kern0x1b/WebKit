@@ -149,7 +149,6 @@ static void HandleRunSource(void *info)
     for (const auto& block : queueCopy) {
         block();
 #if defined(WEBKIT_IOS6)
-        // Between jobs, not inside one. See WebThreadYieldIfAsked.
         static int yieldBetweenJobs = -1;
         if (yieldBetweenJobs < 0)
             yieldBetweenJobs = access("/tmp/native-no-yield", F_OK) != 0 ? 1 : 0;

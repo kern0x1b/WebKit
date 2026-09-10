@@ -241,12 +241,6 @@ String TextCodecICU::decode(std::span<const uint8_t> source, bool flush, bool st
     UErrorCode err = U_ZERO_ERROR;
 
 #if defined(WEBKIT_IOS6)
-    // Anything that converts in one buffer fill can be handed straight to the string, which skips
-    // the append into the builder and the reallocating copy that toString() does. Every encoding
-    // ICU handles here is byte-based, so text that happens to be ASCII or Latin-1 in one of them
-    // gets an 8-bit string instead of the 16-bit one the builder always produces.
-    // A count of zero is left to the builder so that an empty decode keeps returning a null string
-    // rather than an empty one.
     size_t firstCount = decodeToBuffer(target, source, offsets, flush, err);
     if (firstCount && !needsToGrowToProduceBuffer(err) && U_SUCCESS(err))
         return StringImpl::create8BitIfPossible(target.first(firstCount));

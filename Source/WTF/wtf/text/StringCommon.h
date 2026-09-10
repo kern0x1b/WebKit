@@ -542,15 +542,8 @@ bool NODELETE equal(const StringClass& string, std::span<const char8_t> span)
 }
 
 #if defined(WEBKIT_IOS6) && CPU(LITTLE_ENDIAN)
-// SIMD::isNonZero() and SIMD::findFirstNonZeroIndex() both reduce through simde_vmaxvq_u8 /
-// simde_vminvq_u8. simde only implements those natively when SIMDE_ARCH_AARCH64 is set, so on
-// armv7 each call spills the vector to the stack and runs a 16-iteration scalar loop; the
-// "vector" paths below cost more than not vectorising at all. These helpers do the same work
-// on the 32-bit registers this core actually has.
 namespace SWAR {
 
-// Sets bit 7 of every byte that holds an ASCII uppercase letter. Both addends stay inside
-// their byte because the operand is masked down to 0x7F first, so no carry crosses a lane.
 ALWAYS_INLINE constexpr uint32_t asciiLowerBytes(uint32_t word)
 {
     uint32_t low = word & 0x7F7F7F7FU;
@@ -610,9 +603,6 @@ template<typename CharacterTypeA, typename CharacterTypeB> SUPPRESS_NODELETE inl
         }
     }
 #elif defined(WEBKIT_IOS6) && CPU(LITTLE_ENDIAN)
-    // Only for identical character types: mixing Latin1Character with char makes the scalar
-    // comparison below promote the two sides differently above 0x7F, and a word compare would
-    // not reproduce that.
     if constexpr (std::is_same_v<CharacterTypeA, CharacterTypeB> && (sizeof(CharacterTypeA) == 1 || sizeof(CharacterTypeA) == 2)) {
         constexpr size_t stride = sizeof(uint32_t) / sizeof(CharacterTypeA);
         size_t i = 0;
@@ -778,10 +768,6 @@ template<typename UnsignedType>
 SUPPRESS_NODELETE ALWAYS_INLINE const UnsignedType* NODELETE findImpl(const UnsignedType* pointer, UnsignedType character, size_t length)
 {
 #if defined(WEBKIT_IOS6) && CPU(LITTLE_ENDIAN)
-    // Two emulated horizontal reductions per 16-byte block is worse than no vectorising at
-    // all. Two UTF-16 units fit in a word; the classic "has a zero unit" test finds the
-    // match. The borrow that test can leak only ever reaches units above a real match, so
-    // the low flag is genuine whenever it is set and the first match is still exact.
     size_t index = 0;
     if constexpr (sizeof(UnsignedType) == 2) {
         uint32_t splat = static_cast<uint32_t>(character) * 0x00010001U;
@@ -830,8 +816,6 @@ ALWAYS_INLINE const uint32_t* NODELETE find32(const uint32_t* pointer, uint32_t 
 SUPPRESS_NODELETE ALWAYS_INLINE const uint64_t* NODELETE find64(const uint64_t* pointer, uint64_t character, size_t length)
 {
 #if defined(WEBKIT_IOS6)
-    // A 128-bit vector holds two elements here, and locating which of the two matched costs
-    // two emulated horizontal reductions. There is nothing left to win over a plain loop.
     for (size_t index = 0; index < length; ++index) {
         if (pointer[index] == character)
             return pointer + index;
@@ -894,7 +878,6 @@ SUPPRESS_NODELETE ALWAYS_INLINE const uint64_t* NODELETE find64(const uint64_t* 
 SUPPRESS_NODELETE ALWAYS_INLINE const uint8_t* NODELETE reverseFind8(const uint8_t* pointer, uint8_t character, size_t length)
 {
 #if defined(WEBKIT_IOS6)
-    // SIMD::findLastNonZeroIndex() is the same emulated reduction; scan backwards directly.
     for (size_t index = length; index--;) {
         if (pointer[index] == character)
             return pointer + index;
@@ -1350,9 +1333,6 @@ SUPPRESS_NODELETE ALWAYS_INLINE const char16_t* NODELETE find16NonASCII(std::spa
     return find16NonASCIIAlignedImpl({ pointer + index, length - index });
 }
 #elif defined(WEBKIT_IOS6) && CPU(LITTLE_ENDIAN)
-// find8NonASCIIAlignedImpl() locates the matching lane with simde_vminvq_u8, emulated here.
-// A word-at-a-time scan needs no alignment runway and no reduction: the high bits of the
-// word already say which lane, and on little-endian the lowest of them is the first unit.
 SUPPRESS_NODELETE ALWAYS_INLINE const Latin1Character* NODELETE find8NonASCII(std::span<const Latin1Character> data)
 {
     auto* pointer = data.data();
@@ -1545,9 +1525,6 @@ SUPPRESS_NODELETE inline bool NODELETE equalLettersIgnoringASCIICaseWithLength(s
         }
     }
 #elif defined(WEBKIT_IOS6)
-    // Same transcription as the vector path: the expected side is already lowercase, so
-    // setting bit 5 of every byte on the left is the whole comparison. Byte lanes, so this
-    // is endian-independent.
     if constexpr (sizeof(CharacterType) == 1) {
         size_t i = 0;
         for (; i + 4 <= length; i += 4) {

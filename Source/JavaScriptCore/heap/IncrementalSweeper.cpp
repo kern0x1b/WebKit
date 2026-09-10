@@ -52,14 +52,6 @@ static double envDouble(const char* name, double defaultValue)
     return value;
 }
 
-// Upstream takes a ten millisecond bite out of the main runloop and then waits ninety: a tenth of a
-// core, spent as one uninterrupted block. Ten milliseconds is most of a frame at 800 MHz, so on this
-// device that shape drops a frame outright every hundred milliseconds for as long as the sweep runs
-// after a collection - and the sweeper runs after every collection, on the thread the user is
-// touching. The same tenth of a core taken in two millisecond bites every twenty milliseconds
-// returns the same number of blocks to the allocator in the same wall-clock time while never
-// occupying more than an eighth of a frame. The deadline is only checked between blocks, so the real
-// worst case is the slice plus one block either way; a smaller slice shrinks that too.
 static Seconds sweepTimeSlice()
 {
     static const Seconds slice = Seconds::fromMilliseconds(envDouble("JSC_IOS6_SWEEP_SLICE_MS", 2.0));

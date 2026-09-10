@@ -37,8 +37,6 @@ namespace WebCore {
 CFStringRef getUIContentSizeCategoryDidChangeNotificationName()
 {
 #if defined(WEBKIT_IOS6)
-    // Dynamic Type is iOS 7. The notification never fires here, but the font
-    // cache still wants a name to register under.
     return CFSTR("UIContentSizeCategoryDidChangeNotification");
 #else
     return static_cast<CFStringRef>(PAL::get_UIKit_UIContentSizeCategoryDidChangeNotificationSingleton());
@@ -62,8 +60,6 @@ CFStringRef contentSizeCategory()
 #if PLATFORM(IOS_FAMILY) && !defined(WEBKIT_IOS6)
     return static_cast<CFStringRef>([[PAL::getUIApplicationClassSingleton() sharedApplication] preferredContentSizeCategory]);
 #else
-    // -preferredContentSizeCategory is Dynamic Type, which arrived in iOS 7.
-    // Text on this system is always the one size.
     return kCTFontContentSizeCategoryL;
 #endif
 }

@@ -242,7 +242,6 @@ RefPtr<const DisplayList::DisplayList> FontCascade::displayListForTextRun(Graphi
 #if defined(WEBKIT_IOS6)
     auto glyphBuffer = layoutText(run, from, destination).glyphBuffer;
 #else
-    // FIXME: Use the fast code path once it handles partial runs with kerning and ligatures. See http://webkit.org/b/100050
     CodePath codePathToUse = codePath(run);
     if (codePathToUse != CodePath::Complex && !canHandleRunAsSimpleText(run, from, destination))
         codePathToUse = CodePath::Complex;
@@ -264,18 +263,6 @@ RefPtr<const DisplayList::DisplayList> FontCascade::displayListForGlyphBuffer(Gr
 #if USE(SKIA)
     const auto drawGlyphsMode = context.hasPlatformContext() ? DisplayList::Recorder::DrawGlyphsMode::TextBlob : DisplayList::Recorder::DrawGlyphsMode::Normal;
 #elif defined(WEBKIT_IOS6)
-    // Glyphs are recorded as they come, not taken apart first.
-    //
-    // Deconstructing them builds a scratch CGContext through
-    // DrawGlyphsRecorder::createInternalContext, which uses the context-delegate
-    // interface. This system's CoreGraphics is from 2012 and aborts the process
-    // there - reached on claude.ai, whose bot check draws text into an offscreen
-    // canvas: fillText, drawTextUnchecked, displayListForGlyphBuffer,
-    // createInternalContext, CGContextDelegateSetCallback, abort.
-    //
-    // The mode only decides whether a glyph run is split so a later replay can
-    // re-derive fonts from the context. Recording the run whole draws the same
-    // text.
     constexpr auto drawGlyphsMode = DisplayList::Recorder::DrawGlyphsMode::Normal;
 #else
     constexpr auto drawGlyphsMode = DisplayList::Recorder::DrawGlyphsMode::Deconstruct;
@@ -733,18 +720,11 @@ bool FontCascade::shouldDisableFontSubpixelAntialiasingForTesting()
 bool FontCascade::canHandleRunAsSimpleText(const TextRun& run, unsigned from, unsigned to) const
 {
 #if defined(WEBKIT_IOS6)
-    // Font::applyTransforms on this port returns before the shaper, so a sub-range measures
-    // and paints exactly as the whole run does and there is no boundary effect left to
-    // guard against. enableKerning() and requiresShaping() are both true by default, so the
-    // test below was sending every partial run through ComplexTextController - a CTLine per
-    // paint - for plain Latin text. Scripts that really need shaping still reach the complex
-    // path through characterRangeCodePath().
     UNUSED_PARAM(run);
     UNUSED_PARAM(from);
     UNUSED_PARAM(to);
     return true;
 #elif !PLATFORM(GTK) && !PLATFORM(WPE) && !USE(FREETYPE)
-    // FIXME: Use the fast code path once it handles partial runs with kerning and ligatures. See http://webkit.org/b/100050
     return !((enableKerning() || requiresShaping()) && (from || to != run.length()));
 #else
     UNUSED_PARAM(run);

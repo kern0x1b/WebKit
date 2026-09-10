@@ -49,9 +49,6 @@
 
 #if defined(WEBKIT_IOS6)
 #include <unistd.h>
-// Our own running commentary. WTFLogAlways reaches a file through stderr, so
-// every one of these is a synchronous write on whichever thread the engine is
-// on - and some of them sit on paths that run for every frame of a scroll.
 static bool tileCacheChatterEnabled()
 {
     static int enabled = -1;
@@ -94,8 +91,6 @@ namespace WebCore {
 #if defined(WEBKIT_IOS6)
 extern "C" int g_webkitIOS6PendingDrawWork;
 extern "C" unsigned g_webkitIOS6PaintsRefusedForLayout;
-// Raised when a _dispatchTileDidDraw: perform is in flight, lowered by
-// -[WebView _dispatchTileDidDraw:] when it runs. See drawLayer().
 extern "C" { int g_webkitIOS6TileDidDrawPending = 0; }
 #endif
 
@@ -499,23 +494,6 @@ unsigned LegacyTileCache::tileCapacityForGrid(LegacyTileGrid* grid)
         gridCapacity = capacity;
 
 #if defined(WEBKIT_IOS6)
-    // The active grid has to hold the whole cover rect with room to spare, or
-    // dropDistantTiles() refuses and createTiles() returns having created
-    // nothing. A 1380 px cover rect against a 12 MB grid painted 18, 18 and 17%
-    // of the feed through ten 400 px flicks - the worst of every pairing tried.
-    // The same coverage against a 36 MB grid painted 44%, and the 2300 px rect
-    // this port now asks for against this 18 MB grid painted 31 to 62%.
-    //
-    // The level read above is kern.memorystatus_level, which is the whole
-    // system's free memory, and on this device the page is most of it - so the
-    // tiering cuts the grid to three tiles exactly while the reader is
-    // scrolling, which is the one moment it is needed. A floor rather than a
-    // rewrite: the ceiling still tiers, and real pressure is still answered by
-    // removeAllNonVisibleTilesInternal() and releaseMemory() above.
-    //
-    // On a 24000 px static page, where layout is cheap, three tiles and eleven
-    // paint the same: every frame of ten flicks whole, at 76 and 94 MB
-    // resident. Nothing here is what leaves the feed unpainted.
     static const unsigned activeGridFloor = webkitIOS6TileBudgetFromEnvironment("WEBKIT_IOS6_TILE_FLOOR_MB", 18);
     if (gridCapacity < static_cast<int>(activeGridFloor * 4 / 3))
         gridCapacity = static_cast<int>(activeGridFloor * 4 / 3);
@@ -738,16 +716,6 @@ void LegacyTileCache::drawLayer(LegacyTileLayer* layer, CGContextRef context, Dr
 
     WAKView* view = [m_window contentView];
 #if defined(WEBKIT_IOS6)
-    // One outstanding "tiles drew" notification, not one per tile.
-    //
-    // -[WebView _dispatchTileDidDraw:] reports the first paint of a load and
-    // returns immediately on every call after it, but the delayed perform that
-    // carries it allocates a timer and wakes the run loop each time. On the web
-    // thread that wake is a whole extra turn of the loop, which means another
-    // acquire and release of the web lock plus an autorelease pool - paid once
-    // per tile, per drawing pass. The flag is lowered by the callback itself, so
-    // no notification is dropped: a pass that finds one already in flight is a
-    // pass whose notification has not been delivered yet.
     if (view && !g_webkitIOS6TileDidDrawPending) {
         g_webkitIOS6TileDidDrawPending = 1;
         [view performSelector:@selector(_dispatchTileDidDraw:) withObject:layer afterDelay:0.0];
@@ -774,14 +742,6 @@ void LegacyTileCache::setNeedsDisplayInRect(const IntRect& dirtyRect)
     Locker locker { m_savedDisplayRectMutex };
     bool addedFirstRect = m_savedDisplayRects.isEmpty();
 #if defined(WEBKIT_IOS6)
-    // A repaint contained in one already queued invalidates exactly the same
-    // pixels of exactly the same tiles, so queueing it only makes
-    // flushSavedDisplayRects() walk the grid again for nothing. Pages that
-    // invalidate an element and then its parent do this constantly.
-    //
-    // The parent-then-element order is just as common, so the swallowing goes
-    // both ways: a rect that covers the one already queued replaces it instead
-    // of adding a second walk of the grid over the same pixels.
     if (!addedFirstRect) {
         IntRect& lastRect = m_savedDisplayRects.last();
         if (lastRect.contains(dirtyRect))

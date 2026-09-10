@@ -104,9 +104,6 @@ static inline size_t NODELETE maxCanvasArea()
     if (maxCanvasAreaForTesting)
         return *maxCanvasAreaForTesting;
 
-    // Firefox limits width/height to 32767 pixels, but slows down dramatically before it
-    // reaches that limit. We limit by area instead, giving us larger maximum dimensions,
-    // in exchange for a smaller maximum canvas size. The maximum canvas size is in device pixels.
 #if defined(WEBKIT_IOS6)
     return 2048 * 2048;
 #elif PLATFORM(IOS_FAMILY)

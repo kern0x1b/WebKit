@@ -689,10 +689,6 @@ void RenderLayerCompositor::cacheAcceleratedCompositingFlagsAfterLayout()
     };
 
 #if defined(WEBKIT_IOS6)
-    // forceCompositingMode is an embedder setting WebKitLegacy never sets, so a
-    // scrollable frame stayed uncomposited and had no layer to hand over. Its
-    // own condition is enough on its own: a frame is composited here because it
-    // scrolls, which is the only reason this port asks.
     bool forceCompositingMode = m_hasAcceleratedCompositing && frameContentRequiresCompositing();
 #else
     bool forceCompositingMode = m_hasAcceleratedCompositing && m_renderView.settings().forceCompositingMode() && frameContentRequiresCompositing();
@@ -918,11 +914,6 @@ void RenderLayerCompositor::updateScrollCoordinatedLayersAfterFlush()
 }
 
 #if defined(WEBKIT_IOS6)
-// A subframe scrolls its own document, which is not a RenderLayer and so never
-// reaches the scrolling layer coordinator above. The embedder's contract does not
-// care about the difference: it wants a container layer, a contents layer, a
-// content size and a node to report back against, and a frame has all four, its
-// node being the element that owns it.
 void RenderLayerCompositor::updateFrameScrollingLayerForEmbedder()
 {
     auto& frameView = m_renderView.frameView();
@@ -1098,10 +1089,6 @@ static std::optional<ScrollingNodeID> frameHostingNodeForFrame(LocalFrame& frame
 bool RenderLayerCompositor::updateCompositingLayers(CompositingUpdateType updateType, RenderLayer* updateRootArg)
 {
 #if defined(WEBKIT_IOS6)
-    // Every layer with a backing store costs a screen of pixels at retina scale -
-    // over two megabytes for a full-width one - and the process reports fifty two
-    // megabytes of graphics while the tile cache accounts for under five. This
-    // says how many there are.
     {
         static int recordLayers = -1;
         if (recordLayers < 0)
@@ -1365,21 +1352,6 @@ bool RenderLayerCompositor::allowBackingStoreDetachingForFixedPosition(RenderLay
     bool allowDetaching = !fixedLayoutRect.intersects(absoluteBounds);
 
 #if defined(WEBKIT_IOS6)
-    // Never on this port.
-    //
-    // The rule above throws away a fixed layer's backing store when the engine
-    // believes the layer is outside the layout viewport. That belief is formed
-    // from where the element was laid out, and on this port the application
-    // moves pinned layers itself on every frame while layouts happen rarely - so
-    // the two drift apart as soon as the reader scrolls, the engine decides the
-    // page's own header and footer are far away, and their backing stores are
-    // discarded. The result on the device: the bars are in exactly the right
-    // place, measured at y 20 and y 430 in window coordinates, and nothing is
-    // drawn in them.
-    //
-    // The memory this rule is protecting is two bars at 320 by 74 and 320 by 50 -
-    // about 145 kilobytes. Keeping them is not a cost worth the page losing its
-    // furniture.
     allowDetaching = false;
 #endif
     LOG_WITH_STREAM(Compositing, stream << "RenderLayerCompositor (layer " << &layer << ") allowsBackingStoreDetaching - absoluteBounds " << absoluteBounds << " layoutViewportRect " << fixedLayoutRect << ", allowDetaching " << allowDetaching);
@@ -4246,10 +4218,6 @@ bool RenderLayerCompositor::requiresCompositingForScrollableFrame(RequiresCompos
         return false;
 
 #if defined(WEBKIT_IOS6)
-    // Async frame scrolling is what asks for this upstream, and it needs a
-    // scrolling coordinator that WebKitLegacy has none of. The embedder scrolls
-    // the layer for us instead, so what matters here is only that a scrollable
-    // frame gets composited and therefore gets a layer to hand over.
 #elif PLATFORM(COCOA) || USE(COORDINATED_GRAPHICS)
     if (!m_renderView.settings().asyncFrameScrollingEnabled())
         return false;
@@ -4285,14 +4253,6 @@ bool RenderLayerCompositor::requiresCompositingForPosition(RenderLayerModelObjec
     if (isFixed && !layer.isStackingContext())
         return false;
 #else
-    // A fixed element without a layer of its own is painted from the render
-    // tree, which on this port only learns the new scroll offset at the next
-    // layout - so a site's bars drift with the content and snap back, which is
-    // exactly what a person sees. With a layer, the scroll handler moves it
-    // directly in the same frame as the scroll. Narrowing this back to upstream
-    // behaviour was tried to save memory and saved none: the graphics figure did
-    // not move, because it is decoded images, not layer backing stores. The
-    // layer count on this feed is five to eleven.
 #endif
     
     bool isSticky = renderer.isInFlowPositioned() && position == PositionType::Sticky;
@@ -4315,17 +4275,12 @@ bool RenderLayerCompositor::requiresCompositingForPosition(RenderLayerModelObjec
     auto container = renderer.container();
     ASSERT(container);
 
-    // Don't promote fixed position elements that are descendants of a non-view container, e.g. transformed elements.
-    // They will stay fixed wrt the container rather than the enclosing frame.
 #if !defined(WEBKIT_IOS6)
     if (container != &m_renderView) {
         queryData.nonCompositedForPositionReason = RenderLayer::NotCompositedForNonViewContainer;
         return false;
     }
 #else
-    // Being fixed with respect to a transformed container is the lesser error
-    // here: left out of a layer, the element is painted at a stale offset, and a
-    // sheet that appears mid-scroll is never drawn at all.
     UNUSED_VARIABLE(container);
 #endif
 

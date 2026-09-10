@@ -1598,10 +1598,6 @@ bool FrameSelection::modify(Alteration alter, SelectionDirection direction, Text
             cache->setTextSelectionIntent(textSelectionIntent(alter, direction, granularity));
     }
 
-    // Some of the above operations set an xPosForVerticalArrowNavigation.
-    // Setting a selection will clear it, so save it to possibly restore later.
-    // Note: the Start position type is arbitrary because it is unused, it would be
-    // the requested position type if there were no xPosForVerticalArrowNavigation set.
 #if defined(WEBKIT_IOS6)
     bool needsXPosForVerticalArrowNavigation = granularity == TextGranularity::LineGranularity || granularity == TextGranularity::ParagraphGranularity;
     LayoutUnit x = needsXPosForVerticalArrowNavigation ? lineDirectionPointForBlockDirectionNavigation(PositionType::Start) : LayoutUnit { };

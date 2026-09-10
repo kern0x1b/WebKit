@@ -53,14 +53,6 @@ void RemoteCommandListener::resetCreationFunction()
 {
     remoteCommandListenerCreationFunction() = [] (RemoteCommandListenerClient& client) -> RefPtr<RemoteCommandListener> {
 #if defined(WEBKIT_IOS6)
-        // MediaRemote.framework is here, but it is the 2012 one: of the six
-        // functions this listener needs, four are not in it -
-        // MRMediaRemoteGetLocalOrigin, MRMediaRemoteAddAsyncCommandHandlerBlock,
-        // MRMediaRemoteSetSupportedCommands and MRMediaRemoteCommandInfoCreate
-        // all postdate it, and PAL's soft-link asserts rather than returning
-        // null. So there is no remote command source for a page to register
-        // with, which is what returning nothing says. Every caller already
-        // handles it: the GLib build without MEDIA_SESSION returns the same.
         UNUSED_PARAM(client);
         return nullptr;
 #elif PLATFORM(COCOA)

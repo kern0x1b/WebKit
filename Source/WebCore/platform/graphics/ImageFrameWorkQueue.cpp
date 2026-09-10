@@ -195,22 +195,18 @@ void ImageFrameWorkQueue::drainNextPendingDecode()
 
     request.options = { request.options.decodingMode(), decodingDestination, request.options.sizeForDrawing() };
 
-    // Pretend as if decoding the frame took minimumDecodingDuration.
     if (minimumDecodingDuration > 0_s) {
         auto actualDecodingDuration = MonotonicTime::now() - startingTime;
         if (minimumDecodingDuration > actualDecodingDuration)
             sleep(minimumDecodingDuration - actualDecodingDuration);
     }
 
-    // Even if we fail to decode the frame, it is important to sync the main thread with this result.
     callOnMainThread([protectedThis = WTF::move(protectedThis), protectedSource = WTF::move(protectedSource), request, generation, nativeImage = WTF::move(nativeImage)] () mutable {
-        // The decoding of this generation of requests was cancelled before the frame was decoded.
         if (generation != protectedThis->m_generation.load()) {
             LOG(Images, "ImageFrameWorkQueue::%s - %p - url: %s. Decoding was cancelled at index = %d.", __FUNCTION__, protectedThis.ptr(), protectedSource->sourceUTF8().data(), request.index);
             return;
         }
 
-        // The DecodeQueue may have been cleared before the frame was decoded.
         if (!protectedThis->removeFromDecodeQueue(request)) {
             LOG(Images, "ImageFrameWorkQueue::%s - %p - url: %s. DecodeQueue was cleared at index = %d.", __FUNCTION__, protectedThis.ptr(), protectedSource->sourceUTF8().data(), request.index);
             return;
@@ -256,22 +252,18 @@ void ImageFrameWorkQueue::start()
 
             request.options = { request.options.decodingMode(), decodingDestination, request.options.sizeForDrawing() };
 
-            // Pretend as if decoding the frame took minimumDecodingDuration.
             if (minimumDecodingDuration > 0_s) {
                 auto actualDecodingDuration = MonotonicTime::now() - startingTime;
                 if (minimumDecodingDuration > actualDecodingDuration)
                     sleep(minimumDecodingDuration - actualDecodingDuration);
             }
 
-            // Even if we fail to decode the frame, it is important to sync the main thread with this result.
             callOnMainThread([protectedThis, protectedWorkQueue, protectedSource, request, nativeImage = WTF::move(nativeImage)] () mutable {
-                // The WorkQueue may have been recreated before the frame was decoded.
                 if (protectedWorkQueue.ptr() != protectedThis->m_workQueue || protectedSource.ptr() != protectedThis->m_source.get().ptr()) {
                     LOG(Images, "ImageFrameWorkQueue::%s - %p - url: %s. WorkQueue was recreated at index = %d.", __FUNCTION__, protectedThis.ptr(), protectedSource->sourceUTF8().data(), request.index);
                     return;
                 }
 
-                // The DecodeQueue may have been cleared before the frame was decoded.
                 if (!protectedThis->removeFromDecodeQueue(request)) {
                     LOG(Images, "ImageFrameWorkQueue::%s - %p - url: %s. DecodeQueue was cleared at index = %d.", __FUNCTION__, protectedThis.ptr(), protectedSource->sourceUTF8().data(), request.index);
                     return;
@@ -281,7 +273,6 @@ void ImageFrameWorkQueue::start()
             });
         }
 
-        // Ensure destruction happens on creation thread.
         callOnMainThread([protectedThis = WTF::move(protectedThis), protectedWorkQueue = WTF::move(protectedWorkQueue), protectedSource = WTF::move(protectedSource)] () mutable { });
     });
 }

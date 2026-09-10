@@ -94,13 +94,6 @@ inline void RenderObject::setNeedsLayout(MarkingBehavior markParents)
         notifyInspectorOfLayoutInvalidate();
     m_stateBitfields.setFlag(StateFlag::NeedsLayout);
 #if defined(WEBKIT_IOS6)
-    // Who dirties the tree.
-    //
-    // Measured: one to four renderers are dirty when a layout begins, and then
-    // nine thousand blocks are laid out. Guessing at the mechanism cost two
-    // wrong fixes, so this records the return address of every clean-to-dirty
-    // transition and the top few are symbolised offline against the unstripped
-    // build. Off unless the flag file is present, and the check is cached.
     if (WebCore::g_webkitIOS6NeedsLayoutRecording) [[unlikely]]
         WebCore::recordNeedsLayoutCaller(__builtin_return_address(0));
 #endif

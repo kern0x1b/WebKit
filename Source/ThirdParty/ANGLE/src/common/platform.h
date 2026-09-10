@@ -135,10 +135,6 @@
 #        if TARGET_OS_VISION  // Must be checked before iOS
 #            define ANGLE_PLATFORM_VISIONOS 1
 #        elif TARGET_OS_IOS
-// The floor is the Metal backend's: it calls API that only the iOS 17 SDK
-// declares. This port builds ANGLE for its GLES renderer on hardware that
-// predates Metal entirely, and builds against the newest SDK that still emits
-// armv7, so the requirement does not apply to it.
 #            if __IPHONE_OS_VERSION_MAX_ALLOWED < 170000 && !defined(WEBKIT_IOS6)
 #                error iOS 17 SDK or newer is required.
 #            endif

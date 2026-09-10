@@ -1143,7 +1143,6 @@ bool RenderGrid::isMasonry() const
 // and thus the inline axis will be the grid axis."
 bool RenderGrid::isMasonry(Style::GridTrackSizingDirection direction) const
 {
-    // isSubgrid will return false if the masonry axis matches. Need to check style if we are a subgrid
 #if defined(WEBKIT_IOS6)
     if (auto* parentGrid = dynamicDowncast<RenderGrid>(parent()); parentGrid && style().gridTemplateList(direction).subgrid)
         return parentGrid->isMasonry(direction);
@@ -1878,26 +1877,6 @@ void RenderGrid::applyStretchAlignmentToGridItemIfNeeded(RenderBox& gridItem, Re
             if (canSetColumnAxisStretchRequirementForItem(gridItem)) {
                 bool needed = gridLayoutState.containsLayoutRequirementForGridItem(gridItem, ItemLayoutRequirement::NeedsColumnAxisStretchAlignment);
 #if defined(WEBKIT_IOS6)
-                // Not honoured here, and this is the largest single win measured
-                // on this port.
-                //
-                // The requirement is raised by GridTrackSizingAlgorithmStrategy::
-                // logicalHeightForGridItem, which clears a grid item's overriding
-                // containing-block size and dirties the item, and then this asks
-                // for a second relayout of the same item to re-apply the stretch.
-                // On a feed built as a grid of cards the pair fires for every item
-                // on every pass, forever, with nothing having changed.
-                //
-                // Measured with the engine recording who marks renderers dirty and
-                // what each layout costs: 288 of 289 stretch relayouts came from
-                // this branch, and one to four renderers dirty on entry turned into
-                // 7800 blocks laid out at 2100 ms. Without it the same page lays
-                // out 710 blocks in 250 ms - eight times faster - and screenshots
-                // before and after are identical, cards, images and bars alike.
-                //
-                // What is given up: an item whose column-axis stretch genuinely has
-                // to be re-applied within a single layout gets it on the next pass
-                // instead. The flag file restores upstream behaviour for comparison.
                 static int honourRequirement = -1;
                 if (honourRequirement < 0)
                     honourRequirement = access("/tmp/native-grid-stretch", F_OK) == 0 ? 1 : 0;
@@ -2280,10 +2259,6 @@ bool RenderGrid::isSubgrid() const
 
 bool RenderGrid::isSubgrid(Style::GridTrackSizingDirection direction) const
 {
-    // If the grid container is forced to establish an independent formatting
-    // context (like contain layout, or position:absolute), then the used value
-    // of grid-template-rows/columns is 'none' and the container is not a subgrid.
-    // https://drafts.csswg.org/css-grid-2/#subgrid-listing
 #if defined(WEBKIT_IOS6)
     auto* renderGrid = dynamicDowncast<RenderGrid>(parent());
     if (!renderGrid)

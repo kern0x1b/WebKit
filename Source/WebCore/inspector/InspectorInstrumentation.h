@@ -1223,7 +1223,6 @@ inline void InspectorInstrumentation::continueAfterXFrameOptionsDenied(LocalFram
 #if defined(WEBKIT_IOS6)
     return;
 #else
-    // Treat the same as didReceiveResponse.
     didReceiveResourceResponseImpl(protect(instrumentingAgents(frame)), identifier, &loader, response, nullptr);
 #endif
 }
@@ -1233,7 +1232,6 @@ inline void InspectorInstrumentation::continueWithPolicyDownload(LocalFrame& fra
 #if defined(WEBKIT_IOS6)
     return;
 #else
-    // Treat the same as didReceiveResponse.
     didReceiveResourceResponseImpl(protect(instrumentingAgents(frame)), identifier, &loader, response, nullptr);
 #endif
 }
@@ -1243,7 +1241,6 @@ inline void InspectorInstrumentation::continueWithPolicyIgnore(LocalFrame& frame
 #if defined(WEBKIT_IOS6)
     return;
 #else
-    // Treat the same as didReceiveResponse.
     didReceiveResourceResponseImpl(protect(instrumentingAgents(frame)), identifier, &loader, response, nullptr);
 #endif
 }

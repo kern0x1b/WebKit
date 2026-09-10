@@ -389,12 +389,6 @@ ALWAYS_INLINE void SlotVisitor::visitChildren(const JSCell* cell)
     cell->setCellState(CellState::PossiblyBlack);
 
 #if defined(WEBKIT_IOS6)
-    // This fence pairs with the storeLoadFence in Heap::writeBarrierSlowPath: it stops us reading a
-    // stale field while a barrier on another thread reads a stale, not-yet-black cell state. On this
-    // CPU Options::useConcurrentGC() is forced off, so the world is stopped for the whole mark phase
-    // and the only other threads that can execute a barrier against a cell we are scanning are the
-    // helper markers. With no helper markers there is no second party, and this is a full dmb on
-    // armv7 - paid once per marked cell.
     if (m_needsMarkingFence) [[likely]]
         WTF::storeLoadFence();
 #else
@@ -796,17 +790,6 @@ NEVER_INLINE SlotVisitor::SharedDrainResult SlotVisitor::drainFromShared(SharedD
                 if (didReachTermination(locker)) {
                     m_heap.m_markingConditionVariable.notifyAll();
                     
-                    // If we're in concurrent mode, then we know that the mutator will eventually do
-                    // the right thing because:
-                    // - It's possible that the collector has the conn. In that case, the collector will
-                    //   wake up from the notification above. This will happen if the app released heap
-                    //   access. Native apps can spend a lot of time with heap access released.
-                    // - It's possible that the mutator will allocate soon. Then it will check if we
-                    //   reached termination. This is the most likely outcome in programs that allocate
-                    //   a lot.
-                    // - WebCore never releases access. But WebCore has a runloop. The runloop will check
-                    //   if we reached termination.
-                    // So, this tells the runloop that it's got things to do.
 #if defined(WEBKIT_IOS6)
                     if (!m_heap.worldIsStopped())
                         m_heap.m_stopIfNecessaryTimer->scheduleSoon();

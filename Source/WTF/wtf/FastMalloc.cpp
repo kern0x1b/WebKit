@@ -476,9 +476,6 @@ size_t fastMallocSize(const void* p)
 #if BENABLE(MALLOC_SIZE)
     return bmalloc::api::mallocSize(p);
 #else
-    // FIXME: This is incorrect; best fix is probably to remove this function.
-    // Caller currently are all using this for assertion, not to actually check
-    // the size of the allocation, so maybe we can come up with something for that.
     UNUSED_PARAM(p);
     return 1;
 #endif

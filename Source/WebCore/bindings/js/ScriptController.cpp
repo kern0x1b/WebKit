@@ -304,7 +304,6 @@ JSC::JSValue ScriptController::evaluateModule(const URL& sourceURL, AbstractModu
     constexpr bool isWasmModule = false;
 #endif
     if (isWasmModule) {
-        // FIXME: Provide better inspector support for Wasm scripts.
         InspectorInstrumentation::willEvaluateScript(protect(m_frame), sourceURL.string(), 1, 1);
     } else if (moduleRecord.inherits<JSC::SyntheticModuleRecord>())
         InspectorInstrumentation::willEvaluateScript(frame.get(), sourceURL.string(), 1, 1);

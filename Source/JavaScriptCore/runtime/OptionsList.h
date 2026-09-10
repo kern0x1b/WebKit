@@ -26,11 +26,6 @@
 #pragma once
 
 #if defined(WEBKIT_IOS6)
-// Capturing a hundred frames of stack for every exception thrown means a large
-// allocation at exactly the moment a page is doing something unusual - and the
-// login page died in malloc inside Exception::finishCreation, out of memory, with
-// the interpreter nested dozens of frames deep. Twenty five frames is still a
-// usable trace and costs a quarter of the memory.
 #define WEBKIT_IOS6_STACK_TRACE_LIMIT 25u
 #else
 #define WEBKIT_IOS6_STACK_TRACE_LIMIT 100u
@@ -38,35 +33,6 @@
 
 
 #if defined(WEBKIT_IOS6)
-// Upstream's numbers, kept after measuring twice.
-//
-// The first measurement compiled five times sooner and was worse on both axes:
-// passes of 5.4, 12.6, 10.3, 1.7 and 0.7 seconds against 3.9, 9.7, 10.3 and 1.0,
-// and 174 MB resident against 151. It concluded that paying baseline compilation
-// for the thousands of functions a bundle calls once costs more than the
-// interpreter does. Re-run after property inline caches were fixed in baseline
-// code, with a census of every live CodeBlock taken every five seconds: the
-// decision stands and every reason given for it is wrong.
-//
-// Lowering the interpreter's threshold alone, 500 to 100, halves the share of live
-// bytecode still interpreted - 47.1% to 25.9% - for 2.9 MB of a 27.2 MB code pool.
-// It is not expensive. It is also not useful: stalls, frame rate and resident
-// memory each moved further between two runs of one configuration than between any
-// two configurations. Resident tracks how many posts the feed delivered, r = 0.98
-// at 8.6 MB per thousand elements, and does not track these numbers at all, so
-// 174-against-151 is as likely to have been the feed as the compiler.
-//
-// Nor is the interpreted code the functions a bundle calls once: five live blocks
-// had run fewer than fifteen times, against two hundred and eleven sitting between
-// two hundred and five hundred, most of the way to the threshold and never
-// arriving. They never arrived because every compiled function in the process was
-// discarded about once a minute. Holding the whole compiled set instead - three
-// runs reached that state, one of them without being asked to - moved the frame
-// rate not at all: 15.5, 7.0 and 8.0 frames from the same tier state.
-//
-// So the tier the site's JavaScript runs in does not predict what the reader
-// feels, and neither of these numbers is worth moving again without a measurement
-// that separates it from the feed.
 #define WEBKIT_IOS6_JIT_WARMUP 500
 #define WEBKIT_IOS6_JIT_SOON 100
 #define WEBKIT_IOS6_OPTIMIZE_WARMUP 1000
@@ -79,10 +45,6 @@
 #endif
 
 #if defined(WEBKIT_IOS6)
-// The ahead-of-time bytecode pass only exists on this port, but the option has to
-// exist everywhere because the option list is one macro and cannot be #if'd inside.
-// Off by default off-port so that a build that does not compile the pass also does
-// not advertise a switch that does nothing.
 #define WEBKIT_IOS6_AHEAD_OF_TIME_BYTECODE true
 #else
 #define WEBKIT_IOS6_AHEAD_OF_TIME_BYTECODE false
@@ -106,23 +68,8 @@
 #endif
 
 #if defined(WEBKIT_IOS6)
-// Heap sizing. minHeapSize() for HeapType::Large is min(largeHeapSize, ramSize *
-// smallHeapRAMFraction), and that product is the floor the collector will never
-// collect below. Upstream's 32 MB against a quarter of RAM is a desktop number:
-// on a 512 MB device it hands the first VM 32 MB before a page exists, and on a
-// 128 MB device it hands it the entire application budget.
-//
-// The armv7 values are the ones the application already exports through
-// JSC_largeHeapSize and friends before WebKit starts, so this changes nothing on
-// that device - it only means the floor is still right when the environment is
-// not set. armv6 has a 128 MB machine and roughly 25-40 MB before the watchdog,
-// so the same fractions of a much smaller budget.
 #if CPU(ARM_THUMB2)
 #define WEBKIT_IOS6_LARGE_HEAP_SIZE (4 * 1024 * 1024)
-// The medium and small floors were left at upstream's 4 MB and 1 MB, so a worker
-// VM was handed the same never-collect-below floor as the whole page, and unlike
-// Large those two are not clamped against RAM at all. In 2012 the ratio between
-// the page's heap and a worker's was sixteen to one; keep that shape.
 #define WEBKIT_IOS6_MEDIUM_HEAP_SIZE (1024 * 1024)
 #define WEBKIT_IOS6_SMALL_HEAP_SIZE (512 * 1024)
 #define WEBKIT_IOS6_SMALL_HEAP_RAM_FRACTION 0.08
@@ -155,28 +102,6 @@
 #endif
 
 #if defined(WEBKIT_IOS6)
-// A floor, in bytes, under the amount a program may allocate between two collections.
-//
-// updateAllocationLimits() sets that budget to proportionalHeapSize(live) - live, which is
-// (growthFactor - 1) * live. The only guard upstream has against the budget collapsing is
-// m_minBytesPerCycle, and it is a floor on the total heap rather than on the increment, so
-// it stops having any effect as soon as the heap is larger than largeHeapSize - which here
-// is four megabytes. The growth factors this port runs are 1.25 / 1.12 / 1.05 against
-// upstream's 2 / 1.5 / 1.24, and the band is picked from the process footprint, which on
-// this device sits above mediumHeapRAMFraction * 512 MB for most of a page's life. So the
-// steady state is a five percent budget: with twenty megabytes live the collector is asked
-// to run again after one more megabyte. An event handler that allocates twenty megabytes of
-// garbage pays for twenty collections, and with useConcurrentGC forced off for anything that
-// is not x86_64 or arm64 (Options.cpp, notifyOptionsChanged) every one of them stops the
-// world on the main thread.
-//
-// A proportion is the wrong unit here anyway. The thing that has to be budgeted is the
-// jetsam limit, which is an absolute number of bytes, and the JS heap is not what dominates
-// the footprint - tiles, decoded images and the DOM are. Floor the increment instead: the
-// heap may exceed its proportional target by at most this many bytes, which is the whole of
-// the memory this costs, and the collector runs that much less often.
-//
-// Zero means "use the proportional rule alone", which is what every other port gets.
 #if CPU(ARM_THUMB2)
 #define WEBKIT_IOS6_MIN_BYTES_PER_COLLECTION_CYCLE (8 * 1024 * 1024)
 #else

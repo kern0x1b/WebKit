@@ -150,7 +150,6 @@ auto Evaluation<LineWidth, float>::operator()(const LineWidth& value, ZoomFactor
 
 auto Evaluation<LineWidth, LayoutUnit>::operator()(const LineWidth& value, ZoomFactor zoom, float deviceScaleFactor) -> LayoutUnit
 {
-    // NOTE: Using `evaluate<float>`, not `evaluate<LayoutUnit>`, as snapLengthAsBorderWidth takes a `float`.
     return LayoutUnit { snapLengthAsBorderWidth(evaluate<float>(value.value, zoom), deviceScaleFactor) };
 }
 

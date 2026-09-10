@@ -2289,7 +2289,6 @@ bool hasAnyPlainText(const SimpleRange& range, TextIteratorBehaviors behaviors, 
 
 String plainText(const SimpleRange& range, TextIteratorBehaviors defaultBehavior, bool isDisplayString)
 {
-    // The initial buffer size can be critical for performance: https://bugs.webkit.org/show_bug.cgi?id=81192
 #if defined(WEBKIT_IOS6)
     constexpr unsigned initialCapacity = 1 << 12;
 #else

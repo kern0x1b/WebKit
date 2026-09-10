@@ -362,9 +362,6 @@ String TextCodecUTF8::decode(std::span<const uint8_t> bytes, bool flush, bool st
                 goto upConvertTo16Bit;
             }
 #if defined(WEBKIT_IOS6)
-            // A leading byte order mark is the only non-Latin-1 character that produces no output
-            // at all. Dropping it here keeps a document that starts with one on the 8-bit path
-            // instead of storing every following ASCII byte in two bytes.
             if (character == byteOrderMark && destination.data() == buffer.characters() && std::exchange(m_shouldStripByteOrderMark, false)) {
                 skip(source, count);
                 continue;
@@ -388,9 +385,6 @@ String TextCodecUTF8::decode(std::span<const uint8_t> bytes, bool flush, bool st
         return { };
     }
 #if defined(WEBKIT_IOS6)
-    // String::adopt keeps the whole allocation, so a decode that shrank the input holds the
-    // slack for as long as the string lives. Past a quarter of the buffer it is worth one copy
-    // to hand back an exactly sized string, which is also a single allocation rather than two.
     if (size_t slack = bufferSize - buffer.length(); slack >= 4096 && slack >= bufferSize / 4)
         return String { buffer.span() };
 #endif
@@ -407,8 +401,6 @@ upConvertTo16Bit:
     skip(destination16, charactersToCopy);
 
 #if defined(WEBKIT_IOS6)
-    // Nothing below reads the 8-bit buffer again, and it is as large as the input. Releasing it
-    // here means the rest of the decode holds two bytes per input byte instead of three.
     {
         auto releasedBuffer = buffer.release();
     }
@@ -475,9 +467,6 @@ upConvertTo16Bit:
         return { };
     }
 #if defined(WEBKIT_IOS6)
-    // The 16-bit buffer is two bytes per input byte, so a multi-byte document leaves far more
-    // slack here than on the 8-bit path: three-byte sequences waste four bytes each. String::adopt
-    // would keep that for the lifetime of the string.
     if (size_t slack = bufferSize - buffer16.length(); slack >= 2048 && slack >= bufferSize / 4)
         return String { buffer16.span() };
 #endif

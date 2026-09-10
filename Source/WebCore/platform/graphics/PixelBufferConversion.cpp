@@ -482,21 +482,8 @@ static void convertImagePixelsToFloat16(const ConstPixelBufferConversionView& so
 #endif // ENABLE(PIXEL_FORMAT_RGBA16F)
 
 #if defined(WEBKIT_IOS6)
-// Crossing colour spaces needs vImageConverter_CreateWithCGImageFormat, which is
-// iOS 7. Here it fails, and the accelerated path then zero-fills the destination
-// rather than expose stale heap - so an SVG filter came out black, linearRGB
-// being the space filters interpolate in by default. The unaccelerated path's own
-// note says this can be done with the functions in ColorConversion.h; that is
-// what this does, for the pair that actually arises.
-//
-// Two passes rather than one: everything except the colour space goes through the
-// existing conversions, then the transfer function is applied in place. The table
-// is built once from the engine's own sRGB transfer function, which is exact for
-// eight-bit channels since it acts on each channel independently.
 static const std::array<uint8_t, 256>& transferTable(bool toLinear)
 {
-    // The engine's own sRGB transfer function, clamped, which is what the colour
-    // conversions in ColorConversion.h use for this pair.
     using Transfer = SRGBTransferFunction<float, TransferFunctionMode::Clamped>;
 
     static NeverDestroyed<std::array<uint8_t, 256>> toLinearTable = [] {
@@ -555,8 +542,6 @@ static bool convertImagePixelsAcrossSRGBAndLinearSRGB(const ConstPixelBufferConv
                         destination.rows[pixel + channel] = 0;
                         continue;
                     }
-                    // The transfer function is not linear, so it has to act on
-                    // the colour itself rather than on the colour times alpha.
                     value = std::min<unsigned>(255, (value * 255 + alpha / 2) / alpha);
                 }
 

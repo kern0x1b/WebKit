@@ -321,7 +321,6 @@ JSC::JSValue WorkerOrWorkletScriptController::evaluateModule(const URL& sourceUR
 
     RefPtr globalScope = m_globalScope.get();
     if (isWasmModule) {
-        // FIXME: Provide better inspector support for Wasm scripts.
         InspectorInstrumentation::willEvaluateScript(*globalScope, sourceURL.string(), 1, 1);
     } else if (moduleRecord.inherits<JSC::SyntheticModuleRecord>())
         InspectorInstrumentation::willEvaluateScript(*globalScope, sourceURL.string(), 1, 1);

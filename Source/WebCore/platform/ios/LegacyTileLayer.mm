@@ -92,9 +92,6 @@ using WebCore::LegacyTileCache;
 {
     if (pthread_main_np()) {
 #if defined(WEBKIT_IOS6)
-        // Only when the engine has something to give, and only if it is free.
-        // See LegacyTileCache::mainThreadShouldWaitForEngine and
-        // WebThreadTryLockForFrame.
         static int alwaysWait = -1;
         if (alwaysWait < 0)
             alwaysWait = access("/tmp/native-always-wait-for-engine", F_OK) == 0 ? 1 : 0;
@@ -104,17 +101,6 @@ using WebCore::LegacyTileCache;
             if (!WebCore::LegacyTileCache::mainThreadShouldWaitForEngine())
                 return;
             if (!WebThreadTryLockForFrame()) {
-                // The pass is owed, not skipped.
-                //
-                // Skipping prepareToDraw skips the compositing flush with it, and
-                // that flush is what fills composited layers - without it the
-                // page's fixed bars stayed empty while the engine had them in
-                // exactly the right place. But the main thread does not have to
-                // be the one to do it: asked for on the web thread, the work runs
-                // there, under the lock that thread already owns, and the
-                // interface never waits at all. Making the main thread block for
-                // it instead was tried and put the tail straight back - a worst
-                // wait of 3406 ms against 293.
                 if (WebCore::LegacyTileCache::mainThreadMustWaitForEngine()) {
                     WebCore::LegacyTileGrid* grid = _tileGrid;
                     WebThreadRun(^{

@@ -143,11 +143,6 @@ Plan::Plan(CodeBlock* passedCodeBlock, CodeBlock* profiledDFGCodeBlock,
         , m_transitions(m_codeBlock)
 {
 #if defined(WEBKIT_IOS6)
-    // A valid osrEntryBytecodeIndex means operationOptimize() (JITOperations.cpp) called us
-    // from a loop back-edge check, not from op_enter's call-count trigger - i.e. this code was
-    // provably running, mid-loop, at the instant this plan was created. See
-    // JITPlan::wasLoopTriggerAtEnqueueForQueueOrdering() for how JITWorklistThread's
-    // dequeue-time reordering uses this.
     m_wasLoopTriggerAtEnqueue = static_cast<bool>(osrEntryBytecodeIndex);
 #endif
     RELEASE_ASSERT(m_codeBlock->alternative()->jitCode());

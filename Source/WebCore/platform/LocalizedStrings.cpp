@@ -119,12 +119,6 @@ RetainPtr<CFStringRef> copyLocalizedString(CFStringRef key)
 #endif
 
 #if defined(WEBKIT_IOS6)
-    // The sentinel above is meant to trip the assertion in a debug build; in a
-    // release build it reaches the interface, and did - a select rendered with
-    // "localized string not found" as its label. The framework staged for the
-    // substitution carries the media controls' strings and no Localizable.strings
-    // beside them, so every key misses. The key is the English string, which is
-    // the same fallback the missing-bundle case above already uses.
     if (!result || result.get() == notFound)
         return key;
 #endif

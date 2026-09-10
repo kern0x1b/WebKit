@@ -219,8 +219,6 @@ struct Hashtable {
 
     Hashtable(unsigned size)
 #if defined(WEBKIT_IOS6)
-        // Cortex-A9 has no integer divide: a runtime "% data.size()" is a call to
-        // __aeabi_uidivmod on every park and every unpark. A power-of-two spine masks instead.
         : data(std::bit_ceil(size))
 #else
         : data(size)

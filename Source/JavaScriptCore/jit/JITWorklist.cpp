@@ -40,8 +40,6 @@
 namespace JSC {
 
 #if defined(WEBKIT_IOS6)
-// Defined in JIT.cpp; declared here rather than pulling in JIT.h, which this file has no other
-// reason to include.
 namespace CostCeilingInstrumentation {
 bool queueOrderingEnabled();
 }
@@ -443,13 +441,6 @@ JITWorklist::State JITWorklist::removeAllReadyPlansForVM(VM& vm, Vector<Ref<JITP
             return Compiled;
 
 #if defined(WEBKIT_IOS6)
-        // Same lookup as the upstream m_plans.contains() below, but keeping the iterator lets
-        // us also bump the plan's reheat count: reaching this point means requestedKey's plan
-        // is still in m_plans (i.e. still Preparing or Compiling) and its code block just
-        // called back in here via operationOptimize() (JITOperations.cpp) because it
-        // re-crossed its tier-up threshold - proof the code kept running after this plan was
-        // queued. See JITPlan::bumpReheatForQueueOrdering() for the field this feeds and
-        // JITWorklistThread::selectAndRemoveBestDFGPlan() for the reader.
         auto iter = m_plans.find(requestedKey);
         if (iter != m_plans.end()) {
             if (CostCeilingInstrumentation::queueOrderingEnabled())

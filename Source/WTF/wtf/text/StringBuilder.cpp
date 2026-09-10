@@ -159,10 +159,6 @@ void StringBuilder::append(std::span<const char16_t> characters)
     }
     RELEASE_ASSERT(characters.size() < std::numeric_limits<uint32_t>::max());
 #if defined(WEBKIT_IOS6)
-    // Widening costs a fresh buffer of twice the capacity, an upconverting copy of
-    // everything already accumulated, two bytes per character for every later append,
-    // and a 16-bit result String. Most text arriving as UTF-16 is entirely Latin-1 and
-    // needs none of that; the scan below bails on the first character that does.
     if (is8Bit() && charactersAreAllLatin1(characters)) {
         if (auto destination = extendBufferForAppending<Latin1Character>(saturatingSum<uint32_t>(m_length, static_cast<uint32_t>(characters.size()))); destination.data())
             StringImpl::copyCharacters(destination, characters);

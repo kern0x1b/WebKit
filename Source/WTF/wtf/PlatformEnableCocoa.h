@@ -84,14 +84,6 @@
 #define ENABLE_APP_BOUND_DOMAINS 1
 #endif
 
-// Modern WebKit runs WebKitLegacy's iOS port without a web thread, because the
-// clients it still has do not need one. This embedder does: with the web thread
-// disabled, parsing, style, layout, JavaScript and painting all happen on the
-// main thread, so the interface is dead for as long as a page is working - which
-// on a feed is several seconds at a time, and is the difference between this
-// feeling like an application and feeling like a browser that has stopped
-// responding. Captured directly: the main thread was found standing inside
-// JSEventListener::handleEvent, eight seconds into a load.
 #if !defined(ENABLE_WEB_THREAD_DISABLEMENT) && PLATFORM(IOS_FAMILY) && !defined(WEBKIT_IOS6)
 #define ENABLE_WEB_THREAD_DISABLEMENT 1
 #endif
@@ -931,12 +923,6 @@
 #define ENABLE_TOUCH_EVENTS 1
 #endif
 
-// Touch event regions are how a multi-process WebKit tells the UI process which
-// screen regions a page wants to intercept touches in, so scrolling can start
-// on the UI process's thread before the web process has even seen the touch -
-// a site-isolation/WebKit2 concept. This port is WebKitLegacy only, one
-// process, no UI-process/WebProcess split to report anything across, so there
-// is nothing for this to do here regardless of the internal SDK.
 #if !defined(ENABLE_TOUCH_EVENT_REGIONS) && PLATFORM(IOS_FAMILY) && !defined(WEBKIT_IOS6)
 #define ENABLE_TOUCH_EVENT_REGIONS 1
 #endif

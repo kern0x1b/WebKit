@@ -77,8 +77,6 @@ do { \
 
 #if defined(WEBKIT_IOS6)
 
-// Declared locally: this SDK does not carry the class as a weakly linked symbol,
-// so it is looked up at runtime.
 @protocol RevNowPlayingInfoCentre <NSObject>
 - (void)setNowPlayingInfo:(NSDictionary *)info;
 @end
@@ -478,10 +476,6 @@ static void publishNowPlayingInfoToNowPlayingCentre(const WebCore::NowPlayingInf
 void MediaSessionManagerCocoa::setNowPlayingInfo(bool setAsNowPlayingApplication, bool shouldUpdateNowPlayingSuppression, const NowPlayingInfo& nowPlayingInfo)
 {
 #if defined(WEBKIT_IOS6)
-    // MediaRemote is absent on this system, so the modern publisher below never
-    // runs and nothing ever describes what is playing. The now playing centre in
-    // MediaPlayer is the interface this platform offers for that, and it is what
-    // fills the lock screen and the multitasking transport view.
     UNUSED_PARAM(setAsNowPlayingApplication);
     UNUSED_PARAM(shouldUpdateNowPlayingSuppression);
     publishNowPlayingInfoToNowPlayingCentre(nowPlayingInfo);

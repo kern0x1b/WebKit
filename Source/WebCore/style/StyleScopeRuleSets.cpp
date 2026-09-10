@@ -368,8 +368,6 @@ template<typename KeyType, typename Hash, typename HashTraits>
 static Vector<InvalidationRuleSet>* ensureInvalidationRuleSets(const KeyType& key, HashMap<KeyType, std::unique_ptr<Vector<InvalidationRuleSet>>, Hash, HashTraits>& ruleSetMap, const HashMap<KeyType, std::unique_ptr<RuleFeatureVector>, Hash, HashTraits>& ruleFeatures)
 {
 #if defined(WEBKIT_IOS6)
-    // Upstream memoises misses by inserting a permanent null-valued entry, so on a class-heavy page
-    // these maps grow without bound from keys that have no features at all. Probe instead.
     {
         auto it = ruleSetMap.find(key);
         if (it != ruleSetMap.end())

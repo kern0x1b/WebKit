@@ -32,10 +32,6 @@ namespace WTF {
 
 #if defined(WEBKIT_IOS6)
 
-    // A 64x64->128 multiply costs four umull plus carry propagation on armv7, and every
-    // pointer and integer key in the engine goes through this function. Two 32-bit
-    // multiplies with the same avalanche quality in the low bits is what the table
-    // actually needs, since the index is taken as `hash & sizeMask`.
     ALWAYS_INLINE unsigned intHash(uint32_t key)
     {
         key ^= key >> 16;
@@ -68,8 +64,6 @@ namespace WTF {
 
 #else
 
-    // rapidhash "mum" mixer.
-    // Keep in sync with AssemblyHelpers::rapidHashMix64 and FTL rapidHashMix64 code as we need to use the same hash function.
     inline unsigned intHash(uint64_t key)
     {
         constexpr uint64_t secret1 = 0x2d358dccaa6c78a5ULL;
@@ -94,7 +88,6 @@ namespace WTF {
         return intHash(static_cast<uint32_t>(key16));
     }
 
-    // Compound integer hash method: http://opendatastructures.org/versions/edition-0.1d/ods-java/node33.html#SECTION00832000000000000000
     inline unsigned pairIntHash(unsigned key1, unsigned key2)
     {
         unsigned shortRandom1 = 277951225; // A random 32-bit value.

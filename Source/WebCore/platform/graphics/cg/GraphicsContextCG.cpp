@@ -61,8 +61,6 @@ namespace WebCore {
 WTF_MAKE_TZONE_ALLOCATED_IMPL(GraphicsContextCG);
 
 #if defined(WEBKIT_IOS6)
-// Every colour space this CoreGraphics can make is the one device RGB space, so an
-// sRGB byte colour is already in destination form.
 static std::optional<std::array<CGFloat, 4>> NODELETE ios6DeviceRGBComponents(const Color& color)
 {
     auto bytes = color.tryGetAsSRGBABytes();
@@ -1199,8 +1197,6 @@ void GraphicsContextCG::setCGDropShadow(const std::optional<GraphicsDropShadow>&
     CGContextSetAlpha(context, shadow->opacity);
 
 #if defined(WEBKIT_IOS6)
-    // The shadow API that predates CGStyle draws the same shadow, without the
-    // style object this CoreGraphics cannot accept.
     CGContextSetShadowWithColor(context, offset, blurRadius,
         cachedCGColorInDestinationStandardRange(shadow->color, colorSpace()).get());
 #else

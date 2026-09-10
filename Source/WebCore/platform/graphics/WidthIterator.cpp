@@ -89,10 +89,6 @@ inline auto WidthIterator::applyFontTransforms(GlyphBuffer& glyphBuffer, unsigne
         return { 0, makeGlyphBufferAdvance() };
 
 #if defined(WEBKIT_IOS6)
-    // Font::applyTransforms on this port only reverses RTL runs; it never rewrites an
-    // advance. The only thing that can move a width between the two sums below is the
-    // treated-as-space fixup, so with nothing to fix up the two passes are provably equal
-    // and both can be skipped.
     const bool measureWidthChange = !charactersTreatedAsSpace.isEmpty();
 #else
     constexpr bool measureWidthChange = true;

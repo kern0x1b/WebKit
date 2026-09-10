@@ -3264,8 +3264,6 @@ void RenderLayer::clipToRect(GraphicsContext& context, GraphicsContextStateSaver
         adjustedClipRect.move(paintingInfo.subpixelOffset);
         snappedClipRect = snapRectToDevicePixelsIfNeeded(adjustedClipRect, renderer());
 #if defined(WEBKIT_IOS6)
-        // Intersecting the clip with a rectangle that already contains it changes
-        // nothing, but still costs a gState save, a state copy and the restore.
         if (!paintingInfo.regionContext && !context.paintingDisabled() && snappedClipRect.contains(FloatRect { context.clipBounds() }))
             needsClipping = false;
 #endif

@@ -588,12 +588,6 @@ static void filterEnabledNonemptyCSSStyleSheets(Vector<Ref<CSSStyleSheet>>& resu
 void Scope::updateActiveStyleSheets(UpdateType updateType)
 {
 #if defined(WEBKIT_IOS6)
-    // How often the author's rules are rebuilt, and how long it takes.
-    //
-    // Sorting inside RuleSetBuilder is the single most expensive function in the
-    // engine on this page - more than selector matching, more than layout - and
-    // the page has sixteen thousand rules that do not change. That points at
-    // rebuilding rather than at the rules, so the rebuilds are counted here.
     static int reportRebuilds = -1;
     if (reportRebuilds < 0)
         reportRebuilds = access("/tmp/native-style-rebuilds", F_OK) == 0 ? 1 : 0;

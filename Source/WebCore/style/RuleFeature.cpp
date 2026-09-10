@@ -469,9 +469,6 @@ static PseudoClassInvalidationKey makePseudoClassInvalidationKey(CSSSelector::Ps
 void RuleFeatureSet::collectFeatures(CollectionContext& collectionContext, const RuleData& ruleData, const Vector<Ref<const StyleRuleScope>>& scopeRules)
 {
 #if defined(WEBKIT_IOS6)
-    // Called once per selector of every rule of every sheet. With the web thread in play isMainThread()
-    // is an exported call that reaches pthread_self() and the web thread lock hook; the callers that
-    // reach here (RuleSetBuilder, invalidation rule sets) are main-thread-only by construction.
     ASSERT(isMainThread());
 #else
     RELEASE_ASSERT(isMainThread());
@@ -793,8 +790,6 @@ void RuleFeatureSet::shrinkToFit()
     auto shrinkAll = [](auto& map) {
         for (auto& rules : map.values()) {
 #if defined(WEBKIT_IOS6)
-            // Shrinking moves every RuleFeature (two selector lists each) into a fresh allocation.
-            // Doing that for thousands of buckets to reclaim a few entries each is not worth it.
             if (rules->capacity() - rules->size() < 4)
                 continue;
 #endif

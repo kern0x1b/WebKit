@@ -186,8 +186,6 @@ size_t availableMemory()
 MemoryStatus memoryStatus()
 {
 #if defined(WEBKIT_IOS6)
-    // This kernel answers TASK_VM_INFO at revision 0, which stops short of
-    // phys_footprint and leaves those bytes holding whatever was on the stack.
     mach_task_basic_info_data_t taskInfo;
     mach_msg_type_number_t taskInfoCount = MACH_TASK_BASIC_INFO_COUNT;
 

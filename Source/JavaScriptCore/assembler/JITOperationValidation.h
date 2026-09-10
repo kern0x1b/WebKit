@@ -35,9 +35,6 @@
 #pragma clang diagnostic pop
 #else // ENABLE(JIT_CAGE)
 #if defined(WEBKIT_IOS6)
-// MAP_JIT arrived years after this system. Passing it to mmap here fails with
-// EINVAL, the executable region is never reserved, and JavaScriptCore falls back
-// to the interpreter without saying so.
 #define MAP_EXECUTABLE_FOR_JIT 0
 #define MAP_EXECUTABLE_FOR_JIT_WITH_JIT_CAGE 0
 #elif OS(DARWIN)

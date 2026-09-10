@@ -164,8 +164,6 @@ void WebResourceLoadScheduler::scheduleLoad(ResourceLoader* resourceLoader)
 
 #if PLATFORM(COCOA) && !defined(WEBKIT_IOS6)
     if (ResourceRequest::resourcePrioritiesEnabled() && !isSuspendingPendingRequests()) {
-        // Serve all requests at once to keep the pipeline full at the network layer.
-        // FIXME: Does this code do anything useful, given that we also set maxRequestsInFlightPerHost to effectively unlimited on these platforms?
         servePendingRequests(WTF::move(host), ResourceLoadPriority::VeryLow);
         return;
     }

@@ -33,9 +33,6 @@
 namespace
 {
 
-// IOSurface is a private framework on this release, so the three calls this
-// file needs are resolved at runtime rather than linked - the same way the rest
-// of the port reaches it.
 void *iosurfaceLibrary()
 {
     static void *library =
@@ -93,7 +90,6 @@ IOSurfaceSurfaceEAGL::IOSurfaceSurfaceEAGL(const egl::SurfaceState &state,
       mSurfaceTextureID(0),
       mFramebufferID(0)
 {
-    // Keep a reference so the surface outlives whoever handed it over.
     mIOSurface = reinterpret_cast<IOSurfaceRef>(buffer);
     CFRetain(mIOSurface);
 
@@ -160,8 +156,6 @@ angle::Result IOSurfaceSurfaceEAGL::ensureSurfaceTexture(const gl::Context *cont
         return angle::Result::Continue;
     }
 
-    // BGRA is the order an IOSurface arrives in, and the order this GPU's
-    // texture upload wants to be told about; the internal format stays RGBA.
     CVReturn result = CVOpenGLESTextureCacheCreateTextureFromImage(
         kCFAllocatorDefault, mTextureCache, mPixelBuffer, nullptr, GL_TEXTURE_2D, GL_RGBA, mWidth,
         mHeight, GL_BGRA_EXT, GL_UNSIGNED_BYTE, mPlane, &mSurfaceTexture);
@@ -187,9 +181,6 @@ angle::Result IOSurfaceSurfaceEAGL::getBindTexImageTextureID(const gl::Context *
     return angle::Result::Continue;
 }
 
-// A context asked for without an alpha channel is served from a surface that
-// has one, so the alpha the caller never writes has to read as opaque: ANGLE
-// swizzles it away when sampling, and the surface's own bytes are set once.
 angle::Result IOSurfaceSurfaceEAGL::initializeAlphaChannel(const gl::Context *context,
                                                            GLuint texture)
 {
@@ -290,7 +281,6 @@ EGLint IOSurfaceSurfaceEAGL::getSwapBehavior() const
     return EGL_BUFFER_PRESERVED;
 }
 
-// static
 bool IOSurfaceSurfaceEAGL::validateAttributes(EGLClientBuffer buffer,
                                               const egl::AttributeMap &attribs)
 {
@@ -312,10 +302,6 @@ bool IOSurfaceSurfaceEAGL::validateAttributes(EGLClientBuffer buffer,
         return false;
     }
 
-    // Eight bits a channel, which is what a canvas is. GL_RGB is here because a
-    // context asked for without an alpha channel is served from the same BGRA
-    // surface with its alpha ignored, the way the CGL backend does it; claiming
-    // any of the rest would mean claiming conversions this backend does not do.
     EGLAttrib internalFormat = attribs.get(EGL_TEXTURE_INTERNAL_FORMAT_ANGLE);
     EGLAttrib type           = attribs.get(EGL_TEXTURE_TYPE_ANGLE);
     if ((internalFormat != GL_BGRA_EXT && internalFormat != GL_RGBA && internalFormat != GL_RGB) ||

@@ -604,10 +604,6 @@ DECLARE_ALLOCATOR_WITH_HEAP_IDENTIFIER(HashTable);
             const unsigned* metadata = reinterpret_cast_ptr<const unsigned*>(m_table);
             unsigned size = metadata[tableSizeOffset];
 #if defined(WEBKIT_IOS6)
-            // A shrink is a fresh malloc, a reinsert of every surviving entry and a free.
-            // Below this floor it hands back at most a few hundred bytes, and tables that
-            // hover around the threshold pay for it on every remove/add pair. Larger tables,
-            // where the memory actually is, still shrink exactly as before.
             static constexpr unsigned smallestTableWorthShrinking = 32;
             if (size <= smallestTableWorthShrinking)
                 return false;

@@ -593,9 +593,6 @@ static void logStyleDifference(const RenderElement& renderer, const Style::Compu
 void RenderElement::setStyle(Style::ComputedStyle&& style, Style::DifferenceResult minimalStyleDifference)
 {
 #if defined(WEBKIT_IOS6)
-    // How much of the tree the engine restyles between layouts. A layout that
-    // reports ten thousand dirty blocks is either a restyle of everything or a
-    // dirtying of everything; this separates the two.
     if (g_webkitIOS6LayoutCounters) [[unlikely]] {
         extern unsigned g_webkitIOS6StylesSet;
         ++g_webkitIOS6StylesSet;

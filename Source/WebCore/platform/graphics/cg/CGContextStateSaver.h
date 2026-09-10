@@ -66,8 +66,6 @@ public:
 
 private:
 #if defined(WEBKIT_IOS6)
-    // Stack scoped inside a single drawing call: the context always outlives it,
-    // and the retain/release pair is two atomics per drawing operation.
     CGContextRef contextRef() const { return m_context; }
 
     CGContextRef m_context;

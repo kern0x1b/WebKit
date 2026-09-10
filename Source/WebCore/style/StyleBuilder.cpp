@@ -374,9 +374,6 @@ void Builder::applyProperty(CSSPropertyID id, CSSValue& value, SelectorChecker::
     id = CSSProperty::resolveDirectionAwareProperty(id, style.writingMode());
 
 #if defined(WEBKIT_IOS6)
-    // Substitution is rare and taking a reference is not free: this runs for
-    // every declaration of every element, and the returned Ref costs a retain
-    // and a release each time even when nothing was substituted.
     RefPtr<CSSValue> substitutedValue;
     if (value.hasSubstitutionFunctions()) [[unlikely]]
         substitutedValue = resolveSubstitutionFunctions(id, value);

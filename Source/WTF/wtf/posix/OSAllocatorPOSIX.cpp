@@ -44,15 +44,6 @@
 #define MAP_EXECUTABLE_FOR_JIT MAP_JIT
 #define MAP_EXECUTABLE_FOR_JIT_WITH_JIT_CAGE MAP_JIT
 #elif OS(DARWIN)
-// MAP_JIT arrived in iOS 7 / OS X 10.9. This kernel does not know the flag, and
-// mmap rejects the whole call with EINVAL rather than ignoring it - so the JIT
-// pool reservation fails, ExecutableAllocator::isValid() goes false, and the
-// engine silently runs the LLInt for the life of the process.
-//
-// Nothing is lost by dropping it. MAP_JIT exists to obtain writable-executable
-// pages on systems that otherwise forbid them; this one has no such rule, which
-// was verified directly on the device - mmap of RWX and mprotect RW->RX both
-// succeed and the code written through them executes, as root and as mobile.
 #define MAP_EXECUTABLE_FOR_JIT 0
 #define MAP_EXECUTABLE_FOR_JIT_WITH_JIT_CAGE 0
 #else // OS(DARWIN)

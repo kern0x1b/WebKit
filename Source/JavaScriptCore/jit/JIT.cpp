@@ -70,13 +70,6 @@ static constexpr const bool verbose = false;
 }
 
 #if defined(WEBKIT_IOS6)
-// Counts, for the whole session, how many CodeBlocks compileAndLinkWithoutFinalizing() below
-// refuses to ever hand to the DFG because bytecodeCost() exceeds
-// Options::maximumOptimizationCandidateBytecodeCost() - the refusal is permanent, since a
-// CannotCompile CodeBlock never emits the counter that would otherwise trigger a later retry
-// (see emit_op_enter() in JITOpcodes.cpp). Off unless WEBKIT_IOS6_OPT_CEILING_LOG names a file,
-// in which case one line is appended per refusal and a full ranked summary is appended on every
-// GC tick (Heap.cpp calls dumpSnapshot() right after it writes its own GC log line) and at exit.
 namespace CostCeilingInstrumentation {
 
 struct Refusal {
@@ -109,20 +102,11 @@ static const char* logPath()
     return (path && path[0]) ? path : nullptr;
 }
 
-// Not static: JITPlan.cpp checks this before paying for a MonotonicTime::now() read on every
-// JITPlan construction (i.e. every compile, at every tier - most of which are not DFG plans
-// refused for cost at all), so that the read only happens when instrumentation is actually on.
 bool enabled()
 {
     return logPath();
 }
 
-// The A/B switch for JITWorklistThread::poll()'s dequeue-time reordering of the DFG queue
-// (see JITWorklistThread.cpp) - deliberately independent of enabled() above, so a run can
-// flip reordering on or off while leaving WEBKIT_IOS6_OPT_CEILING_LOG (and therefore the
-// dispatch-age histogram both runs are compared by) set the same way. Not static, for the
-// same reason as enabled(): JITPlan.cpp checks it before reading a clock on every plan
-// construction.
 bool queueOrderingEnabled()
 {
     static bool value = [] {
@@ -132,16 +116,6 @@ bool queueOrderingEnabled()
     return value;
 }
 
-// A plan whose code block has not re-crossed its tier-up threshold even once since this plan
-// was queued (see JITPlan::reheatCountForQueueOrdering()), and that was not itself triggered
-// from inside a loop (see JITPlan::wasLoopTriggerAtEnqueueForQueueOrdering()), and that has
-// been waiting at least this long, is dropped rather than compiled - see
-// JITWorklistThread::selectAndRemoveBestDFGPlan() in JITWorklistThread.cpp. Defaults to 750ms,
-// deliberately past the 500ms bucket boundary already used by the dispatch-age histogram, so
-// only plans that would have landed in the worst "500-2000ms" or "2000ms+" buckets are ever
-// candidates. Set WEBKIT_IOS6_DFG_QUEUE_DISCARD_MS to something larger than any plan could
-// plausibly wait to disable discarding while keeping reordering on, for an A/B of the two
-// halves of this feature against each other.
 unsigned queueDiscardThresholdMS()
 {
     static unsigned value = [] {
@@ -154,13 +128,6 @@ unsigned queueDiscardThresholdMS()
     return value;
 }
 
-// The starvation bound: once a plan has waited this long, it is dispatched next regardless of
-// how it scores against competing plans (see JITWorklistThread::selectAndRemoveBestDFGPlan()).
-// Defaults to 500ms, the same boundary the dispatch-age histogram already uses for its
-// "100-500" / "500-2000" bucket split, so with the switch on, no plan should land past that
-// bucket edge except by however long it takes the single DFG compiler thread to clear
-// whatever else already crossed the bound first (see the report in this file's dumpSnapshot()
-// for the honest statement of that residual).
 unsigned queueStarveThresholdMS()
 {
     static unsigned value = [] {
@@ -191,30 +158,18 @@ static unsigned& queueDiscardedCount()
     return s_count;
 }
 
-// Called from JITWorklistThread::selectAndRemoveBestDFGPlan() when it picks a plan other than
-// the one at the front of the queue, i.e. reordering actually changed the outcome versus plain
-// FIFO. Locked the same as the rest of this namespace's counters so dumpSnapshot() sees a
-// consistent snapshot; contention is a non-issue since numberOfDFGCompilerThreads is pinned to
-// 1 on this platform, so there is only ever one caller.
 void recordQueueReordered()
 {
     std::lock_guard<std::mutex> locker(lock());
     ++queueReorderedCount();
 }
 
-// Called when the plan picked was picked purely because it crossed the starvation bound (see
-// queueStarveThresholdMS() above), not because it scored highest.
 void recordQueueStarvationPromotion()
 {
     std::lock_guard<std::mutex> locker(lock());
     ++queueStarvationPromotionCount();
 }
 
-// Called once per plan dropped by selectAndRemoveBestDFGPlan()'s eviction pass. Every dropped
-// plan is a dispatch that recordDFGQueueAge() (and therefore dfgDispatches in the QUEUE line)
-// will never see, so dfgDispatches after a run with the switch on should be lower than a
-// matched run with it off by roughly this count - the two counts are the cross-check for each
-// other.
 void recordQueueDiscarded()
 {
     std::lock_guard<std::mutex> locker(lock());
@@ -242,9 +197,6 @@ static const char* describe(const CString& string)
 
 static constexpr unsigned maxTrackedEntries = 2000;
 
-// Called once per refused CodeBlock, from the CannotCompile branch of
-// compileAndLinkWithoutFinalizing(). Allocates a counter cell that is never freed and never
-// moved, so its address can be baked into JIT-compiled code as an AbsoluteAddress.
 uint32_t* recordCostRefusal(CodeBlock* codeBlock, unsigned bytecodeCost)
 {
     if (!enabled())
@@ -278,17 +230,6 @@ void recordOtherRefusal()
     ++otherReasonRefusalCount();
 }
 
-// How long a DFG::Plan sat in JITWorklist before a worker thread actually started compiling
-// it, i.e. how long the single numberOfDFGCompilerThreads=1 slot made it wait its turn. Fed
-// from JITPlan::compileInThread() in JITPlan.cpp; age is (dispatch time - JITPlan construction
-// time), which is a slight underestimate since a plan is not literally enqueued the instant it
-// is constructed, but the two happen back to back in the same call with nothing that blocks
-// between them.
-//
-// Reported as bucket counts, not a mean/max - per-run GC-log timings on this device have been
-// seen to vary by more than 2x between otherwise identical runs, so "mean dispatch age was
-// 40ms" is not trustworthy from a single run. "3 plans waited over a second" is a count, and a
-// count from one run is a fact.
 static SimpleStats& dfgQueueAgeStatsMS()
 {
     static SimpleStats stats;
@@ -301,7 +242,6 @@ static double& dfgQueueAgeMaxMS()
     return maxMS;
 }
 
-// Bucket boundaries in ms: [0,16) one frame, [16,100), [100,500), [500,2000), [2000,inf).
 static unsigned* dfgQueueAgeBuckets()
 {
     static unsigned buckets[5] = { 0, 0, 0, 0, 0 };
@@ -332,8 +272,6 @@ void recordDFGQueueAge(Seconds age)
     dfgQueueAgeBuckets()[dfgQueueAgeBucketFor(ms)]++;
 }
 
-// Appended after every GC (Heap.cpp) and once more at process exit, so a killed process still
-// leaves behind whatever was current as of the last collection.
 void dumpSnapshot()
 {
     if (!enabled())
@@ -355,8 +293,6 @@ void dumpSnapshot()
     unsigned ceiling = Options::maximumOptimizationCandidateBytecodeCost();
     unsigned buckets[5] = { 0, 0, 0, 0, 0 }; // (1-2x],(2-4x],(4-8x],(8-16x],(16x+] of the ceiling
     uint64_t totalCalls = 0;
-    // Three tiers of "was this refusal cold or hot", as plain counts: called at all, called
-    // enough to matter, called enough that it would very likely have paid for a DFG compile.
     unsigned calledAtLeastOnce = 0;
     unsigned calledAtLeast100 = 0;
     unsigned calledAtLeast1000 = 0;
@@ -390,14 +326,6 @@ void dumpSnapshot()
             dfgQueueAgeStatsMS().mean(), dfgQueueAgeMaxMS());
     }
 
-    // Only meaningful with WEBKIT_IOS6_DFG_QUEUE_HOTTEST_FIRST set - all three counters stay 0
-    // otherwise. queueReordered is how often the linear scan in
-    // JITWorklistThread::selectAndRemoveBestDFGPlan() picked something other than the front of
-    // the queue; queueStarvationPromotions is how many of those picks were forced purely by
-    // the starvation bound rather than by score; queueDiscarded is how many plans never got
-    // compiled at all - compare it against the drop in dfgDispatches above versus a matched
-    // run with the switch off (see recordQueueDiscarded()'s comment for why those two numbers
-    // should track each other).
     if (queueReorderedCount() || queueStarvationPromotionCount() || queueDiscardedCount()) {
         fprintf(log, "%.3f ORDER queueReordered=%u queueStarvationPromotions=%u queueDiscarded=%u"
             " starveThresholdMS=%u discardThresholdMS=%u\n",

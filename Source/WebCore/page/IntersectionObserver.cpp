@@ -775,11 +775,6 @@ auto IntersectionObserver::updateObservations(const Frame& hostFrame) -> NeedNot
 
     auto needNotify = NeedNotify::No;
 
-    // Iterate on a snapshot of m_observationTargets, in case something in the loop mutates it.
-    // Copying the WeakListHashSet allocated a list node per target and a hash table on top of
-    // them, every frame; a vector of the same weak pointers is one allocation, and none at all
-    // for the inline capacity. Null entries are skipped exactly as the set's iterator skipped
-    // them, so a target that dies during the loop is still passed over.
 #if defined(WEBKIT_IOS6)
     if (m_observationTargetsSnapshotIsStale) {
         m_observationTargetsSnapshot.shrink(0);

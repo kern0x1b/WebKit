@@ -787,10 +787,7 @@ ImageDrawResult RenderImage::paintIntoRect(PaintInfo& paintInfo, const FloatRect
     if (!img || img->isNull())
         return ImageDrawResult::DidNothing;
 
-    // FIXME: Document when image != img.get().
 #if defined(WEBKIT_IOS6)
-    // Only a generated image answers differently when asked without a size, and asking
-    // costs a second NullGraphicsContext per painted image.
     RefPtr image = img;
 #else
     RefPtr image = imageResource().image();

@@ -430,10 +430,6 @@ public:
         static_assert(sizeof(char16_t) == sizeof(uint16_t));
         static_assert(sizeof(Latin1Character) == sizeof(uint8_t));
 #if defined(WEBKIT_IOS6)
-        // The generic upconvert is a byte-at-a-time loop on everything but arm64. For the
-        // short copies that dominate here, a word load and two word stores move four
-        // characters per round; longer runs stay on the generic loop, which the compiler
-        // can turn into NEON widening moves.
         RELEASE_ASSERT(destination.size() >= source.size());
         size_t count = source.size();
         if (count >= 32)
@@ -842,10 +838,6 @@ inline std::strong_ordering codePointCompare(std::span<const CharacterType1> cha
     size_t position = 0;
 
 #if defined(WEBKIT_IOS6) && CPU(LITTLE_ENDIAN)
-    // armv7 has no 64-bit register but does allow unaligned word loads, so the same
-    // trick works with a 32-bit chunk: four Latin-1 units or two UTF-16 units per
-    // compare instead of one, and the first differing chunk is ordered by reversing
-    // the bytes (Latin-1) or rotating the halves (UTF-16) into big-endian order.
     if constexpr (sizeof(CharacterType1) == sizeof(CharacterType2) && (sizeof(CharacterType1) == 1 || sizeof(CharacterType1) == 2)) {
         constexpr size_t stride = sizeof(uint32_t) / sizeof(CharacterType1);
         for (; position + (stride - 1) < commonLength;) {
@@ -872,10 +864,6 @@ inline std::strong_ordering codePointCompare(std::span<const CharacterType1> cha
         using ChunkType = std::conditional_t<sizeof(CharacterType1) == 1, uint32_t, uint64_t>;
         constexpr size_t stride = sizeof(ChunkType) / sizeof(CharacterType1);
         for (; position + (stride - 1) < commonLength;) {
-            // Even though CPU does not need aligned access, we cannot
-            // simply dereference ChunkType* or the compiler may perform
-            // optimizations based on the assumption that all ChunkType
-            // objects are naturally aligned.
             auto lhs = unalignedLoad<ChunkType>(characters1Ptr);
             auto rhs = unalignedLoad<ChunkType>(characters2Ptr);
             if (lhs != rhs) {
@@ -1298,9 +1286,6 @@ inline StringImpl::StringImpl(CreateSymbolTag)
 template<typename T> inline size_t StringImpl::allocationSize(Checked<size_t> tailElementCount)
 {
 #if defined(WEBKIT_IOS6)
-    // isValidLength<T>() bounds the element count so that this product plus the header
-    // always fits in size_t, and every caller checks it first, so the overflow-checked
-    // multiply and add here can never fire.
     return tailOffset<T>() + tailElementCount.value() * sizeof(T);
 #else
     return tailOffset<T>() + tailElementCount * sizeof(T);
@@ -1542,9 +1527,6 @@ inline Expected<std::invoke_result_t<Func, std::span<const char8_t>>, UTF8Conver
         return makeUnexpected(UTF8ConversionError::OutOfMemory);
 
 #if CPU(ARM64) || (defined(WEBKIT_IOS6) && CPU(LITTLE_ENDIAN))
-    // An all-ASCII Latin-1 string is already valid UTF-8. Taking this branch skips a
-    // 2x-sized buffer (heap-allocated past 1024 bytes) and a full conversion pass, which is
-    // what every URL, header and attribute value paid for on the way out.
     if (auto* firstNonASCII = find8NonASCII(characters)) {
         size_t prefixLength = firstNonASCII - characters.data();
         size_t remainingLength = characters.size() - prefixLength;

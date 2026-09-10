@@ -79,10 +79,6 @@ struct Atomic {
     {
         T expectedOrActual = expected;
 #if defined(WEBKIT_IOS6)
-        // A weak CAS that fails tells the caller nothing except "retry", and every caller
-        // in this tree either loops with a relaxed load or falls into a slow path that
-        // re-reads with its own ordering. Asking for an acquire failure order makes clang
-        // emit a dmb ish on the failure edge, which on Cortex-A9 costs more than the CAS.
         if (order == std::memory_order_acquire || order == std::memory_order_acq_rel)
             return value.compare_exchange_weak(expectedOrActual, desired, order, std::memory_order_relaxed);
 #endif

@@ -41,64 +41,7 @@ namespace WTF {
 template<typename LockType, LockType isHeldBit, LockType hasParkedBit, typename Hooks>
 void LockAlgorithm<LockType, isHeldBit, hasParkedBit, Hooks>::lockSlow(Atomic<LockType>& lock)
 {
-    // These values were selected empirically.
-    // The balancing act here lies in speeding up the "semi-contended" case
-    // without too strongly disadvantaging the "heavily-contended" case
-    // (the uncontended case of course never hits the spinloop).
-    // There are a few variables to consider:
-    //
-    //   * Time-to-park: the total CPU time of a full spinloop
-    //     ~= spinLimit * (nopCount + 1/yieldInterval)
-    //     Increases with spinLimit, nopCount; decreases with yieldInterval.
-    //     Higher is better (to a point) for semi-contended,
-    //     but significantly worse for heavily-contended, as we pay
-    //     the full cost of the spinloop on ~every attempt to acquire.
-    //
-    //   * Niceness: (vaguely) how often we yield vs. run on core
-    //     ~= 1 / (yieldInterval * nopCount)
-    //     Higher is better for heavily-contended, as it means that high-
-    //     priority threads will 'make room' for other threads as they
-    //     spin, rather than taking up high-priority CPU time on a spinloop.
-    //     However, it's worse for the semi-contended case, as when we
-    //     do acquire the spinlock the priority depression can last
-    //     for some time, meaning it could take a few quanta to get
-    //     back to 'full speed'.
-    //
-    //   * Poll-rate: the rate at which we read the atomic lock bit
-    //     ~= 1 / (nopCount + 1/yieldInterval)
-    //     This affects performance in two different ways.
-    //     The first is that, if the lock does become available, we
-    //     may be in the middle of a nop-spin, and therefore have to
-    //     execute the remaining nops before we check again.
-    //     Therefore, in the semi-contended case we want a higher frequency.
-    //     However, the higher the frequency, the more often we hammer the
-    //     lock's cache line. In sparse contention regimes this is relatively
-    //     OK: e.g. if there's only a single waiter, then the cache-line
-    //     stays local. With multiple waiters, however, then the line
-    //     can ping between cores, hurting performance.
-    //     Therefore, in the heavily-contended case it's better for this
-    //     to be lower.
-    //
-    // In general, the gains for the semi-contended case are modest, but
-    // show up across the board. On the flipside, hits to the heavily-
-    // contended case tend to be localized to a few scenarios, but have
-    // a very large effect-size; heavy contention is very rare
-    // (by design, from how WebKit uses locks), but very sensitive
-    // because spinlocks are poorly-adapted for that regime. E.g.
-    // omitting sched-yield entirely can more than double the runtime
-    // of certain benchmarks!
-    //
-    // N.b.: there are of course more considerations than just the above three.
-    // Fairness suffers as time-to-park increases, while all three can have
-    // deleterious effects on the rest of the system (e.g. scheduler churn,
-    // wasting memory bandwidth, etc.) depending on the details. But since
-    // those factors are harder to frame neatly I'm leaving them to this
-    // appendix.
 #if defined(WEBKIT_IOS6)
-    // Two in-order cores at 800 MHz: a sched_yield syscall costs more than the critical
-    // sections this lock protects, and the generic path below yields on every one of its
-    // 40 spins. Poll with the cheap YIELD hint instead and park after a handful of
-    // rounds, since with only two cores the holder is usually descheduled, not running.
     static constexpr unsigned spinLimit = 16;
     static constexpr unsigned nopCount = 8;
     static constexpr unsigned yieldInterval = 8;
@@ -112,10 +55,6 @@ void LockAlgorithm<LockType, isHeldBit, hasParkedBit, Hooks>::lockSlow(Atomic<Lo
     static constexpr unsigned yieldInterval = 4;
 #else
     static constexpr unsigned spinLimit = 40;
-    // The tuning necessary to determine the optimal values
-    // for other platforms has not yet been done, so we
-    // retain the old sched-yield loop to avoid
-    // possible regressions.
     static constexpr unsigned nopCount = 0;
     static constexpr unsigned yieldInterval = 1;
 #endif
@@ -124,9 +63,6 @@ void LockAlgorithm<LockType, isHeldBit, hasParkedBit, Hooks>::lockSlow(Atomic<Lo
     
     for (;;) {
 #if defined(WEBKIT_IOS6)
-        // The seq_cst load costs a dmb ish on every trip round the spin loop. Nothing is
-        // decided by this read on its own: the compare-exchange below re-validates it and
-        // carries the acquire.
         LockType currentValue = lock.load(std::memory_order_relaxed);
 #else
         LockType currentValue = lock.load();
@@ -135,9 +71,6 @@ void LockAlgorithm<LockType, isHeldBit, hasParkedBit, Hooks>::lockSlow(Atomic<Lo
         // We allow ourselves to barge in.
         if (!(currentValue & isHeldBit)) {
 #if defined(WEBKIT_IOS6)
-            // This is the same acquisition lockFast()/lockFastAssumingZero() perform with
-            // std::memory_order_acquire, so seq_cst here is a leading dmb ish that no caller
-            // can be relying on: the uncontended path never provided a total order either.
             if (lock.compareExchangeWeak(currentValue, Hooks::lockHook(currentValue | isHeldBit), std::memory_order_acquire))
                 return;
 #else
@@ -223,7 +156,6 @@ void LockAlgorithm<LockType, isHeldBit, hasParkedBit, Hooks>::unlockSlow(Atomic<
         
         if ((oldByteValue & mask) == isHeldBit) {
 #if defined(WEBKIT_IOS6)
-            // Same release unlockFast()/unlockFastAssumingZero() perform; see lockSlow().
             if (lock.compareExchangeWeak(oldByteValue, Hooks::unlockHook(oldByteValue & ~isHeldBit), std::memory_order_release))
                 return;
 #else

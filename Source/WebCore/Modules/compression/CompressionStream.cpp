@@ -57,10 +57,6 @@ bool CompressionStream::initializeIfNecessary(Algorithm algorithm, Operation ope
         break;
     }
 #else
-    // libcompression arrived in iOS 9, so there is nothing to initialise here.
-    // Reporting success anyway left callers using an uninitialised stream, and
-    // the destructor then tearing it down. Fail closed instead, which is what
-    // every caller of this already handles.
     UNUSED_PARAM(algorithm);
     UNUSED_PARAM(operation);
     return false;

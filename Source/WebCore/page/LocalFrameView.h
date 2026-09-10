@@ -151,9 +151,6 @@ public:
     bool useCustomFixedPositionLayoutRect() const;
     IntRect customFixedPositionLayoutRect() const { return m_customFixedPositionLayoutRect; }
 #if defined(WEBKIT_IOS6)
-    // The rectangle the last layout actually ran against, which is what a
-    // viewport constraint means by "at last layout" - see the comment where it
-    // is recorded in LocalFrameViewLayoutContext.
     LayoutRect fixedPositionRectAtLastLayout() const { return m_fixedPositionRectAtLastLayout; }
     void setFixedPositionRectAtLastLayout(const LayoutRect& rect) { m_fixedPositionRectAtLastLayout = rect; }
 #endif

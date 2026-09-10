@@ -122,8 +122,6 @@ static EGLDisplay initializeEGLDisplay(const GraphicsContextGLAttributes& attrs)
     Vector<EGLAttrib> displayAttributes;
     displayAttributes.append(EGL_PLATFORM_ANGLE_TYPE_ANGLE);
 #if defined(WEBKIT_IOS6)
-    // Metal needs an A7; this GPU is two generations older and its only API is
-    // GLES, which ANGLE reaches here through the EAGL backend.
     displayAttributes.append(EGL_PLATFORM_ANGLE_TYPE_OPENGLES_ANGLE);
 #else
     displayAttributes.append(EGL_PLATFORM_ANGLE_TYPE_METAL_ANGLE);
@@ -132,9 +130,6 @@ static EGLDisplay initializeEGLDisplay(const GraphicsContextGLAttributes& attrs)
     // but Metal backend uses EGLDisplay attributes.
     auto powerPreference = attrs.powerPreference;
 #if defined(WEBKIT_IOS6)
-    // There is one GPU here and no extension to choose between them, and a
-    // display attribute the backend does not advertise is rejected outright -
-    // EGL_BAD_ATTRIBUTE, no display, no WebGL.
     powerPreference = GraphicsContextGLPowerPreference::Default;
 #endif
     if (powerPreference == GraphicsContextGLPowerPreference::HighPerformance) {
@@ -872,10 +867,6 @@ RefPtr<NativeImage> GraphicsContextGLCocoa::copyNativeImageYFlipped(SurfaceBuffe
 void GraphicsContextGLCocoa::insertFinishedSignalOrInvoke(Function<void()> signal)
 {
 #if defined(WEBKIT_IOS6)
-    // The signal a Metal shared event carries says "the GPU has finished with
-    // this frame". Without Metal there is no event to listen to and no fence in
-    // GLES 2.0 either, so the work is waited for and the caller told directly -
-    // slower than a callback, and the same guarantee.
     if (makeContextCurrent())
         GL_Finish();
     signal();
@@ -884,7 +875,6 @@ void GraphicsContextGLCocoa::insertFinishedSignalOrInvoke(Function<void()> signa
     static std::atomic<uint64_t> nextSignalValue;
     uint64_t signalValue = ++nextSignalValue;
     RetainPtr<id<MTLSharedEvent>> event = m_finishedMetalSharedEvent.get();
-    // The block below has to be a real compiler generated block instead of BlockPtr due to a Metal bug. rdar://108035473
     __block Function<void()> blockSignal = WTF::move(signal);
     [event notifyListener:m_finishedMetalSharedEventListener.get() atValue:signalValue block:^(id<MTLSharedEvent>, uint64_t) {
         blockSignal();

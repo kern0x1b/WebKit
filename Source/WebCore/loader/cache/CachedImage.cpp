@@ -566,10 +566,6 @@ bool CachedImage::shouldDeferUpdateImageData() const
     unsigned interval = m_updateImageDataCount;
 
 #if defined(WEBKIT_IOS6)
-    // Once the size is known, layout has everything it needs and the only thing a
-    // further update buys is a repaint of a half-arrived image. That repaint copies
-    // the whole body into the decoder and then decodes the partial frame on the web
-    // thread, and the result is replaced moments later by the complete one.
     if (m_intrinsicSizeIsAvailable) {
         static const double progressiveInterval = [] -> double {
             if (const char* override = getenv("WEBKIT_IOS6_PROGRESSIVE_IMAGE_INTERVAL"))

@@ -385,7 +385,6 @@ ALWAYS_INLINE JSTokenType Lexer<T>::lexExpectIdentifier(JSToken* tokenRecord, Op
         ++ptr;
     }
 
-    // Here's the shift
     if (ptr < end) {
         if ((!WTF::isASCII(*ptr)) || (*ptr == '\\'))
             goto slowCase;
@@ -402,7 +401,6 @@ ALWAYS_INLINE JSTokenType Lexer<T>::lexExpectIdentifier(JSToken* tokenRecord, Op
         ++ptr;
     }
 
-    // Here's the shift
     if (ptr < end) {
         if ((!WTF::isASCII(*ptr)) || (*ptr == '\\') || (*ptr == '_') || (*ptr == '$'))
             goto slowCase;

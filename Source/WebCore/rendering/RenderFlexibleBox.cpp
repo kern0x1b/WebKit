@@ -676,10 +676,6 @@ void RenderFlexibleBox::layoutFlexItemWithMainSize(FlexLayoutItem& flexLayoutIte
         forceFlexItemRelayout = true;
 #else
     if (!forceFlexItemRelayout && flexItemHasPercentHeightDescendants(flexItem)) {
-        // Have to force another relayout even though the child is sized
-        // correctly, because its descendants are not sized correctly yet. Our
-        // previous layout of the child was done without an override height set.
-        // So, redo it here.
         forceFlexItemRelayout = true;
     }
 #endif

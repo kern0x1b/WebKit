@@ -327,13 +327,6 @@ static void SendDelegateMessage(RetainPtr<NSInvocation>&& invocation)
 #endif
 
 #if defined(WEBKIT_IOS6)
-    // What the round trip costs.
-    //
-    // The web thread wakes the main thread and then blocks until it answers, so
-    // every synchronous delegate message is a full main-thread latency. A load
-    // pulls eighty five resources and each one reports progress several times,
-    // and the profile shows the web thread parked for a quarter of the load - this
-    // counts whether this is where it goes.
     static int recordDelegates = -1;
     if (recordDelegates < 0)
         recordDelegates = access("/tmp/native-delegate-cost", F_OK) == 0 ? 1 : 0;
@@ -378,17 +371,11 @@ static void SendDelegateMessage(RetainPtr<NSInvocation>&& invocation)
         if (blocked > slowest)
             slowest = blocked;
         CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();
-        // Which selectors, and what each costs in total - a message sent three
-        // hundred times for a tenth of a millisecond is a different problem from
-        // one sent twice for half a second.
         if (blocked > 0.02) {
             const char *name = "(unknown)";
             const char *detail = "";
             @try {
                 name = sel_getName([sentInvocation selector]);
-                // For a notification the selector says nothing; the name of the
-                // notification is the first argument, and that is what identifies
-                // whose observers are taking the time.
                 if ([[sentInvocation target] isKindOfClass:[NSNotificationCenter class]]) {
                     id argument = nil;
                     [sentInvocation getArgument:&argument atIndex:2];
@@ -652,14 +639,6 @@ NSInvocation* WebThreadMakeNSInvocation(id target, SEL selector)
 }
 
 #if defined(WEBKIT_IOS6)
-// The auto-unlock observer is installed once and left in place.
-//
-// CFRunLoopAddObserver/RemoveObserver for kCFRunLoopCommonModes walks every
-// common mode and edits each one's observer set, and the pair was paid on every
-// single acquisition of the web lock from the main thread - measured at 537
-// attempts from the tile layout pass alone in one scroll. The observer costs
-// nothing to leave installed: it is a C callback that reads one BOOL and returns
-// when there is nothing to unlock, so the flag alone decides.
 static void EnsureMainRunLoopAutoUnlockObserver()
 {
     static bool installed;
@@ -689,33 +668,6 @@ static void MainRunLoopAutoUnlock(CFRunLoopObserverRef, CFRunLoopActivity, void*
 }
 
 #if defined(WEBKIT_IOS6)
-// Taking the web lock only if it is free, from the main thread.
-//
-// The interface freezes measured on this device are not a slow median - 97% of
-// acquisitions are inside a frame - they are a tail: single waits of one, two,
-// sixteen, nineteen seconds while the web thread runs a long layout or a long
-// script inside one run-loop iteration. The lock is held for that whole
-// iteration by design (WebRunLoopLock at order 0, WebRunLoopUnlock at 2500000),
-// so a main thread that asks for it can be stopped for as long as the page's own
-// JavaScript feels like running.
-//
-// Nothing the main thread does under this lock is worth an unbounded wait: it is
-// preparing tiles, and tiles that already exist keep their content and are moved
-// by UIKit without the engine. So it asks, and if the answer is no it draws what
-// it has and comes back next frame. The engine invalidates the tiles when it is
-// done, which brings the caller straight back here, so nothing is lost - only
-// the waiting.
-// Letting the main thread through, at a point where the engine is between jobs.
-//
-// The web lock is held for a whole turn of the web thread's run loop, so a turn
-// that contains several pieces of work makes the interface wait for their sum.
-// The main thread raises webThreadShouldYield before it blocks; this hands the
-// lock over at a boundary where nothing is half-built, and takes it back
-// afterwards. The main thread's own auto-unlock observer releases it at the end
-// of its turn, so the wait it was in ends immediately.
-//
-// Only safe between whole jobs. Never inside layout - the render tree is
-// inconsistent there and a main-thread reader would see it.
 bool WebThreadYieldIfAsked(void)
 {
     if (!WebThreadIsCurrent() || !webThreadShouldYield || !isWebThreadLocked)
@@ -800,20 +752,6 @@ static void WebRunLoopUnlockInternal(AutoreleasePoolOperation poolOperation)
     NSMutableArray *asyncDelegates = sAsyncDelegates().get();
     if ([asyncDelegates count]) {
 #if defined(WEBKIT_IOS6)
-        // Sent without waiting, which is what "async" was supposed to mean.
-        //
-        // These invocations were queued by callers that explicitly did not want
-        // to block - WKViewNotificationViewFrameSizeChanged says so in its own
-        // comment - and then the queue was drained with SendDelegateMessage,
-        // which wakes the main thread and blocks until it answers. So the block
-        // was only deferred, not removed. Measured over one load: 419 messages,
-        // 1939 ms of web thread blocked, and 1450 ms of that in two postings of
-        // WAKViewFrameSizeDidChangeNotification alone.
-        //
-        // Dispatching instead keeps the web lock on the web thread and lets it
-        // carry on. The ordering that is given up is between these no-reply
-        // messages and later synchronous ones, which is exactly what queueing
-        // them asynchronously already conceded.
         static int blockOnAsyncDelegates = -1;
         if (blockOnAsyncDelegates < 0)
             blockOnAsyncDelegates = access("/tmp/native-block-async-delegates", F_OK) == 0 ? 1 : 0;
@@ -957,19 +895,6 @@ static WebThreadContext* CurrentThreadContext()
 }
 
 #if defined(WEBKIT_IOS6)
-// Spike: give the web thread a real-time scheduling class so the timeshare
-// scheduler can't starve it mid-hold of the web lock while the UIKit main
-// thread is waiting on it (see WebRunLoopLock/_WebThreadLock below) - the
-// same thread_policy_set(THREAD_TIME_CONSTRAINT_POLICY) trick CoreAudio uses
-// for its render thread. Unlike QOS classes this needs no entitlement on any
-// iOS version. The web thread isn't a periodic callback like an audio
-// render thread, so period/constraint are a rough fit at one display
-// refresh; exceeding the computation budget demotes the thread back to
-// timeshare rather than crashing or hanging anything, so this is safe to
-// try. Opt-in via a /tmp marker file, not an env var: launchctl setenv only
-// reaches processes launchd itself spawns, not ones SpringBoard posix_spawns
-// on launch, so it silently never reached this thread - a file check works
-// regardless of how the app got launched.
 static void SetWebThreadRealTimePolicyIfRequested()
 {
     if (access("/tmp/webthread-realtime-enable", F_OK) != 0)
@@ -1124,10 +1049,6 @@ static void _WebThreadLock()
     }
 
 #if defined(WEBKIT_IOS6)
-    // Every interface freeze on this port is the main thread waiting here, and
-    // the waiter's own stack never names the work that is holding the lock.
-    // Recording who asked, and for how long, is the only way to see what the
-    // finger is actually blocked behind.
     static int recordWaits = -1;
     if (recordWaits < 0)
         recordWaits = access("/tmp/native-weblock-on", F_OK) == 0 ? 1 : 0;
@@ -1147,12 +1068,6 @@ static void _WebThreadLock()
     if (askedAt) {
         double waited = CFAbsoluteTimeGetCurrent() - askedAt;
 
-        // How long the interface waits for the engine, as a distribution.
-        //
-        // This is the number a person feels as jitter: a frame is 16 ms, so every
-        // wait longer than that is a frame the page did not move. A backtrace per
-        // wait is far too expensive to leave on, so the shape is kept as six
-        // counters and printed twice a second.
         {
             static unsigned buckets[6];
             static double waitedTotal;
@@ -1313,13 +1228,6 @@ void _WebThreadUnlock()
 }
 
 #if defined(WEBKIT_IOS6)
-// Whether taking the web lock from the main thread would block right now.
-//
-// UIKit calls WebThreadLock from -[UIWebTiledView layoutSubviews], which runs
-// inside every CoreAnimation layout pass - so on every frame of a scroll. Every
-// main-thread freeze over 400 ms captured on the device had exactly that stack
-// and was parked there. This lets the caller ask first and do nothing this
-// frame instead of stopping the interface until the engine is finished.
 bool WebThreadIsBusy(void)
 {
     return isWebThreadLocked && !mainThreadLockCount;

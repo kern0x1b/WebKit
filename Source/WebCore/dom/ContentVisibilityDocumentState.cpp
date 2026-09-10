@@ -111,25 +111,6 @@ IntersectionObserver* ContentVisibilityDocumentState::intersectionObserver(Docum
     if (!m_observer) {
         auto callback = ContentVisibilityIntersectionObserverCallback::create(document);
 #if defined(WEBKIT_IOS6)
-        // A margin, so that "near the viewport" means near, not touching.
-        //
-        // Upstream creates this observer with no root margin at all, so anything
-        // not literally intersecting the screen counts as far away and is
-        // skipped. That is fine when content-visibility is something an author
-        // asked for on a specific element; it is wrong when the engine applies it
-        // by itself, because an infinite feed keeps its "load more" sentinel and
-        // its prefetch observers in the content just below the fold - and a
-        // skipped subtree is not observed. Measured on the device: with no margin
-        // the document stopped growing at 1800-3000 px where it otherwise reaches
-        // 4300-6500.
-        //
-        // The margin has to cover a flick, not a nudge. At two screens a fast
-        // scroll outran it: sampled during a flick, one frame in twelve had
-        // fourteen of the thirty boxes on screen still skipped, which is the white
-        // space a reader sees. A flick moves about four hundred and thirty pixels
-        // and several arrive before the observer has caught up, so the margin is
-        // five screens - still far short of a feed that runs to ten thousand
-        // pixels, which is where the layout saving comes from.
         IntersectionObserver::Init options { document, "500%"_s, { }, { } };
 #else
         IntersectionObserver::Init options { document, { }, { }, { } };

@@ -37,31 +37,6 @@ namespace WTF {
 size_t memoryFootprint()
 {
 #if defined(WEBKIT_IOS6)
-    // This kernel answers TASK_VM_INFO at revision 0, which stops short of
-    // phys_footprint — task_info writes nothing there and leaves whatever the
-    // caller's stack held, so the modern query returns noise. Resident size is
-    // also the number jetsam judges a process by on this release.
-    //
-    // But resident size counts every resident page the task maps, including the
-    // shared cache and our own framework text - measured at 138.7 MB, flat, of a
-    // ~220 MB total. So the collector's own bands, which are about how hard to
-    // collect, were being crossed by system libraries being paged in rather than
-    // by anything the collector can influence: collecting harder does not unmap
-    // libobjc. Revision 0 does carry `internal`, the task's own anonymous
-    // memory, which is what phys_footprint approximates upstream.
-    //
-    // WEBKIT_IOS6_FOOTPRINT=resident restores the old number.
-    // Measured, not assumed: this returned resident_size to the megabyte on every
-    // call - 228/228, 224/224, 229/229, 233/233 - so either TASK_VM_INFO is refused
-    // at this revision and the fallback below runs, or internal+compressed is the
-    // same quantity here. Either way the change did nothing, and the bands that were
-    // recalibrated onto it were therefore recalibrated onto resident size while
-    // being reasoned about as though they were not. Two deaths and seven code wipes
-    // in one soak followed.
-    //
-    // Left in place, disabled, with the diagnostic that would settle which of the two
-    // it is: WEBKIT_IOS6_FOOTPRINT=own turns it on and logs the return code and both
-    // numbers once. Do not enable it again without reading that line first.
     static const int useInternal = [] -> int {
         const char* mode = getenv("WEBKIT_IOS6_FOOTPRINT");
         return mode && !strcmp(mode, "own");

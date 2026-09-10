@@ -674,9 +674,6 @@ RuleSet::CollectedMediaQueryChanges RuleSet::evaluateDynamicMediaQueryRules(cons
 }
 
 #if defined(WEBKIT_IOS6)
-// Shrinking reallocates and copies the whole vector. With thousands of buckets that is thousands of
-// allocator round trips for, in most buckets, a few dozen bytes. Only pay it when there is something
-// to reclaim.
 template<typename VectorType> static inline void shrinkVectorIfWorthwhile(VectorType& vector)
 {
     if (vector.capacity() - vector.size() >= 4)

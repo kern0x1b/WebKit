@@ -2186,12 +2186,6 @@ static constexpr auto frozenVersion = "18_7"_s;
 #endif
 
 #if defined(WEBKIT_IOS6)
-// The browser this engine is loaded into names itself after the engine it shipped
-// with, and sites branch on its Version/ and Safari/ tokens to decide which code
-// paths a Safari gets. Those tokens belong to the engine, not to the application
-// around it, so an application that calls itself Safari gets the pair that goes
-// with the frozen OS version above - the same two constants WebKit itself writes
-// for a browser that reports through -_setBrowserUserAgentProductVersion:.
 static constexpr auto frozenMobileBuild = "15E148"_s;
 static constexpr auto frozenSafariVersion = "604.1"_s;
 

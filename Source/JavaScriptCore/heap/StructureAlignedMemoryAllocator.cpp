@@ -315,13 +315,6 @@ void StructureAlignedMemoryAllocator::initializeStructureAddressSpace()
 
 #if defined(WEBKIT_IOS6)
 
-// On !CPU(ADDRESS64), initializeStructureAddressSpace() above never reserves a Structure
-// address range at all (startOfStructureHeap/structureIDBase are 0, sizeOfStructureHeap is
-// UINTPTR_MAX): StructureID does not encode a Structure block's address here the way it
-// does on CPU(ADDRESS64), so there is no constant-top-32-bits invariant for a shared pool
-// to violate. That makes it safe for Structure's 16 KB blocks to come from the same
-// Ios6BlockReservationPool as FastMalloc's and Gigacage's, instead of each Structure block
-// getting its own tryFastCompactAlignedMalloc() call and its own VM region.
 
 void* StructureAlignedMemoryAllocator::tryAllocateAlignedMemory(size_t alignment, size_t size)
 {

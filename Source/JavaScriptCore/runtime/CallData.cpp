@@ -92,8 +92,6 @@ JSValue call(JSGlobalObject* globalObject, JSValue functionObject, const CallDat
 #include "JSFunction.h"
 #include "FunctionExecutable.h"
 
-// Set while the engine is inside a call from C++ into script, so a sampler can
-// record only the passes that matter instead of the whole session.
 extern "C" { __attribute__((visibility("default"))) volatile int g_webkitIOS6InsideScript = 0; }
 #endif
 

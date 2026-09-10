@@ -129,12 +129,6 @@ RefPtr<NativeImage> ImageBufferCGBitmapBackend::createNativeImageReference()
 }
 
 #if defined(WEBKIT_IOS6)
-// This CoreGraphics matches colour by primaries and ignores the transfer
-// function, so asking it for linear light does nothing except tint what it
-// touches. WebKit carried the answer to that until 2020: ImageBuffer built a
-// 256 entry table from its own sRGB transfer function and handed it to the
-// port's platformTransformColorSpace. CG never needed one, because its colour
-// management did the work; this one has none, so the table comes back.
 static const std::array<uint8_t, 256>& transferTable(bool toLinear)
 {
     using Transfer = SRGBTransferFunction<float, TransferFunctionMode::Clamped>;
@@ -161,8 +155,6 @@ void ImageBufferCGBitmapBackend::transformToColorSpace(const DestinationColorSpa
     if (newColorSpace == colorSpace())
         return;
 
-    // Only sRGB and linearRGB are a pair this can be done for, which is what
-    // the transform upstream carried was limited to as well.
     bool toLinear = !colorSpace().isLinearSRGB() && newColorSpace.isLinearSRGB();
     bool toGammaEncoded = colorSpace().isLinearSRGB() && !newColorSpace.isLinearSRGB();
     if (!toLinear && !toGammaEncoded)
@@ -180,8 +172,6 @@ void ImageBufferCGBitmapBackend::transformToColorSpace(const DestinationColorSpa
                 continue;
 
             for (size_t channel = 0; channel < 3; ++channel) {
-                // The transfer function is not linear, so it acts on the colour
-                // itself rather than on the colour multiplied by its alpha.
                 unsigned value = alpha == 255 ? pixel[channel] : std::min<unsigned>(255, (pixel[channel] * 255 + alpha / 2) / alpha);
                 value = table[value];
                 pixel[channel] = static_cast<uint8_t>(alpha == 255 ? value : (value * alpha + 127) / 255);

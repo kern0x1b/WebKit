@@ -5482,12 +5482,6 @@ bool LocalFrameView::shouldSuspendScrollAnimations() const
 void LocalFrameView::notifyAllFramesThatContentAreaWillPaint() const
 {
 #if defined(WEBKIT_IOS6)
-    // The only thing on the far end of contentAreaWillPaint() is the hook that
-    // flashes Mac's overlay scrollbars; every other ScrollbarsController leaves
-    // it as an empty virtual. Getting there once per rendering update walked
-    // every rendered subframe and every scrollable area of every one of them,
-    // and scrollbarsController() builds a controller for each area it is asked
-    // about. UIKit owns scrolling and scroll indicators on this port.
 #else
     notifyScrollableAreasThatContentAreaWillPaint();
 
@@ -5504,7 +5498,6 @@ void LocalFrameView::notifyAllFramesThatContentAreaWillPaint() const
 void LocalFrameView::notifyScrollableAreasThatContentAreaWillPaint() const
 {
 #if defined(WEBKIT_IOS6)
-    // See notifyAllFramesThatContentAreaWillPaint().
 #else
     RefPtr page = m_frame->page();
     if (!page)
@@ -5517,7 +5510,6 @@ void LocalFrameView::notifyScrollableAreasThatContentAreaWillPaint() const
 
     for (CheckedRef area : *m_scrollableAreas) {
         CheckedPtr<ScrollableArea> scrollableArea(area);
-        // ScrollView ScrollableAreas will be handled via the Frame tree traversal above.
         if (!is<ScrollView>(scrollableArea))
             scrollableArea->contentAreaWillPaint();
     }
@@ -6741,14 +6733,6 @@ bool LocalFrameView::updateFixedPositionLayoutRect()
         return false;
 
 #if defined(WEBKIT_IOS6)
-    // UIKit owns the scroll view on this port and hands the engine a new rect for
-    // every frame of a drag. Where a fixed element ends up on screen changes with
-    // the scroll, but nothing about its layout does - the layer holding it is
-    // repositioned directly. Treating a scroll as a layout change means marking
-    // every viewport-constrained object dirty and, worse, turning whatever
-    // subtree layout was pending into a layout of the whole document, once per
-    // frame. Measured on the device: a full layout of a real feed takes over a
-    // second, which is the entire freeze.
     bool onlyScrolled = newRect.size() == m_customFixedPositionLayoutRect.size();
     m_customFixedPositionLayoutRect = newRect;
     if (onlyScrolled)

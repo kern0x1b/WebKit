@@ -367,10 +367,6 @@ bool BitmapImageSource::isLargeForDecoding() const
 {
     auto sizeInBytes = size(ImageOrientation::Orientation::None).unclampedArea() * sizeof(uint32_t);
 #if defined(WEBKIT_IOS6)
-    // This is the only thing that lets an image be decoded off the web thread, and at
-    // 500 KB it excludes everything up to about 350 square. A feed is full of images
-    // that size, and each one is a decode inside a tile paint. Only a true icon is
-    // cheap enough that hopping threads for it is not worth it.
     static const size_t asynchronousDecodingThreshold = [] -> size_t {
         if (const char* override = getenv("WEBKIT_IOS6_ASYNC_DECODE_MIN_KB")) {
             int value = atoi(override);
@@ -573,9 +569,6 @@ const ImageFrame& BitmapImageSource::frameAtIndexCacheIfNeeded(unsigned index, c
     auto subsamplingLevelValue = subsamplingLevel.value_or(frame.subsamplingLevel());
 
 #if defined(WEBKIT_IOS6)
-    // ImageDecoderCG records frame metadata for the encoded image, not for the
-    // reduction it was decoded at, so a complete frame answers whatever level is
-    // asked about. Refetching would destroy the frame the following draw wants.
     if (frame.isComplete())
         return frame;
 #else

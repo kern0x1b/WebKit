@@ -62,9 +62,6 @@ WTF_ALLOW_UNSAFE_BUFFER_USAGE_BEGIN
 
 #if defined(WEBKIT_IOS6)
 
-// Most vector copies in this engine are a handful of bytes. A call into memcpy costs more
-// in prologue and dispatch than the copy itself at those sizes, and unaligned word loads
-// and stores are legal on this core, so copy the short cases inline and word-wise.
 ALWAYS_INLINE void vectorCopyBytes(void* destination, const void* source, size_t bytes)
 {
     if (bytes >= 32) {
@@ -1441,9 +1438,6 @@ bool Vector<T, inlineCapacity, OverflowHandler, minCapacity, Malloc>::reserveCap
         return true;
 
 #if defined(WEBKIT_IOS6)
-    // Growing a memcpy-movable buffer through realloc lets the system allocator extend
-    // the block in place, or move the pages instead of copying them, and it saves the
-    // separate malloc / copy / free round trip that the generic path always pays.
     if constexpr (action == FailureAction::Crash) {
         if (Base::shouldReallocateBuffer(newCapacity) && isValidCapacityForVector<T>(newCapacity)) {
             asanSetBufferSizeToFullCapacity();

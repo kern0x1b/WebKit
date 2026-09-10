@@ -39,41 +39,9 @@
 
 namespace JSC {
 
-// Shared block source for FastMallocAlignedMemoryAllocator, GigacageAlignedMemoryAllocator
-// and StructureAlignedMemoryAllocator on this port, for their MarkedBlock::blockSize
-// (16 KB) aligned allocations only. PreciseAllocation traffic -- tryAllocateMemory(),
-// freeMemory(), tryReallocateMemory(), all arbitrary-size -- is untouched and still goes
-// straight to each allocator's own backing malloc (FastMalloc, Gigacage, or, for
-// Structure, RELEASE_ASSERT_NOT_REACHED(), since Structures never take that path).
-//
-// Why the three can share one pool: each independently called its own aligned malloc
-// once per 16 KB block -- tryFastCompactAlignedMalloc() for FastMalloc,
-// Gigacage::tryAlignedMalloc() for Gigacage, a per-block OSAllocator commit for
-// Structure -- and each such call is free to land its backing pages in a distinct VM
-// region. Under fragmentation that is one region-table entry per live block, times
-// three allocators that never share space with one another even when a block from one
-// is freed right next to where another wants to allocate. This pool instead reserves
-// address space in 2 MB granules (128 blocks) up front -- uncommitted, so an unused
-// granule costs no resident memory -- and commits/decommits individual 16 KB pages
-// within a granule as blocks are handed out and returned. One granule backs up to 128
-// blocks from any of the three allocators, so it is one VM region no matter how the
-// live blocks are split between them.
-//
-// Why Structure blocks are safe to mix into the same reservation as FastMalloc/Gigacage
-// blocks *on this port specifically*: StructureID encoding only needs all Structure
-// blocks to share one aligned address range, with a constant top 32 bits, on
-// CPU(ADDRESS64) -- see StructureAlignedMemoryAllocator::computePreferredStructureHeapReservationSize()
-// and the CPU(ADDRESS64) branch of initializeStructureAddressSpace(). This is a 32-bit
-// (!CPU(ADDRESS64)) port: its initializeStructureAddressSpace() sets startOfStructureHeap
-// and structureIDBase to 0 and sizeOfStructureHeap to UINTPTR_MAX, i.e. there was never a
-// reserved Structure address range to begin with here, and StructureID does not encode
-// a Structure block's address at all on this configuration. There is nothing for sharing
-// the pool to violate.
 class Ios6BlockReservationPool {
     WTF_MAKE_NONCOPYABLE(Ios6BlockReservationPool);
 public:
-    // Public so NeverDestroyed<Ios6BlockReservationPool> can construct it in singleton()
-    // below; this is the only construction path anyone is meant to use.
     Ios6BlockReservationPool() = default;
 
     static Ios6BlockReservationPool& singleton()

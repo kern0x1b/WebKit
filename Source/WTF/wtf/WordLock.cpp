@@ -74,11 +74,6 @@ static unsigned wordLockPolicy(const char* name, unsigned defaultValue, unsigned
     return std::max<unsigned>(minimum, static_cast<unsigned>(parsed));
 }
 
-// Two in-order cores at 800 MHz: this lock guards a ParkingLot bucket whose critical sections
-// are a few linked-list stores, and the generic policy calls Thread::yield() on each of its 40
-// spins -- on Darwin that is a thread_switch trap with SWITCH_OPTION_DEPRESS, so it both traps
-// and depresses this thread's priority. Poll with the cheap YIELD hint and park early, as
-// LockAlgorithm already does for WTF::Lock here.
 static const unsigned wordLockSpinLimit = wordLockPolicy("WEBKIT_WORDLOCK_SPIN_LIMIT", 16, 0);
 static const unsigned wordLockNopCount = wordLockPolicy("WEBKIT_WORDLOCK_NOP_COUNT", 8, 0);
 static const unsigned wordLockYieldInterval = wordLockPolicy("WEBKIT_WORDLOCK_YIELD_INTERVAL", 8, 1);
@@ -92,14 +87,11 @@ NEVER_INLINE void WordLock::lockSlow()
     const unsigned spinLimit = wordLockSpinLimit;
     unsigned spinsSinceYield = 0;
 #else
-    // This magic number turns out to be optimal based on past JikesRVM experiments.
     const unsigned spinLimit = 40;
 #endif
 
     for (;;) {
 #if defined(WEBKIT_IOS6)
-        // The seq_cst load costs a dmb ish per spin. No pointer is derived from this read;
-        // the compare-exchange below re-validates it and carries the acquire.
         uintptr_t currentWordValue = m_word.load(std::memory_order_relaxed);
 #else
         uintptr_t currentWordValue = m_word.load();

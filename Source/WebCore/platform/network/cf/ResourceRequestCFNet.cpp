@@ -89,11 +89,6 @@ void ResourceRequest::setHTTPPipeliningEnabled(bool flag)
 unsigned initializeMaximumHTTPConnectionCountPerHost()
 {
 #if defined(WEBKIT_IOS6)
-    // Tunable without a rebuild: the right number is a property of the network
-    // and the page, and finding it by rebuilding is how a day disappears. Six
-    // was measured far better than unlimited, but a feed opens thirty images
-    // across two hosts and the spread within one host is 86 ms to 11958 - which
-    // is queueing, not the host being slow.
     static const unsigned preferredConnectionCount = [] -> unsigned {
         if (const char* override = getenv("WEBKIT_IOS6_MAX_CONNECTIONS")) {
             int value = atoi(override);
@@ -120,12 +115,6 @@ unsigned initializeMaximumHTTPConnectionCountPerHost()
         return maximumHTTPConnectionCountPerHost;
 
 #if defined(WEBKIT_IOS6)
-    // The priority SPI below is for a CFNetwork this OS does not have; setting
-    // the limits does nothing, and returning "unlimited" then hands every queued
-    // request to the network at once. Measured on the device: twenty images in
-    // flight together crawling at a shared trickle, 25 seconds each, while a
-    // single stream through the same pipe moves at 392 KB/s. Let the engine's
-    // own per-host scheduler do its job instead.
     return maximumHTTPConnectionCountPerHost;
 #endif
 

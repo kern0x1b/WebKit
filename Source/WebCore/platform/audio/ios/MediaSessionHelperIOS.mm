@@ -492,11 +492,6 @@ void MediaSessionHelperIOS::externalOutputDeviceAvailableDidChange()
         if (RefPtr callback = _callback.get()) {
             BEGIN_BLOCK_OBJC_EXCEPTIONS
 #if defined(WEBKIT_IOS6)
-            // AVRouteDetector is iOS 11. There is no route detection to enable
-            // and no notification to observe, so the only honest answer to
-            // "which wireless routes are available" is the one the callback
-            // already gets when there are none. PAL's soft-link would assert
-            // rather than return nil, which is what killed the process here.
             callback->externalOutputDeviceAvailableDidChange();
             _startMonitoringAirPlayRoutesPending = false;
             return;

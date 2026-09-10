@@ -83,10 +83,6 @@ std::unique_ptr<FilterEffectApplier> FEBlend::createSoftwareApplier() const
 {
 #if HAVE(ARM_NEON_INTRINSICS)
 #if defined(WEBKIT_IOS6)
-    // The NEON applier predates the CSS blend modes: it implements five of them
-    // and writes transparent black for the rest, which erases the layer instead
-    // of blending it. Send those to the generic applier, which implements all
-    // eighteen, and keep NEON for the five it does.
     switch (blendMode()) {
     case BlendMode::Normal:
     case BlendMode::Multiply:

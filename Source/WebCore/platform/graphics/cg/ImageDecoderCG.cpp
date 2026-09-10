@@ -322,9 +322,6 @@ ImageDecoderCG::ImageDecoderCG(FragmentedSharedBuffer& data, AlphaOption, GammaA
 {
     RetainPtr<CFStringRef> utiHint;
 #if defined(WEBKIT_IOS6)
-    // The type is named by the first few bytes, but makeContiguous() here copies the
-    // whole body, and this constructor runs again every time the decoder is dropped
-    // under memory pressure and rebuilt from a complete image.
     if (data.size() >= 32) {
         std::array<uint8_t, 512> header;
         auto headerSpan = std::span<uint8_t> { header }.first(std::min<size_t>(header.size(), data.size()));
@@ -455,24 +452,11 @@ EncodedDataStatus ImageDecoderCG::encodedDataStatus() const
 
 bool ImageDecoderCG::hasHDRGainMap() const
 {
-// Gain maps postdate this ImageIO, and the lookup is a whole-container metadata copy.
 #if HAVE(SUPPORT_HDR_DISPLAY) && !defined(WEBKIT_IOS6)
     auto properties = adoptCF(CGImageSourceCopyProperties(m_nativeDecoder.get(), imageSourceMetadataOptions().get()));
     if (!properties)
         return false;
 
-    // Look for FileContentsDictionary like this one:
-    //
-    // "{FileContents}" = {
-    //      ImageCount = 1;
-    //      Images = ( {
-    //              AuxiliaryData = ( {
-    //                      AuxiliaryDataType = kCGImageAuxiliaryDataTypeISOGainMap;
-    //                      Height = 667;
-    //                      Orientation = 1;
-    //                      PixelFormat = 875836518;
-    //                      Width = 1000;
-    //              } );
     auto fileContentsProperties = dynamic_cf_cast<CFDictionaryRef>(CFDictionaryGetValue(properties.get(), kCGImagePropertyFileContentsDictionary));
     if (!fileContentsProperties)
         return false;
@@ -619,8 +603,6 @@ Seconds ImageDecoderCG::frameDurationAtIndex(size_t index) const
     CFDictionaryRef animationProperties = animationPropertiesFromProperties(frameProperties.get());
 
 #if defined(WEBKIT_IOS6)
-    // The container lookup below only ever holds delays for HEICS and AVIS, which are
-    // multi-frame by construction.
     bool mayHaveContainerFrameInfo = frameCount() > 1;
 #else
     constexpr bool mayHaveContainerFrameInfo = true;
@@ -661,10 +643,6 @@ bool ImageDecoderCG::frameHasAlphaAtIndex(size_t index) const
 bool ImageDecoderCG::fetchFrameMetaDataAtIndex(size_t index, SubsamplingLevel subsamplingLevel, const DecodingOptions& options, ImageFrame& frame) const
 {
 #if defined(WEBKIT_IOS6)
-    // Everything below is a property of the encoded image, not of the reduction the
-    // frame was decoded at, and ImageFrame::size() is only read for the intrinsic
-    // size layout uses. One level keeps the properties cache warm across a decode and
-    // stops a query about one level discarding a frame decoded at another.
     UNUSED_PARAM(options);
     auto properties = propertiesAtIndex(index, SubsamplingLevel::Default);
     if (!properties)
@@ -749,10 +727,6 @@ PlatformImagePtr ImageDecoderCG::createFrameImageAtIndex(size_t index, Subsampli
     std::optional<IntSize> nativeSize;
 
 #if defined(WEBKIT_IOS6)
-    // Every image inside the viewport is decoded synchronously, so on this port the
-    // images on screen are exactly the ones held at native size while being painted
-    // into a 320pt column. Decode at the size it will be drawn, as the asynchronous
-    // branch below already does for the images below the fold.
     if (sizeForDrawing) {
         nativeSize = frameSizeAtIndex(index, SubsamplingLevel::Default);
         if (sizeForDrawing->unclampedArea() < nativeSize->unclampedArea())
@@ -787,22 +761,6 @@ PlatformImagePtr ImageDecoderCG::createFrameImageAtIndex(size_t index, Subsampli
     // CoreGraphics needs to un-deprecate kCGImageCachingTemporary since it's still not the default.
 ALLOW_DEPRECATED_DECLARATIONS_BEGIN
 #if defined(WEBKIT_IOS6)
-    // Temporary keeps the decoded bytes until the cache is trimmed; transient
-    // lets CoreGraphics mark them purgeable soon after they are drawn, so the
-    // kernel can take them back instead of jetsam taking the process. Upstream
-    // landed transient twice and rolled it out twice, both times for CPU - the
-    // subimage cache is skipped for transient images, so cropped draws recreate
-    // the image - never for memory. This device fails on memory, so it was
-    // measured here rather than assumed.
-    //
-    // Measured, three cold runs of four heavy sites each: 160.9 MB of dirty
-    // memory against 203.4 MB, a median saving of 42 MB, with the worst
-    // transient run equal to the best temporary one. But the page that draws one
-    // decoded image six hundred times cropped - tests/device/image-draw-cost.html
-    // - takes the process down with it under transient, in the image decode
-    // path, and a saving bought with a crash is not a saving. So: off, with the
-    // measurement recorded and the switch kept, because the crash is worth
-    // understanding and this is how to reproduce it.
     static const bool transient = [] {
         if (const char* override = getenv("WEBKIT_IOS6_TRANSIENT_IMAGE_CACHE"))
             return override[0] == '1';

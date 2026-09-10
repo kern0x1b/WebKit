@@ -41,10 +41,6 @@ template<const CFStringRef& colorSpaceNameGlobalConstant> static CGColorSpaceRef
     static std::once_flag onceFlag;
     std::call_once(onceFlag, [] {
 #if defined(WEBKIT_IOS6)
-        // This CoreGraphics has one RGB colour space and does not answer to any
-        // of these names — CGColorSpaceCreateWithName(kCGColorSpaceSRGB) included,
-        // which returns nothing here. Its device RGB is sRGB: the screen is an
-        // sRGB panel and there is no colour management to select between spaces.
         colorSpace.construct(adoptCF(CGColorSpaceCreateDeviceRGB()));
 #else
         colorSpace.construct(adoptCF(CGColorSpaceCreateWithName(RetainPtr { colorSpaceNameGlobalConstant }.get())));
@@ -132,14 +128,6 @@ CGColorSpaceRef linearDisplayP3ColorSpaceSingleton()
 CGColorSpaceRef linearSRGBColorSpaceSingleton()
 {
 #if defined(WEBKIT_IOS6)
-    // This CoreGraphics has no colour management: it matches between spaces by
-    // their primaries and ignores their transfer function. A calibrated space
-    // with a gamma of one was tried here and measured on device - it did not
-    // linearise anything (a saturate filter gave the same 92 grey in linearRGB
-    // as in sRGB, where linear light asks for 110), while its primaries did
-    // shift colour, so an identity colour matrix turned 192,64,64 into
-    // 171,76,66. A filter that changes nothing must change nothing, so this
-    // hands back the one RGB space the system really has.
     return sRGBColorSpaceSingleton();
 #else
     return namedColorSpace<kCGColorSpaceLinearSRGB>();

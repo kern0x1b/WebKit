@@ -247,9 +247,6 @@ void TextPainter::paintRange(const TextRun& textRun, const FloatRect& boxRect, c
 bool TextPainter::shouldUseGlyphDisplayList(const PaintInfo& paintInfo, const Style::ComputedStyle& style)
 {
 #if defined(WEBKIT_IOS6)
-    // Recording glyphs into a display list installs a CoreGraphics delegate
-    // callback that this CoreGraphics does not know, and it aborts rather than
-    // ignoring it. Text is drawn straight into the context instead.
     UNUSED_PARAM(paintInfo);
     UNUSED_PARAM(style);
     return false;

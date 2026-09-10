@@ -148,11 +148,6 @@ RetainPtr<CTFontRef> SystemFontDatabaseCoreText::createFontByApplyingWeightWidth
     CFTypeRef traitsValues[] = { weightNumber.get(), widthNumber.get(), italicsNumber.get(), design ? static_cast<CFTypeRef>(design) : static_cast<CFTypeRef>(kCTFontUIFontDesignDefault) };
     auto traitsDictionary = adoptCF(CFDictionaryCreate(kCFAllocatorDefault, traitsKeys, traitsValues, std::size(traitsKeys), &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks));
 #if defined(WEBKIT_IOS6)
-    // The numeric weight and slant traits above are how CoreText has been asked
-    // for a face since iOS 7; this release matches on the symbolic traits it
-    // shipped with, so the same intent is stated twice and the one it
-    // understands is the one it uses. Without this every -apple-system request
-    // came back Regular however bold the page asked for.
     {
         auto mutableTraits = adoptCF(CFDictionaryCreateMutableCopy(kCFAllocatorDefault, 0, traitsDictionary.get()));
         CTFontSymbolicTraits symbolicTraits = 0;
@@ -174,11 +169,6 @@ RetainPtr<CTFontRef> SystemFontDatabaseCoreText::createFontByApplyingWeightWidth
     if (font) {
         auto result = adoptCF(CTFontCreateCopyWithAttributes(font, size, nullptr, modification.get()));
 #if defined(WEBKIT_IOS6)
-        // Copying with a traits dictionary is how a face has been asked for
-        // since iOS 7 and this release ignores it, so the same request goes
-        // through the call it does answer. Without this a page asking the system
-        // font for bold got regular, which is most of the headings on a site
-        // that names -apple-system first.
         CTFontSymbolicTraits desired = 0;
         if (weight >= kCTFontWeightSemibold)
             desired |= kCTFontTraitBold;

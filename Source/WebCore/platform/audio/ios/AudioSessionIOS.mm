@@ -284,8 +284,6 @@ void AudioSessionIOS::setCategory(CategoryType newCategory, Mode newMode, RouteS
     auto *currentMode = [session mode];
     auto currentOptions = [session categoryOptions];
 #if defined(WEBKIT_IOS6)
-    // Route sharing arrived in iOS 11; there is no policy to read and none to
-    // compare against, so the category, mode and options are the whole question.
     auto needSessionUpdate = ![currentCategory isEqualToString:categoryString] || ![currentMode isEqualToString:modeString] || currentOptions != options;
 #else
     auto currentPolicy = [session routeSharingPolicy];
@@ -299,9 +297,6 @@ void AudioSessionIOS::setCategory(CategoryType newCategory, Mode newMode, RouteS
         ALWAYS_LOG(identifier, newCategory, ", mode = ", newMode);
         NSError *error = nil;
 #if defined(WEBKIT_IOS6)
-        // The combined setter is iOS 11. Here the category and the mode are set
-        // separately, and the route sharing policy has nowhere to go because the
-        // concept does not exist on this release.
         UNUSED_PARAM(policy);
         [session setCategory:categoryString withOptions:options error:&error];
         if (!error)
@@ -388,8 +383,6 @@ ALLOW_DEPRECATED_DECLARATIONS_END
 String AudioSessionIOS::routingContextUID() const
 {
 #if defined(WEBKIT_IOS6)
-    // -routingContextUID does not exist here, and neither does the routing
-    // context it identifies.
     return emptyString();
 #elif !PLATFORM(IOS_FAMILY_SIMULATOR) && !PLATFORM(MACCATALYST) && !PLATFORM(WATCHOS)
     return [[PAL::getAVAudioSessionClassSingleton() sharedInstance] routingContextUID];
@@ -416,10 +409,6 @@ size_t AudioSessionIOS::numberOfOutputChannels() const
 size_t AudioSessionIOS::maximumNumberOfOutputChannels() const
 {
 #if defined(WEBKIT_IOS6)
-    // -maximumOutputNumberOfChannels arrived in iOS 7. This AVAudioSession can
-    // only say how many channels the current route has, which on a device whose
-    // outputs are a speaker, a headphone jack and Bluetooth is also the most it
-    // will ever have.
     return [[PAL::getAVAudioSessionClassSingleton() sharedInstance] outputNumberOfChannels];
 #else
     return [[PAL::getAVAudioSessionClassSingleton() sharedInstance] maximumOutputNumberOfChannels];

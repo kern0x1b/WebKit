@@ -124,11 +124,6 @@ SUPPRESS_NODELETE inline bool NODELETE charactersAreAllASCII(std::span<const Cha
 {
 WTF_ALLOW_UNSAFE_BUFFER_USAGE_BEGIN
 #if defined(WEBKIT_IOS6)
-    // SIMD::isNonZero() bottoms out in simde_vmaxvq_u8(), which simde only implements
-    // natively when SIMDE_ARCH_AARCH64 is set. On armv7 it spills the vector to the
-    // stack and runs a scalar reduction per block, so the vector path here is slower
-    // than scalar. A 32-bit word carries four Latin-1 units or two UTF-16 units and
-    // the same "any high bit set" test collapses to one AND per word.
     constexpr size_t stride = sizeof(uint32_t) / sizeof(CharacterType);
     static_assert(sizeof(CharacterType) == 1 || sizeof(CharacterType) == 2);
     constexpr uint32_t nonASCIIMask = sizeof(CharacterType) == 1 ? 0x80808080U : 0xFF80FF80U;
@@ -171,7 +166,6 @@ WTF_ALLOW_UNSAFE_BUFFER_USAGE_END
         constexpr auto nonASCIIMask = static_cast<UnsignedType>(~UnsignedType { 0x7F });
         auto mask = SIMD::splat<UnsignedType>(nonASCIIMask);
 
-        // Process chunkSize elements per chunk (8 x SIMD vectors), check once per chunk.
         const auto* chunkEnd = characters + (length & ~(chunkSize - 1));
         while (characters < chunkEnd) {
             auto acc = SIMD::load(std::bit_cast<const UnsignedType*>(characters));
@@ -186,7 +180,6 @@ WTF_ALLOW_UNSAFE_BUFFER_USAGE_END
                 return false;
             characters += chunkSize;
         }
-        // Handle remaining SIMD vectors.
         const auto* simdEnd = characters + (static_cast<size_t>(end - characters) & ~(simdStride - 1));
         auto acc = SIMD::splat<UnsignedType>(0);
         while (characters < simdEnd) {
@@ -197,7 +190,6 @@ WTF_ALLOW_UNSAFE_BUFFER_USAGE_END
             return false;
     }
 
-    // Scalar tail with early exit.
     while (characters < end) {
         if (!isASCII(*characters++))
             return false;
@@ -222,9 +214,6 @@ inline constexpr bool charactersAreAllLatin1(std::span<const char16_t> span)
     } else {
         WTF_ALLOW_UNSAFE_BUFFER_USAGE_BEGIN
 #if defined(WEBKIT_IOS6)
-        // Same reason as charactersAreAllASCII: the horizontal reduction behind
-        // SIMD::isNonZero() is emulated here. One 32-bit word holds two UTF-16 units
-        // and 0xFF00FF00 answers "either unit above Latin-1" in a single AND.
         const auto* characters = span.data();
         const auto* end = characters + span.size();
         const auto* wordEnd = characters + (span.size() & ~static_cast<size_t>(1));

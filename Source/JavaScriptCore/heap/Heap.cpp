@@ -131,9 +131,6 @@
 namespace JSC {
 
 #if defined(WEBKIT_IOS6)
-// Defined in JIT.cpp; appends the current maximumOptimizationCandidateBytecodeCost refusal
-// summary to WEBKIT_IOS6_OPT_CEILING_LOG. Declared here rather than pulling in JIT.h, which
-// this file has no other reason to include.
 namespace CostCeilingInstrumentation {
 void dumpSnapshot();
 }
@@ -166,58 +163,6 @@ static double NODELETE envDouble(const char* name, double defaultValue)
     return value;
 }
 
-// Resident bytes at which JSC starts treating memory as scarce. Jetsam kills this process somewhere
-// between 106 and 136 MB and the application's own valves fire at 148 and 162 MB; the upstream test
-// is percentAvailableMemoryInUse() > 0.80, and availableMemory() answers 512 MB here because
-// memorystatus_control is refused, so it asks whether resident has passed 409.6 MB and is never
-// true. That left every memory-driven path in the collector dead: eden was never clamped and the
-// one-big-allocation bail in collectIfNecessaryOrDefer could suppress collection indefinitely.
-//
-// The two bands do different things on purpose. The gentle band is crossed routinely and must stay
-// cheap: it only clamps how much eden may grow. Escalating to a full mark or a synchronous sweep
-// there would put a whole-heap pause under the user's finger on nearly every collection. The hard
-// band is the one that buys a full collection, because above it the alternative is the process
-// disappearing.
-//
-// Standing measurement, 2 September: resident on the feed no longer sits at 133-170 MB. It ramps to
-// 205-235 MB inside the first hundred seconds and stays there, peaking at 249 - the tile floor, the
-// two-screen cover rect and the 6 MB live-decoded budget added since these numbers were chosen are
-// most of the difference. Both bands are therefore below the process's floor and true at every
-// collection, so shouldDoFullCollection() and shouldSweepSynchronously() are permanently true and
-// the generational collector this file was rewritten to obtain does not run.
-//
-// Raising the hard band to 245 was measured over two seven-minute scrolling sessions and is not
-// free: median resident went 228.3 -> 232.4 MB and the median JS heap 45.8 -> 56.8 MB, because the
-// old generation is no longer marked every time and deleteAllCode stops firing. The tail was
-// slightly better (p90 242.6 -> 237.5).
-//
-// The frame-rate number arrived, and with it the reason the band is 180 and not 245. At 245 the
-// process reaches 236-243 MB and the GPU driver dies there: two fifteen-minute soaks, two SIGSEGVs
-// at 0x3c inside IMGSGX543GLDriver under a QuartzCore commit, at 168 s and 371 s. It is a null
-// surface dereferenced at a field offset, and it happened with the tile coverage and the layer pool
-// both back at their old values, so it is the ceiling and not the tiles. At 180 the same soak runs
-// fifteen minutes with no deaths and a slightly better frame rate: median 12.6 fps against 11.8 at
-// 245 and 9.5 before any of this work, p10 3.4 against 1.6.
-//
-// So the band is what keeps this process below the point where the graphics driver fails, and it is
-// worth more than the megabytes it costs. JSC_IOS6_GC_HARD_MB moves it without a rebuild.
-//
-// Then the number these bands are compared against changed, and they had to move with it.
-// memoryFootprint() used to return resident_size, which counts every resident page the task maps -
-// including 138.7 MB of shared cache and our own framework text, flat, of a ~220 MB total. The
-// collector was crossing its bands when the system paged in more libraries, which collecting harder
-// cannot undo. It now returns the task's own anonymous memory instead, so the same numbers meant
-// something three times stricter and the heap ran to 75 MB before the bands bit.
-//
-// Four fifteen-minute soaks, same driving, 32 rounds of ten 400 px flicks:
-//
-//   resident, 148/180   median 12.6 fps   p10 3.4   29 stalls    survived
-//   own,      148/180   median 17.6 fps   p10 3.3   122 stalls   DIED at 245 MB
-//   own,      110/130   median 18.8 fps   p10 2.3   19 stalls    survived
-//   (before any of this work: median 9.5 fps, p10 1.6, 236 stalls)
-//
-// So these two numbers are calibrated against the anonymous-memory measure, not resident size, and
-// changing one without the other is what killed the second run.
 static size_t NODELETE criticalMemoryFootprintBytes()
 {
     static const size_t bytes = static_cast<size_t>(envDouble("JSC_IOS6_GC_CRITICAL_MB", 148) * MB);
@@ -230,7 +175,6 @@ static size_t NODELETE hardMemoryFootprintBytes()
     return bytes;
 }
 
-// How much eden may still grow once the gentle band is crossed.
 static size_t NODELETE maxEdenSizeWhenCriticalBytes()
 {
     static const size_t bytes = static_cast<size_t>(envDouble("WEBKIT_IOS6_GC_CRITICAL_EDEN_MB", 8.0) * MB);
@@ -243,16 +187,6 @@ static size_t NODELETE maxEdenSizeWhenHardCriticalBytes()
     return bytes;
 }
 
-// The two constants above are a ceiling: under memory pressure they clamp how much eden may grow
-// before a collection is requested, which makes collections MORE frequent, not less. They do not
-// implement a floor that skips a collection when almost nothing was allocated. That gap is what
-// the pair below is for: below normal (non-critical) memory pressure, m_maxHeapSize grows by only
-// ~1.05x per cycle (see fullCollectionHeapGrowthTrigger's comment), so bytesAllowedThisCycle in
-// collectIfNecessaryOrDefer's shouldRequestGC can be a few KB - small enough that an eden collection
-// fires to reclaim next to nothing while still paying the ~8ms fixed constraint+finalize cost that
-// scales with total live cells, not with what was collected. This floor raises that budget to an
-// absolute minimum so trivial eden collections get deferred, bounded by a consecutive-skip cap so
-// a long idle-but-slowly-allocating period cannot suppress collection indefinitely.
 static size_t NODELETE edenAllocationFloorBytes()
 {
     static const size_t bytes = static_cast<size_t>(envDouble("WEBKIT_IOS6_GC_EDEN_ALLOC_FLOOR_KB", 96.0) * KB);
@@ -279,15 +213,12 @@ static FILE* NODELETE gcEventLog()
     return file;
 }
 
-// How far the live heap may grow past its size at the last full collection before the next
-// collection is promoted to a full one.
 static double NODELETE fullCollectionHeapGrowthTrigger()
 {
     static const double factor = std::max(1.05, envDouble("JSC_IOS6_GC_FULL_TRIGGER", 1.6));
     return factor;
 }
 
-// Ceiling on how many eden collections may run between two full ones.
 static unsigned NODELETE maxEdenCollectionsBetweenFullCollections()
 {
     static const unsigned count = static_cast<unsigned>(std::max(1.0, envDouble("JSC_IOS6_GC_MAX_EDENS", 24)));
@@ -400,13 +331,6 @@ static size_t proportionalHeapSize(size_t heapSize, GrowthMode growthMode, size_
     }
 
 #if defined(WEBKIT_IOS6)
-    // Compare the JS heap against the RAM hint, not the whole process against it. The footprint form
-    // asks whether resident - 133-170 MB here, nearly all of it CoreGraphics and layout - is below a
-    // fraction of ramSize, which forceRAMSize pins at 24 MB. It never is, so every heap took the
-    // large-heap growth factor from its very first collection: a 100 KB heap during page setup got a
-    // budget of 1.05 * 100 KB and collected again five kilobytes later. Against the JS heap the three
-    // bands mean what they were written to mean, a small heap is allowed to grow quickly, and the
-    // mach trap that memoryFootprint() costs disappears from every full collection.
     if (heapSize < ramSize * Options::smallHeapRAMFraction())
         return Options::smallHeapGrowthFactor() * heapSize;
     if (heapSize < ramSize * Options::mediumHeapRAMFraction())
@@ -699,13 +623,8 @@ Heap::Heap(VM& vm, HeapType heapType)
     m_collectorSlotVisitor->optimizeForStoppedMutator();
 
 #if defined(WEBKIT_IOS6)
-    // Upstream derives this from ramSize * (1 - criticalGCMemoryThreshold) / 4, which reads the
-    // critical fraction backwards: lowering the threshold so the collector reacts sooner also raises
-    // the allowance it reacts with. With the threshold now expressed in absolute resident bytes that
-    // formula has no meaning at all, so state the allowance directly.
     m_maxEdenSizeWhenCritical = maxEdenSizeWhenCriticalBytes();
 #else
-    // When memory is critical, allow allocating 25% of the amount above the critical threshold before collecting.
     size_t memoryAboveCriticalThreshold = static_cast<size_t>(static_cast<double>(m_ramSize) * (1.0 - Options::criticalGCMemoryThreshold()));
     m_maxEdenSizeWhenCritical = memoryAboveCriticalThreshold / 4;
 #endif
@@ -1902,8 +1821,6 @@ WTF_ALLOW_UNSAFE_BUFFER_USAGE_END
         // estimate.
         // https://bugs.webkit.org/show_bug.cgi?id=166828
             
-        // Wondering what this does? Look at Heap::addCoreConstraints(). The DOM and others can also
-        // add their own using Heap::addMarkingConstraint().
 #if defined(WEBKIT_IOS6)
         MonotonicTime ios6ConstraintStart = MonotonicTime::now();
 #endif
@@ -2934,20 +2851,6 @@ void Heap::updateAllocationLimits()
         m_sizeAfterLastEdenCollect = currentHeapSize;
         dataLogLnIf(verbose, "Eden: sizeAfterLastEdenCollect = ", currentHeapSize);
 #if defined(WEBKIT_IOS6)
-        // Upstream promotes the next collection to a full one when the headroom left under
-        // m_maxHeapSize falls below a third of it. That test assumes a growth factor large enough for
-        // a third to be reachable. The factor in force on this device is 1.05, so the headroom right
-        // after a full collection is already only (1.05 - 1) / 1.05, about 4.8%, and the eden branch
-        // below raises m_maxHeapSize by exactly the survivors each time - so the ratio never climbs
-        // back above 4.8% and the test is true at every single eden collection. The generational
-        // collector degenerated into a full mark of the whole thirty-megabyte heap every other
-        // collection, single-threaded, with the world stopped, which is the longest pause the engine
-        // can produce and it landed under the user's finger.
-        //
-        // Ask the question the ratio was standing in for instead: has the live heap actually grown
-        // since the last full collection, and how long has it been. Neither bound is needed for
-        // correctness - eden collections stay sound indefinitely because the write barrier maintains
-        // the remembered set - they only stop the old generation drifting up unwatched.
         ++m_edenCollectionsSinceLastFullCollect;
         size_t growthTrigger = static_cast<size_t>(m_sizeAfterLastFullCollect * fullCollectionHeapGrowthTrigger());
         if (currentHeapSize > std::max(m_minBytesPerCycle, growthTrigger)
@@ -3203,22 +3106,7 @@ bool Heap::useGenerationalGC()
 
 bool Heap::shouldSweepSynchronously()
 {
-    // updateAllocationLimits() updates info that overCriticalMemoryThreshold() needs.
 #if defined(WEBKIT_IOS6)
-    // sweepBlocks() followed by shrink() walks every block in the heap without yielding, inside
-    // finalize(). On thirty megabytes at 800 MHz that is hundreds of milliseconds bolted onto the end
-    // of a collection, and the gentle band is crossed on nearly every collection here, so upstream's
-    // test would take that walk almost every time. The incremental sweeper does the same work in
-    // small slices off the critical path and frees empty blocks as it goes.
-    //
-    // Two cases still earn the walk. Above the hard band the alternative is being killed. And a full
-    // collection that lands while memory is already tight is worth finishing properly: full
-    // collections are rare here by design, and this is the path a memory warning takes, since
-    // WebCore answers one with deleteAllCode() plus a synchronous full collection - without this the
-    // blocks it just emptied would trickle back over the following second instead of at once. Eden
-    // collections, which is what the user's finger sees, never take it.
-    //
-    // Mini mode is dropped: it means "no JIT" rather than "tiny heap", and this heap is not tiny.
     if (Options::sweepSynchronously() || m_overHardMemoryThreshold)
         return true;
     return overCriticalMemoryThreshold()
@@ -3235,11 +3123,6 @@ bool Heap::shouldDoFullCollection()
 
     if (!m_currentRequest.scope) {
 #if defined(WEBKIT_IOS6)
-        // Only the hard band promotes a collection to a full one. Resident sits at 133-170 MB in a
-        // normal session, so the gentle band is true most of the time; letting it force a full mark
-        // would hand the user a whole-heap pause on nearly every collection, which is the thing this
-        // wave exists to remove. What the gentle band does instead is clamp eden in
-        // collectIfNecessaryOrDefer, which collects sooner and each time collects less.
         bool wantsFull = m_shouldDoFullCollection || (overCriticalMemoryThreshold() && m_overHardMemoryThreshold);
         return wantsFull && !suppressPromotionToFull();
 #else
@@ -3461,21 +3344,6 @@ bool Heap::consumeEdenAllocationFloorSkip(size_t bytesAllowedThisCycle)
         }
         return false;
     }
-    // A skip episode spans one edenFloorRescheduleSeconds() window, tracked as an absolute
-    // deadline rather than a plain latch. Within that window, repeated calls from any of the
-    // three call sites (the eden timer, collectIfNecessaryOrDefer, and the opportunistic task)
-    // collapse into the single skip that opened it - only the first call in the window
-    // increments the counters and logs. Once the deadline passes, the next call opens a fresh
-    // window and the counter advances again, so edenAllocationFloorMaxSkips() consecutive
-    // *windows* of still-under-floor allocation are what it takes to hit the cap, matching
-    // what the constant is meant to bound.
-    //
-    // The previous version reset the latch only when some collection completed - full or eden,
-    // triggered by this mechanism or by anything else in the heap. That let an unrelated full
-    // collection silently clear it early, and, more importantly, meant a long stretch with no
-    // completed collection at all could never advance the counter past 1: the cap was
-    // effectively unreachable, since reaching it requires exactly the kind of repeated skipping
-    // that also prevents any collection from completing to reset the latch for the next count.
     MonotonicTime now = MonotonicTime::now();
     if (!m_edenAllocFloorSkipPending || now >= m_edenAllocFloorSkipDeadline) {
         m_edenAllocFloorSkipPending = true;

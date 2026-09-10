@@ -107,9 +107,6 @@ void GraphicsContextCG::drawFocusRing(const Path& path, float, const Color& colo
         return;
 
 #if defined(WEBKIT_IOS6)
-    // Focus rings are drawn with CGStyle, which this CoreGraphics does not have;
-    // asking for it aborts the process rather than being ignored. A touch device
-    // with no keyboard focus loses nothing by not drawing them.
     UNUSED_PARAM(color);
     UNUSED_PARAM(zoomFactor);
     return;
@@ -128,17 +125,12 @@ void GraphicsContextCG::drawFocusRing(const Path& path, float, const Color& colo
     focusRingStyle.bounds = CGRectZero;
 #endif
 
-    // zoomFactor covers CSS zoom / page zoom (Cmd+/-). ctmScale covers page scale (pinch-to-zoom), canvas transforms, etc.
     CGContextRef platformContext = this->platformContext();
     auto ctmScale = singularValue(getUserToBaseCTM(platformContext), SingularValueSelection::Largest);
     if (ctmScale <= 0)
         ctmScale = 1.0f;
     focusRingStyle.radius *= zoomFactor * ctmScale;
 
-    // We want to respect the CGContext clipping and also not overpaint any
-    // existing focus ring. The way to do this is set accumulate to
-    // -1. According to CoreGraphics, the reasoning for this behavior has been
-    // lost in time.
     focusRingStyle.accumulate = -1;
     auto style = adoptCF(CGStyleCreateFocusRingWithColor(&focusRingStyle, cachedCGColor(color).get()));
 

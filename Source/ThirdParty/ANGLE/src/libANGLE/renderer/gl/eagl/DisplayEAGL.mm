@@ -73,8 +73,6 @@ egl::Error DisplayEAGL::initialize(egl::Display *display)
     }
     mThreadsWithCurrentContext.insert(angle::GetCurrentThreadUniqueId());
 
-    // EAGL has no getProcAddress, so the framework is opened directly, the way
-    // the CGL backend opens libGL.
     void *handle = dlopen(kOpenGLESFrameworkName, RTLD_NOW);
     if (!handle)
     {
@@ -154,8 +152,6 @@ SurfaceImpl *DisplayEAGL::createWindowSurface(const egl::SurfaceState &state,
                                               EGLNativeWindowType window,
                                               const egl::AttributeMap &attribs)
 {
-    // A window here is a CAEAGLLayer, which nothing in this port draws to: the
-    // browser composites through an IOSurface.
     UNIMPLEMENTED();
     return nullptr;
 }
@@ -245,8 +241,6 @@ egl::ConfigSet DisplayEAGL::generateConfigs()
 
     config.transparentType = EGL_NONE;
 
-    // The driver's own limit rather than a number chosen here: a pbuffer is
-    // renderbuffer-backed, and a renderbuffer is what it will refuse first.
     const gl::Caps &caps    = mRenderer->getNativeCaps();
     config.maxPBufferWidth  = caps.maxRenderbufferSize;
     config.maxPBufferHeight = caps.maxRenderbufferSize;
@@ -260,14 +254,8 @@ egl::ConfigSet DisplayEAGL::generateConfigs()
     config.bindToTextureRGB  = EGL_FALSE;
     config.bindToTextureRGBA = EGL_FALSE;
 
-    // GLES has no rectangle textures; an IOSurface reaches a shader as an
-    // ordinary 2D texture here.
     config.bindToTextureTarget = EGL_TEXTURE_2D;
 
-    // eglChooseConfig defaults EGL_SURFACE_TYPE to EGL_WINDOW_BIT, and a caller
-    // that does not ask for a surface type - WebCore's is one - matches nothing
-    // without it. No window surface is ever created here; the browser composites
-    // through an IOSurface.
     config.surfaceType = EGL_WINDOW_BIT | EGL_PBUFFER_BIT;
 
     config.minSwapInterval = 1;
@@ -313,7 +301,6 @@ void DisplayEAGL::generateExtensions(egl::DisplayExtensions *outExtensions) cons
     outExtensions->iosurfaceClientBuffer = true;
     outExtensions->surfacelessContext    = true;
 
-    // Contexts are virtualized so textures and semaphores can be shared globally
     outExtensions->displayTextureShareGroup   = true;
     outExtensions->displaySemaphoreShareGroup = true;
 
@@ -351,7 +338,6 @@ gl::Version DisplayEAGL::getMaxSupportedESVersion() const
 
 egl::Error DisplayEAGL::makeCurrentSurfaceless(gl::Context *context)
 {
-    // mContext is always current, and EAGL is surfaceless by default.
     return egl::NoError();
 }
 

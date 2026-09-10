@@ -131,14 +131,6 @@ static void notificationCallback (WKViewRef v, WKViewNotificationType type, void
         }
         case WKViewNotificationViewDidScroll: {
 #if defined(WEBKIT_IOS6)
-            // Posted without stopping the web thread.
-            //
-            // WebThreadRunOnMainThread drops every JS lock, releases the web
-            // lock, wakes the main thread and blocks until it has run the block -
-            // a full main-thread latency for a notification nothing in this
-            // process observes, on a callback that fires while the page is being
-            // scrolled. The frame-size notification next door already concluded
-            // that this ordering is not worth blocking for.
             WebThreadCallDelegateAsync(invocationForPostNotification(WAKViewDidScrollNotification, view, nil));
 #else
             WebThreadRunOnMainThread(^ {

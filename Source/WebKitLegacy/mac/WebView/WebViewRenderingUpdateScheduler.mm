@@ -95,13 +95,6 @@ void WebViewRenderingUpdateScheduler::scheduleRenderingUpdate()
 #endif
 
 #if defined(WEBKIT_IOS6)
-    // A run loop observer binds to whatever run loop schedules it, once, and
-    // never rebinds. Both of these observers open their bodies with
-    // WebThreadLock(), so one scheduled from the main thread turns into a lock
-    // acquisition on the main thread for every turn of the main run loop -
-    // measured as the last remaining main-thread wait of this kind, 89 ms per
-    // load. Scheduled from the web thread instead, the lock is a recursive
-    // no-op.
     if (!WebThreadIsCurrent() && WebThreadIsEnabled()) {
         WebThreadRun(^{
             m_renderingUpdateRunLoopObserver->schedule();
@@ -133,11 +126,6 @@ void WebViewRenderingUpdateScheduler::didCompleteRenderingUpdateDisplay()
 void WebViewRenderingUpdateScheduler::schedulePostRenderingUpdate()
 {
 #if defined(WEBKIT_IOS6)
-    // Same reason as scheduleRenderingUpdate(): this observer's body opens with
-    // WebThreadLock(), and it is scheduled from a CoreAnimation post-commit
-    // handler that runs on whichever thread committed. Bound to the main run
-    // loop it makes the interface take the web lock once per frame for work that
-    // belongs to the engine.
     if (!WebThreadIsCurrent() && WebThreadIsEnabled()) {
         WebThreadRun(^{
             m_postRenderingUpdateRunLoopObserver->schedule();

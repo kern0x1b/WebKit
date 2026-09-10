@@ -44,19 +44,10 @@ namespace WTF {
 void MemoryPressureHandler::platformReleaseMemory(Critical critical)
 {
 #if defined(WEBKIT_IOS6)
-    // The condition below means "the OS has not told libcache itself, so tell
-    // it". Here the OS never tells it: the dispatch memory-pressure source is
-    // refused on this system (see install()), and what pressure this port has
-    // is derived from polling kern.memorystatus_level and this process's own
-    // footprint. isUnderMemoryPressure() being true is therefore not evidence
-    // that libcache has heard anything, and reading it here would silence the
-    // prod at exactly the Strict threshold where it is wanted.
     if (critical == Critical::Yes)
         cache_simulate_memory_warning_event(DISPATCH_MEMORYPRESSURE_CRITICAL);
 #else
     if (critical == Critical::Yes && (!isUnderMemoryPressure() || m_isSimulatingMemoryPressure)) {
-        // libcache listens to OS memory notifications, but for process suspension
-        // or memory pressure simulation, we need to prod it manually:
         cache_simulate_memory_warning_event(DISPATCH_MEMORYPRESSURE_CRITICAL);
     }
 #endif
@@ -93,8 +84,6 @@ static constexpr unsigned s_holdOffMultiplier = 20;
 #if defined(WEBKIT_IOS6)
 static const Seconds s_criticalPressureRepeatInterval { 60_s };
 
-// Percentage of system memory still free, as jetsam itself accounts for it.
-// LegacyTileCache reads the same sysctl to size its tile budget.
 static int systemMemoryFreeLevel()
 {
     int level = 0;
@@ -144,12 +133,6 @@ void MemoryPressureHandler::install()
 
     dispatch_async(m_dispatchQueue.get(), ^{
 #if defined(WEBKIT_IOS6)
-        // The graded memory-pressure source is iOS 8, and this system refuses
-        // even the ungraded VM pressure source that preceded it — dispatch says
-        // so by returning nothing rather than by failing, so nothing here ever
-        // fired. kern.memorystatus_level is the pressure signal the kernel does
-        // export, and it is what jetsam decides on, so it is polled instead on
-        // the interval that already bounds how often pressure may be answered.
         SUPPRESS_RETAINPTR_CTOR_ADOPT memoryPressureEventSource() = adoptOSObject(dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, m_dispatchQueue.get()));
         if (!memoryPressureEventSource())
             return;
@@ -178,13 +161,11 @@ void MemoryPressureHandler::install()
 #else
         auto memoryStatusFlags = DISPATCH_MEMORYPRESSURE_NORMAL | DISPATCH_MEMORYPRESSURE_WARN | DISPATCH_MEMORYPRESSURE_CRITICAL | DISPATCH_MEMORYPRESSURE_PROC_LIMIT_WARN | DISPATCH_MEMORYPRESSURE_PROC_LIMIT_CRITICAL;
         auto *memoryPressureSourceType = DISPATCH_SOURCE_TYPE_MEMORYPRESSURE;
-        // FIXME: This is a false positive. rdar://160931336
         SUPPRESS_RETAINPTR_CTOR_ADOPT memoryPressureEventSource() = adoptOSObject(dispatch_source_create(memoryPressureSourceType, 0, memoryStatusFlags, m_dispatchQueue.get()));
 
         dispatch_source_set_event_handler(memoryPressureEventSource().get(), ^{
             auto status = dispatch_source_get_data(memoryPressureEventSource().get());
             switch (status) {
-            // VM pressure events.
             case DISPATCH_MEMORYPRESSURE_NORMAL:
                 setMemoryPressureStatus(SystemMemoryPressureStatus::Normal);
                 break;
@@ -196,7 +177,6 @@ void MemoryPressureHandler::install()
                 setMemoryPressureStatus(SystemMemoryPressureStatus::Critical);
                 respondToMemoryPressure(Critical::Yes);
                 break;
-            // Process memory limit events.
             case DISPATCH_MEMORYPRESSURE_PROC_LIMIT_WARN:
                 didExceedProcessMemoryLimit(ProcessMemoryLimit::Warning);
                 respondToMemoryPressure(Critical::No);
@@ -335,8 +315,6 @@ std::optional<MemoryPressureHandler::ReliefLogger::MemoryUsage> MemoryPressureHa
     if (err != KERN_SUCCESS)
         return std::nullopt;
 
-    // phys_footprint is past what this kernel fills in, so relief is measured
-    // against the same resident size the rest of the port accounts by.
 #if defined(WEBKIT_IOS6)
     return MemoryUsage {static_cast<size_t>(vmInfo.internal), memoryFootprint()};
 #else

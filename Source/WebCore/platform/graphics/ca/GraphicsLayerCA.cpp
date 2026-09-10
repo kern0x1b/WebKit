@@ -108,23 +108,13 @@ static const int cMaxPixelDimension = 2048;
 // Derived empirically: <rdar://problem/13401861>
 static const unsigned cMaxLayerTreeDepth = 128;
 
-// About 10 screens of an iPhone 6 Plus. <rdar://problem/44532782>
 #if defined(WEBKIT_IOS6)
-// The areas this is compared against come from borderBoxRect(), which is in CSS
-// pixels, while the constant above counts device pixels of a 3x phone. On this
-// screen, 320x480 in CSS pixels, that budget is around 178 screenfuls rather
-// than the ten it reads as. Ten screens of this display is the intended amount.
 static const unsigned cMaxTotalBackdropFilterArea = 320 * 480 * 10;
 #else
 static const unsigned cMaxTotalBackdropFilterArea = 1242 * 2208 * 10;
 #endif
 
-// Don't let a single tiled layer use more than 156MB of memory. On a 3x display with RGB10A8 surfaces, this is about 12 tiles.
 #if defined(WEBKIT_IOS6)
-// 156 MB is more than half the memory this device has, and the process is killed
-// at 282 MB, so as a ceiling on one layer it never fires before something worse
-// does. Twelve tiles of this 2x display at four bytes a pixel is the same
-// intent, and lands near 12 MB.
 static const unsigned cMaxScaledTiledLayerMemorySize = 1024 * 1024 * 12;
 #else
 static const unsigned cMaxScaledTiledLayerMemorySize = 1024 * 1024 * 156;
@@ -4868,23 +4858,7 @@ bool GraphicsLayerCA::requiresTiledLayer(float pageScaleFactor) const
     if (!m_drawsContent || isPageTiledBackingLayer() || !allowsTiling())
         return false;
 
-    // FIXME: catch zero-size height or width here (or earlier)?
 #if defined(WEBKIT_IOS6) && PLATFORM(IOS_FAMILY)
-    // The limits below are pixel dimensions of the backing store, and the backing
-    // store is allocated at page scale times device scale, so testing page scale
-    // alone lets a layer through at twice the intended size on this 2x screen.
-    // Folding the device scale into the test below was tried and measured worse:
-    // it sends many more layers down the tiled path, and a tile grid costs more
-    // here than the single buffer it replaces. Footprints rose from 185/185/232 MB
-    // to 218/227/257 MB on SoundCloud, The Verge and Google. So the ordinary test
-    // stays in page-scale pixels, as upstream has it.
-    //
-    // Catching only the extreme - forcing tiling above 2048 device pixels, well
-    // above where rank and file layers sit - was tried as a middle ground and
-    // measured no better: 223/227/259 MB against 185/185/232 MB, plus a crash and
-    // two jettisons. Layers reach that size often enough, and tiling them costs
-    // more here than the single buffer does. Tiling on this port is simply the
-    // more expensive option, which is why the plain test is right.
     float scaledWidth = m_size.width() * pageScaleFactor;
     float scaledHeight = m_size.height() * pageScaleFactor;
     if (!(scaledWidth > cMaxPixelDimensionLowMemory) && !(scaledHeight > cMaxPixelDimensionLowMemory))

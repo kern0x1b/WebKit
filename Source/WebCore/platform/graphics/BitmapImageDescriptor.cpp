@@ -109,13 +109,6 @@ EncodedDataStatus BitmapImageDescriptor::encodedDataStatus() const
 IntSize BitmapImageDescriptor::size(ImageOrientation orientation) const
 {
 #if defined(WEBKIT_IOS6)
-    // Same state the guard in sourceSize() below is written for: metadata is
-    // decoded but no frame is cached yet. Asking for the density corrected size
-    // first would reach the primary frame, re-enter through primaryFrameIndex()
-    // and come straight back here, and the recursion runs until the stack is
-    // gone. sourceSize() answers from the decoder in that state, so go there
-    // directly rather than through a frame that does not exist. This crashed on
-    // image-heavy pages with two identical frames at the top of the trace.
     if (RefPtr decoder = m_source->decoderIfExists(); decoder && m_source->frames().isEmpty())
         return sourceSize(orientation);
 #endif
@@ -135,13 +128,6 @@ IntSize BitmapImageDescriptor::sourceSize(ImageOrientation orientation) const
     IntSize size;
 
 #if !USE(CG) || defined(WEBKIT_IOS6)
-    // It's possible that we have decoded the metadata, but not frame contents yet. In that case ImageDecoder claims to
-    // have the size available, but the frame cache is empty. Return the decoder size without caching in such case.
-    //
-    // This guard is needed here as well, not only off CG. Asking for the primary
-    // frame in that state re-enters through primaryFrameIndex() and back into
-    // size(), and the recursion runs until the stack is gone: image-heavy pages
-    // crashed with two identical frames at the top of the trace.
     RefPtr decoder = m_source->decoderIfExists();
     if (decoder && m_source->frames().isEmpty())
         size = decoder->size();
@@ -206,8 +192,6 @@ bool BitmapImageDescriptor::hasHDRGainMap() const
 bool BitmapImageDescriptor::hasHDRColorSpace() const
 {
 #if defined(WEBKIT_IOS6)
-    // No colour space this ImageIO produces uses the ITU-R 2100 transfer functions,
-    // and the path below answers by decoding the whole frame and discarding it.
     return false;
 #else
     if (m_cachedFlags.contains(CachedFlag::ColorSpace))
@@ -218,8 +202,6 @@ bool BitmapImageDescriptor::hasHDRColorSpace() const
 
     bool hasHDRColorSpace = colorSpace().usesITUR_2100TF();
 
-    // FIXME: This frame may not be destroyed. It can be reused for sync image decoding.
-    // Async image decoding should destroy this frame and treat it as if it did not exist.
     m_source->destroyNativeImageAtIndex(m_source->primaryFrameIndex());
     return hasHDRColorSpace;
 #endif
@@ -262,14 +244,8 @@ SubsamplingLevel BitmapImageDescriptor::maximumSubsamplingLevel() const
         return SubsamplingLevel::Default;
 
 #if defined(WEBKIT_IOS6)
-    // subsamplingLevelForScaleFactor() rounds down, so the level it picks is never
-    // coarser than the size the frame is painted at; an area cap on top of that only
-    // forbids reductions already known to be invisible.
     auto level = SubsamplingLevel::Last;
 #else
-    // FIXME: this value was chosen to be appropriate for Apple ports since the image
-    // subsampling is only enabled by default on Apple ports. Choose a different value
-    // if image subsampling is enabled on other platform.
     static constexpr int maximumImageAreaBeforeSubsampling = 5 * 1024 * 1024;
     auto level = SubsamplingLevel::First;
 
@@ -300,7 +276,6 @@ SubsamplingLevel BitmapImageDescriptor::subsamplingLevelForScaleFactor(GraphicsC
         return SubsamplingLevel::Default;
 
 #if defined(WEBKIT_IOS6)
-    // Rounding up picks a frame smaller than the drawn size, which shows as softening.
     int result = std::floor(std::log2(1 / scale));
 #else
     int result = std::ceil(std::log2(1 / scale));

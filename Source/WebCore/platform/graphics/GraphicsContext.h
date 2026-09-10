@@ -401,8 +401,6 @@ protected:
     GraphicsContextState m_state;
 private:
 #if defined(WEBKIT_IOS6)
-    // restore() releases the buffer whenever the stack drains, so with room for one
-    // state a paint that nests two deep mallocs and frees on every save/restore pair.
     Vector<GraphicsContextState, 4> m_stack;
 #else
     Vector<GraphicsContextState, 1> m_stack;

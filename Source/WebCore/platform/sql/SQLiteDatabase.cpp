@@ -111,20 +111,11 @@ static void initializeSQLiteIfNecessary()
 #if OS(DARWIN) && !defined(WEBKIT_IOS6)
         int ret;
         callOnMainThreadAndWait([&] {
-            // In the Network process, this function can be called on a background thread when
-            // creating WebKit::ResourceLoadStatisticsStore, which then races with
-            // WebKit::NetworkProcess::initializeNetworkProcess(). Since both of those calls query
-            // the Darwin user temp directory via confstr(), this should only be called from the
-            // main thread.
             ret = sqlite3_initialize();
         });
 #elif OS(DARWIN)
         int ret = sqlite3_initialize();
 #else
-        // On non-Darwin systems confstr() is MT-safe and it does not try to fiddle with environment
-        // variables, and it is better initialize directly. This is true at least on Linux with the
-        // supported C libraries (glibc, Musl, uClibc), the "big" BSDs (FreeBSD, NetBSD, OpenBSD),
-        // and the Android C library (Bionic) does not even provide confstr().
         int ret = sqlite3_initialize();
 #endif
 

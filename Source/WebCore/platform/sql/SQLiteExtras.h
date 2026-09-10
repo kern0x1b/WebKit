@@ -42,7 +42,6 @@ inline int sqliteBindBlob(sqlite3_stmt* statement, int index, std::span<const ui
         return SQLITE_TOOBIG;
     return sqlite3_bind_blob(statement, index, data.data(), static_cast<int>(data.size()), destructor); // NOLINT
 #elif PLATFORM(PLAYSTATION)
-    // sqlite3_bind_blob64() symbol is undefined on the PlayStation port.
     return sqlite3_bind_blob(statement, index, data.data(), data.size(), destructor); // NOLINT
 #else
     return sqlite3_bind_blob64(statement, index, data.data(), data.size(), destructor); // NOLINT

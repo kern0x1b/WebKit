@@ -694,7 +694,6 @@ inline bool ElementRuleCollector::ruleMatches(const RuleData& ruleData, unsigned
 #endif // ENABLE(CSS_SELECTOR_JIT)
     {
         auto& selector = ruleData.selector();
-        // Slow path.
 #if defined(WEBKIT_IOS6)
         selectorMatches = m_selectorChecker.match(selector, element(), context);
 #else

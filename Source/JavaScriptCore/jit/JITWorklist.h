@@ -104,19 +104,6 @@ private:
     State removeAllReadyPlansForVM(VM&, Vector<Ref<JITPlan>, 8>&, JITCompilationKey);
 
 #if defined(WEBKIT_IOS6)
-    // Cancels a still-Preparing plan without ever dispatching it to a worker thread, for
-    // JITWorklistThread::selectAndRemoveBestDFGPlan()'s dequeue-time discard (see
-    // JITWorklistThread.cpp). Only called while this plan's stage is still Preparing - the
-    // same precondition JITWorklist::removeMatchingPlansForVM() already relies on elsewhere in
-    // this file when it cancels queued-but-not-yet-dispatched plans - and only from a caller
-    // already holding m_lock (JITWorklistThread::poll() holds it for the whole call, per
-    // AutomaticThread's contract). Unlike the maximumOptimizationCandidateBytecodeCost refusal
-    // in JIT.cpp, this never touches m_canBeOptimized or the code block's counter-emission
-    // machinery (JITOpcodes.cpp's emit_op_enter): it only cancels the in-flight JITPlan/
-    // JITWorklist bookkeeping, so the discarded code block's own tier-up counter is left
-    // exactly where JITOperations.cpp's operationOptimize() last set it (already crossed, in
-    // the common case - see JITWorklistThread.cpp), meaning the very next qualifying call
-    // re-triggers a fresh compile attempt rather than being permanently barred.
     void discardPreparingPlan(Ref<JITPlan>&&);
 #endif
 

@@ -173,12 +173,6 @@ static void addAttributesForFontPalettes(CFMutableDictionaryRef attributes, cons
 }
 
 #if defined(WEBKIT_IOS6)
-// This CoreText addresses features by the numeric AAT type/selector pair; the
-// OpenType tag keys arrived in iOS 8, and handing it a tag-keyed dictionary
-// crashes descriptor matching. The mapping below is Apple's own, as it stood
-// before commit 06230e738722 replaced it with the tag form, so tags a page asks
-// for are translated rather than dropped: without it font-feature-settings and
-// every font-variant-* were silently ignored.
 static void appendRawTrueTypeFeature(CFMutableArrayRef features, int type, int selector)
 {
     auto typeNumber = adoptCF(CFNumberCreate(kCFAllocatorDefault, kCFNumberIntType, &type));
@@ -189,8 +183,6 @@ static void appendRawTrueTypeFeature(CFMutableArrayRef features, int type, int s
     CFArrayAppendValue(features, feature.get());
 }
 
-// An OpenType tag is four ASCII bytes; the literals below are lower case, and a
-// page may have written the tag in either case.
 static bool tagEquals(FontTag tag, const char (&comparison)[5])
 {
     for (size_t i = 0; i < tag.size(); ++i) {
@@ -310,10 +302,6 @@ void UnrealizedCoreTextFont::applyVariations(CFMutableDictionaryRef attributes, 
         return;
 
 #if defined(WEBKIT_IOS6)
-    // Variable fonts are a decade newer than this CoreText, and none of the
-    // fonts on the device has an axis to vary. Handing it a variation
-    // dictionary does not degrade to a static font — it crashes inside
-    // descriptor matching.
     UNUSED_PARAM(attributes);
     return;
 #else

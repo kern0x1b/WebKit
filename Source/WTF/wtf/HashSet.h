@@ -205,11 +205,7 @@ public:
     template<typename OtherCollection>
     bool isSubset(const OtherCollection&);
 
-    // Overloads for smart pointer values that take the raw pointer type as the parameter.
 #if defined(WEBKIT_IOS6)
-    // Matching the raw-pointer find/contains/remove: adding an already-present key should not
-    // cost a temporary smart pointer and its ref/deref pair. The smart pointer is built only
-    // on the branch that actually stores one.
     template<SmartPtr V = ValueType> AddResult add(typename GetPtrHelper<V>::UnderlyingType*) LIFETIME_BOUND;
 #endif
 

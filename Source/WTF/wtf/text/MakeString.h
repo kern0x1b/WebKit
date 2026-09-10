@@ -72,10 +72,6 @@ template<typename Adapter> constexpr bool adapterCanShareStringImpl = requires(c
     { adapter.existingStringImpl() } -> std::same_as<StringImpl*>;
 };
 
-// When one adapter supplies the whole result, every other adapter is empty and contributes
-// nothing, so the concatenation is that adapter's string. Sharing its StringImpl skips the
-// allocation and the full-body copy. The is8Bit() test keeps the result byte-for-byte and
-// flag-for-flag what the general path would have built.
 template<typename... StringTypeAdapters>
 String tryShareSingleNonEmptyAdapter(unsigned length, bool areAllAdapters8Bit, const StringTypeAdapters&... adapters)
 {

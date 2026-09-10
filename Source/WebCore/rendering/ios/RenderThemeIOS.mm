@@ -1018,12 +1018,7 @@ static std::optional<Color>& cachedInsertionPointColor()
 Color RenderThemeIOS::systemFocusRingColor()
 {
     if (!cachedFocusRingColor().has_value()) {
-        // FIXME: Should be using +keyboardFocusIndicatorColor. For now, work around <rdar://problem/50838886>.
 #if defined(WEBKIT_IOS6)
-        // +systemBlueColor is iOS 13, along with the rest of the named system
-        // colours. The system blue of this release is a fixed value rather than
-        // a named one - #007AFF, what every tinted control on the device is
-        // drawn in - so name it here instead of asking for it.
         cachedFocusRingColor() = SRGBA<uint8_t> { 0, 122, 255 };
 #else
         cachedFocusRingColor() = colorFromCocoaColor([PAL::getUIColorClassSingleton() systemBlueColor]);
@@ -1176,11 +1171,6 @@ static const Vector<CSSValueSystemColorInformation>& cssValueSystemColorInformat
 static inline std::optional<Color> systemColorFromCSSValueSystemColorInformation(CSSValueSystemColorInformation systemColorInformation, bool useDarkAppearance)
 {
 #if defined(WEBKIT_IOS6)
-    // This table names iOS 13's semantic colours - labelColor, systemFillColor
-    // and their kin. This UIColor predates all of them, and sending it one of
-    // those selectors raises rather than returning nil. Ask first; the caller
-    // already knows what to do when there is no colour, and CSS falls back to
-    // the same defaults it uses on a system that never had these names.
     if (![PAL::getUIColorClassSingleton() respondsToSelector:systemColorInformation.selector])
         return std::nullopt;
 #endif
@@ -1212,19 +1202,6 @@ static std::optional<Color> systemColorFromCSSValueID(CSSValueID cssValueID, boo
 }
 
 #if defined(WEBKIT_IOS6)
-// The semantic colours above arrived with iOS 13 and this system has none of
-// them, so systemColorFromCSSValueSystemColorInformation declines and the base
-// RenderTheme is asked instead. It knows only the colours the CSS specification
-// names, and answers anything else with an invalid colour - which is fully
-// transparent. That is how every form control on the web came to be painted with
-// transparent text on a transparent background: the user agent stylesheet asks
-// for -apple-system-blue and -apple-system-opaque-secondary-fill, and got
-// nothing back for both.
-//
-// Each name below is answered with the specification colour that fills the same
-// role, so every value still comes from WebKit's own table and none is invented
-// here. Accentcolor in particular is already defined as 0, 122, 255, which is
-// exactly the blue the missing selector would have returned.
 static CSSValueID standardEquivalentOfAppleSystemColor(CSSValueID cssValueID)
 {
     switch (cssValueID) {
@@ -1255,11 +1232,6 @@ static CSSValueID standardEquivalentOfAppleSystemColor(CSSValueID cssValueID)
     case CSSValueAppleSystemSecondaryGroupedBackground:
     case CSSValueAppleSystemTertiaryGroupedBackground:
     case CSSValueAppleSystemTextBackground:
-    // LocalFrameView::updateBackgroundRecursively reads this one to decide a
-    // frame view's base background, and calls setTransparent when it comes back
-    // invisible. It was dropped from this list by accident while fixing a
-    // duplicate case; no visible symptom was traced to it, but a frame whose
-    // base background is invisible is wrong either way.
     case CSSValueAppleSystemControlBackground:
         return CSSValueCanvas;
 

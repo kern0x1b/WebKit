@@ -146,14 +146,6 @@ static bool NODELETE isJITEnabled()
 {
     bool jitEnabled = !g_jscConfig.jitDisabled;
 #if defined(WEBKIT_IOS6)
-    // The entitlement gate cannot be satisfied here and does not need to be.
-    // processHasEntitlement() goes through SecTaskCreateFromSelf and an XPC
-    // entitlement lookup, neither of which answers on this system, so it reports
-    // no dynamic-codesigning and the JIT is switched off before it is ever tried.
-    // The result was measured: a plain counting loop ran at about two million
-    // iterations a second and did not get faster over five runs - interpreter
-    // speed, no tier-up, for every line of script on every page. On a jailbroken
-    // system the restriction the entitlement exists to lift is already lifted.
     return jitEnabled;
 #elif HAVE(IOS_JIT_RESTRICTIONS)
     jitEnabled = jitEnabled && (processHasEntitlement("dynamic-codesigning"_s) || processHasEntitlement("com.apple.developer.cs.allow-jit"_s));

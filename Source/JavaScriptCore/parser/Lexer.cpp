@@ -991,8 +991,6 @@ template <bool shouldCreateIdentifier> ALWAYS_INLINE JSTokenType Lexer<Latin1Cha
     while (found < m_codeEnd && typesOfLatin1Characters[*found] <= CharacterOtherIdentifierPart)
         ++found;
 #else
-    // Attempt SIMD scan first
-    // caseFoldMask: OR-ing with 0x20 maps 'A'-'Z' to 'a'-'z', so one range check covers both cases.
     constexpr auto caseFoldMask = SIMD::splat<Latin1Character>(0x20);
     constexpr auto lowerA = SIMD::splat<Latin1Character>('a');
     constexpr auto lowerZ = SIMD::splat<Latin1Character>('z');
@@ -1101,7 +1099,6 @@ template <bool shouldCreateIdentifier> ALWAYS_INLINE JSTokenType Lexer<char16_t>
         ++found;
     }
 #else
-    // Attempt SIMD scan first
     constexpr auto caseFoldMask = SIMD::splat<uint16_t>(0x20);
     constexpr auto lowerA = SIMD::splat<uint16_t>('a');
     constexpr auto lowerZ = SIMD::splat<uint16_t>('z');
