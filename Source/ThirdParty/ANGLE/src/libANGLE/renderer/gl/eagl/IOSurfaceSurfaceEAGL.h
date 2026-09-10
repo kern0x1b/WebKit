@@ -68,15 +68,11 @@ class IOSurfaceSurfaceEAGL : public SurfaceGL
     egl::Error detachFromFramebuffer(const gl::Context *context,
                                      gl::Framebuffer *framebuffer) override;
 
+    angle::Result getBindTexImageTextureID(const gl::Context *context,
+                                           GLuint *textureIDOut) override;
+
   private:
-    // The texture the IOSurface is visible through. GLES has no way to give an
-    // existing texture object another texture's storage, which is what the CGL
-    // backend does with CGLTexImageIOSurface2D, so the surface owns a texture of
-    // its own and the two are copied where they have to meet.
     angle::Result ensureSurfaceTexture(const gl::Context *context);
-    angle::Result copyBetweenTextures(const gl::Context *context,
-                                      GLuint sourceTexture,
-                                      GLuint destinationTexture);
 
     const FunctionsGL *mFunctions;
     StateManagerGL *mStateManager;
@@ -92,9 +88,7 @@ class IOSurfaceSurfaceEAGL : public SurfaceGL
     CVOpenGLESTextureRef mSurfaceTexture;
     GLuint mSurfaceTextureID;
 
-    GLuint mBoundTextureID;
     GLuint mFramebufferID;
-    GLuint mCopyFramebufferID;
 };
 
 }  // namespace rx

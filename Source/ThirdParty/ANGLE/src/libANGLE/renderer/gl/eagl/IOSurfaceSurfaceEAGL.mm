@@ -6,12 +6,12 @@
 
 // IOSurfaceSurfaceEAGL.mm: an IOSurface-backed pbuffer for the EAGL backend
 //
-// The CGL backend hands an IOSurface to an existing texture object with
-// CGLTexImageIOSurface2D. GLES has no such call and no rectangle textures; what
-// it has is CVOpenGLESTextureCache, which produces a texture of its own that is
-// backed by the surface. So this surface owns that texture, gives it directly to
-// a framebuffer when it can, and copies to and from the caller's texture when
-// EGL_BindTexImage is used instead.
+// The CGL backend points an existing texture object at an IOSurface with
+// CGLTexImageIOSurface2D. GLES has no such call; what it has is
+// CVOpenGLESTextureCache, which makes a texture of its own out of the surface.
+// So the surface creates that texture and hands its name over - to a framebuffer
+// directly, or to the texture object that EGL_BindTexImage names, which takes
+// the name for as long as the image is bound.
 
 #import "libANGLE/renderer/gl/eagl/IOSurfaceSurfaceEAGL.h"
 
@@ -27,7 +27,6 @@
 #import "libANGLE/renderer/gl/FunctionsGL.h"
 #import "libANGLE/renderer/gl/RendererGL.h"
 #import "libANGLE/renderer/gl/StateManagerGL.h"
-#import "libANGLE/renderer/gl/TextureGL.h"
 #import "libANGLE/renderer/gl/renderergl_utils.h"
 
 namespace
@@ -89,9 +88,7 @@ IOSurfaceSurfaceEAGL::IOSurfaceSurfaceEAGL(const egl::SurfaceState &state,
       mTextureCache(nullptr),
       mSurfaceTexture(nullptr),
       mSurfaceTextureID(0),
-      mBoundTextureID(0),
-      mFramebufferID(0),
-      mCopyFramebufferID(0)
+      mFramebufferID(0)
 {
     // Keep a reference so the surface outlives whoever handed it over.
     mIOSurface = reinterpret_cast<IOSurfaceRef>(buffer);
@@ -108,11 +105,6 @@ IOSurfaceSurfaceEAGL::~IOSurfaceSurfaceEAGL()
     {
         mStateManager->deleteFramebuffer(mFramebufferID);
         mFramebufferID = 0;
-    }
-    if (mCopyFramebufferID != 0)
-    {
-        mStateManager->deleteFramebuffer(mCopyFramebufferID);
-        mCopyFramebufferID = 0;
     }
     if (mSurfaceTexture != nullptr)
     {
@@ -179,22 +171,11 @@ angle::Result IOSurfaceSurfaceEAGL::ensureSurfaceTexture(const gl::Context *cont
     return angle::Result::Continue;
 }
 
-angle::Result IOSurfaceSurfaceEAGL::copyBetweenTextures(const gl::Context *context,
-                                                        GLuint sourceTexture,
-                                                        GLuint destinationTexture)
+angle::Result IOSurfaceSurfaceEAGL::getBindTexImageTextureID(const gl::Context *context,
+                                                             GLuint *textureIDOut)
 {
-    if (mCopyFramebufferID == 0)
-    {
-        mFunctions->genFramebuffers(1, &mCopyFramebufferID);
-    }
-
-    mStateManager->bindFramebuffer(GL_READ_FRAMEBUFFER, mCopyFramebufferID);
-    mFunctions->framebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
-                                     sourceTexture, 0);
-
-    mStateManager->bindTexture(gl::TextureType::_2D, destinationTexture);
-    mFunctions->copyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, mWidth, mHeight);
-
+    ANGLE_TRY(ensureSurfaceTexture(context));
+    *textureIDOut = mSurfaceTextureID;
     return angle::Result::Continue;
 }
 
@@ -239,36 +220,12 @@ egl::Error IOSurfaceSurfaceEAGL::bindTexImage(const gl::Context *context,
         return egl::Error(EGL_CONTEXT_LOST, "Could not make a texture from the IOSurface.");
     }
 
-    const TextureGL *textureGL = GetImplAs<TextureGL>(texture);
-    mBoundTextureID            = textureGL->getTextureID();
-
-    // Give the caller's texture storage of its own and start it from what the
-    // surface currently holds, so a page that draws over part of the canvas
-    // does not lose the rest of it.
-    mStateManager->bindTexture(gl::TextureType::_2D, mBoundTextureID);
-    mFunctions->texImage2D(GL_TEXTURE_2D, 0, GL_RGBA, mWidth, mHeight, 0, GL_RGBA,
-                           GL_UNSIGNED_BYTE, nullptr);
-    if (IsError(copyBetweenTextures(context, mSurfaceTextureID, mBoundTextureID)))
-    {
-        return egl::Error(EGL_CONTEXT_LOST, "Could not read the IOSurface into the texture.");
-    }
-
     return egl::NoError();
 }
 
 egl::Error IOSurfaceSurfaceEAGL::releaseTexImage(const gl::Context *context, EGLint buffer)
 {
-    if (mBoundTextureID != 0 && mSurfaceTextureID != 0)
-    {
-        if (IsError(copyBetweenTextures(context, mBoundTextureID, mSurfaceTextureID)))
-        {
-            return egl::Error(EGL_CONTEXT_LOST, "Could not write the texture into the IOSurface.");
-        }
-        mBoundTextureID = 0;
-    }
-
-    const FunctionsGL *functions = GetFunctionsGL(context);
-    functions->flush();
+    GetFunctionsGL(context)->flush();
     return egl::NoError();
 }
 

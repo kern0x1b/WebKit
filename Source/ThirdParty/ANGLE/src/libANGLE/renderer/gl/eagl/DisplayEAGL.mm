@@ -245,9 +245,12 @@ egl::ConfigSet DisplayEAGL::generateConfigs()
 
     config.transparentType = EGL_NONE;
 
-    config.maxPBufferWidth  = 2048;
-    config.maxPBufferHeight = 2048;
-    config.maxPBufferPixels = 2048 * 2048;
+    // The driver's own limit rather than a number chosen here: a pbuffer is
+    // renderbuffer-backed, and a renderbuffer is what it will refuse first.
+    const gl::Caps &caps    = mRenderer->getNativeCaps();
+    config.maxPBufferWidth  = caps.maxRenderbufferSize;
+    config.maxPBufferHeight = caps.maxRenderbufferSize;
+    config.maxPBufferPixels = caps.maxRenderbufferSize * caps.maxRenderbufferSize;
 
     config.configCaveat = EGL_NONE;
 

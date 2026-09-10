@@ -29,6 +29,9 @@ class SurfaceGL : public SurfaceImpl
 
     virtual bool hasEmulatedAlphaChannel() const;
 
+    virtual angle::Result getBindTexImageTextureID(const gl::Context *context,
+                                                   GLuint *textureIDOut);
+
     egl::Error attachToFramebuffer(const gl::Context *context,
                                    gl::Framebuffer *framebuffer) override;
     egl::Error detachFromFramebuffer(const gl::Context *context,
