@@ -108,7 +108,7 @@ static void initializeSQLiteIfNecessary()
         // aren't confident that it really is, and we still support ancient versions of SQLite. So
         // std::call_once is used to stay on the safe side. See bug #143245.
 
-#if OS(DARWIN)
+#if OS(DARWIN) && !defined(WEBKIT_IOS6)
         int ret;
         callOnMainThreadAndWait([&] {
             // In the Network process, this function can be called on a background thread when
@@ -118,6 +118,8 @@ static void initializeSQLiteIfNecessary()
             // main thread.
             ret = sqlite3_initialize();
         });
+#elif OS(DARWIN)
+        int ret = sqlite3_initialize();
 #else
         // On non-Darwin systems confstr() is MT-safe and it does not try to fiddle with environment
         // variables, and it is better initialize directly. This is true at least on Linux with the
