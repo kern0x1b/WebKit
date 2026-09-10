@@ -121,7 +121,13 @@ static EGLDisplay initializeEGLDisplay(const GraphicsContextGLAttributes& attrs)
 
     Vector<EGLAttrib> displayAttributes;
     displayAttributes.append(EGL_PLATFORM_ANGLE_TYPE_ANGLE);
+#if defined(WEBKIT_IOS6)
+    // Metal needs an A7; this GPU is two generations older and its only API is
+    // GLES, which ANGLE reaches here through the EAGL backend.
+    displayAttributes.append(EGL_PLATFORM_ANGLE_TYPE_OPENGLES_ANGLE);
+#else
     displayAttributes.append(EGL_PLATFORM_ANGLE_TYPE_METAL_ANGLE);
+#endif
     // These properties are defined for EGL_ANGLE_power_preference as EGLContext attributes,
     // but Metal backend uses EGLDisplay attributes.
     auto powerPreference = attrs.powerPreference;
@@ -146,11 +152,13 @@ static EGLDisplay initializeEGLDisplay(const GraphicsContextGLAttributes& attrs)
         displayAttributes.append(static_cast<EGLAttrib>(attrs.windowGPUID));
     }
 #endif
+#if !defined(WEBKIT_IOS6)
     ASSERT(WTF::contains(clientExtensions, "EGL_ANGLE_feature_control"_span));
     displayAttributes.append(EGL_FEATURE_OVERRIDES_DISABLED_ANGLE);
     displayAttributes.append(reinterpret_cast<EGLAttrib>(disabledANGLEMetalFeatures));
     displayAttributes.append(EGL_FEATURE_OVERRIDES_ENABLED_ANGLE);
     displayAttributes.append(reinterpret_cast<EGLAttrib>(enabledANGLEMetalFeatures));
+#endif
     displayAttributes.append(EGL_NONE);
 
     EGLDisplay display = EGL_GetPlatformDisplay(EGL_PLATFORM_ANGLE_ANGLE, reinterpret_cast<void*>(EGL_DEFAULT_DISPLAY), displayAttributes.span().data());
@@ -162,7 +170,7 @@ static EGLDisplay initializeEGLDisplay(const GraphicsContextGLAttributes& attrs)
     }
     LOG(WebGL, "ANGLE initialised Major: %d Minor: %d", majorVersion, minorVersion);
 
-#if ASSERT_ENABLED
+#if ASSERT_ENABLED && !defined(WEBKIT_IOS6)
     auto displayExtensions = unsafeSpan(EGL_QueryString(display, EGL_EXTENSIONS));
     ASSERT(WTF::contains(displayExtensions, "EGL_ANGLE_metal_shared_event_sync"_span));
 #endif
@@ -200,8 +208,10 @@ bool GraphicsContextGLCocoa::platformInitializeContext()
 {
     GraphicsContextGLAttributes attributes = contextAttributes();
     m_isForWebGL2 = attributes.isWebGL2;
+#if !defined(WEBKIT_IOS6)
     if (!platformSupportsMetal())
         return false;
+#endif
 
     m_displayObj = initializeEGLDisplay(attributes);
     if (!m_displayObj)
@@ -272,6 +282,7 @@ bool GraphicsContextGLCocoa::platformInitializeContext()
         LOG(WebGL, "EGLContext Initialization failed.");
         return false;
     }
+#if !defined(WEBKIT_IOS6)
     m_finishedMetalSharedEventListener = adoptNS([[MTLSharedEventListener alloc] init]);
     if (!m_finishedMetalSharedEventListener) {
         ASSERT_NOT_REACHED();
@@ -282,6 +293,7 @@ bool GraphicsContextGLCocoa::platformInitializeContext()
         ASSERT_NOT_REACHED();
         return false;
     }
+#endif
     return true;
 }
 
@@ -853,6 +865,16 @@ RefPtr<NativeImage> GraphicsContextGLCocoa::copyNativeImageYFlipped(SurfaceBuffe
 
 void GraphicsContextGLCocoa::insertFinishedSignalOrInvoke(Function<void()> signal)
 {
+#if defined(WEBKIT_IOS6)
+    // The signal a Metal shared event carries says "the GPU has finished with
+    // this frame". Without Metal there is no event to listen to and no fence in
+    // GLES 2.0 either, so the work is waited for and the caller told directly -
+    // slower than a callback, and the same guarantee.
+    if (makeContextCurrent())
+        GL_Finish();
+    signal();
+    return;
+#else
     static std::atomic<uint64_t> nextSignalValue;
     uint64_t signalValue = ++nextSignalValue;
     RetainPtr<id<MTLSharedEvent>> event = m_finishedMetalSharedEvent.get();
@@ -869,6 +891,7 @@ void GraphicsContextGLCocoa::insertFinishedSignalOrInvoke(Function<void()> signa
     }
     bool result = EGL_DestroySync(platformDisplay(), eglSync);
     ASSERT_UNUSED(result, result);
+#endif
 }
 
 #if ENABLE(VIDEO)
