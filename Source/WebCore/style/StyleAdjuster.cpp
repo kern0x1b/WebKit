@@ -511,6 +511,8 @@ void Adjuster::adjust(Style::ComputedStyle& style) const
     // A backdrop filter cannot be honoured on this system: the layer class that
     // samples what is behind an element does not exist, so the filter is dropped
     // and the element is left with whatever translucent background it declared.
+    // Both spellings reach here: the unprefixed property is enabled in this port
+    // precisely so that a site declaring only the modern one is adjusted too.
     // The result is a bar you can read the page through - and while the page is
     // scrolling, what shows through is the tile behind it, still holding the
     // previous frame, so the bar appears to double and smear. An opaque bar is

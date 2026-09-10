@@ -1772,13 +1772,13 @@ CSSUnprefixedBackdropFilterEnabled:
   humanReadableDescription: "Enable unprefixed backdrop-filter CSS property"
   defaultValue:
     WebKitLegacy:
-      default: false
+      default: true
     WebKit:
       "ENABLE(UNPREFIXED_BACKDROP_FILTER)": true
       default: false
     WebCore:
       "ENABLE(UNPREFIXED_BACKDROP_FILTER)": true
-      default: false
+      default: true
 
 CSSWhiteSpaceTrimEnabled:
   type: bool
