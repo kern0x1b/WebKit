@@ -71,8 +71,11 @@ class IOSurfaceSurfaceEAGL : public SurfaceGL
     angle::Result getBindTexImageTextureID(const gl::Context *context,
                                            GLuint *textureIDOut) override;
 
+    bool hasEmulatedAlphaChannel() const override;
+
   private:
     angle::Result ensureSurfaceTexture(const gl::Context *context);
+    angle::Result initializeAlphaChannel(const gl::Context *context, GLuint texture);
 
     const FunctionsGL *mFunctions;
     StateManagerGL *mStateManager;
@@ -82,6 +85,8 @@ class IOSurfaceSurfaceEAGL : public SurfaceGL
     int mWidth;
     int mHeight;
     int mPlane;
+    GLenum mInternalFormat;
+    bool mAlphaInitialized;
 
     CVPixelBufferRef mPixelBuffer;
     CVOpenGLESTextureCacheRef mTextureCache;

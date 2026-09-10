@@ -22,6 +22,7 @@
 
 #import "common/debug.h"
 #import "libANGLE/AttributeMap.h"
+#import "libANGLE/renderer/gl/BlitGL.h"
 #import "libANGLE/renderer/gl/ContextGL.h"
 #import "libANGLE/renderer/gl/FramebufferGL.h"
 #import "libANGLE/renderer/gl/FunctionsGL.h"
@@ -84,6 +85,8 @@ IOSurfaceSurfaceEAGL::IOSurfaceSurfaceEAGL(const egl::SurfaceState &state,
       mWidth(0),
       mHeight(0),
       mPlane(0),
+      mInternalFormat(GL_NONE),
+      mAlphaInitialized(false),
       mPixelBuffer(nullptr),
       mTextureCache(nullptr),
       mSurfaceTexture(nullptr),
@@ -97,6 +100,9 @@ IOSurfaceSurfaceEAGL::IOSurfaceSurfaceEAGL(const egl::SurfaceState &state,
     mWidth  = static_cast<int>(attribs.get(EGL_WIDTH));
     mHeight = static_cast<int>(attribs.get(EGL_HEIGHT));
     mPlane  = static_cast<int>(attribs.get(EGL_IOSURFACE_PLANE_ANGLE));
+
+    mInternalFormat   = static_cast<GLenum>(attribs.get(EGL_TEXTURE_INTERNAL_FORMAT_ANGLE));
+    mAlphaInitialized = !hasEmulatedAlphaChannel();
 }
 
 IOSurfaceSurfaceEAGL::~IOSurfaceSurfaceEAGL()
@@ -176,8 +182,32 @@ angle::Result IOSurfaceSurfaceEAGL::getBindTexImageTextureID(const gl::Context *
                                                              GLuint *textureIDOut)
 {
     ANGLE_TRY(ensureSurfaceTexture(context));
+    ANGLE_TRY(initializeAlphaChannel(context, mSurfaceTextureID));
     *textureIDOut = mSurfaceTextureID;
     return angle::Result::Continue;
+}
+
+// A context asked for without an alpha channel is served from a surface that
+// has one, so the alpha the caller never writes has to read as opaque: ANGLE
+// swizzles it away when sampling, and the surface's own bytes are set once.
+angle::Result IOSurfaceSurfaceEAGL::initializeAlphaChannel(const gl::Context *context,
+                                                           GLuint texture)
+{
+    if (mAlphaInitialized)
+    {
+        return angle::Result::Continue;
+    }
+
+    BlitGL *blitter = GetBlitGL(context);
+    ANGLE_TRY(blitter->clearRenderableTextureAlphaToOne(context, texture,
+                                                        gl::TextureTarget::_2D, 0));
+    mAlphaInitialized = true;
+    return angle::Result::Continue;
+}
+
+bool IOSurfaceSurfaceEAGL::hasEmulatedAlphaChannel() const
+{
+    return mInternalFormat == GL_RGB;
 }
 
 egl::Error IOSurfaceSurfaceEAGL::makeCurrent(const gl::Context *context)
@@ -282,12 +312,14 @@ bool IOSurfaceSurfaceEAGL::validateAttributes(EGLClientBuffer buffer,
         return false;
     }
 
-    // Only the eight-bit four-channel format is served here. It is what a canvas
-    // is, and claiming the rest would mean claiming conversions this backend
-    // does not do.
+    // Eight bits a channel, which is what a canvas is. GL_RGB is here because a
+    // context asked for without an alpha channel is served from the same BGRA
+    // surface with its alpha ignored, the way the CGL backend does it; claiming
+    // any of the rest would mean claiming conversions this backend does not do.
     EGLAttrib internalFormat = attribs.get(EGL_TEXTURE_INTERNAL_FORMAT_ANGLE);
     EGLAttrib type           = attribs.get(EGL_TEXTURE_TYPE_ANGLE);
-    if ((internalFormat != GL_BGRA_EXT && internalFormat != GL_RGBA) || type != GL_UNSIGNED_BYTE)
+    if ((internalFormat != GL_BGRA_EXT && internalFormat != GL_RGBA && internalFormat != GL_RGB) ||
+        type != GL_UNSIGNED_BYTE)
     {
         return false;
     }
@@ -304,6 +336,11 @@ egl::Error IOSurfaceSurfaceEAGL::attachToFramebuffer(const gl::Context *context,
     if (IsError(ensureSurfaceTexture(context)))
     {
         return egl::Error(EGL_CONTEXT_LOST, "Could not make a texture from the IOSurface.");
+    }
+
+    if (IsError(initializeAlphaChannel(context, mSurfaceTextureID)))
+    {
+        return egl::Error(EGL_CONTEXT_LOST, "Could not clear the IOSurface's alpha channel.");
     }
 
     if (mFramebufferID == 0)
