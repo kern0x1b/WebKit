@@ -167,6 +167,23 @@ typedef enum {
 
 @end
 
+#if defined(WEBKIT_IOS6)
+/*!
+    An embedder that has to add globals to every page - and cannot rely on being
+    the frame load delegate, because the browser it is loaded into already is -
+    registers here instead. The callback runs for the main normal world only,
+    before any of the page's scripts, whatever the delegate implements.
+*/
+typedef void (*WebWindowObjectClearedCallback)(WebView *webView, WebFrame *frame);
+#ifdef __cplusplus
+extern "C" {
+#endif
+extern __attribute__((visibility("default"))) void WebSetWindowObjectClearedCallback(WebWindowObjectClearedCallback);
+#ifdef __cplusplus
+}
+#endif
+#endif
+
 @interface WebView (WebPendingPublic)
 
 - (void)scheduleInRunLoop:(NSRunLoop *)runLoop forMode:(NSString *)mode;

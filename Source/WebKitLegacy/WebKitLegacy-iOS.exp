@@ -478,6 +478,7 @@ _WebQuickLookUTIKey
 _WebScriptErrorDescriptionKey
 _WebScriptErrorDomain
 _WebScriptErrorLineNumberKey
+_WebSetWindowObjectClearedCallback
 _WebStorageDidModifyOriginNotification
 _WebStorageDirectoryDefaultsKey
 _WebThreadAdoptAndRelease

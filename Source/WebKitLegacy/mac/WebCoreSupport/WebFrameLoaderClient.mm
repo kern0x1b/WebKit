@@ -1852,10 +1852,24 @@ AtomString WebFrameLoaderClient::overrideMediaType() const
     return nullAtom();
 }
 
+#if defined(WEBKIT_IOS6)
+static WebWindowObjectClearedCallback s_windowObjectClearedCallback;
+
+extern "C" __attribute__((visibility("default"))) void WebSetWindowObjectClearedCallback(WebWindowObjectClearedCallback callback)
+{
+    s_windowObjectClearedCallback = callback;
+}
+#endif
+
 void WebFrameLoaderClient::dispatchDidClearWindowObjectInWorld(WebCore::DOMWrapperWorld& world)
 {
     RetainPtr webView = getWebView(m_webFrame.get());
     WebFrameLoadDelegateImplementationCache* implementations = WebViewGetFrameLoadDelegateImplementations(webView.get());
+
+#if defined(WEBKIT_IOS6)
+    if (s_windowObjectClearedCallback && &world == &WebCore::mainThreadNormalWorldSingleton())
+        s_windowObjectClearedCallback(webView.get(), m_webFrame.get());
+#endif
 
     if (implementations->didClearWindowObjectForFrameInScriptWorldFunc) {
         CallFrameLoadDelegate(implementations->didClearWindowObjectForFrameInScriptWorldFunc,
