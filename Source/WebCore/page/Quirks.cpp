@@ -2185,8 +2185,28 @@ static constexpr auto frozenVersion = "18_6"_s;
 static constexpr auto frozenVersion = "18_7"_s;
 #endif
 
-String Quirks::standardUserAgentWithApplicationNameIncludingCompatOverrides(const String& applicationName, const String& userAgentOSVersion, UserAgentType type)
+#if defined(WEBKIT_IOS6)
+// The browser this engine is loaded into names itself after the engine it shipped
+// with - "Version/6.0 Mobile/15E148 Safari/8536.25" - and sites branch on those two
+// tokens to serve a 2012 engine the code paths written for it. This engine is not
+// that engine, and no browser has ever paired those tokens with AppleWebKit/605, so
+// the pair also reads as a forgery to anything checking for one. Report the browser
+// version that goes with the frozen OS version above.
+static String applicationNameMatchingFrozenVersion(const String& applicationName)
 {
+    if (!applicationName.contains("Safari/8536"_s))
+        return applicationName;
+    return makeString("Version/"_s, makeStringByReplacingAll(StringView(frozenVersion), '_', '.'), " Mobile/15E148 Safari/604.1"_s);
+}
+#endif
+
+String Quirks::standardUserAgentWithApplicationNameIncludingCompatOverrides(const String& originalApplicationName, const String& userAgentOSVersion, UserAgentType type)
+{
+#if defined(WEBKIT_IOS6)
+    auto applicationName = applicationNameMatchingFrozenVersion(originalApplicationName);
+#else
+    auto& applicationName = originalApplicationName;
+#endif
     auto overriddenUAString = standardUserAgentWithApplicationNameIncludingCompatOverridesInternal(applicationName, userAgentOSVersion, type);
     if (overriddenUAString.length())
         return overriddenUAString;
