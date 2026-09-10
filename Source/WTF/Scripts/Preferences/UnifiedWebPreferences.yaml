@@ -652,8 +652,8 @@ ApplePayEnabled:
 
 # Off on this port: the API is complete, but writing goes through NSItemProvider
 # and -[UIPasteboard setItemProviders:], which are iOS 11, and calling writeText
-# takes the process down. Turning it on needs PlatformPasteboardIOS to write
-# through -setItems: on this release first.
+# takes the process down. The item-dictionary fallback macCatalyst uses was tried
+# here and the crash survived it, so the write path needs writing, not routing.
 AsyncClipboardAPIEnabled:
   type: bool
   status: mature
