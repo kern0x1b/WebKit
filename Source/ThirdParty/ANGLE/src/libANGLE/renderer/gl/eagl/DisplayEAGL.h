@@ -63,6 +63,10 @@ class DisplayEAGL : public DisplayGL
     egl::Error restoreLostDevice(const egl::Display *display) override;
 
     bool isValidNativeWindow(EGLNativeWindowType window) const override;
+    egl::Error validateClientBuffer(const egl::Config *configuration,
+                                    EGLenum buftype,
+                                    EGLClientBuffer clientBuffer,
+                                    const egl::AttributeMap &attribs) const override;
 
     DeviceImpl *createDevice() override;
 

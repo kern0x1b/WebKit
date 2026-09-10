@@ -105,6 +105,8 @@ if(is_ios OR WEBKIT_IOS6)
         "src/libANGLE/renderer/gl/eagl/DeviceEAGL.h"
         "src/libANGLE/renderer/gl/eagl/DisplayEAGL.h"
         "src/libANGLE/renderer/gl/eagl/DisplayEAGL.mm"
+        "src/libANGLE/renderer/gl/eagl/IOSurfaceSurfaceEAGL.h"
+        "src/libANGLE/renderer/gl/eagl/IOSurfaceSurfaceEAGL.mm"
         "src/libANGLE/renderer/gl/eagl/PbufferSurfaceEAGL.cpp"
         "src/libANGLE/renderer/gl/eagl/PbufferSurfaceEAGL.h"
     )

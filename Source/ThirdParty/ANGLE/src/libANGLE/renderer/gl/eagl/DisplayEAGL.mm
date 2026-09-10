@@ -22,6 +22,7 @@
 #import "libANGLE/renderer/gl/ContextGL.h"
 #import "libANGLE/renderer/gl/RendererGL.h"
 #import "libANGLE/renderer/gl/eagl/DeviceEAGL.h"
+#import "libANGLE/renderer/gl/eagl/IOSurfaceSurfaceEAGL.h"
 #import "libANGLE/renderer/gl/eagl/PbufferSurfaceEAGL.h"
 
 namespace
@@ -172,8 +173,24 @@ SurfaceImpl *DisplayEAGL::createPbufferFromClientBuffer(const egl::SurfaceState 
                                                         EGLClientBuffer clientBuffer,
                                                         const egl::AttributeMap &attribs)
 {
-    UNIMPLEMENTED();
-    return nullptr;
+    ASSERT(buftype == EGL_IOSURFACE_ANGLE);
+
+    return new IOSurfaceSurfaceEAGL(state, mRenderer.get(), mContext, clientBuffer, attribs);
+}
+
+egl::Error DisplayEAGL::validateClientBuffer(const egl::Config *configuration,
+                                             EGLenum buftype,
+                                             EGLClientBuffer clientBuffer,
+                                             const egl::AttributeMap &attribs) const
+{
+    ASSERT(buftype == EGL_IOSURFACE_ANGLE);
+
+    if (!IOSurfaceSurfaceEAGL::validateAttributes(clientBuffer, attribs))
+    {
+        return egl::Error(EGL_BAD_ATTRIBUTE);
+    }
+
+    return egl::NoError();
 }
 
 SurfaceImpl *DisplayEAGL::createPixmapSurface(const egl::SurfaceState &state,
@@ -286,7 +303,8 @@ EAGLContext *DisplayEAGL::getEAGLContext() const
 
 void DisplayEAGL::generateExtensions(egl::DisplayExtensions *outExtensions) const
 {
-    outExtensions->surfacelessContext = true;
+    outExtensions->iosurfaceClientBuffer = true;
+    outExtensions->surfacelessContext    = true;
 
     // Contexts are virtualized so textures and semaphores can be shared globally
     outExtensions->displayTextureShareGroup   = true;
