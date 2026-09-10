@@ -650,7 +650,10 @@ ApplePayEnabled:
   sharedPreferenceForWebProcess: true
   richJavaScript: true
 
-# FIXME: This is on by default in WebKit2 PLATFORM(COCOA). Perhaps we should consider turning it on for WebKitLegacy as well.
+# Off on this port: the API is complete, but writing goes through NSItemProvider
+# and -[UIPasteboard setItemProviders:], which are iOS 11, and calling writeText
+# takes the process down. Turning it on needs PlatformPasteboardIOS to write
+# through -setItems: on this release first.
 AsyncClipboardAPIEnabled:
   type: bool
   status: mature
