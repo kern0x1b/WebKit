@@ -261,7 +261,11 @@ egl::ConfigSet DisplayEAGL::generateConfigs()
     // ordinary 2D texture here.
     config.bindToTextureTarget = EGL_TEXTURE_2D;
 
-    config.surfaceType = EGL_PBUFFER_BIT;
+    // eglChooseConfig defaults EGL_SURFACE_TYPE to EGL_WINDOW_BIT, and a caller
+    // that does not ask for a surface type - WebCore's is one - matches nothing
+    // without it. No window surface is ever created here; the browser composites
+    // through an IOSurface.
+    config.surfaceType = EGL_WINDOW_BIT | EGL_PBUFFER_BIT;
 
     config.minSwapInterval = 1;
     config.maxSwapInterval = 1;

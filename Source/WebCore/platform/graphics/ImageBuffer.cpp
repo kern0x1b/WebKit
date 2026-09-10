@@ -87,7 +87,11 @@ RefPtr<ImageBuffer> ImageBuffer::create(const FloatSize& size, RenderingMode ren
 
     switch (renderingMode) {
     case RenderingMode::Accelerated:
-#if HAVE(IOSURFACE)
+// An IOSurface-backed image buffer buys nothing on this device - nothing
+// composites a canvas on the GPU here - and costs the four non-separable blend
+// modes, which a CoreGraphics context over an IOSurface silently drops. WebGL
+// still gets its IOSurfaces; it makes them itself rather than through here.
+#if HAVE(IOSURFACE) && !defined(WEBKIT_IOS6)
         if (ProcessCapabilities::canUseAcceleratedBuffers()) {
             ImageBufferCreationContext creationContext;
             if (graphicsClient)

@@ -380,7 +380,7 @@
 #define HAVE_AVASSETREADER 1
 #endif
 
-#if PLATFORM(COCOA) && !defined(WEBKIT_IOS6)
+#if PLATFORM(COCOA)
 #define HAVE_IOSURFACE 1
 #endif
 
@@ -2066,6 +2066,16 @@
 #define HAVE_SUPPORT_HDR_DISPLAY_APIS 0
 #undef HAVE_TASK_IDENTITY_TOKEN
 #define HAVE_TASK_IDENTITY_TOKEN 0
+// Ownership identity is the task identity token above by another name: without
+// one there is nothing to hand CGContextSetOwnerIdentity.
+#undef HAVE_CG_CONTEXT_SET_OWNER_IDENTITY
+#define HAVE_CG_CONTEXT_SET_OWNER_IDENTITY 0
+// IOSurfaceAccelerator is an iOS 8 framework; linking it stops the engine from
+// loading at all on this release.
+#undef HAVE_IOSURFACE_ACCELERATOR
+#define HAVE_IOSURFACE_ACCELERATOR 0
+#undef HAVE_IOSURFACE_COREIMAGE_SUPPORT
+#define HAVE_IOSURFACE_COREIMAGE_SUPPORT 0
 #undef HAVE_AVSAMPLEBUFFERVIDEORENDERER
 #define HAVE_AVSAMPLEBUFFERVIDEORENDERER 0
 #undef HAVE_VTDECOMPRESSIONSESSION_MULTIIMAGE

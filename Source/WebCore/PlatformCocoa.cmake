@@ -519,9 +519,7 @@ list(APPEND WebCore_SOURCES
     platform/graphics/cocoa/FontPlatformDataCocoa.mm
     platform/graphics/cocoa/GraphicsContextCocoa.mm
     platform/graphics/cocoa/GraphicsContextGLCocoa.mm
-    # ios6: platform/graphics/cocoa/IOSurface.mm
     platform/graphics/cocoa/IOSurfaceDrawingBuffer.cpp
-    # ios6: platform/graphics/cocoa/IOSurfacePoolCocoa.mm
     platform/graphics/cocoa/IntRectCocoa.mm
     platform/graphics/cocoa/MediaPlayerEnumsCocoa.mm
     platform/graphics/cocoa/TextTransformCocoa.cpp
@@ -1557,3 +1555,11 @@ list(APPEND WebCore_PRIVATE_FRAMEWORK_HEADERS
     platform/mac/WebCoreView.h
 )
 
+# The surface WebGL presents through. IOSurface is a private framework on this
+# release, so what these files call that came later is answered by the
+# compatibility library.
+list(APPEND WebCore_SOURCES
+    platform/graphics/cg/IOSurfacePool.cpp
+    platform/graphics/cocoa/IOSurface.mm
+    platform/graphics/cocoa/IOSurfacePoolCocoa.mm
+)

@@ -131,6 +131,12 @@ static EGLDisplay initializeEGLDisplay(const GraphicsContextGLAttributes& attrs)
     // These properties are defined for EGL_ANGLE_power_preference as EGLContext attributes,
     // but Metal backend uses EGLDisplay attributes.
     auto powerPreference = attrs.powerPreference;
+#if defined(WEBKIT_IOS6)
+    // There is one GPU here and no extension to choose between them, and a
+    // display attribute the backend does not advertise is rejected outright -
+    // EGL_BAD_ATTRIBUTE, no display, no WebGL.
+    powerPreference = GraphicsContextGLPowerPreference::Default;
+#endif
     if (powerPreference == GraphicsContextGLPowerPreference::HighPerformance) {
         displayAttributes.append(EGL_POWER_PREFERENCE_ANGLE);
         displayAttributes.append(EGL_HIGH_POWER_ANGLE);

@@ -116,7 +116,7 @@ ALWAYS_INLINE void convert16BitFormatToRGBA8(std::span<const SourceType>, std::s
 template<> ALWAYS_INLINE void NODELETE convert16BitFormatToRGBA8<GraphicsContextGL::DataFormat::RGBA16Little, uint16_t, uint8_t>(std::span<const uint16_t> source, std::span<uint8_t> destination, unsigned pixelsPerRow)
 {
 #if HAVE(ARM_NEON_INTRINSICS)
-    SIMD::unpackOneRowOfRGBA16LittleToRGBA8(source.data(), destination.data(), pixelsPerRow);
+    SIMD::unpackOneRowOfRGBA16LittleToRGBA8(source, destination, pixelsPerRow);
 #endif
     for (unsigned i = 0; i < pixelsPerRow; ++i) {
         destination[0] = convertColor16LittleTo8(source[0]);
@@ -143,7 +143,7 @@ template<> ALWAYS_INLINE void NODELETE convert16BitFormatToRGBA8<GraphicsContext
 template<> ALWAYS_INLINE void NODELETE convert16BitFormatToRGBA8<GraphicsContextGL::DataFormat::RGB16Little, uint16_t, uint8_t>(std::span<const uint16_t> source, std::span<uint8_t> destination, unsigned pixelsPerRow)
 {
 #if HAVE(ARM_NEON_INTRINSICS)
-    SIMD::unpackOneRowOfRGB16LittleToRGBA8(source.data(), destination.data(), pixelsPerRow);
+    SIMD::unpackOneRowOfRGB16LittleToRGBA8(source, destination, pixelsPerRow);
 #endif
     for (unsigned i = 0; i < pixelsPerRow; ++i) {
         destination[0] = convertColor16LittleTo8(source[0]);
@@ -170,7 +170,7 @@ template<> ALWAYS_INLINE void NODELETE convert16BitFormatToRGBA8<GraphicsContext
 template<> ALWAYS_INLINE void NODELETE convert16BitFormatToRGBA8<GraphicsContextGL::DataFormat::ARGB16Little, uint16_t, uint8_t>(std::span<const uint16_t> source, std::span<uint8_t> destination, unsigned pixelsPerRow)
 {
 #if HAVE(ARM_NEON_INTRINSICS)
-    SIMD::unpackOneRowOfARGB16LittleToRGBA8(source.data(), destination.data(), pixelsPerRow);
+    SIMD::unpackOneRowOfARGB16LittleToRGBA8(source, destination, pixelsPerRow);
 #endif
     for (unsigned i = 0; i < pixelsPerRow; ++i) {
         destination[0] = convertColor16LittleTo8(source[1]);
