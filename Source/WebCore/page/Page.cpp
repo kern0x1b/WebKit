@@ -2613,9 +2613,7 @@ void Page::doAfterUpdateRendering()
 
     m_renderingUpdateRemainingSteps.last().remove(RenderingUpdateStep::PrepareCanvasesForDisplayOrFlush);
 
-    forEachRenderable([] (Document& document) {
-        document.prepareCanvasesForDisplayOrFlushIfNeeded();
-    });
+    prepareCanvasesForDisplayOrFlushIfNeeded();
 
     if (localMainFrame) {
         ASSERT(!localMainFrame->view() || !localMainFrame->view()->needsLayout());
@@ -2642,6 +2640,13 @@ void Page::doAfterUpdateRendering()
     if (settings().siteIsolationEnabled())
         syncLocalFrameInfoToRemote();
 #endif
+}
+
+void Page::prepareCanvasesForDisplayOrFlushIfNeeded()
+{
+    forEachRenderableDocument([] (Document& document) {
+        document.prepareCanvasesForDisplayOrFlushIfNeeded();
+    });
 }
 
 void Page::finalizeRenderingUpdate(OptionSet<FinalizeRenderingUpdateFlags> flags)

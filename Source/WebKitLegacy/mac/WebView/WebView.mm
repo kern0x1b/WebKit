@@ -9242,6 +9242,11 @@ FORWARD(toggleUnderline)
     if (!frame || !frame->view())
         return YES;
 
+#if defined(WEBKIT_IOS6)
+    if (RefPtr page = _private->page.get())
+        page->prepareCanvasesForDisplayOrFlushIfNeeded();
+#endif
+
     BOOL flushed = frame->view()->flushCompositingStateIncludingSubframes();
 
     // Correcting the pinned bars here, inside the engine's own transaction, was

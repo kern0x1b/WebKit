@@ -34,6 +34,7 @@
 #import "LocalCurrentGraphicsContext.h"
 #import "MediaPlayerEnumsCocoa.h"
 #import "Model.h"
+#import "NativeImage.h"
 #import "PathCG.h"
 #import "PlatformCAAnimationCocoa.h"
 #import "PlatformCAFilters.h"
@@ -846,8 +847,14 @@ void PlatformCALayerCocoa::setContents(CFTypeRef value)
 void PlatformCALayerCocoa::setDelegatedContents(const PlatformCALayerInProcessDelegatedContents& contents)
 {
 #if HAVE(IOSURFACE)
-    if (!contents.finishedFence || protect(contents.finishedFence)->waitFor(delegatedContentsFinishedTimeout))
+    if (!contents.finishedFence || protect(contents.finishedFence)->waitFor(delegatedContentsFinishedTimeout)) {
+#if defined(WEBKIT_IOS6)
+        RefPtr image = const_cast<IOSurface&>(contents.surface).createNativeImage();
+        setContents(image ? image->platformImage().get() : nullptr);
+#else
         setContents(contents.surface.asLayerContents());
+#endif
+    }
 #else
     UNUSED_PARAM(contents);
 #endif
