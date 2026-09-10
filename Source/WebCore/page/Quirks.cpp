@@ -2187,16 +2187,20 @@ static constexpr auto frozenVersion = "18_7"_s;
 
 #if defined(WEBKIT_IOS6)
 // The browser this engine is loaded into names itself after the engine it shipped
-// with - "Version/6.0 Mobile/15E148 Safari/8536.25" - and sites branch on those two
-// tokens to serve a 2012 engine the code paths written for it. This engine is not
-// that engine, and no browser has ever paired those tokens with AppleWebKit/605, so
-// the pair also reads as a forgery to anything checking for one. Report the browser
-// version that goes with the frozen OS version above.
+// with, and sites branch on its Version/ and Safari/ tokens to decide which code
+// paths a Safari gets. Those tokens belong to the engine, not to the application
+// around it, so an application that calls itself Safari gets the pair that goes
+// with the frozen OS version above - the same two constants WebKit itself writes
+// for a browser that reports through -_setBrowserUserAgentProductVersion:.
+static constexpr auto frozenMobileBuild = "15E148"_s;
+static constexpr auto frozenSafariVersion = "604.1"_s;
+
 static String applicationNameMatchingFrozenVersion(const String& applicationName)
 {
-    if (!applicationName.contains("Safari/8536"_s))
+    if (!applicationName.contains("Safari/"_s))
         return applicationName;
-    return makeString("Version/"_s, makeStringByReplacingAll(StringView(frozenVersion), '_', '.'), " Mobile/15E148 Safari/604.1"_s);
+    return makeString("Version/"_s, makeStringByReplacingAll(StringView(frozenVersion), '_', '.'),
+        " Mobile/"_s, frozenMobileBuild, " Safari/"_s, frozenSafariVersion);
 }
 #endif
 
