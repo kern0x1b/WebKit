@@ -68,15 +68,15 @@ public:
         m_targets.clear();
     }
 
-    void setWantedGPR(GPRReg gpr)
+    void setWantedJSValueRegs(JSValueRegs jsValueRegs)
     {
         ASSERT(m_wantedFPR == InvalidFPRReg);
-        m_wantedGPR = gpr;
+        m_wantedJSValueRegs = jsValueRegs;
     }
 
     void setWantedFPR(FPRReg fpr)
     {
-        ASSERT(m_wantedGPR == InvalidGPRReg);
+        ASSERT(!m_wantedJSValueRegs);
         m_wantedFPR = fpr;
     }
 
@@ -111,13 +111,13 @@ public:
 
     void setRecovery(ValueRecovery recovery) { m_recovery = recovery; }
 
-    GPRReg wantedGPR() const { return m_wantedGPR; }
+    JSValueRegs wantedJSValueRegs() const { return m_wantedJSValueRegs; }
 
     FPRReg wantedFPR() const { return m_wantedFPR; }
 private:
     Vector<VirtualRegister, 1> m_targets;
     ValueRecovery m_recovery;
-    GPRReg m_wantedGPR { InvalidGPRReg };
+    JSValueRegs m_wantedJSValueRegs;
     FPRReg m_wantedFPR { InvalidFPRReg };
 };
 

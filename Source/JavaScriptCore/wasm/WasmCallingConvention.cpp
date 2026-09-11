@@ -116,8 +116,9 @@ const CCallingConventionArmThumb2& cCallingConventionArmThumb2()
         scratch.exclude(RegisterSet::macroClobberedGPRs());
         scratch.exclude(RegisterSet::reservedHardwareRegisters());
         scratch.exclude(RegisterSet::stackRegisters());
-        for (GPRReg gpr : gprArgumentRegisters)
-            scratch.remove(gpr);
+        for (JSValueRegs jsr : jsrArgumentRegisters) {
+            scratch.remove(jsr.payloadGPR());
+        }
 
         Vector<GPRReg> scratchGPRs;
         for (Reg reg : scratch)

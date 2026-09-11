@@ -193,11 +193,23 @@ public:
         add(reg, conservativeWidthWithoutVectors(reg));
     }
 
+    inline constexpr RegisterSet& add(JSValueRegs regs, IgnoreVectorsTag = IgnoreVectors)
+    {
+        add(regs.payloadGPR());
+        return *this;
+    }
+
     inline constexpr RegisterSet& remove(Reg reg)
     {
         ASSERT_UNDER_CONSTEXPR_CONTEXT(!!reg);
         m_bits.clear(reg.index());
         m_upperBits.clear(reg.index());
+        return *this;
+    }
+
+    inline constexpr RegisterSet& remove(JSValueRegs regs)
+    {
+        remove(regs.payloadGPR());
         return *this;
     }
 
@@ -280,6 +292,7 @@ public:
 
 private:
     inline constexpr void setAny(Reg reg) { ASSERT_UNDER_CONSTEXPR_CONTEXT(!reg.isFPR()); add(reg, IgnoreVectors); }
+    inline constexpr void setAny(JSValueRegs regs) { add(regs, IgnoreVectors); }
     inline constexpr void setAny(const RegisterSet& set) { merge(set); }
     inline constexpr void setMany() { }
     template<typename RegType, typename... Regs>
@@ -327,6 +340,11 @@ public:
     {
         ASSERT_UNDER_CONSTEXPR_CONTEXT(!!reg);
         m_bits.set(reg.index());
+    }
+
+    inline constexpr void add(JSValueRegs regs, IgnoreVectorsTag = IgnoreVectors)
+    {
+        add(regs.payloadGPR());
     }
 
     inline constexpr void remove(Reg reg)

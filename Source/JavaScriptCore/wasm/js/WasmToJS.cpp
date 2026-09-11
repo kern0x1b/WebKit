@@ -83,7 +83,7 @@ std::expected<MacroAssemblerCodeRef<WasmEntryPtrTag>, BindingFailure> wasmToJS(c
     // If we ever change this, we will also need to change WasmOMGIRGenerator.
 
     // Below, we assume that the JS calling convention is always on the stack.
-    ASSERT_UNUSED(jsCC, !jsCC.gprArgs.size());
+    ASSERT_UNUSED(jsCC, !jsCC.jsrArgs.size());
     ASSERT(!jsCC.fprArgs.size());
 
     jit.emitFunctionPrologue();
@@ -258,7 +258,7 @@ std::expected<MacroAssemblerCodeRef<WasmEntryPtrTag>, BindingFailure> wasmToJS(c
             case TypeKind::I32:
             case TypeKind::I64: {
                 // Skipped: handled above.
-                if (marshalledGPRs >= wasmCC.gprArgs.size())
+                if (marshalledGPRs >= wasmCC.jsrArgs.size())
                     frOffset += sizeof(Register);
                 ++marshalledGPRs;
                 calleeFrameOffset += sizeof(Register);
@@ -343,9 +343,23 @@ std::expected<MacroAssemblerCodeRef<WasmEntryPtrTag>, BindingFailure> wasmToJS(c
         const auto& returnType = signature.returnType(0);
         switch (returnType.kind) {
         case TypeKind::I64: {
-            // FIXME: Optimize I64 extraction from BigInt.
-            // https://bugs.webkit.org/show_bug.cgi?id=220053
-            JSValueRegs dest = wasmCallInfo.results[0].location.jsr();
+            CCallHelpers::JumpList done;
+            CCallHelpers::JumpList slowPath;
+            JSValueRegs destJSR = wasmCallInfo.results[0].location.jsr();
+            GPRReg destGPR = destJSR.payloadGPR();
+            GPRReg cellGPR = JSRInfo::returnValueJSR.payloadGPR();
+
+            slowPath.append(jit.branchIfNotCell(JSRInfo::returnValueJSR, DoNotHaveTagRegisters));
+            slowPath.append(jit.branchIfNotHeapBigInt(cellGPR));
+            if (cellGPR == destGPR) {
+                GPRReg scratch = GPRInfo::nonPreservedNonReturnGPR;
+                jit.move(cellGPR, scratch);
+                jit.toBigInt64(scratch, destGPR);
+            } else
+                jit.toBigInt64(cellGPR, destGPR);
+            done.append(jit.jump());
+
+            slowPath.link(&jit);
             jit.prepareWasmCallOperation(GPRInfo::wasmContextInstancePointer);
             jit.setupArguments<decltype(operationConvertToI64)>(GPRInfo::wasmContextInstancePointer, JSRInfo::returnValueJSR);
             jit.callOperation<OperationPtrTag>(operationConvertToI64);

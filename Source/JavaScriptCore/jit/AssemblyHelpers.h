@@ -246,6 +246,11 @@ public:
     }
 #endif
 
+    void storeCell(JSValueRegs regs, void* address)
+    {
+        store64(regs.gpr(), address);
+    }
+
     void loadCell(Address address, GPRReg gpr)
     {
 #if USE(JSVALUE64)
@@ -729,6 +734,11 @@ public:
 #endif
     }
 
+    Jump branchIfNotCell(JSValueRegs regs, TagRegistersMode mode = HaveTagRegisters)
+    {
+        return branchIfNotCell(regs.gpr(), mode);
+    }
+
     template<typename T>
     Jump branchIfCell(T maybeCell, TagRegistersMode mode = HaveTagRegisters)
     {
@@ -750,10 +760,14 @@ public:
         return branchIfCell(regs.tagGPR(), mode);
 #endif
     }
+
+    Jump branchIfCell(JSValueRegs regs, TagRegistersMode mode = HaveTagRegisters)
+    {
+        return branchIfCell(regs.gpr(), mode);
+    }
     
     Jump branchIfOther(JSValueRegs regs, GPRReg tempGPR)
     {
-#if USE(JSVALUE64)
         and64(TrustedImm32(~JSValue::UndefinedTag), regs.gpr(), tempGPR);
         return branch64(Equal, tempGPR, TrustedImm64(JSValue::ValueNull));
 #else
@@ -792,6 +806,11 @@ public:
 #else
         return branchIfInt32(regs.tagGPR(), mode);
 #endif
+    }
+
+    Jump branchIfInt32(JSValueRegs regs, TagRegistersMode mode = HaveTagRegisters)
+    {
+        return branchIfInt32(regs.gpr(), mode);
     }
 
     Jump branchIfNotInt32(GPRReg gpr, TagRegistersMode mode = HaveTagRegisters)
@@ -851,7 +870,11 @@ public:
 #endif
     }
 
-#if USE(JSVALUE64)
+    Jump branchIfNumber(JSValueRegs regs, TagRegistersMode mode = HaveTagRegisters)
+    {
+        return branchIfNumber(regs.gpr(), mode);
+    }
+
     Jump branchIfNotNumber(GPRReg gpr, TagRegistersMode mode = HaveTagRegisters)
     {
         if (mode == HaveTagRegisters)
@@ -859,6 +882,11 @@ public:
         return branchTest64(Zero, gpr, TrustedImm64(JSValue::NumberTag));
     }
 #endif
+
+    Jump branchIfNotNumber(JSValueRegs regs, TagRegistersMode mode = HaveTagRegisters)
+    {
+        return branchIfNotNumber(regs.gpr(), mode);
+    }
 
     Jump branchIfNotDoubleKnownNotInt32(JSValueRegs regs, TagRegistersMode mode = HaveTagRegisters)
     {
@@ -916,6 +944,11 @@ public:
 #else
         return branchIfNotBoolean(regs.tagGPR(), tempGPR);
 #endif
+    }
+
+    Jump branchIfNotBoolean(JSValueRegs regs, GPRReg tempGPR)
+    {
+        return branchIfNotBoolean(regs.gpr(), tempGPR);
     }
 
 #if USE(BIGINT32)
@@ -1073,6 +1106,11 @@ public:
 #endif
     }
 
+    Jump branchIfEmpty(JSValueRegs regs)
+    {
+        return branchIfEmpty(regs.gpr());
+    }
+
     Jump branchIfNotEmpty(BaseIndex address)
     {
 #if USE(JSVALUE64)
@@ -1130,6 +1168,12 @@ public:
     }
 
     // Note that this function does not respect MasqueradesAsUndefined.
+    Jump branchIfUndefined(JSValueRegs regs)
+    {
+        return branchIfUndefined(regs.gpr());
+    }
+
+    // Note that this function does not respect MasqueradesAsUndefined.
     Jump branchIfNotUndefined(GPRReg gpr)
     {
 #if USE(JSVALUE64)
@@ -1183,6 +1227,11 @@ public:
 #else
         return branchIfNull(regs.tagGPR());
 #endif
+    }
+
+    Jump branchIfNull(JSValueRegs regs)
+    {
+        return branchIfNull(regs.gpr());
     }
 
     Jump branchIfNotNull(GPRReg gpr)
@@ -1551,9 +1600,9 @@ public:
         unboxDouble(regs.payloadGPR(), resultGPR, destFPR);
     }
 
-    void unboxDoubleNonDestructive(GPRReg gpr, FPRReg destFPR, GPRReg resultGPR)
+    void unboxDoubleNonDestructive(JSValueRegs regs, FPRReg destFPR, GPRReg resultGPR)
     {
-        unboxDouble(gpr, resultGPR, destFPR);
+        unboxDouble(regs.payloadGPR(), resultGPR, destFPR);
     }
 
     Jump isStrictInt52(GPRReg valueGPR, GPRReg scratchGPR)
@@ -1692,14 +1741,20 @@ public:
 
     void boxBooleanPayload(bool value, GPRReg payloadGPR)
     {
-#if USE(JSVALUE64)
         move(TrustedImm32(JSValue::ValueFalse + value), payloadGPR);
-#else
-        move(TrustedImm32(value), payloadGPR);
-#endif
     }
 
     void boxBoolean(GPRReg boolGPR, JSValueRegs boxedRegs)
+    {
+        boxBooleanPayload(boolGPR, boxedRegs.payloadGPR());
+    }
+
+    void boxBoolean(bool value, JSValueRegs boxedRegs)
+    {
+        boxBooleanPayload(value, boxedRegs.payloadGPR());
+    }
+
+    void boxInt32(GPRReg intGPR, JSValueRegs boxedRegs, TagRegistersMode mode = HaveTagRegisters)
     {
         boxBooleanPayload(boolGPR, boxedRegs.payloadGPR());
 #if USE(JSVALUE32_64)
@@ -2020,20 +2075,20 @@ public:
         
         notCell.link(this);
 
-        Jump notNumber = branchIfNotNumber(valueGPR);
+        Jump notNumber = branchIfNotNumber(regs);
         functor(TypeofType::Number, false);
         notNumber.link(this);
         
-        JumpList notNull = branchIfNotEqual(valueGPR, jsNull());
+        JumpList notNull = branchIfNotEqual(regs, jsNull());
         functor(TypeofType::Object, false);
         notNull.link(this);
         
-        Jump notBoolean = branchIfNotBoolean(valueGPR, tempGPR);
+        Jump notBoolean = branchIfNotBoolean(regs, tempGPR);
         functor(TypeofType::Boolean, false);
         notBoolean.link(this);
 
 #if USE(BIGINT32)
-        Jump notBigInt32 = branchIfNotBigInt32(valueGPR, tempGPR);
+        Jump notBigInt32 = branchIfNotBigInt32(regs, tempGPR);
         functor(TypeofType::BigInt, false);
         notBigInt32.link(this);
 #endif

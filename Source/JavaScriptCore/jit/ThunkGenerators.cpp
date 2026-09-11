@@ -1441,8 +1441,8 @@ MacroAssemblerCodeRef<JITThunkPtrTag> boundFunctionCallGenerator(VM& vm)
     CCallHelpers::Label loop = jit.label();
     jit.sub32(CCallHelpers::TrustedImm32(1), GPRInfo::regT3);
     jit.sub32(CCallHelpers::TrustedImm32(1), GPRInfo::regT1);
-    jit.loadValue(CCallHelpers::addressFor(virtualRegisterForArgumentIncludingThis(1)).indexedBy(GPRInfo::regT3, CCallHelpers::TimesEight), valueGPR);
-    jit.storeValue(valueGPR, CCallHelpers::calleeArgumentSlot(1).indexedBy(GPRInfo::regT1, CCallHelpers::TimesEight));
+    jit.loadValue(CCallHelpers::addressFor(virtualRegisterForArgumentIncludingThis(1)).indexedBy(GPRInfo::regT3, CCallHelpers::TimesEight), valueRegs);
+    jit.storeValue(valueRegs, CCallHelpers::calleeArgumentSlot(1).indexedBy(GPRInfo::regT1, CCallHelpers::TimesEight));
     jit.branchTest32(CCallHelpers::NonZero, GPRInfo::regT3).linkTo(loop, &jit);
     
     done.link(&jit);
@@ -1453,8 +1453,8 @@ MacroAssemblerCodeRef<JITThunkPtrTag> boundFunctionCallGenerator(VM& vm)
         jit.loadPtr(CCallHelpers::Address(GPRInfo::regT0, JSBoundFunction::offsetOfBoundArgs()), GPRInfo::regT3);
         CCallHelpers::Label loopBound = jit.label();
         jit.sub32(CCallHelpers::TrustedImm32(1), GPRInfo::regT1);
-        jit.loadValue(CCallHelpers::BaseIndex(GPRInfo::regT3, GPRInfo::regT1, CCallHelpers::TimesEight, JSCellButterfly::offsetOfData()), valueGPR);
-        jit.storeValue(valueGPR, CCallHelpers::calleeArgumentSlot(1).indexedBy(GPRInfo::regT1, CCallHelpers::TimesEight));
+        jit.loadValue(CCallHelpers::BaseIndex(GPRInfo::regT3, GPRInfo::regT1, CCallHelpers::TimesEight, JSCellButterfly::offsetOfData()), valueRegs);
+        jit.storeValue(valueRegs, CCallHelpers::calleeArgumentSlot(1).indexedBy(GPRInfo::regT1, CCallHelpers::TimesEight));
         jit.branchTest32(CCallHelpers::NonZero, GPRInfo::regT1).linkTo(loopBound, &jit);
         argsPushed.append(jit.jump());
     }
@@ -1462,8 +1462,8 @@ MacroAssemblerCodeRef<JITThunkPtrTag> boundFunctionCallGenerator(VM& vm)
     {
         CCallHelpers::Label loopBound = jit.label();
         jit.sub32(CCallHelpers::TrustedImm32(1), GPRInfo::regT1);
-        jit.loadValue(CCallHelpers::BaseIndex(GPRInfo::regT0, GPRInfo::regT1, CCallHelpers::TimesEight, JSBoundFunction::offsetOfBoundArgs()), valueGPR);
-        jit.storeValue(valueGPR, CCallHelpers::calleeArgumentSlot(1).indexedBy(GPRInfo::regT1, CCallHelpers::TimesEight));
+        jit.loadValue(CCallHelpers::BaseIndex(GPRInfo::regT0, GPRInfo::regT1, CCallHelpers::TimesEight, JSBoundFunction::offsetOfBoundArgs()), valueRegs);
+        jit.storeValue(valueRegs, CCallHelpers::calleeArgumentSlot(1).indexedBy(GPRInfo::regT1, CCallHelpers::TimesEight));
         jit.branchTest32(CCallHelpers::NonZero, GPRInfo::regT1).linkTo(loopBound, &jit);
     }
     argsPushed.link(&jit);

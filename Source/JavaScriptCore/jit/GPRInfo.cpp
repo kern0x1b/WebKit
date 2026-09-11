@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2015-2019 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -20,36 +20,21 @@
  * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
  * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
 #include "config.h"
-#include "DOMJITHelpers.h"
+#include "GPRInfo.h"
 
-#if ENABLE(JIT)
+#if ENABLE(ASSEMBLER)
 
-#include "Document.h"
-#include "JSDOMBinding.h"
-#include "Node.h"
+namespace JSC {
 
-namespace WebCore { namespace DOMJIT {
-
-using JSC::CCallHelpers;
-using JSC::GPRReg;
-using JSC::JSValueRegs;
-using JSC::MacroAssembler;
-
-void loadDocument(MacroAssembler& jit, GPRReg node, GPRReg output)
+void JSValueRegs::dump(PrintStream& out) const
 {
-    jit.loadPtr(CCallHelpers::Address(node, Node::treeScopeMemoryOffset()), output);
-    jit.loadPtr(CCallHelpers::Address(output, TreeScope::documentScopeMemoryOffset()), output);
+    out.print(m_gpr);
 }
 
-void loadDocumentElement(MacroAssembler& jit, GPRReg document, GPRReg output)
-{
-    jit.loadPtr(CCallHelpers::Address(document, Document::documentElementMemoryOffset()), output);
-}
+} // namespace JSC
 
-} }
-
-#endif
+#endif // ENABLE(ASSEMBLER)

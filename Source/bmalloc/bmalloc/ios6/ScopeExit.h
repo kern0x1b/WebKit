@@ -28,21 +28,59 @@
 
 namespace bmalloc_ios6 {
 
-template<typename ExitFunction>
-class ScopeExit {
+#if ENABLE(JIT)
+
+namespace JSC {
+
+// SnippetReg is a polymorphic register class. It can refer to an FPRReg, a GPRReg, or a
+// "JSValueRegs". Note that isGPR() returns false when the target Reg is "JSValueRegs".
+//
+// FIXME: Eventually we should move this class into JSC and make is available for other JIT code.
+// https://bugs.webkit.org/show_bug.cgi?id=162990
+class SnippetReg {
 public:
-    explicit ScopeExit(ExitFunction&& exitFunction)
-        : m_exitFunction(exitFunction)
+    enum class Type : uint8_t {
+        GPR = 0,
+        FPR = 1,
+        JSValue = 2,
+    };
+
+    SnippetReg(GPRReg reg)
+        : m_variant(reg)
     {
     }
 
     ~ScopeExit()
     {
-        m_exitFunction();
+    }
+
+    SnippetReg(JSValueRegs regs)
+        : m_variant(regs)
+    {
+    }
+
+    bool isGPR() const { return m_variant.index() == static_cast<unsigned>(Type::GPR); }
+    bool isFPR() const { return m_variant.index() == static_cast<unsigned>(Type::FPR); }
+    bool isJSValueRegs() const { return m_variant.index() == static_cast<unsigned>(Type::JSValue); }
+
+    GPRReg gpr() const
+    {
+        ASSERT(isGPR());
+        return std::get<GPRReg>(m_variant);
+    }
+    FPRReg fpr() const
+    {
+        ASSERT(isFPR());
+        return std::get<FPRReg>(m_variant);
+    }
+    JSValueRegs jsValueRegs() const
+    {
+        ASSERT(isJSValueRegs());
+        return std::get<JSValueRegs>(m_variant);
     }
 
 private:
-    ExitFunction m_exitFunction;
+    Variant<GPRReg, FPRReg, JSValueRegs> m_variant;
 };
 
 template<typename ExitFunction>

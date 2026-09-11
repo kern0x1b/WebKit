@@ -1103,7 +1103,7 @@ void RTT::ensureArgumINTBytecode(const CallInformation& callCC) const
     constexpr static int NUM_ARGUMINT_GPRS = 8;
     constexpr static int NUM_ARGUMINT_FPRS = 8;
 
-    ASSERT_UNUSED(NUM_ARGUMINT_GPRS, wasmCallingConvention().gprArgs.size() <= NUM_ARGUMINT_GPRS);
+    ASSERT_UNUSED(NUM_ARGUMINT_GPRS, wasmCallingConvention().jsrArgs.size() <= NUM_ARGUMINT_GPRS);
     ASSERT_UNUSED(NUM_ARGUMINT_FPRS, wasmCallingConvention().fprArgs.size() <= NUM_ARGUMINT_FPRS);
 
     m_argumINTBytecode.ensure([&] {
@@ -1156,7 +1156,7 @@ void RTT::ensureUINTBytecode(const CallInformation& returnCC) const
     // uINT: the interpreter smaller than mINT
     constexpr static int NUM_UINT_GPRS = 8;
     constexpr static int NUM_UINT_FPRS = 8;
-    ASSERT_UNUSED(NUM_UINT_GPRS, wasmCallingConvention().gprArgs.size() <= NUM_UINT_GPRS);
+    ASSERT_UNUSED(NUM_UINT_GPRS, wasmCallingConvention().jsrArgs.size() <= NUM_UINT_GPRS);
     ASSERT_UNUSED(NUM_UINT_FPRS, wasmCallingConvention().fprArgs.size() <= NUM_UINT_FPRS);
 
     m_uINTBytecode.ensure([&] {
@@ -1223,7 +1223,7 @@ static Vector<uint8_t, 16> buildCallArgumentBytecode(const CallInformation& call
 {
     constexpr static int NUM_MINT_CALL_GPRS = 8;
     constexpr static int NUM_MINT_CALL_FPRS = 8;
-    ASSERT_UNUSED(NUM_MINT_CALL_GPRS, wasmCallingConvention().gprArgs.size() <= NUM_MINT_CALL_GPRS);
+    ASSERT_UNUSED(NUM_MINT_CALL_GPRS, wasmCallingConvention().jsrArgs.size() <= NUM_MINT_CALL_GPRS);
     ASSERT_UNUSED(NUM_MINT_CALL_FPRS, wasmCallingConvention().fprArgs.size() <= NUM_MINT_CALL_FPRS);
 
     auto toBytecodeUint8 = [](IPInt::CallArgumentBytecode bytecode) {
@@ -1302,7 +1302,7 @@ static intptr_t buildCallResultBytecode(Vector<uint8_t, 16>& results, const Call
 {
     constexpr static int NUM_MINT_RET_GPRS = 8;
     constexpr static int NUM_MINT_RET_FPRS = 8;
-    ASSERT_UNUSED(NUM_MINT_RET_GPRS, wasmCallingConvention().gprArgs.size() <= NUM_MINT_RET_GPRS);
+    ASSERT_UNUSED(NUM_MINT_RET_GPRS, wasmCallingConvention().jsrArgs.size() <= NUM_MINT_RET_GPRS);
     ASSERT_UNUSED(NUM_MINT_RET_FPRS, wasmCallingConvention().fprArgs.size() <= NUM_MINT_RET_FPRS);
 
     intptr_t firstStackResultSPOffset = 0;

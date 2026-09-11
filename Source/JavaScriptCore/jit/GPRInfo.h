@@ -1146,6 +1146,13 @@ public:
 #endif
         return preferredArgumentJSR<OperationType, ArgNum>().payloadGPR();
     }
+
+    template<typename OperationType, size_t ArgNum>
+        requires HasNthArgument<OperationType, ArgNum>
+    static constexpr GPRReg preferredArgumentGPR()
+    {
+        return preferredArgumentJSR<OperationType, ArgNum>().payloadGPR();
+    }
 };
 
 // Computes (statically, at compilation time), the ideal machine register an argument should be

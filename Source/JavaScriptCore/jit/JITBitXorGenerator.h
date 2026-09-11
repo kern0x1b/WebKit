@@ -36,7 +36,7 @@ public:
     static constexpr bool needsScratchGPR = false;
 
     JITBitXorGenerator(const SnippetOperand& leftOperand, const SnippetOperand& rightOperand,
-        GPRReg result, GPRReg left, GPRReg right)
+        JSValueRegs result, JSValueRegs left, JSValueRegs right)
         : JITBitBinaryOpGenerator(leftOperand, rightOperand, result, left, right)
     { }
 
