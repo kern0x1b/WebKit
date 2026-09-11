@@ -1269,18 +1269,18 @@ static bool fillBufferWithContentsOfFile(const String& fileName, Vector<char>& b
         fprintf(stderr, "Error when parsing file name: %s\n", fileName.ascii().data());
         return false;
     }
-    if (stat(fileNameUTF->data(), &statBuf) == -1) {
-        fprintf(stderr, "Could not open file: %s\n", fileNameUTF->data());
+    if (stat(fileNameUTF->legacyCStringPointer(), &statBuf) == -1) {
+        fprintf(stderr, "Could not open file: %s\n", fileNameUTF->legacyCStringPointer());
         return false;
     }
 
     if ((statBuf.st_mode & S_IFMT) != S_IFREG) {
-        fprintf(stderr, "Trying to open a non-file: %s\n", fileNameUTF->data());
+        fprintf(stderr, "Trying to open a non-file: %s\n", fileNameUTF->legacyCStringPointer());
         return false;
     }
-    auto* f = fopen(fileNameUTF->data(), "rb");
+    auto* f = fopen(fileNameUTF->legacyCStringPointer(), "rb");
     if (!f) {
-        fprintf(stderr, "Could not open file: %s\n", fileNameUTF->data());
+        fprintf(stderr, "Could not open file: %s\n", fileNameUTF->legacyCStringPointer());
         return false;
     }
 
@@ -1453,12 +1453,12 @@ static bool fetchModuleFromLocalFileSystem(const URL& fileURL, Vector& buffer)
 #else
     auto pathName = fileName.utf8();
     struct stat status { };
-    if (stat(pathName.data(), &status))
+    if (stat(pathName.legacyCStringPointer(), &status))
         return false;
     if ((status.st_mode & S_IFMT) != S_IFREG)
         return false;
 
-    FILE* f = fopen(pathName.data(), "r");
+    FILE* f = fopen(pathName.legacyCStringPointer(), "r");
 #endif
     if (!f) {
         fprintf(stderr, "Could not open file: %s\n", fileName.utf8().legacyCStringPointer());
@@ -1555,7 +1555,7 @@ void GlobalObject::promiseRejectionTracker(JSGlobalObject*, JSPromise*, JSPromis
 
 #endif // ENABLE(FUZZILLI)
 
-static CString toCString(JSGlobalObject* globalObject, ThrowScope& scope, Expected<CString, UTF8ConversionError> expectedString)
+static UTF8CString toCString(JSGlobalObject* globalObject, ThrowScope& scope, std::expected<UTF8CString, UTF8ConversionError> expectedString)
 {
     if (expectedString)
         return expectedString.value();
@@ -1571,7 +1571,7 @@ static CString toCString(JSGlobalObject* globalObject, ThrowScope& scope, Expect
     return { };
 }
 
-template<typename T> static CString toCString(JSGlobalObject* globalObject, ThrowScope& scope, T& string)
+template<typename T> static UTF8CString toCString(JSGlobalObject* globalObject, ThrowScope& scope, T& string)
 {
     return toCString(globalObject, scope, string.tryGetUTF8());
 }
@@ -1779,7 +1779,7 @@ JSC_DEFINE_HOST_FUNCTION(functionJSCStack, (JSGlobalObject* globalObject, CallFr
 
     FunctionJSCStackFunctor functor(trace);
     StackVisitor::visit(callFrame, vm, functor);
-    fprintf(stderr, "%s", trace.toString().utf8().legacyCStringPointer());
+    fprintf(stderr, "%s", trace.toString().utf8().data());
     return JSValue::encode(jsUndefined());
 }
 
@@ -2286,7 +2286,7 @@ JSC_DEFINE_HOST_FUNCTION(functionReadline, (JSGlobalObject* globalObject, CallFr
             break;
         line.append(c);
     }
-    return JSValue::encode(jsString(globalObject->vm(), String(line.span())));
+    return JSValue::encode(jsString(globalObject->vm(), String::fromLatin1(line.span())));
 }
 
 JSC_DEFINE_HOST_FUNCTION(functionPreciseTime, (JSGlobalObject*, CallFrame*))
@@ -2969,7 +2969,7 @@ JSC_DEFINE_HOST_FUNCTION(functionDumpBytecodeProfile, (JSGlobalObject* globalObj
     RETURN_IF_EXCEPTION(scope, { });
 
     auto pathUtf8 = path.utf8();
-    bool ok = vm.m_perBytecodeProfiler->save(pathUtf8.data());
+    bool ok = vm.m_perBytecodeProfiler->save(pathUtf8.legacyCStringPointer());
     return JSValue::encode(jsBoolean(ok));
 }
 
@@ -3732,9 +3732,9 @@ static void dumpException(GlobalObject* globalObject, JSValue exception)
 
     auto exceptionString = exception.toWTFString(globalObject);
     CHECK_EXCEPTION();
-    Expected<CString, UTF8ConversionError> expectedCString = exceptionString.tryGetUTF8();
+    auto expectedCString = exceptionString.tryGetUTF8();
     if (expectedCString)
-        printf("Exception: %s\n", expectedCString.value().data());
+        printf("Exception: %s\n", expectedCString.value().legacyCStringPointer());
     else
         printf("Exception: <out of memory while extracting exception string>\n");
 
@@ -3764,7 +3764,7 @@ static void dumpException(GlobalObject* globalObject, JSValue exception)
         CHECK_EXCEPTION();
         auto lineNumberString = lineNumberValue.toWTFString(globalObject);
         CHECK_EXCEPTION();
-        printf("at %s:%s\n", fileNameString.utf8().legacyCStringPointer(), lineNumberString.utf8().legacyCStringPointer());
+        printf("at %s:%s\n", fileNameString.utf8().data(), lineNumberString.utf8().data());
     }
     
     if (!stackValue.isUndefinedOrNull()) {
@@ -3773,7 +3773,7 @@ static void dumpException(GlobalObject* globalObject, JSValue exception)
         if (stackString.length()) {
             auto expectedUtf8 = stackString.tryGetUTF8();
             if (expectedUtf8)
-                printf("%s\n", expectedUtf8.value().data());
+                printf("%s\n", expectedUtf8.value().legacyCStringPointer());
         }
     }
 
@@ -3787,19 +3787,19 @@ static bool checkUncaughtException(VM& vm, GlobalObject* globalObject, JSValue e
     auto scope = DECLARE_TOP_EXCEPTION_SCOPE(vm);
     scope.clearException();
     if (!exception) {
-        printf("Expected uncaught exception with name '%s' but none was thrown\n", expectedExceptionName.utf8().legacyCStringPointer());
+        printf("Expected uncaught exception with name '%s' but none was thrown\n", expectedExceptionName.utf8().data());
         return false;
     }
 
     JSValue exceptionClass = globalObject->get(globalObject, Identifier::fromString(vm, expectedExceptionName));
     if (!exceptionClass.isObject() || scope.exception()) {
-        printf("Expected uncaught exception with name '%s' but given exception class is not defined\n", expectedExceptionName.utf8().legacyCStringPointer());
+        printf("Expected uncaught exception with name '%s' but given exception class is not defined\n", expectedExceptionName.utf8().data());
         return false;
     }
 
     bool isInstanceOfExpectedException = uncheckedDowncast<JSObject>(exceptionClass)->hasInstance(globalObject, exception);
     if (scope.exception()) {
-        printf("Expected uncaught exception with name '%s' but given exception class fails performing hasInstance\n", expectedExceptionName.utf8().legacyCStringPointer());
+        printf("Expected uncaught exception with name '%s' but given exception class fails performing hasInstance\n", expectedExceptionName.utf8().data());
         return false;
     }
     if (isInstanceOfExpectedException) {
@@ -3808,7 +3808,7 @@ static bool checkUncaughtException(VM& vm, GlobalObject* globalObject, JSValue e
         return true;
     }
 
-    printf("Expected uncaught exception with name '%s' but exception value is not instance of this exception class\n", expectedExceptionName.utf8().legacyCStringPointer());
+    printf("Expected uncaught exception with name '%s' but exception value is not instance of this exception class\n", expectedExceptionName.utf8().data());
     dumpException(globalObject, exception);
     return false;
 }
@@ -3985,7 +3985,7 @@ static void runInteractive(GlobalObject* globalObject)
         } while (error.syntaxErrorType() == ParserError::SyntaxErrorRecoverable);
         
         if (error.isValid()) {
-            printf("%s:%d\n", error.message().utf8().legacyCStringPointer(), error.line());
+            printf("%s:%d\n", error.message().utf8().data(), error.line());
             continue;
         }
         
@@ -4011,7 +4011,7 @@ static void runInteractive(GlobalObject* globalObject)
         if (evaluationException && vm.isTerminationException(evaluationException.get()))
             vm.setExecutionForbidden();
 
-        Expected<CString, UTF8ConversionError> utf8;
+        std::expected<UTF8CString, UTF8ConversionError> utf8;
         if (evaluationException) {
             fputs("Exception: ", stdout);
             utf8 = evaluationException->value().toWTFString(globalObject).tryGetUTF8();
@@ -4356,8 +4356,8 @@ void CommandLine::parseArguments(int argc, char** argv, int start)
         if (!strncmp(arg, singleStringSubArgList.characters(), singleStringSubArgList.length())) {
             // We just assume input is utf-8 (probably ascii)
             String subArgList = String::fromLatin1(arg + singleStringSubArgList.length());
-            Vector<CString> splitArgs = subArgList.split(" "_s).map([](const String& arg) { return arg.impl()->utf8(); });
-            Vector<char*> buffer = splitArgs.map([](const CString& arg) { return const_cast<char*>(arg.data()); });
+            auto splitArgs = subArgList.split(" "_s).map([](const String& arg) { return arg.impl()->utf8(); });
+            Vector<char*> buffer = splitArgs.map([](const auto& arg) { return const_cast<char*>(arg.legacyCStringPointer()); });
 
             parseArguments(buffer.mutableSpan().size(), buffer.mutableSpan().data(), 0);
             continue;
