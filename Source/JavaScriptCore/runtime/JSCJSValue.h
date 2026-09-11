@@ -950,6 +950,7 @@ ALWAYS_INLINE JSCell* JSValue::asCell() const
     ASSERT(isCell());
     return u.ptr;
 }
+#endif // USE(JSVALUE64)
 
 
 #if USE(BIGINT32)
@@ -1203,6 +1204,8 @@ public:
 private:
     JSValue m_value;
 };
+
+#if USE(JSVALUE64) || !ENABLE(CONCURRENT_JS)
 
 ALWAYS_INLINE JSValue JSValue::decodeConcurrent(const EncodedJSValue* encodedJSValue)
 {
