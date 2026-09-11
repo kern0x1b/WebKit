@@ -87,7 +87,7 @@ RefPtr<ImageBuffer> ImageBuffer::create(const FloatSize& size, RenderingMode ren
 
     switch (renderingMode) {
     case RenderingMode::Accelerated:
-#if HAVE(IOSURFACE)
+#if HAVE(IOSURFACE) && !defined(WEBKIT_IOS6)
         if (ProcessCapabilities::canUseAcceleratedBuffers()) {
             ImageBufferCreationContext creationContext;
             if (graphicsClient)

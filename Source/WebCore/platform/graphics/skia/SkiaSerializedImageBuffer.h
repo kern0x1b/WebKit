@@ -44,14 +44,9 @@ private:
     RefPtr<ImageBuffer> sinkIntoImageBuffer() override;
     size_t memoryCost() const override;
 
-    RefPtr<ImageBuffer> m_imageBuffer;
-    FloatSize m_logicalSize;
-    float m_resolutionScale { 1 };
-    DestinationColorSpace m_colorSpace { DestinationColorSpace::SRGB() };
-    ImageBufferFormat m_bufferFormat;
+    Ref<ImageBuffer> m_imageBuffer;
     RefPtr<NativeImage> m_image;
     std::unique_ptr<GLFence> m_fence;
-    size_t m_memoryCost { 0 };
 };
 
 } // namespace WebCore

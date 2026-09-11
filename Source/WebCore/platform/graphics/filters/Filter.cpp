@@ -32,7 +32,27 @@
 #include "FilterStyle.h"
 #include "ImageBuffer.h"
 
+#if defined(WEBKIT_IOS6)
+#include <cmath>
+#include <cstdlib>
+#endif
+
 namespace WebCore {
+
+#if defined(WEBKIT_IOS6)
+static float filterIOS6MaxRegionPixels()
+{
+    static const float maxPixels = [] -> float {
+        if (const char* override = getenv("WEBKIT_IOS6_FILTER_MAX_PIXELS")) {
+            int parsed = atoi(override);
+            if (parsed > 0)
+                return static_cast<float>(parsed);
+        }
+        return 640 * 960;
+    }();
+    return maxPixels;
+}
+#endif
 
 Filter::Filter(Filter::Type filterType, std::optional<RenderingResourceIdentifier> renderingResourceIdentifier)
     : FilterFunction(filterType, renderingResourceIdentifier)
@@ -95,7 +115,19 @@ bool Filter::clampFilterRegionIfNeeded()
     auto scaledFilterRegion = scaledByFilterScale(m_geometry.filterRegion);
 
     FloatSize clampingScale(1, 1);
-    if (!ImageBuffer::sizeNeedsClamping(scaledFilterRegion.size(), clampingScale))
+    bool needsClamping = ImageBuffer::sizeNeedsClamping(scaledFilterRegion.size(), clampingScale);
+
+#if defined(WEBKIT_IOS6)
+    auto clampedSize = scaledFilterRegion.size() * clampingScale;
+    float area = clampedSize.width() * clampedSize.height();
+    float maxArea = filterIOS6MaxRegionPixels();
+    if (area > maxArea && area > 0) {
+        clampingScale.scale(std::sqrt(maxArea / area));
+        needsClamping = true;
+    }
+#endif
+
+    if (!needsClamping)
         return false;
 
     m_geometry.scale = m_geometry.scale * clampingScale;

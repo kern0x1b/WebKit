@@ -32,6 +32,7 @@
 #include "FontInterrogation.h"
 #include "FontMetricsNormalization.h"
 #include <CoreFoundation/CoreFoundation.h>
+#include <CoreText/SFNTLayoutTypes.h>
 #include <optional>
 #include <pal/spi/cf/CoreTextSPI.h>
 
@@ -171,10 +172,114 @@ static void addAttributesForFontPalettes(CFMutableDictionaryRef attributes, cons
     }
 }
 
+#if defined(WEBKIT_IOS6)
+static void appendRawTrueTypeFeature(CFMutableArrayRef features, int type, int selector)
+{
+    auto typeNumber = adoptCF(CFNumberCreate(kCFAllocatorDefault, kCFNumberIntType, &type));
+    auto selectorNumber = adoptCF(CFNumberCreate(kCFAllocatorDefault, kCFNumberIntType, &selector));
+    CFTypeRef featureKeys[] = { kCTFontFeatureTypeIdentifierKey, kCTFontFeatureSelectorIdentifierKey };
+    CFTypeRef featureValues[] = { typeNumber.get(), selectorNumber.get() };
+    auto feature = adoptCF(CFDictionaryCreate(kCFAllocatorDefault, featureKeys, featureValues, std::size(featureKeys), &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks));
+    CFArrayAppendValue(features, feature.get());
+}
+
+static bool tagEquals(FontTag tag, const char (&comparison)[5])
+{
+    for (size_t i = 0; i < tag.size(); ++i) {
+        char c = tag[i];
+        if (c >= 'A' && c <= 'Z')
+            c += 'a' - 'A';
+        if (c != comparison[i])
+            return false;
+    }
+    return true;
+}
+
+static void appendTrueTypeFeature(CFMutableArrayRef features, const FontFeature& feature)
+{
+    if (tagEquals(feature.tag(), "liga") || tagEquals(feature.tag(), "clig")) {
+        if (feature.enabled()) {
+            appendRawTrueTypeFeature(features, kLigaturesType, kCommonLigaturesOnSelector);
+            appendRawTrueTypeFeature(features, kLigaturesType, kContextualLigaturesOnSelector);
+        } else {
+            appendRawTrueTypeFeature(features, kLigaturesType, kCommonLigaturesOffSelector);
+            appendRawTrueTypeFeature(features, kLigaturesType, kContextualLigaturesOffSelector);
+        }
+    } else if (tagEquals(feature.tag(), "dlig")) {
+        if (feature.enabled())
+            appendRawTrueTypeFeature(features, kLigaturesType, kRareLigaturesOnSelector);
+        else
+            appendRawTrueTypeFeature(features, kLigaturesType, kRareLigaturesOffSelector);
+    } else if (tagEquals(feature.tag(), "hlig")) {
+        if (feature.enabled())
+            appendRawTrueTypeFeature(features, kLigaturesType, kHistoricalLigaturesOnSelector);
+        else
+            appendRawTrueTypeFeature(features, kLigaturesType, kHistoricalLigaturesOffSelector);
+    } else if (tagEquals(feature.tag(), "calt")) {
+        if (feature.enabled())
+            appendRawTrueTypeFeature(features, kContextualAlternatesType, kContextualAlternatesOnSelector);
+        else
+            appendRawTrueTypeFeature(features, kContextualAlternatesType, kContextualAlternatesOffSelector);
+    } else if (tagEquals(feature.tag(), "subs") && feature.enabled())
+        appendRawTrueTypeFeature(features, kVerticalPositionType, kInferiorsSelector);
+    else if (tagEquals(feature.tag(), "sups") && feature.enabled())
+        appendRawTrueTypeFeature(features, kVerticalPositionType, kSuperiorsSelector);
+    else if (tagEquals(feature.tag(), "smcp") && feature.enabled())
+        appendRawTrueTypeFeature(features, kLowerCaseType, kLowerCaseSmallCapsSelector);
+    else if (tagEquals(feature.tag(), "c2sc") && feature.enabled())
+        appendRawTrueTypeFeature(features, kUpperCaseType, kUpperCaseSmallCapsSelector);
+    else if (tagEquals(feature.tag(), "pcap") && feature.enabled())
+        appendRawTrueTypeFeature(features, kLowerCaseType, kLowerCasePetiteCapsSelector);
+    else if (tagEquals(feature.tag(), "c2pc") && feature.enabled())
+        appendRawTrueTypeFeature(features, kUpperCaseType, kUpperCasePetiteCapsSelector);
+    else if (tagEquals(feature.tag(), "titl") && feature.enabled())
+        appendRawTrueTypeFeature(features, kStyleOptionsType, kTitlingCapsSelector);
+    else if (tagEquals(feature.tag(), "lnum") && feature.enabled())
+        appendRawTrueTypeFeature(features, kNumberCaseType, kUpperCaseNumbersSelector);
+    else if (tagEquals(feature.tag(), "onum") && feature.enabled())
+        appendRawTrueTypeFeature(features, kNumberCaseType, kLowerCaseNumbersSelector);
+    else if (tagEquals(feature.tag(), "pnum") && feature.enabled())
+        appendRawTrueTypeFeature(features, kNumberSpacingType, kProportionalNumbersSelector);
+    else if (tagEquals(feature.tag(), "tnum") && feature.enabled())
+        appendRawTrueTypeFeature(features, kNumberSpacingType, kMonospacedNumbersSelector);
+    else if (tagEquals(feature.tag(), "frac") && feature.enabled())
+        appendRawTrueTypeFeature(features, kFractionsType, kDiagonalFractionsSelector);
+    else if (tagEquals(feature.tag(), "afrc") && feature.enabled())
+        appendRawTrueTypeFeature(features, kFractionsType, kVerticalFractionsSelector);
+    else if (tagEquals(feature.tag(), "ordn") && feature.enabled())
+        appendRawTrueTypeFeature(features, kVerticalPositionType, kOrdinalsSelector);
+    else if (tagEquals(feature.tag(), "zero") && feature.enabled())
+        appendRawTrueTypeFeature(features, kTypographicExtrasType, kSlashedZeroOnSelector);
+    else if (tagEquals(feature.tag(), "hist") && feature.enabled())
+        appendRawTrueTypeFeature(features, kLigaturesType, kHistoricalLigaturesOnSelector);
+    else if (tagEquals(feature.tag(), "fwid") && feature.enabled())
+        appendRawTrueTypeFeature(features, kTextSpacingType, kMonospacedTextSelector);
+    else if (tagEquals(feature.tag(), "pwid") && feature.enabled())
+        appendRawTrueTypeFeature(features, kTextSpacingType, kProportionalTextSelector);
+    else if (tagEquals(feature.tag(), "ruby") && feature.enabled())
+        appendRawTrueTypeFeature(features, kRubyKanaType, kRubyKanaOnSelector);
+}
+#endif
+
 static void applyFeatures(CFMutableDictionaryRef attributes, const FeaturesMap& featuresToBeApplied)
 {
     if (featuresToBeApplied.isEmpty())
         return;
+
+#if defined(WEBKIT_IOS6)
+    RetainPtr<CFMutableArrayRef> aatFeatures;
+    if (RetainPtr existing = static_cast<CFArrayRef>(CFDictionaryGetValue(attributes, kCTFontFeatureSettingsAttribute)))
+        aatFeatures = adoptCF(CFArrayCreateMutableCopy(kCFAllocatorDefault, 0, existing.get()));
+    else
+        aatFeatures = adoptCF(CFArrayCreateMutable(kCFAllocatorDefault, 0, &kCFTypeArrayCallBacks));
+
+    for (auto& p : featuresToBeApplied)
+        appendTrueTypeFeature(aatFeatures.get(), FontFeature(p.key, p.value));
+
+    if (CFArrayGetCount(aatFeatures.get()))
+        CFDictionarySetValue(attributes, kCTFontFeatureSettingsAttribute, aatFeatures.get());
+    return;
+#else
 
     RetainPtr<CFMutableArrayRef> featureArray;
     if (RetainPtr fontFeatureSettings = static_cast<CFArrayRef>(CFDictionaryGetValue(attributes, kCTFontFeatureSettingsAttribute)))
@@ -188,12 +293,18 @@ static void applyFeatures(CFMutableDictionaryRef attributes, const FeaturesMap& 
     }
 
     CFDictionarySetValue(attributes, kCTFontFeatureSettingsAttribute, featureArray.get());
+#endif
 }
 
 void UnrealizedCoreTextFont::applyVariations(CFMutableDictionaryRef attributes, const VariationsMap& variationsToBeApplied)
 {
     if (variationsToBeApplied.isEmpty())
         return;
+
+#if defined(WEBKIT_IOS6)
+    UNUSED_PARAM(attributes);
+    return;
+#else
 
     RetainPtr<CFMutableDictionaryRef> variationDictionary;
     if (RetainPtr fontVariations = static_cast<CFDictionaryRef>(CFDictionaryGetValue(attributes, kCTFontVariationAttribute)))
@@ -209,6 +320,7 @@ void UnrealizedCoreTextFont::applyVariations(CFMutableDictionaryRef attributes, 
     }
 
     CFDictionarySetValue(attributes, kCTFontVariationAttribute, variationDictionary.get());
+#endif
 }
 
 void UnrealizedCoreTextFont::modifyFromContext(CFMutableDictionaryRef attributes, const FontDescription& fontDescription, const FontCreationContext& fontCreationContext, ApplyTraitsVariations applyTraitsVariations, float weight, float width, float slope, CGFloat size, const OpticalSizingType& opticalSizingType)
@@ -320,6 +432,25 @@ RetainPtr<CTFontRef> UnrealizedCoreTextFont::realize() const
 {
     if (!static_cast<bool>(*this))
         return nullptr;
+
+#if defined(WEBKIT_IOS6)
+    if (([]() { static const bool logFontsOnce = getenv("WEBKIT_IOS6_LOG_FONTS") != nullptr; return logFontsOnce; }())) {
+        auto base = WTF::switchOn(m_baseFont, [](const RetainPtr<CTFontRef>& font) -> RetainPtr<CFStringRef> {
+            return font ? adoptCF(CTFontCopyFamilyName(font.get())) : nullptr;
+        }, [](const RetainPtr<CTFontDescriptorRef>& descriptor) -> RetainPtr<CFStringRef> {
+            return descriptor ? adoptCF(static_cast<CFStringRef>(CTFontDescriptorCopyAttribute(descriptor.get(), kCTFontFamilyNameAttribute))) : nullptr;
+        });
+        auto keys = adoptCF(CFDictionaryCreateMutable(kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks, nullptr));
+        CFDictionaryApplyFunction(m_attributes.get(), [](const void* key, const void*, void* context) {
+            CFDictionarySetValue(static_cast<CFMutableDictionaryRef>(context), key, kCFBooleanTrue);
+        }, keys.get());
+        auto description = adoptCF(CFCopyDescription(keys.get()));
+        fprintf(stderr, "[ios6 font] realize %s size %g keys %s\n",
+            base ? String(base.get()).utf8().data() : "(no base)", m_size,
+            String(description.get()).utf8().data());
+        fflush(stderr);
+    }
+#endif
 
     auto font = WTF::switchOn(m_baseFont, [this](const RetainPtr<CTFontRef>& font) -> RetainPtr<CTFontRef> {
         if (!font)

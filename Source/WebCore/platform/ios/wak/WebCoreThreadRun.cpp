@@ -79,6 +79,15 @@ public:
     {
     }
 
+    // Without this the temporary built by every WebThreadRun() call is copied
+    // into the queue - one more Block_copy and Block_release per call - and the
+    // queue's own growth copies every element it already holds.
+    WebThreadBlock(WebThreadBlock&& other)
+        : m_block(std::exchange(other.m_block, nullptr))
+        , m_state(std::exchange(other.m_state, nullptr))
+    {
+    }
+
     WebThreadBlock& operator=(const WebThreadBlock& other)
     {
         void (^oldBlock)() = m_block;
@@ -127,15 +136,26 @@ static void HandleRunSource(void *info)
     ASSERT(runSource());
     ASSERT(runQueue);
 
+    // Taking the queue rather than copying it: copying Block_copy'd every queued
+    // block and clearing the original Block_release'd it again, a malloc/free
+    // pair per block on a source that fires for every WebThreadRun.
     WebThreadRunQueue queueCopy;
     {
         Locker locker { runQueueMutex };
-        queueCopy = *runQueue;
+        queueCopy = WTF::move(*runQueue);
         runQueue->clear();
     }
 
-    for (const auto& block : queueCopy)
+    for (const auto& block : queueCopy) {
         block();
+#if defined(WEBKIT_IOS6)
+        static int yieldBetweenJobs = -1;
+        if (yieldBetweenJobs < 0)
+            yieldBetweenJobs = access("/tmp/native-no-yield", F_OK) != 0 ? 1 : 0;
+        if (yieldBetweenJobs)
+            WebThreadYieldIfAsked();
+#endif
+    }
 }
 
 static void _WebThreadRun(void (^block)(void), bool synchronous)

@@ -207,6 +207,9 @@ public:
     unsigned generation() const { return m_generation; }
 
     TextShapingResult layoutText(CodePath, const TextRun&, unsigned from, unsigned to, ForTextEmphasis = ForTextEmphasis::No) const;
+#if defined(WEBKIT_IOS6)
+    TextShapingResult layoutText(const TextRun&, unsigned from, unsigned to, ForTextEmphasis = ForTextEmphasis::No) const;
+#endif
     void drawGlyphBuffer(GraphicsContext&, const GlyphBuffer&, FloatPoint&, CustomFontNotReadyAction) const;
 
 private:

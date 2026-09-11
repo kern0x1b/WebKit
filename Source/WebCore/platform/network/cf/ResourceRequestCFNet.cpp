@@ -24,6 +24,7 @@
  */
 
 #include "config.h"
+#include <stdlib.h>
 #include "ResourceRequestCFNet.h"
 
 #include "HTTPHeaderNames.h"
@@ -87,7 +88,18 @@ void ResourceRequest::setHTTPPipeliningEnabled(bool flag)
 // FIXME: It is confusing that this function both sets connection count and determines maximum request count at network layer. This can and should be done separately.
 unsigned initializeMaximumHTTPConnectionCountPerHost()
 {
+#if defined(WEBKIT_IOS6)
+    static const unsigned preferredConnectionCount = [] -> unsigned {
+        if (const char* override = getenv("WEBKIT_IOS6_MAX_CONNECTIONS")) {
+            int value = atoi(override);
+            if (value > 0 && value <= 64)
+                return static_cast<unsigned>(value);
+        }
+        return 6;
+    }();
+#else
     static const unsigned preferredConnectionCount = 6;
+#endif
     static const unsigned unlimitedRequestCount = 10000;
 
     _CFNetworkHTTPConnectionCacheSetLimit(kHTTPLoadWidth, preferredConnectionCount);
@@ -101,6 +113,10 @@ unsigned initializeMaximumHTTPConnectionCountPerHost()
     // Use WebCore scheduler when we can't use request priorities with CFNetwork.
     if (!ResourceRequest::resourcePrioritiesEnabled())
         return maximumHTTPConnectionCountPerHost;
+
+#if defined(WEBKIT_IOS6)
+    return maximumHTTPConnectionCountPerHost;
+#endif
 
     _CFNetworkHTTPConnectionCacheSetLimit(kHTTPPriorityNumLevels, resourceLoadPriorityCount);
     _CFNetworkHTTPConnectionCacheSetLimit(kHTTPMinimumFastLanePriority, toPlatformRequestPriority(ResourceLoadPriority::Medium));

@@ -147,12 +147,40 @@ RetainPtr<CTFontRef> SystemFontDatabaseCoreText::createFontByApplyingWeightWidth
     CFTypeRef traitsKeys[] = { kCTFontWeightTrait, kCTFontWidthTrait, kCTFontSlantTrait, kCTFontUIFontDesignTrait };
     CFTypeRef traitsValues[] = { weightNumber.get(), widthNumber.get(), italicsNumber.get(), design ? static_cast<CFTypeRef>(design) : static_cast<CFTypeRef>(kCTFontUIFontDesignDefault) };
     auto traitsDictionary = adoptCF(CFDictionaryCreate(kCFAllocatorDefault, traitsKeys, traitsValues, std::size(traitsKeys), &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks));
+#if defined(WEBKIT_IOS6)
+    {
+        auto mutableTraits = adoptCF(CFDictionaryCreateMutableCopy(kCFAllocatorDefault, 0, traitsDictionary.get()));
+        CTFontSymbolicTraits symbolicTraits = 0;
+        if (weight >= kCTFontWeightSemibold)
+            symbolicTraits |= kCTFontTraitBold;
+        if (italic)
+            symbolicTraits |= kCTFontTraitItalic;
+        if (symbolicTraits) {
+            auto symbolicNumber = adoptCF(CFNumberCreate(kCFAllocatorDefault, kCFNumberSInt32Type, &symbolicTraits));
+            CFDictionarySetValue(mutableTraits.get(), kCTFontSymbolicTrait, symbolicNumber.get());
+        }
+        traitsDictionary = adoptCF(static_cast<CFDictionaryRef>(CFRetain(mutableTraits.get())));
+    }
+#endif
     auto attributes = adoptCF(CFDictionaryCreateMutable(kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks));
     CFDictionaryAddValue(attributes.get(), kCTFontTraitsAttribute, traitsDictionary.get());
     addAttributesForInstalledFonts(attributes.get(), allowUserInstalledFonts);
     auto modification = adoptCF(CTFontDescriptorCreateWithAttributes(attributes.get()));
-    if (font)
-        return adoptCF(CTFontCreateCopyWithAttributes(font, size, nullptr, modification.get()));
+    if (font) {
+        auto result = adoptCF(CTFontCreateCopyWithAttributes(font, size, nullptr, modification.get()));
+#if defined(WEBKIT_IOS6)
+        CTFontSymbolicTraits desired = 0;
+        if (weight >= kCTFontWeightSemibold)
+            desired |= kCTFontTraitBold;
+        if (italic)
+            desired |= kCTFontTraitItalic;
+        if (desired) {
+            if (RetainPtr withTraits = adoptCF(CTFontCreateCopyWithSymbolicTraits(result ? result.get() : font, size, nullptr, desired, desired)))
+                return withTraits;
+        }
+#endif
+        return result;
+    }
     return adoptCF(CTFontCreateWithFontDescriptor(modification.get(), size, nullptr));
 }
 

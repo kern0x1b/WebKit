@@ -42,6 +42,7 @@
 #include "UnrealizedCoreTextFont.h"
 #include <CoreText/SFNTLayoutTypes.h>
 #include <array>
+#include <atomic>
 #include <pal/spi/cf/CoreTextSPI.h>
 #include <pal/spi/cocoa/AccessibilitySupportSPI.h>
 #include <wtf/HashSet.h>
@@ -71,10 +72,16 @@ static RetainPtr<CFArrayRef> variationAxesWithNonLocalizedAxesNames(CTFontDescri
 
 static RetainPtr<CFArrayRef> variationAxes(CTFontRef font, ShouldLocalizeAxisNames shouldLocalizeAxisNames)
 {
+#if defined(WEBKIT_IOS6)
+    UNUSED_PARAM(font);
+    UNUSED_PARAM(shouldLocalizeAxisNames);
+    return nullptr;
+#else
     if (shouldLocalizeAxisNames == ShouldLocalizeAxisNames::Yes)
         return adoptCF(CTFontCopyVariationAxes(font));
     RetainPtr fontDescriptor = adoptCF(CTFontCopyFontDescriptor(font));
     return variationAxesWithNonLocalizedAxesNames(fontDescriptor.get());
+#endif
 }
 
 VariationDefaultsMap defaultVariationValues(CTFontRef font, ShouldLocalizeAxisNames shouldLocalizeAxisNames)
@@ -284,7 +291,12 @@ public:
         m_families.clear();
         for (auto& item : inputAllowlist)
             m_families.add(item);
+        s_isEmpty.store(m_families.isEmpty(), std::memory_order_relaxed);
     }
+
+    // An empty allowlist allows everything, which is the state every normal load runs in.
+    // Publishing that as a flag keeps the per-family-lookup lock off the hot path.
+    static bool isEmpty() { return s_isEmpty.load(std::memory_order_relaxed); }
 
     bool allows(const AtomString& family) const WTF_REQUIRES_LOCK(lock)
     {
@@ -294,10 +306,12 @@ public:
     static Lock lock;
 
 private:
+    static std::atomic<bool> s_isEmpty;
     HashSet<String, ASCIICaseInsensitiveHash> m_families;
 };
 
 Lock FontCacheAllowlist::lock;
+std::atomic<bool> FontCacheAllowlist::s_isEmpty { true };
 
 void FontCache::setFontAllowlist(const Vector<String>& inputAllowlist)
 {
@@ -444,6 +458,11 @@ FontSelectionCapabilities capabilitiesForFontDescriptor(CTFontDescriptorRef font
 
 static const FontDatabase::InstalledFont* findClosestFont(const FontDatabase::InstalledFontFamily& familyFonts, FontSelectionRequest fontSelectionRequest)
 {
+    // With one candidate the selection algorithm can only pick it. Short-circuiting skips a
+    // heap-allocated capabilities vector and the whole three-stage matching pass per lookup.
+    if (familyFonts.installedFonts.size() == 1)
+        return &familyFonts.installedFonts[0];
+
     auto capabilities = familyFonts.installedFonts.map([](auto& font) {
         return font.capabilities;
     });
@@ -476,8 +495,13 @@ struct FontLookup {
 
 static bool isDotPrefixedForbiddenFont(const AtomString& family)
 {
+    // Everything this can forbid is dot-prefixed, so for an ordinary family neither the
+    // SDK query nor the name comparisons below can change the answer.
+    if (!family.startsWith('.'))
+        return false;
+
     if (linkedOnOrAfterSDKWithBehavior(SDKAlignedBehavior::ForbidsDotPrefixedFonts))
-        return family.startsWith('.');
+        return true;
     return equalLettersIgnoringASCIICase(family, ".applesystemuifontserif"_s)
         || equalLettersIgnoringASCIICase(family, ".sf ns mono"_s)
         || equalLettersIgnoringASCIICase(family, ".sf ui mono"_s)
@@ -487,6 +511,9 @@ static bool isDotPrefixedForbiddenFont(const AtomString& family)
 
 static bool isAllowlistedFamily(const AtomString& family)
 {
+    if (FontCacheAllowlist::isEmpty())
+        return true;
+
     if (isSystemFont(family.string()))
         return true;
 

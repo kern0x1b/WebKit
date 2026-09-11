@@ -109,6 +109,11 @@ static bool anyComponentIsNone(const GradientColorStops& stops)
 
 GradientRendererCG::Gradient GradientRendererCG::makeGradient(ColorInterpolationMethod colorInterpolationMethod, const GradientColorStops& stops) const
 {
+#if defined(WEBKIT_IOS6)
+    if (colorInterpolationMethod.alphaPremultiplication == AlphaPremultiplication::Premultiplied)
+        return makeGradientBySampling(colorInterpolationMethod, stops);
+#endif
+
     // For non-sRGB color spaces, or sRGB with 'none' components, fall back to sampling.
     bool needsSampling = WTF::switchOn(colorInterpolationMethod.colorSpace,
         [&] (const ColorInterpolationMethod::SRGB&) {

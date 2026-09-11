@@ -82,6 +82,18 @@ std::unique_ptr<FilterEffectApplier> FEBlend::createAcceleratedApplier() const
 std::unique_ptr<FilterEffectApplier> FEBlend::createSoftwareApplier() const
 {
 #if HAVE(ARM_NEON_INTRINSICS)
+#if defined(WEBKIT_IOS6)
+    switch (blendMode()) {
+    case BlendMode::Normal:
+    case BlendMode::Multiply:
+    case BlendMode::Screen:
+    case BlendMode::Darken:
+    case BlendMode::Lighten:
+        break;
+    default:
+        return FilterEffectApplier::create<FEBlendSoftwareApplier>(*this);
+    }
+#endif
     return FilterEffectApplier::create<FEBlendNeonApplier>(*this);
 #else
     return FilterEffectApplier::create<FEBlendSoftwareApplier>(*this);

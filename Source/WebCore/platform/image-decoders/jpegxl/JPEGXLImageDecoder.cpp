@@ -131,7 +131,6 @@ void JPEGXLImageDecoder::clearDecodedPixelDataIfNeeded(size_t clearBeforeFrame)
 
     // Unlike the png and gif cases, we can always try to clear frames before "clearBeforeFrame" because
     // the dependenciy to the previous frame is handled by libjxl.
-    clearBeforeFrame = std::min(clearBeforeFrame, m_frameBufferCache.size());
     const Vector<ScalableImageDecoderFrame>::iterator end(m_frameBufferCache.begin() + clearBeforeFrame);
 
     for (Vector<ScalableImageDecoderFrame>::iterator i(m_frameBufferCache.begin()); i != end; ++i) {
@@ -344,10 +343,7 @@ JxlDecoderStatus JPEGXLImageDecoder::processInput(Query query)
                 m_frameBufferCache.grow(m_frameCount + 1);
 
             auto& buffer = m_frameBufferCache[m_currentFrame];
-            if (buffer.isInvalid()) {
-                if (!buffer.initialize(size(), m_premultiplyAlpha))
-                    return JXL_DEC_ERROR;
-
+            if (buffer.isInvalid() && buffer.initialize(size(), m_premultiplyAlpha)) {
                 buffer.setDecodingStatus(DecodingStatus::Partial);
                 buffer.setHasAlpha(hasAlpha());
                 if (m_basicInfo && m_basicInfo->have_animation) {
@@ -379,19 +375,19 @@ JxlDecoderStatus JPEGXLImageDecoder::processInput(Query query)
     }
 }
 
-void JPEGXLImageDecoder::imageOutCallback(void* that, size_t x, size_t y, size_t numPixelsInRow, const void* pixels)
+void JPEGXLImageDecoder::imageOutCallback(void* that, size_t x, size_t y, size_t numPixels, const void* pixels)
 {
 #if defined(__clang__)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wthread-safety-analysis"
 #endif
-    static_cast<JPEGXLImageDecoder*>(that)->imageOut(x, y, numPixelsInRow, static_cast<const uint8_t*>(pixels));
+    static_cast<JPEGXLImageDecoder*>(that)->imageOut(x, y, numPixels, static_cast<const uint8_t*>(pixels));
 #if defined(__clang__)
 #pragma clang diagnostic pop
 #endif
 }
 
-void JPEGXLImageDecoder::imageOut(size_t x, size_t y, size_t numPixelsInRow, const uint8_t* pixels)
+void JPEGXLImageDecoder::imageOut(size_t x, size_t y, size_t numPixels, const uint8_t* pixels)
 {
     assertIsHeld(m_lock);
     if (m_currentFrame >= m_frameBufferCache.size())
@@ -401,14 +397,9 @@ void JPEGXLImageDecoder::imageOut(size_t x, size_t y, size_t numPixelsInRow, con
     if (buffer.isInvalid())
         return;
 
-    auto canvasSize = size();
-    if (x >= static_cast<size_t>(canvasSize.width()) || y >= static_cast<size_t>(canvasSize.height()))
-        return;
-    numPixelsInRow = std::min(numPixelsInRow, static_cast<size_t>(canvasSize.width()) - x);
-
     auto row = buffer.backingStore()->pixelsStartingAt(x, y);
     auto currentAddress = row;
-    for (size_t i = 0; i < numPixelsInRow; i++) {
+    for (size_t i = 0; i < numPixels; i++) {
         uint8_t r = *pixels++;
         uint8_t g = *pixels++;
         uint8_t b = *pixels++;
@@ -418,7 +409,7 @@ void JPEGXLImageDecoder::imageOut(size_t x, size_t y, size_t numPixelsInRow, con
     }
 
     auto rowBytes = spanReinterpretCast<uint8_t>(row);
-    maybePerformColorSpaceConversion(rowBytes, rowBytes, numPixelsInRow);
+    maybePerformColorSpaceConversion(rowBytes, rowBytes, numPixels);
 }
 
 #if USE(LCMS)

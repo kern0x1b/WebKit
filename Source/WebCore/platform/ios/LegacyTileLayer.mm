@@ -25,6 +25,7 @@
 
 #import "config.h"
 #import "LegacyTileLayer.h"
+#import "WebCoreThreadRun.h"
 
 #if PLATFORM(IOS_FAMILY)
 
@@ -89,8 +90,31 @@ using WebCore::LegacyTileCache;
 
 - (void)layoutSublayers
 {
-    if (pthread_main_np())
+    if (pthread_main_np()) {
+#if defined(WEBKIT_IOS6)
+        static int alwaysWait = -1;
+        if (alwaysWait < 0)
+            alwaysWait = access("/tmp/native-always-wait-for-engine", F_OK) == 0 ? 1 : 0;
+        if (alwaysWait)
+            WebThreadLock();
+        else {
+            if (!WebCore::LegacyTileCache::mainThreadShouldWaitForEngine())
+                return;
+            if (!WebThreadTryLockForFrame()) {
+                if (WebCore::LegacyTileCache::mainThreadMustWaitForEngine()) {
+                    WebCore::LegacyTileGrid* grid = _tileGrid;
+                    WebThreadRun(^{
+                        if (grid)
+                            grid->tileCache().prepareToDraw();
+                    });
+                }
+                return;
+            }
+        }
+#else
         WebThreadLock();
+#endif
+    }
     // This may trigger WebKit layout and generate more repaint rects.
     if (_tileGrid)
         protect(_tileGrid->tileCache())->prepareToDraw();

@@ -34,6 +34,7 @@
 #include "FontCascade.h"
 #include "FontCustomPlatformData.h"
 #include "FontDescription.h"
+#include "GlyphPage.h"
 #include "LocaleCocoa.h"
 #include "Logging.h"
 #include "OpenTypeCG.h"
@@ -211,10 +212,14 @@ void Font::platformInit()
     }
 
     if (CTFontGetSymbolicTraits(ctFont.get()) & kCTFontTraitColorGlyphs) {
+#if defined(WEBKIT_IOS6)
+        m_emojiType = AllEmojiGlyphs { };
+#else
         if (RetainPtr cfBitVector = adoptCF(CTFontCopyColorGlyphCoverage(ctFont.get())))
             m_emojiType = SomeEmojiGlyphs { BitVector(cfBitVector.get()) };
         else
             m_emojiType = NoEmojiGlyphs { };
+#endif
     } else
         m_emojiType = NoEmojiGlyphs { };
 
@@ -293,6 +298,12 @@ static RetainPtr<CFDictionaryRef> smallCapsTrueTypeDictionary(int rawKey, int ra
 
 static void unionBitVectors(BitVector& result, CFBitVectorRef source)
 {
+    // A coverage query can come back with nothing - this CoreText answers no
+    // coverage for a feature it does not know - and the count below dereferences
+    // whatever it is given. Any page using small-caps took the process down.
+    if (!source)
+        return;
+
     CFIndex length = CFBitVectorGetCount(source);
     result.ensureSize(length);
     CFIndex min = 0;
@@ -409,7 +420,10 @@ static inline std::optional<CFStringRef> openTypeFeature(CFDictionaryRef feature
 {
     ASSERT(isOpenTypeFeature(feature));
     RetainPtr tag = static_cast<CFStringRef>(CFDictionaryGetValue(feature, kCTFontOpenTypeFeatureTag));
-    int rawValue;
+    // Zero, not whatever was on the stack: the only check on the read is an
+    // assertion, which release builds drop, and a failed read then decides
+    // whether a feature is applied from uninitialised memory.
+    int rawValue = 0;
     RetainPtr value = static_cast<CFNumberRef>(CFDictionaryGetValue(feature, kCTFontOpenTypeFeatureValue));
     auto success = CFNumberGetValue(value.get(), kCFNumberIntType, &rawValue);
     ASSERT_UNUSED(success, success);
@@ -419,11 +433,11 @@ static inline std::optional<CFStringRef> openTypeFeature(CFDictionaryRef feature
 static inline std::pair<int, int> trueTypeFeature(CFDictionaryRef feature)
 {
     ASSERT(isTrueTypeFeature(feature));
-    int rawType;
+    int rawType = 0;
     RetainPtr type = static_cast<CFNumberRef>(CFDictionaryGetValue(feature, kCTFontFeatureTypeIdentifierKey));
     auto success = CFNumberGetValue(type.get(), kCFNumberIntType, &rawType);
     ASSERT_UNUSED(success, success);
-    int rawSelector;
+    int rawSelector = 0;
     RetainPtr selector = static_cast<CFNumberRef>(CFDictionaryGetValue(feature, kCTFontFeatureSelectorIdentifierKey));
     success = CFNumberGetValue(selector.get(), kCFNumberIntType, &rawSelector);
     ASSERT_UNUSED(success, success);
@@ -609,10 +623,41 @@ float Font::platformWidthForGlyph(Glyph glyph) const
     if (platformData().size()) {
         bool horizontal = platformData().orientation() == FontOrientation::Horizontal;
         CTFontOrientation orientation = horizontal || m_isBrokenIdeographFallback ? kCTFontOrientationHorizontal : kCTFontOrientationVertical;
-        CTFontGetAdvancesForGlyphs(protect(ctFont()).get(), orientation, &glyph, &advance, 1);
+        // m_platformData owns this CTFont; protect() would be a CFRetain/CFRelease pair for
+        // every glyph whose advance is not cached yet.
+        CTFontGetAdvancesForGlyphs(ctFont(), orientation, &glyph, &advance, 1);
     }
     return advance.width;
 }
+
+#if defined(WEBKIT_IOS6) && !ENABLE(OPENTYPE_VERTICAL)
+void Font::prewarmGlyphAdvances(const GlyphPage& page) const
+{
+    if (!platformData().size())
+        return;
+
+    std::array<CGGlyph, GlyphPage::size> glyphs;
+    unsigned count = 0;
+    for (unsigned i = 0; i < GlyphPage::size; ++i) {
+        auto glyph = page.glyphForIndex(i);
+        if (!glyph || isZeroWidthSpaceGlyph(glyph))
+            continue;
+        glyphs[count++] = glyph;
+    }
+
+    if (count < 2)
+        return;
+
+    bool horizontal = platformData().orientation() == FontOrientation::Horizontal;
+    CTFontOrientation orientation = horizontal || m_isBrokenIdeographFallback ? kCTFontOrientationHorizontal : kCTFontOrientationVertical;
+
+    std::array<CGSize, GlyphPage::size> advances;
+    CTFontGetAdvancesForGlyphs(ctFont(), orientation, glyphs.data(), advances.data(), count);
+
+    for (unsigned i = 0; i < count; ++i)
+        m_glyphToWidthMap.metricsSlotForGlyph(glyphs[i]) = advances[i].width;
+}
+#endif
 
 GlyphBufferAdvance Font::applyTransforms(GlyphBuffer& glyphBuffer, unsigned beginningGlyphIndex, unsigned beginningStringIndex, bool enableKerning, bool requiresShaping, const AtomString& locale, StringView text, TextDirection textDirection) const
 {
@@ -620,6 +665,16 @@ GlyphBufferAdvance Font::applyTransforms(GlyphBuffer& glyphBuffer, unsigned begi
 
     if (!platformData().size())
         return makeGlyphBufferAdvance();
+
+#if defined(WEBKIT_IOS6)
+    UNUSED_PARAM(beginningStringIndex);
+    UNUSED_PARAM(enableKerning);
+    UNUSED_PARAM(locale);
+    UNUSED_PARAM(text);
+    if (textDirection == TextDirection::RTL)
+        glyphBuffer.reverse(beginningGlyphIndex, glyphBuffer.size() - beginningGlyphIndex);
+    return makeGlyphBufferAdvance();
+#endif
 
     auto handler = ^(CFRange range, CGGlyph** newGlyphsPointer, CGSize** newAdvancesPointer, CGPoint** newOffsetsPointer, CFIndex** newIndicesPointer)
     {
@@ -788,7 +843,8 @@ FloatRect Font::platformBoundsForGlyph(Glyph glyph) const
 {
     FloatRect boundingBox;
     CGRect ignoredRect = { };
-    boundingBox = CTFontGetBoundingRectsForGlyphs(protect(ctFont()).get(), platformData().orientation() == FontOrientation::Vertical ? kCTFontOrientationVertical : kCTFontOrientationHorizontal, &glyph, &ignoredRect, 1);
+    // m_platformData owns this CTFont for the duration of the call.
+    boundingBox = CTFontGetBoundingRectsForGlyphs(ctFont(), platformData().orientation() == FontOrientation::Vertical ? kCTFontOrientationVertical : kCTFontOrientationHorizontal, &glyph, &ignoredRect, 1);
     boundingBox.setY(-boundingBox.maxY());
     boundingBox.setWidth(boundingBox.width() + m_syntheticBoldOffset);
 
@@ -798,7 +854,7 @@ FloatRect Font::platformBoundsForGlyph(Glyph glyph) const
 Vector<FloatRect, Font::inlineGlyphRunCapacity> Font::platformBoundsForGlyphs(const Vector<Glyph, inlineGlyphRunCapacity>& glyphs) const
 {
     Vector<CGRect, inlineGlyphRunCapacity> rectsForGlyphs(glyphs.size());
-    CTFontGetBoundingRectsForGlyphs(protect(ctFont()).get(), platformData().orientation() == FontOrientation::Vertical ? kCTFontOrientationVertical : kCTFontOrientationHorizontal, glyphs.span().data(), rectsForGlyphs.mutableSpan().data(), rectsForGlyphs.size());
+    CTFontGetBoundingRectsForGlyphs(ctFont(), platformData().orientation() == FontOrientation::Vertical ? kCTFontOrientationVertical : kCTFontOrientationHorizontal, glyphs.span().data(), rectsForGlyphs.mutableSpan().data(), rectsForGlyphs.size());
 
     return rectsForGlyphs.map<Vector<FloatRect, inlineGlyphRunCapacity>>([&](const auto& rect) -> auto {
         FloatRect boundingBox(rect);

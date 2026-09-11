@@ -108,11 +108,17 @@ static const int cMaxPixelDimension = 2048;
 // Derived empirically: <rdar://problem/13401861>
 static const unsigned cMaxLayerTreeDepth = 128;
 
-// About 10 screens of an iPhone 6 Plus. <rdar://problem/44532782>
+#if defined(WEBKIT_IOS6)
+static const unsigned cMaxTotalBackdropFilterArea = 320 * 480 * 10;
+#else
 static const unsigned cMaxTotalBackdropFilterArea = 1242 * 2208 * 10;
+#endif
 
-// Don't let a single tiled layer use more than 156MB of memory. On a 3x display with RGB10A8 surfaces, this is about 12 tiles.
+#if defined(WEBKIT_IOS6)
+static const unsigned cMaxScaledTiledLayerMemorySize = 1024 * 1024 * 12;
+#else
 static const unsigned cMaxScaledTiledLayerMemorySize = 1024 * 1024 * 156;
+#endif
 
 // If we send a duration of 0 to CA, then it will use the default duration
 // of 250ms. So send a very small value instead.
@@ -1685,7 +1691,10 @@ bool GraphicsLayerCA::visibleRectChangeRequiresFlush(const FloatRect& clipRect) 
 
 TiledBacking* GraphicsLayerCA::tiledBacking() const
 {
-    return protect(m_layer)->tiledBacking();
+    // Called several times per layer per commit, and the layer is owned by this
+    // object for the whole of the call - the protective reference only bought a
+    // refcount pair each time.
+    return m_layer->tiledBacking();
 }
 
 TransformationMatrix GraphicsLayerCA::layerTransform(const FloatPoint& position, const TransformationMatrix* customTransform) const
@@ -1815,8 +1824,9 @@ GraphicsLayerCA::VisibleAndCoverageRects GraphicsLayerCA::computeVisibleAndCover
     auto boundsOrigin = m_boundsOrigin;
 #if PLATFORM(IOS_FAMILY)
     // In WK1, UIKit may be changing layer bounds behind our back in overflow-scroll layers, so use the layer's origin.
-    if (protect(m_layer)->type() == PlatformCALayer::Type::Cocoa)
-        boundsOrigin = protect(m_layer)->bounds().location();
+    // One protective reference for both queries: this runs for every layer of every commit.
+    if (RefPtr layer = m_layer; layer && layer->type() == PlatformCALayer::Type::Cocoa)
+        boundsOrigin = layer->bounds().location();
 #endif
 
     auto coverageRect = clipRectForSelf;
@@ -4848,8 +4858,15 @@ bool GraphicsLayerCA::requiresTiledLayer(float pageScaleFactor) const
     if (!m_drawsContent || isPageTiledBackingLayer() || !allowsTiling())
         return false;
 
-    // FIXME: catch zero-size height or width here (or earlier)?
-#if PLATFORM(IOS_FAMILY)
+#if defined(WEBKIT_IOS6) && PLATFORM(IOS_FAMILY)
+    float scaledWidth = m_size.width() * pageScaleFactor;
+    float scaledHeight = m_size.height() * pageScaleFactor;
+    if (!(scaledWidth > cMaxPixelDimensionLowMemory) && !(scaledHeight > cMaxPixelDimensionLowMemory))
+        return false;
+    if (scaledWidth > cMaxPixelDimension || scaledHeight > cMaxPixelDimension)
+        return true;
+    return systemMemoryLevel() < cMemoryLevelToUseSmallerPixelDimension;
+#elif PLATFORM(IOS_FAMILY)
     int maxPixelDimension = systemMemoryLevel() < cMemoryLevelToUseSmallerPixelDimension ? cMaxPixelDimensionLowMemory : cMaxPixelDimension;
     return m_size.width() * pageScaleFactor > maxPixelDimension || m_size.height() * pageScaleFactor > maxPixelDimension;
 #else

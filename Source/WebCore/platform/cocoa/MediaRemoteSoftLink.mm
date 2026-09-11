@@ -27,8 +27,26 @@
 
 #include <pal/spi/mac/MediaRemoteSPI.h>
 #include <wtf/SoftLinking.h>
+#include <dlfcn.h>
 
+#if defined(WEBKIT_IOS6)
+namespace WebCore {
+void* MediaRemoteLibrary(bool isOptional);
+void* MediaRemoteLibrary(bool)
+{
+    static void* frameworkLibrary;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        frameworkLibrary = dlopen("/System/Library/PrivateFrameworks/MediaRemote.framework/MediaRemote", RTLD_NOW);
+        if (frameworkLibrary && !dlsym(frameworkLibrary, "MRMediaRemoteGetLocalOrigin"))
+            frameworkLibrary = nullptr;
+    });
+    return frameworkLibrary;
+}
+}
+#else
 SOFT_LINK_PRIVATE_FRAMEWORK_FOR_SOURCE(WebCore, MediaRemote)
+#endif
 
 SOFT_LINK_FUNCTION_FOR_SOURCE(WebCore, MediaRemote, MRMediaRemoteGetLocalOrigin, MROriginRef, (), ())
 SOFT_LINK_FUNCTION_FOR_SOURCE(WebCore, MediaRemote, MRMediaRemoteAddAsyncCommandHandlerBlock, void*, (MRMediaRemoteAsyncCommandHandlerBlock block), (block))

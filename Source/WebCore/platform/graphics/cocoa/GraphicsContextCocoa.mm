@@ -36,7 +36,9 @@
 #import <numeric>
 #import <pal/spi/cg/CoreGraphicsSPI.h>
 #import <pal/spi/cocoa/FeatureFlagsSPI.h>
+#if PLATFORM(MAC)
 #import <pal/spi/mac/NSGraphicsSPI.h>
+#endif
 #import <wtf/SoftLinking.h>
 #import <wtf/StdLibExtras.h>
 
@@ -104,6 +106,12 @@ void GraphicsContextCG::drawFocusRing(const Path& path, float, const Color& colo
     if (path.isEmpty())
         return;
 
+#if defined(WEBKIT_IOS6)
+    UNUSED_PARAM(color);
+    UNUSED_PARAM(zoomFactor);
+    return;
+#else
+
     CGFocusRingStyle focusRingStyle;
 #if USE(APPKIT)
     NSInitializeCGFocusRingStyleForTime(NSFocusRingOnly, &focusRingStyle, std::numeric_limits<double>::max());
@@ -117,17 +125,12 @@ void GraphicsContextCG::drawFocusRing(const Path& path, float, const Color& colo
     focusRingStyle.bounds = CGRectZero;
 #endif
 
-    // zoomFactor covers CSS zoom / page zoom (Cmd+/-). ctmScale covers page scale (pinch-to-zoom), canvas transforms, etc.
     CGContextRef platformContext = this->platformContext();
     auto ctmScale = singularValue(getUserToBaseCTM(platformContext), SingularValueSelection::Largest);
     if (ctmScale <= 0)
         ctmScale = 1.0f;
     focusRingStyle.radius *= zoomFactor * ctmScale;
 
-    // We want to respect the CGContext clipping and also not overpaint any
-    // existing focus ring. The way to do this is set accumulate to
-    // -1. According to CoreGraphics, the reasoning for this behavior has been
-    // lost in time.
     focusRingStyle.accumulate = -1;
     auto style = adoptCF(CGStyleCreateFocusRingWithColor(&focusRingStyle, cachedCGColor(color).get()));
 
@@ -138,6 +141,7 @@ void GraphicsContextCG::drawFocusRing(const Path& path, float, const Color& colo
     CGContextAddPath(platformContext, path.platformPath());
 
     CGContextFillPath(platformContext);
+#endif
 }
 
 void GraphicsContextCG::drawFocusRing(const Vector<FloatRect>& rects, float outlineWidth, const Color& color, float zoomFactor)

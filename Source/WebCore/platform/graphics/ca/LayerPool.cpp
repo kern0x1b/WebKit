@@ -30,14 +30,37 @@
 #include <wtf/NeverDestroyed.h>
 #include <wtf/TZoneMallocInlines.h>
 
+#if defined(WEBKIT_IOS6)
+#include <stdlib.h>
+#endif
+
 namespace WebCore {
 
 WTF_MAKE_TZONE_ALLOCATED_IMPL(LayerPool);
 
 static constexpr Seconds capacityDecayTime { 5_s };
 
+#if defined(WEBKIT_IOS6)
+static unsigned maximumLayerPoolBytes()
+{
+    static unsigned value = [] -> unsigned {
+        if (const char* override = getenv("WEBKIT_IOS6_LAYER_POOL_KB")) {
+            int parsed = atoi(override);
+            if (parsed >= 0 && parsed <= 128 * 1024)
+                return static_cast<unsigned>(parsed) * 1024;
+        }
+        return 48 * 1024 * 1024;
+    }();
+    return value;
+}
+#endif
+
 LayerPool::LayerPool()
+#if defined(WEBKIT_IOS6)
+    : m_maxBytesForPool(maximumLayerPoolBytes())
+#else
     : m_maxBytesForPool(48 * 1024 * 1024)
+#endif
     , m_pruneTimer(*this, &LayerPool::pruneTimerFired)
 {
     RELEASE_ASSERT(isMainThread());

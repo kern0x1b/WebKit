@@ -180,9 +180,13 @@ RetainPtr<NSData> DataSegment::createNSData() const
 
 void DataSegment::iterate(CFDataRef data, NOESCAPE const Function<void(std::span<const uint8_t>)>& apply) const
 {
+#if defined(WEBKIT_IOS6)
+    apply(unsafeMakeSpan(CFDataGetBytePtr(data), static_cast<size_t>(CFDataGetLength(data))));
+#else
     [(__bridge NSData *)data enumerateByteRangesUsingBlock:^(const void *bytes, NSRange byteRange, BOOL *) {
         apply(unsafeMakeSpan(static_cast<const uint8_t*>(bytes), byteRange.length));
     }];
+#endif
 }
 
 RetainPtr<NSData> SharedBufferDataView::createNSData() const

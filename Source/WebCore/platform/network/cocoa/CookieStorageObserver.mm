@@ -126,10 +126,13 @@ void CookieStorageObserver::registerInternalsForNotifications(bool isReregisteri
     if (isReregistering && !m_hasRegisteredInternalsForNotifications)
         return;
 
+#if defined(WEBKIT_IOS6)
+#else
     if (m_cookieStorage.get() != [NSHTTPCookieStorage sharedHTTPCookieStorage]) {
         RetainPtr internalObject = (static_cast<WebNSHTTPCookieStorageDummyForInternalAccess *>(m_cookieStorage.get()))->_internal;
         [internalObject registerForPostingNotificationsWithContext:m_cookieStorage.get()];
     }
+#endif
 }
 
 void CookieStorageObserver::stopObserving()

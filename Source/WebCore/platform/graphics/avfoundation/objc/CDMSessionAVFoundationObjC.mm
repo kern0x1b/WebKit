@@ -37,7 +37,7 @@
 #import <AVFoundation/AVAsset.h>
 #import <AVFoundation/AVAssetResourceLoader.h>
 #import <JavaScriptCore/TypedArrayInlines.h>
-#import <objc/objc-runtime.h>
+#import <objc/runtime.h>
 #import <wtf/LoggerHelper.h>
 #import <wtf/MainThread.h>
 #import <wtf/SoftLinking.h>

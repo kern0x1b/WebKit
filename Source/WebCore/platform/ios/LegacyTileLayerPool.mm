@@ -39,9 +39,28 @@ namespace WebCore {
 
 static const Seconds capacityDecayTime { 5_s };
 
+#if defined(WEBKIT_IOS6)
+static unsigned legacyTileLayerPoolDefaultCapacity()
+{
+    static const unsigned capacity = [] -> unsigned {
+        if (const char* override = getenv("WEBKIT_IOS6_TILE_LAYER_POOL_MB")) {
+            int value = atoi(override);
+            if (value >= 0 && value <= 64)
+                return static_cast<unsigned>(value) * 1024 * 1024;
+        }
+        return 12 * 1024 * 1024;
+    }();
+    return capacity;
+}
+#endif
+
 LegacyTileLayerPool::LegacyTileLayerPool()
     : m_totalBytes(0)
+#if defined(WEBKIT_IOS6)
+    , m_capacity(legacyTileLayerPoolDefaultCapacity())
+#else
     , m_capacity(0)
+#endif
     , m_needsPrune(false)
 {
 }
@@ -78,12 +97,24 @@ void LegacyTileLayerPool::addLayer(const RetainPtr<LegacyTileLayer>& layer)
     if (!canReuseLayerWithSize(layerSize))
         return;
 
+#if defined(WEBKIT_IOS6)
+    const bool underPressure = MemoryPressureHandler::singleton().isUnderMemoryPressure();
+
+    Locker locker { m_layerPoolMutex };
+
+    if (underPressure) {
+        const unsigned capacityUnderPressure = 4 * 1024 * 1024;
+        if (m_totalBytes + bytesBackingLayerWithPixelSize(layerSize) > capacityUnderPressure)
+            return;
+    }
+#else
     if (MemoryPressureHandler::singleton().isUnderMemoryPressure()) {
         LOG(MemoryPressure, "Under memory pressure: %s, totalBytes: %d", __PRETTY_FUNCTION__, m_totalBytes);
         return;
     }
 
     Locker locker { m_layerPoolMutex };
+#endif
     listOfLayersWithSize(layerSize).prepend(layer);
     m_totalBytes += bytesBackingLayerWithPixelSize(layerSize);
 

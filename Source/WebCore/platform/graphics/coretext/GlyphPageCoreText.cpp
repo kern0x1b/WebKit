@@ -52,20 +52,22 @@ bool GlyphPage::fill(std::span<const char16_t> buffer)
 {
     ASSERT(buffer.size() == GlyphPage::size || buffer.size() == 2 * GlyphPage::size);
 
-    Ref<const Font> font = this->font();
-    Vector<CGGlyph, 512> glyphs(buffer.size());
+    // The Font owns this GlyphPage, so it outlives the call; and its FontPlatformData owns
+    // the CTFont. Neither needs a reference taken here.
+    const Font& font = this->font();
+    Vector<CGGlyph, GlyphPage::size * 2> glyphs(buffer.size());
     unsigned glyphStep = buffer.size() / GlyphPage::size;
 
     if (shouldFillWithVerticalGlyphs(buffer, font))
-        CTFontGetVerticalGlyphsForCharacters(protect(font->platformData().ctFont()).get(), reinterpret_cast<const UniChar*>(buffer.data()), glyphs.mutableSpan().data(), buffer.size());
+        CTFontGetVerticalGlyphsForCharacters(font.platformData().ctFont(), reinterpret_cast<const UniChar*>(buffer.data()), glyphs.mutableSpan().data(), buffer.size());
     else
-        CTFontGetGlyphsForCharacters(protect(font->platformData().ctFont()).get(), reinterpret_cast<const UniChar*>(buffer.data()), glyphs.mutableSpan().data(), buffer.size());
+        CTFontGetGlyphsForCharacters(font.platformData().ctFont(), reinterpret_cast<const UniChar*>(buffer.data()), glyphs.mutableSpan().data(), buffer.size());
 
     bool haveGlyphs = false;
     for (unsigned i = 0; i < GlyphPage::size; ++i) {
         auto theGlyph = glyphs[i * glyphStep];
         if (theGlyph && theGlyph != deletedGlyph) {
-            setGlyphForIndex(i, theGlyph, font->colorGlyphType(theGlyph));
+            setGlyphForIndex(i, theGlyph, font.colorGlyphType(theGlyph));
             haveGlyphs = true;
         }
     }

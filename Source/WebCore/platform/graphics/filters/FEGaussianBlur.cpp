@@ -30,6 +30,9 @@
 #include "Filter.h"
 #include "GraphicsContext.h"
 #include <numbers>
+#if defined(WEBKIT_IOS6)
+#include <cstdlib>
+#endif
 #include <wtf/text/TextStream.h>
 
 #if USE(CORE_IMAGE)
@@ -87,11 +90,31 @@ bool FEGaussianBlur::setEdgeMode(EdgeModeType edgeMode)
     return true;
 }
 
+#if defined(WEBKIT_IOS6)
+static float feGaussianBlurIOS6StdDeviationCap()
+{
+    static const float cap = [] -> float {
+        if (const char* override = getenv("WEBKIT_IOS6_MAX_BLUR_STD_DEVIATION")) {
+            double parsed = atof(override);
+            if (parsed > 0)
+                return static_cast<float>(parsed);
+        }
+        return 8.0f;
+    }();
+    return cap;
+}
+#endif
+
 FloatSize FEGaussianBlur::effectiveStdDeviation(OptionSet<FilterRenderingOption> renderingOptions) const
 {
     if (renderingOptions.contains(FilterRenderingOption::FastAndLowQuality))
         return { std::min(m_stdX, 20.0f), std::min(m_stdY, 20.0f) };
+#if defined(WEBKIT_IOS6)
+    float cap = feGaussianBlurIOS6StdDeviationCap();
+    return { std::min(m_stdX, cap), std::min(m_stdY, cap) };
+#else
     return { m_stdX, m_stdY };
+#endif
 }
 
 static inline float gaussianKernelFactor()

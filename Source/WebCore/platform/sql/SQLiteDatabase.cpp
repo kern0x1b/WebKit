@@ -34,6 +34,8 @@
 #include "SQLiteFileSystem.h"
 #include "SQLiteStatement.h"
 #include <bmalloc/BPlatform.h>
+#include <stdlib.h>
+#include <limits>
 #include <mutex>
 #include <sqlite3.h>
 #include <thread>
@@ -52,6 +54,45 @@ WTF_MAKE_TZONE_ALLOCATED_IMPL(SQLiteDatabase);
 
 static constexpr auto notOpenErrorMessage = "database is not open"_s;
 
+#if defined(WEBKIT_IOS6)
+static int sqliteDatabaseTuningValue(const char* name, int defaultValue, int minimumValue, int maximumValue)
+{
+    const char* text = getenv(name);
+    if (!text || !*text)
+        return defaultValue;
+
+    char* end = nullptr;
+    long parsed = strtol(text, &end, 10);
+    if (end == text || *end)
+        return defaultValue;
+    if (parsed < minimumValue || parsed > maximumValue)
+        return defaultValue;
+
+    return static_cast<int>(parsed);
+}
+
+static int sqliteDatabaseTuningPageSize()
+{
+    int pageSize = sqliteDatabaseTuningValue("WEBKIT_SQLITE_PAGE_SIZE", 4096, 512, 65536);
+    if (pageSize & (pageSize - 1))
+        return 4096;
+    return pageSize;
+}
+
+static void sqliteDatabaseApplyPragma(SQLiteDatabase& database, ASCIILiteral pragma, int64_t value)
+{
+    auto statement = database.prepareStatementSlow(makeString("PRAGMA "_s, pragma, " = "_s, value));
+    if (!statement) {
+        LOG_ERROR("SQLite database could not prepare PRAGMA %s", pragma.characters());
+        return;
+    }
+
+    int result = statement->step();
+    if (result != SQLITE_DONE && result != SQLITE_ROW)
+        LOG_ERROR("SQLite database could not apply PRAGMA %s - %d", pragma.characters(), result);
+}
+#endif
+
 static void unauthorizedSQLFunction(sqlite3_context *context, int, sqlite3_value **)
 {
     auto* functionName = static_cast<const char*>(sqlite3_user_data(context));
@@ -67,26 +108,21 @@ static void initializeSQLiteIfNecessary()
         // aren't confident that it really is, and we still support ancient versions of SQLite. So
         // std::call_once is used to stay on the safe side. See bug #143245.
 
-#if OS(DARWIN)
+#if OS(DARWIN) && !defined(WEBKIT_IOS6)
         int ret;
         callOnMainThreadAndWait([&] {
-            // In the Network process, this function can be called on a background thread when
-            // creating WebKit::ResourceLoadStatisticsStore, which then races with
-            // WebKit::NetworkProcess::initializeNetworkProcess(). Since both of those calls query
-            // the Darwin user temp directory via confstr(), this should only be called from the
-            // main thread.
             ret = sqlite3_initialize();
         });
+#elif OS(DARWIN)
+        int ret = sqlite3_initialize();
 #else
-        // On non-Darwin systems confstr() is MT-safe and it does not try to fiddle with environment
-        // variables, and it is better initialize directly. This is true at least on Linux with the
-        // supported C libraries (glibc, Musl, uClibc), the "big" BSDs (FreeBSD, NetBSD, OpenBSD),
-        // and the Android C library (Bionic) does not even provide confstr().
         int ret = sqlite3_initialize();
 #endif
 
         if (ret != SQLITE_OK) {
-#if SQLITE_VERSION_NUMBER >= 3007015
+#if defined(WEBKIT_IOS6)
+            WTFLogAlways("Failed to initialize SQLite: %d", ret);
+#elif SQLITE_VERSION_NUMBER >= 3007015
             WTFLogAlways("Failed to initialize SQLite: %s", sqlite3_errstr(ret));
 #else
             WTFLogAlways("Failed to initialize SQLite");
@@ -181,6 +217,15 @@ bool SQLiteDatabase::open(const String& filename, OpenMode openMode, OptionSet<O
     if (sqlite3_extended_result_codes(m_db, 1) != SQLITE_OK)
         return false;
 
+#if defined(WEBKIT_IOS6)
+    {
+        SQLiteTransactionInProgressAutoCounter transactionCounter;
+        if (filename != inMemoryPath())
+            sqliteDatabaseApplyPragma(*this, "page_size"_s, sqliteDatabaseTuningPageSize());
+        sqliteDatabaseApplyPragma(*this, "cache_size"_s, -sqliteDatabaseTuningValue("WEBKIT_SQLITE_CACHE_SIZE_KB", 2048, 32, 65536));
+    }
+#endif
+
     {
         SQLiteTransactionInProgressAutoCounter transactionCounter;
         if (!executeCommand("PRAGMA temp_store = MEMORY;"_s))
@@ -190,6 +235,14 @@ bool SQLiteDatabase::open(const String& filename, OpenMode openMode, OptionSet<O
     if (filename != inMemoryPath()) {
         if (openMode != OpenMode::ReadOnly && !useWALJournalMode())
             return false;
+
+#if defined(WEBKIT_IOS6)
+        if (openMode != OpenMode::ReadOnly) {
+            SQLiteTransactionInProgressAutoCounter transactionCounter;
+            sqliteDatabaseApplyPragma(*this, "synchronous"_s, sqliteDatabaseTuningValue("WEBKIT_SQLITE_SYNCHRONOUS", 1, 0, 2));
+            sqliteDatabaseApplyPragma(*this, "journal_size_limit"_s, static_cast<int64_t>(sqliteDatabaseTuningValue("WEBKIT_SQLITE_JOURNAL_SIZE_LIMIT_KB", 512, 0, 65536)) * 1024);
+        }
+#endif
 
         auto shmFileName = makeString(filename, "-shm"_s);
         if (FileSystem::fileExists(shmFileName) && !FileSystem::isSafeToUseMemoryMapForPath(shmFileName)) {

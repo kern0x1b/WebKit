@@ -155,6 +155,10 @@ void NetworkStorageSession::setAllCookiesToSameSiteStrict(const RegistrableDomai
 {
     ASSERT(hasProcessPrivilege(ProcessPrivilege::CanAccessRawCookies));
 
+#if defined(WEBKIT_IOS6)
+    UNUSED_PARAM(domain);
+    return completionHandler();
+#else
     RetainPtr<NSMutableArray<NSHTTPCookie *>> oldCookiesToDelete = adoptNS([[NSMutableArray alloc] init]);
     RetainPtr<NSMutableArray<NSHTTPCookie *>> newCookiesToAdd = adoptNS([[NSMutableArray alloc] init]);
 
@@ -180,6 +184,26 @@ void NetworkStorageSession::setAllCookiesToSameSiteStrict(const RegistrableDomai
     for (NSHTTPCookie *oldCookie in oldCookiesToDelete.get())
         deleteHTTPCookie(cookieStorage().get(), oldCookie, [aggregator] { });
     END_BLOCK_OBJC_EXCEPTIONS
+#endif
+}
+
+#if defined(WEBKIT_IOS6)
+extern "C" CFArrayRef CFHTTPCookieStorageCopyCookiesForURL(CFHTTPCookieStorageRef, CFURLRef, Boolean sendSecureCookies);
+
+static bool isSessionOwnedStorage(CFHTTPCookieStorageRef storage)
+{
+    return storage && storage != _CFHTTPCookieStorageGetDefault(kCFAllocatorDefault);
+}
+#endif
+
+static RetainPtr<NSHTTPCookieStorage> wrapCookieStorage(CFHTTPCookieStorageRef storage)
+{
+#if defined(WEBKIT_IOS6)
+    UNUSED_PARAM(storage);
+    return [NSHTTPCookieStorage sharedHTTPCookieStorage];
+#else
+    return adoptNS([[NSHTTPCookieStorage alloc] _initWithCFHTTPCookieStorage:storage]);
+#endif
 }
 
 RetainPtr<NSHTTPCookieStorage> NetworkStorageSession::nsCookieStorage() const
@@ -190,7 +214,7 @@ RetainPtr<NSHTTPCookieStorage> NetworkStorageSession::nsCookieStorage() const
     if (!m_isInMemoryCookieStore && (!cfCookieStorage || [NSHTTPCookieStorage sharedHTTPCookieStorage]._cookieStorage == cfCookieStorage))
         return [NSHTTPCookieStorage sharedHTTPCookieStorage];
 
-    return adoptNS([[NSHTTPCookieStorage alloc] _initWithCFHTTPCookieStorage:cfCookieStorage.get()]);
+    return wrapCookieStorage(cfCookieStorage.get());
 }
 
 CookieStorageObserver& NetworkStorageSession::cookieStorageObserver() const
@@ -275,6 +299,7 @@ void NetworkStorageSession::deleteHTTPCookie(CFHTTPCookieStorageRef cookieStorag
     dispatch_async(globalDispatchQueueSingleton(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), makeBlockPtr(WTF::move(work)).get());
 }
 
+#if !defined(WEBKIT_IOS6)
 static RetainPtr<NSDictionary> policyProperties(const SameSiteInfo& sameSiteInfo, NSURL *url, NSString *partition, ThirdPartyCookieBlockingDecision thirdPartyCookieBlockingDecision)
 {
 #if ENABLE(OPT_IN_PARTITIONED_COOKIES) && defined(CFN_COOKIE_ACCEPTS_POLICY_PARTITION) && CFN_COOKIE_ACCEPTS_POLICY_PARTITION
@@ -295,6 +320,7 @@ static RetainPtr<NSDictionary> policyProperties(const SameSiteInfo& sameSiteInfo
 #endif
     return policyProperties;
 }
+#endif
 
 static RetainPtr<NSArray> cookiesForURLFromStorage(NSHTTPCookieStorage *storage, NSURL *url, NSURL *mainDocumentURL, const std::optional<SameSiteInfo>& sameSiteInfo, ThirdPartyCookieBlockingDecision thirdPartyCookieBlockingDecision, NSString *partition = nullptr)
 {
@@ -305,17 +331,22 @@ static RetainPtr<NSArray> cookiesForURLFromStorage(NSHTTPCookieStorage *storage,
     auto completionHandler = [&cookiesPtr] (NSArray *cookies) {
         cookiesPtr = retainPtr(cookies);
     };
+#if defined(WEBKIT_IOS6)
+    UNUSED_PARAM(mainDocumentURL);
+    UNUSED_PARAM(sameSiteInfo);
+    UNUSED_PARAM(partition);
+    completionHandler([storage cookiesForURL:url]);
+#else
     [storage _getCookiesForURL:url mainDocumentURL:mainDocumentURL partition:partition policyProperties:sameSiteInfo ? policyProperties(sameSiteInfo.value(), url, partition, thirdPartyCookieBlockingDecision).get() : nullptr completionHandler:completionHandler];
+#endif
     RELEASE_ASSERT(!!cookiesPtr);
 
-    // _getCookiesForURL returns only unpartitioned cookies if partition is nil, and it returns both
-    // unpartitioned cookies plus cookies in the specified partition if partition is not nil. Return the
-    // array of cookies the partition was nil, or if we should return both partitioned and unpartitioned
-    // cookies
+#if defined(WEBKIT_IOS6)
+    return WTF::move(*cookiesPtr);
+#else
     if (!partition || thirdPartyCookieBlockingDecision == ThirdPartyCookieBlockingDecision::None)
         return WTF::move(*cookiesPtr);
 
-    // Filter all cookies that aren't in the specified partition.
     RetainPtr<NSMutableArray<NSHTTPCookie *>> partitionedCookies = adoptNS([[NSMutableArray alloc] initWithCapacity:[cookiesPtr->get() count]]);
     for (NSHTTPCookie *nsCookie in cookiesPtr->get()) {
         if (![nsCookie._storagePartition isEqualToString:partition])
@@ -323,21 +354,31 @@ static RetainPtr<NSArray> cookiesForURLFromStorage(NSHTTPCookieStorage *storage,
         [partitionedCookies.get() addObject:nsCookie];
     }
     return WTF::move(partitionedCookies);
+#endif
 }
 
 void NetworkStorageSession::setHTTPCookiesForURL(CFHTTPCookieStorageRef cookieStorage, NSArray *cookies, NSURL *url, NSURL *mainDocumentURL, NSString *partition, const SameSiteInfo& sameSiteInfo, ThirdPartyCookieBlockingDecision thirdPartyCookieBlockingDecision) const
 {
     ASSERT(hasProcessPrivilege(ProcessPrivilege::CanAccessRawCookies) || m_isInMemoryCookieStore);
 
+#if defined(WEBKIT_IOS6)
+    UNUSED_PARAM(partition);
+    UNUSED_PARAM(sameSiteInfo);
+    UNUSED_PARAM(thirdPartyCookieBlockingDecision);
+    if (isSessionOwnedStorage(cookieStorage)) {
+        CFHTTPCookieStorageSetCookies(cookieStorage, (__bridge CFArrayRef)cookies, (__bridge CFURLRef)url, (__bridge CFURLRef)mainDocumentURL);
+        return;
+    }
+    [[NSHTTPCookieStorage sharedHTTPCookieStorage] setCookies:cookies forURL:url mainDocumentURL:mainDocumentURL];
+#else
     if (!cookieStorage) {
         [[NSHTTPCookieStorage sharedHTTPCookieStorage] _setCookies:cookies forURL:url mainDocumentURL:mainDocumentURL policyProperties:policyProperties(sameSiteInfo, url, partition, thirdPartyCookieBlockingDecision).get()];
         return;
     }
 
-    // FIXME: Stop creating a new NSHTTPCookieStorage object each time we want to query the cookie jar.
-    // NetworkStorageSession could instead keep a NSHTTPCookieStorage object for us.
-    RetainPtr<NSHTTPCookieStorage> nsCookieStorage = adoptNS([[NSHTTPCookieStorage alloc] _initWithCFHTTPCookieStorage:cookieStorage]);
+    RetainPtr<NSHTTPCookieStorage> nsCookieStorage = wrapCookieStorage(cookieStorage);
     [nsCookieStorage _setCookies:cookies forURL:url mainDocumentURL:mainDocumentURL policyProperties:policyProperties(sameSiteInfo, url, partition, thirdPartyCookieBlockingDecision).get()];
+#endif
 }
 
 RetainPtr<NSArray> NetworkStorageSession::httpCookiesForURL(CFHTTPCookieStorageRef cookieStorage, NSURL *firstParty, const std::optional<SameSiteInfo>& sameSiteInfo, NSURL *url, ThirdPartyCookieBlockingDecision thirdPartyCookieBlockingDecision) const
@@ -348,9 +389,16 @@ RetainPtr<NSArray> NetworkStorageSession::httpCookiesForURL(CFHTTPCookieStorageR
         cookieStorage = _CFHTTPCookieStorageGetDefault(kCFAllocatorDefault);
     }
 
+#if defined(WEBKIT_IOS6)
+    if (isSessionOwnedStorage(cookieStorage)) {
+        RetainPtr cookies = adoptCF(CFHTTPCookieStorageCopyCookiesForURL(cookieStorage, (__bridge CFURLRef)url, true));
+        return (__bridge NSArray *)cookies.get();
+    }
+#endif
+
     // FIXME: Stop creating a new NSHTTPCookieStorage object each time we want to query the cookie jar.
     // NetworkStorageSession could instead keep a NSHTTPCookieStorage object for us.
-    RetainPtr<NSHTTPCookieStorage> nsCookieStorage = adoptNS([[NSHTTPCookieStorage alloc] _initWithCFHTTPCookieStorage:cookieStorage]);
+    RetainPtr<NSHTTPCookieStorage> nsCookieStorage = wrapCookieStorage(cookieStorage);
 #if ENABLE(OPT_IN_PARTITIONED_COOKIES) && defined(CFN_COOKIE_ACCEPTS_POLICY_PARTITION) && CFN_COOKIE_ACCEPTS_POLICY_PARTITION
     RetainPtr partitionKey = isOptInCookiePartitioningEnabled() ? cookiePartitionIdentifier(firstParty).createNSString() : nil;
 #else
@@ -522,7 +570,15 @@ static RetainPtr<NSHTTPCookie> parseDOMCookie(String cookieString, NSURL* cookie
     // cookiesWithResponseHeaderFields doesn't parse cookies without a value
     cookieString = cookieString.contains('=') ? cookieString : makeString(cookieString, '=');
 
+#if defined(WEBKIT_IOS6)
+    UNUSED_PARAM(partition);
+    NSArray<NSHTTPCookie *> *parsed = [NSHTTPCookie
+        cookiesWithResponseHeaderFields:@{ @"Set-Cookie": cookieString.createNSString().get() }
+                                 forURL:cookieURL];
+    return adjustScriptWrittenCookie([parsed firstObject], cappedLifetime);
+#else
     return adjustScriptWrittenCookie([NSHTTPCookie _cookieForSetCookieString:cookieString.createNSString().get() forURL:cookieURL partition:nsStringNilIfEmpty(partition).get()], cappedLifetime);
+#endif
 }
 
 void NetworkStorageSession::setCookiesFromDOM(const URL& firstParty, const SameSiteInfo& sameSiteInfo, const URL& url, std::optional<FrameIdentifier> frameID, std::optional<PageIdentifier> pageID, ApplyTrackingPrevention applyTrackingPrevention, RequiresScriptTrackingPrivacy requiresScriptTrackingPrivacy, const String& cookieString, ShouldRelaxThirdPartyCookieBlocking shouldRelaxThirdPartyCookieBlocking, IsKnownCrossSiteTracker isKnownCrossSiteTracker) const
@@ -681,11 +737,16 @@ void NetworkStorageSession::deleteCookiesMatching(NOESCAPE const Function<bool(N
     BEGIN_BLOCK_OBJC_EXCEPTIONS
 
     RetainPtr<CFHTTPCookieStorageRef> cookieStorage = this->cookieStorage();
-    auto nsCookieStorage = adoptNS([[NSHTTPCookieStorage alloc] _initWithCFHTTPCookieStorage:cookieStorage.get()]);
+    auto nsCookieStorage = wrapCookieStorage(cookieStorage.get());
     auto aggregator = CallbackAggregator::create([completionHandler = WTF::move(completionHandler), nsCookieStorage = WTF::move(nsCookieStorage)] () mutable {
+#if defined(WEBKIT_IOS6)
+        UNUSED_PARAM(nsCookieStorage);
+        ensureOnMainThread(WTF::move(completionHandler));
+#else
         [nsCookieStorage _saveCookies:makeBlockPtr([completionHandler = WTF::move(completionHandler)] () mutable {
             ensureOnMainThread(WTF::move(completionHandler));
         }).get()];
+#endif
     });
 
     RetainPtr<NSArray> cookies = httpCookies(cookieStorage.get());
@@ -704,6 +765,13 @@ void NetworkStorageSession::deleteCookiesMatching(NOESCAPE const Function<bool(N
 
 void NetworkStorageSession::deleteCookies(const ClientOrigin& origin, CompletionHandler<void()>&& completionHandler)
 {
+#if defined(WEBKIT_IOS6)
+    auto domain = origin.clientOrigin.host();
+
+    deleteCookiesMatching([&domain](auto *cookie) {
+        return domain == String(cookie.domain);
+    }, WTF::move(completionHandler));
+#else
     Vector<String> cachePartitions { cookiePartitionIdentifier(origin.topOrigin.toURL()) };
     if (origin.topOrigin == origin.clientOrigin)
         cachePartitions.append({ });
@@ -715,6 +783,7 @@ void NetworkStorageSession::deleteCookies(const ClientOrigin& origin, Completion
         });
         return partitionMatched && domain == String(cookie.domain);
     }, WTF::move(completionHandler));
+#endif
 }
 
 void NetworkStorageSession::deleteCookiesForHostnames(std::span<const String> hostnames, IncludeHttpOnlyCookies includeHttpOnlyCookies, ScriptWrittenCookiesOnly scriptWrittenCookiesOnly, CompletionHandler<void()>&& completionHandler)
@@ -748,9 +817,13 @@ void NetworkStorageSession::deleteAllCookiesModifiedSince(WallTime timePoint, Co
     NSTimeInterval timeInterval = timePoint.secondsSinceEpoch().seconds();
     auto work = [completionHandler = WTF::move(completionHandler), storage = RetainPtr { nsCookieStorage() }, date = RetainPtr { [NSDate dateWithTimeIntervalSince1970:timeInterval] }] () mutable {
         [storage removeCookiesSinceDate:date.get()];
+#if defined(WEBKIT_IOS6)
+        ensureOnMainThread(WTF::move(completionHandler));
+#else
         [storage _saveCookies:makeBlockPtr([completionHandler = WTF::move(completionHandler)] () mutable {
             ensureOnMainThread(WTF::move(completionHandler));
         }).get()];
+#endif
     };
 
     if (m_isInMemoryCookieStore)
@@ -760,20 +833,16 @@ void NetworkStorageSession::deleteAllCookiesModifiedSince(WallTime timePoint, Co
 
 Vector<Cookie> NetworkStorageSession::domCookiesForHost(const URL& firstParty)
 {
+#if defined(WEBKIT_IOS6)
+    RetainPtr nsCookies = [nsCookieStorage() cookiesForURL:firstParty.createNSURL().get()];
+#else
     RetainPtr host = firstParty.host().createNSString();
 
-    // _getCookiesForDomain only returned unpartitioned (i.e., nil partition) cookies
     RetainPtr<NSArray> unpartitionedCookies = [nsCookieStorage() _getCookiesForDomain:host.get()];
     RetainPtr nsCookies = adoptNS([[NSMutableArray alloc] initWithArray:unpartitionedCookies.get()]);
 
 #if ENABLE(OPT_IN_PARTITIONED_COOKIES) && defined(CFN_COOKIE_ACCEPTS_POLICY_PARTITION) && CFN_COOKIE_ACCEPTS_POLICY_PARTITION
     if (isOptInCookiePartitioningEnabled()) {
-        // Next, get all cookies in the partition for this site. However, we
-        // only want the cookies for this host, so we filter all cookies that
-        // don't match.
-        // The _getCookiesForPartition: method calls the
-        // completionHandler synchronously. We crash if this invariant is not
-        // met.
         bool wasCompletionHandlerCalled { false };
         RetainPtr partitionKey = cookiePartitionIdentifier(firstParty).createNSString();
         auto completionHandler = [&wasCompletionHandlerCalled, &nsCookies, &host, &partitionKey, &firstParty] (NSArray *cookies) {
@@ -797,6 +866,7 @@ Vector<Cookie> NetworkStorageSession::domCookiesForHost(const URL& firstParty)
         [nsCookieStorage() _getCookiesForPartition:partitionKey.get() completionHandler:completionHandler];
         RELEASE_ASSERT(wasCompletionHandlerCalled);
     }
+#endif
 #endif
 
     return nsCookiesToCookieVector(nsCookies.get(), [](NSHTTPCookie *cookie) { return !cookie.HTTPOnly; });

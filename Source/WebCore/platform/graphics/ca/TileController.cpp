@@ -839,22 +839,30 @@ bool TileController::hasVerticalMargins() const
 
 int TileController::topMarginHeight() const
 {
-    return (m_marginSize * m_marginEdges.top()) / tileGrid().scale();
+    if (!m_marginEdges.top())
+        return 0;
+    return m_marginSize / tileGrid().scale();
 }
 
 int TileController::bottomMarginHeight() const
 {
-    return (m_marginSize * m_marginEdges.bottom()) / tileGrid().scale();
+    if (!m_marginEdges.bottom())
+        return 0;
+    return m_marginSize / tileGrid().scale();
 }
 
 int TileController::leftMarginWidth() const
 {
-    return (m_marginSize * m_marginEdges.left()) / tileGrid().scale();
+    if (!m_marginEdges.left())
+        return 0;
+    return m_marginSize / tileGrid().scale();
 }
 
 int TileController::rightMarginWidth() const
 {
-    return (m_marginSize * m_marginEdges.right()) / tileGrid().scale();
+    if (!m_marginEdges.right())
+        return 0;
+    return m_marginSize / tileGrid().scale();
 }
 
 Ref<PlatformCALayer> TileController::createTileLayer(const IntRect& tileRect, TileGrid& grid)

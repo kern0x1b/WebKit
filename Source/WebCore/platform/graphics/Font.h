@@ -205,6 +205,10 @@ public:
 
     const GlyphPage* glyphPage(unsigned pageNumber) const;
 
+#if USE(CORE_TEXT) && defined(WEBKIT_IOS6) && !ENABLE(OPENTYPE_VERTICAL)
+    void prewarmGlyphAdvances(const GlyphPage&) const;
+#endif
+
     void determinePitch();
     PitchType pitch() const { return m_treatAsFixedPitch ? PitchType::Fixed : PitchType::Variable; }
     bool canTakeFixedPitchFastContentMeasuring() const { return m_canTakeFixedPitchFastContentMeasuring; }
@@ -249,6 +253,11 @@ public:
     WEBCORE_EXPORT static std::optional<Ref<Font>> fromIPCData(IPCFontData&&);
     WEBCORE_EXPORT IPCFontData toSerializableFont() const;
     WEBCORE_EXPORT std::optional<InstalledFont> toSerializableInstalledFont() const;
+
+    // The Core Text string attributes for shaping with this font. They depend only on the
+    // font, the kerning switch and the locale, so the dictionary is built once per font
+    // rather than once per complex text run.
+    RetainPtr<CFDictionaryRef> cfStringAttributes(bool enableKerning, const AtomString& locale) const;
 #endif
 #if PLATFORM(WIN)
     SCRIPT_CACHE* scriptCache() const LIFETIME_BOUND { return &m_scriptCache; }
@@ -327,6 +336,14 @@ private:
 
     const FontPlatformData m_platformData;
 
+    // Code points 0-255 live in the first few pages and are hit once per character measured
+    // or painted. Their page pointers are kept in a direct-mapped side table so the common
+    // case is an array index instead of a hash probe. Entries in m_glyphPages are never
+    // removed, so a raw pointer stays valid for the lifetime of the Font.
+    static constexpr unsigned directMappedGlyphPageCount = 16;
+    mutable std::array<const GlyphPage*, directMappedGlyphPageCount> m_directMappedGlyphPages { };
+    mutable uint16_t m_directMappedGlyphPagesFilled { 0 };
+
     mutable HashMap<unsigned, RefPtr<GlyphPage>, IntHash<unsigned>, WTF::UnsignedWithZeroKeyHashTraits<unsigned>> m_glyphPages;
     mutable GlyphMetricsMap<float> m_glyphToWidthMap;
     mutable std::unique_ptr<GlyphMetricsMap<FloatRect>> m_glyphToBoundsMap;
@@ -360,13 +377,13 @@ private:
     mutable std::unique_ptr<DerivedFonts> m_derivedFontData;
 
     struct NoEmojiGlyphs { };
-#if USE(SKIA)
+#if USE(SKIA) || defined(WEBKIT_IOS6)
     struct AllEmojiGlyphs { };
 #endif
     struct SomeEmojiGlyphs {
         BitVector colorGlyphs;
     };
-#if USE(SKIA)
+#if USE(SKIA) || defined(WEBKIT_IOS6)
     using EmojiType = Variant<NoEmojiGlyphs, AllEmojiGlyphs, SomeEmojiGlyphs>;
 #else
     using EmojiType = Variant<NoEmojiGlyphs, SomeEmojiGlyphs>;
@@ -387,6 +404,12 @@ private:
     mutable SupportsFeature m_supportsPetiteCaps { SupportsFeature::Unknown };
     mutable SupportsFeature m_supportsAllPetiteCaps { SupportsFeature::Unknown };
     mutable SupportsFeature m_supportsOpenTypeAlternateHalfWidths { SupportsFeature::Unknown };
+#endif
+
+#if USE(CORE_TEXT)
+    mutable RetainPtr<CFDictionaryRef> m_cachedStringAttributes;
+    mutable AtomString m_cachedStringAttributesLocale;
+    mutable bool m_cachedStringAttributesEnableKerning { false };
 #endif
 
 #if PLATFORM(WIN)

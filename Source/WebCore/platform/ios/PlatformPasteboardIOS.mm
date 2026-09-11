@@ -53,7 +53,11 @@
 
 #import <pal/ios/UIKitSoftLink.h>
 
+#if defined(WEBKIT_IOS6)
+#define PASTEBOARD_SUPPORTS_ITEM_PROVIDERS 0
+#else
 #define PASTEBOARD_SUPPORTS_ITEM_PROVIDERS (PLATFORM(IOS_FAMILY) && !(PLATFORM(WATCHOS) || PLATFORM(APPLETV)))
+#endif
 #define PASTEBOARD_SUPPORTS_PRESENTATION_STYLE_AND_TEAM_DATA (PASTEBOARD_SUPPORTS_ITEM_PROVIDERS && !PLATFORM(MACCATALYST))
 
 @interface UIPasteboard () <AbstractPasteboard>
@@ -140,8 +144,6 @@ static bool shouldTreatAtLeastOneTypeAsFile(NSArray<NSString *> *platformTypes)
     return false;
 }
 
-#if PASTEBOARD_SUPPORTS_ITEM_PROVIDERS
-
 static bool platformTypeConformsToWebArchivePBoardType(NSString *platformType, UTType *platformUTType)
 {
     if ([platformType isEqualToString:WebArchivePboardType])
@@ -204,6 +206,8 @@ static Vector<String> webSafeTypes(NSArray<NSString *> *platformTypes, PlatformP
     }
     return copyToVector(domPasteboardTypes);
 }
+
+#if PASTEBOARD_SUPPORTS_ITEM_PROVIDERS
 
 #if PASTEBOARD_SUPPORTS_PRESENTATION_STYLE_AND_TEAM_DATA
 
@@ -704,30 +708,91 @@ bool PlatformPasteboard::allowReadingURLAtIndex(const URL&, int) const
     return false;
 }
 
-void PlatformPasteboard::write(const PasteboardWebContent&)
+// Everything below writes through -[UIPasteboard setItems:], one dictionary of
+// platform type to value per item. The keys have to be uniform type identifiers:
+// a MIME type written straight through is stored, and then nothing else on the
+// system - or in this engine on the way back - recognises what was copied.
+static RetainPtr<NSString> platformTypeForWebType(const String& type)
 {
+    if (isDeclaredUTI(type))
+        return type.createNSString();
+    auto uti = UTIFromMIMEType(type);
+    return uti.isEmpty() ? type.createNSString() : uti.createNSString();
 }
 
-void PlatformPasteboard::write(const PasteboardImage&)
+static RetainPtr<NSDictionary> representationsForCustomData(const PasteboardCustomData& data)
 {
+    auto representations = adoptNS([[NSMutableDictionary alloc] init]);
+    data.forEachPlatformStringOrBuffer([&](auto& type, auto& stringOrBuffer) {
+        RetainPtr platformType = platformTypeForWebType(type);
+        if (![platformType length])
+            return;
+        WTF::switchOn(stringOrBuffer, [&](const String& string) {
+            [representations setObject:string.createNSString().get() forKey:platformType.get()];
+        }, [&](const Ref<SharedBuffer>& buffer) {
+            [representations setObject:buffer->makeContiguous()->createNSData().get() forKey:platformType.get()];
+        });
+    });
+
+    // The serialised blob carries the origin and the types the DOM is not
+    // allowed to write as platform types, which is how a paste back into this
+    // engine recovers them.
+    [representations setObject:data.createSharedBuffer()->createNSData().get() forKey:@(PasteboardCustomData::cocoaType().characters())];
+    return representations;
 }
 
-void PlatformPasteboard::write(const String&, const String&)
+int64_t PlatformPasteboard::write(const Vector<PasteboardCustomData>& itemData, PasteboardDataLifetime)
 {
+    [m_pasteboard setItems:createNSArray(itemData, [](auto& data) {
+        return representationsForCustomData(data);
+    }).get()];
+    return [m_pasteboard changeCount];
 }
 
-void PlatformPasteboard::write(const PasteboardURL&)
+void PlatformPasteboard::write(const PasteboardWebContent& content)
 {
+    PasteboardCustomData data;
+    if (!content.dataInStringFormat.isEmpty())
+        data.writeString(textPlainContentTypeAtom(), content.dataInStringFormat);
+    if (!content.dataInHTMLFormat.isEmpty())
+        data.writeString(textHTMLContentTypeAtom(), content.dataInHTMLFormat);
+    for (auto& typeAndData : content.clientTypesAndData) {
+        if (typeAndData.second)
+            data.writeData(typeAndData.first, protect(typeAndData.second)->makeContiguous());
+    }
+    write(Vector<PasteboardCustomData> { WTF::move(data) }, PasteboardDataLifetime::Persistent);
+}
+
+void PlatformPasteboard::write(const PasteboardImage& pasteboardImage)
+{
+    PasteboardCustomData data;
+    if (pasteboardImage.resourceData && !pasteboardImage.resourceMIMEType.isEmpty())
+        data.writeData(pasteboardImage.resourceMIMEType, protect(pasteboardImage.resourceData)->makeContiguous());
+    if (!pasteboardImage.url.url.isEmpty())
+        data.writeString("text/uri-list"_s, pasteboardImage.url.url.string());
+    write(Vector<PasteboardCustomData> { WTF::move(data) }, PasteboardDataLifetime::Persistent);
+}
+
+void PlatformPasteboard::write(const String& pasteboardType, const String& text)
+{
+    PasteboardCustomData data;
+    data.writeString(pasteboardType, text);
+    write(Vector<PasteboardCustomData> { WTF::move(data) }, PasteboardDataLifetime::Persistent);
+}
+
+void PlatformPasteboard::write(const PasteboardURL& url)
+{
+    PasteboardCustomData data;
+    data.writeString("text/uri-list"_s, url.url.string());
+    data.writeString(textPlainContentTypeAtom(), url.url.string());
+    write(Vector<PasteboardCustomData> { WTF::move(data) }, PasteboardDataLifetime::Persistent);
 }
 
 Vector<String> PlatformPasteboard::typesSafeForDOMToReadAndWrite(const String&) const
 {
-    return { };
-}
-
-int64_t PlatformPasteboard::write(const Vector<PasteboardCustomData>&, PasteboardDataLifetime)
-{
-    return 0;
+    return webSafeTypes([m_pasteboard pasteboardTypes], IncludeImageTypes::No, [] {
+        return false;
+    });
 }
 
 #endif

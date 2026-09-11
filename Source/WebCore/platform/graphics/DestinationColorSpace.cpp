@@ -69,7 +69,10 @@ const DestinationColorSpace& DestinationColorSpace::SRGB()
 
 const DestinationColorSpace& DestinationColorSpace::LinearSRGB()
 {
-#if USE(CG) || USE(SKIA)
+#if defined(WEBKIT_IOS6)
+    static NeverDestroyed<DestinationColorSpace> colorSpace { linearSRGBColorSpaceSingleton(), true };
+    return colorSpace.get();
+#elif USE(CG) || USE(SKIA)
     return knownColorSpace<linearSRGBColorSpaceSingleton>();
 #else
     return knownColorSpace<PlatformColorSpace::Name::LinearSRGB>();
@@ -147,6 +150,10 @@ const DestinationColorSpace& DestinationColorSpace::ExtendedRec2020()
 
 bool operator==(const DestinationColorSpace& a, const DestinationColorSpace& b)
 {
+#if defined(WEBKIT_IOS6)
+    if (a.isLinearSRGB() != b.isLinearSRGB())
+        return false;
+#endif
 #if USE(CG)
     // Do not protect the platformColorSpace here as it is not strictly required for safety and
     // this code is performance sensitive.
@@ -189,8 +196,7 @@ std::optional<DestinationColorSpace> DestinationColorSpace::asExtended() const
 {
     if (usesExtendedRange())
         return *this;
-#if USE(CG)
-    // Avoid refing color space here as this is performance-sensitive.
+#if USE(CG) && !defined(WEBKIT_IOS6)
     SUPPRESS_UNRETAINED_ARG if (RetainPtr colorSpace = adoptCF(CGColorSpaceCreateExtended(platformColorSpace())))
         return DestinationColorSpace(WTF::move(colorSpace));
 #endif
@@ -231,8 +237,7 @@ bool DestinationColorSpace::usesExtendedRange() const
 
 bool DestinationColorSpace::usesITUR_2100TF() const
 {
-#if USE(CG)
-    // Avoid refing color space here as this is performance-sensitive.
+#if USE(CG) && !defined(WEBKIT_IOS6)
     SUPPRESS_UNRETAINED_ARG return CGColorSpaceUsesITUR_2100TF(platformColorSpace());
 #else
     notImplemented();

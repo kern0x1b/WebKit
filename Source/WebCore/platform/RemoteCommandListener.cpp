@@ -52,7 +52,10 @@ void RemoteCommandListener::setCreationFunction(CreationFunction&& function)
 void RemoteCommandListener::resetCreationFunction()
 {
     remoteCommandListenerCreationFunction() = [] (RemoteCommandListenerClient& client) -> RefPtr<RemoteCommandListener> {
-#if PLATFORM(COCOA)
+#if defined(WEBKIT_IOS6)
+        UNUSED_PARAM(client);
+        return nullptr;
+#elif PLATFORM(COCOA)
         return RemoteCommandListenerCocoa::create(client);
 #elif USE(GLIB) && ENABLE(MEDIA_SESSION)
         return RemoteCommandListenerGLib::create(client);

@@ -35,6 +35,7 @@
 #include "DNSResolveQueueCFNet.h"
 #endif
 
+#include <stdlib.h>
 #include <wtf/CompletionHandler.h>
 #include <wtf/NeverDestroyed.h>
 #include <wtf/TZoneMallocInlines.h>
@@ -43,15 +44,32 @@ namespace WebCore {
 
 WTF_MAKE_TZONE_ALLOCATED_IMPL(DNSResolveQueue);
 
-// When resolve queue is empty, we fire async resolution requests immediately (which is important if the prefetch is triggered by hovering).
-// But during page parsing, we should coalesce identical requests to avoid stressing out the DNS resolver.
+#if defined(WEBKIT_IOS6)
+static int webkitIOS6DNSLimit(const char* name, int defaultValue)
+{
+    if (const char* override = getenv(name)) {
+        int value = atoi(override);
+        if (value >= 0 && value <= 64)
+            return value;
+    }
+    return defaultValue;
+}
+#endif
+
+#if defined(WEBKIT_IOS6)
+static const int gNamesToResolveImmediately = webkitIOS6DNSLimit("WEBKIT_IOS6_DNS_IMMEDIATE", 1);
+#else
 static const int gNamesToResolveImmediately = 4;
+#endif
 
 // Coalesce prefetch requests for this long before sending them out.
 static const Seconds coalesceDelay { 1_s };
 
-// Sending many DNS requests at once can overwhelm some gateways. See <rdar://8105550> for specific CFNET issues with CFHost throttling.
+#if defined(WEBKIT_IOS6)
+static const int gMaxSimultaneousRequests = webkitIOS6DNSLimit("WEBKIT_IOS6_DNS_MAX_IN_FLIGHT", 2);
+#else
 static const int gMaxSimultaneousRequests = 8;
+#endif
 
 // For a page has links to many outside sites, it is likely that the system DNS resolver won't be able to cache them all anyway, and we don't want
 // to negatively affect other applications' performance by pushing their cached entries out.

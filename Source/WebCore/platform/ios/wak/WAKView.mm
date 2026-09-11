@@ -40,6 +40,8 @@
 #import "WebEvent.h"
 #import <wtf/Assertions.h>
 #import <wtf/NeverDestroyed.h>
+#import <wtf/RetainPtr.h>
+#import <wtf/Vector.h>
 
 WEBCORE_EXPORT NSString *WAKViewFrameSizeDidChangeNotification =   @"WAKViewFrameSizeDidChangeNotification";
 WEBCORE_EXPORT NSString *WAKViewDidScrollNotification =            @"WAKViewDidScrollNotification";
@@ -55,6 +57,26 @@ static CGInterpolationQuality sInterpolationQuality;
 static void setGlobalFocusView(WAKView *view)
 {
     globalFocusView() = view;
+}
+
+// -[WAKView subviews] builds an autoreleased NSMutableArray of wrappers on every
+// call. The paint and layout paths walk the subviews on every frame and only
+// need a snapshot that keeps the views alive, so they take one on the stack.
+using SubviewSnapshot = Vector<RetainPtr<WAKView>, 8>;
+
+static void snapshotSubviews(WKViewRef viewRef, SubviewSnapshot& result)
+{
+    CFArrayRef subviews = viewRef ? WKViewGetSubviews(viewRef) : nullptr;
+    if (!subviews)
+        return;
+    CFIndex count = CFArrayGetCount(subviews);
+    if (!count)
+        return;
+    result.reserveCapacity(count);
+    for (CFIndex i = 0; i < count; ++i) {
+        if (WAKView *view = WAKViewForWKViewRef(static_cast<WKViewRef>(const_cast<void*>(CFArrayGetValueAtIndex(subviews, i)))))
+            result.append(retainPtr(view));
+    }
 }
 
 static WAKScrollView *enclosingScrollView(WAKView *view)
@@ -108,11 +130,15 @@ static void notificationCallback (WKViewRef v, WKViewNotificationType type, void
             break;
         }
         case WKViewNotificationViewDidScroll: {
+#if defined(WEBKIT_IOS6)
+            WebThreadCallDelegateAsync(invocationForPostNotification(WAKViewDidScrollNotification, view, nil));
+#else
             WebThreadRunOnMainThread(^ {
                  [[NSNotificationCenter defaultCenter] postNotificationName:WAKViewDidScrollNotification object:view userInfo:nil];
             });
+#endif
             break;
-        }            
+        }
         default: {
             break;
         }
@@ -370,11 +396,11 @@ static void _WAKCopyWrapper(const void *value, void *context)
     if (_isHidden)
         return;
 
-    WAKWindow *window = [self window];
+    WAKWindow *window = WKViewGetWindow(viewRef);
     if (!window || CGRectIsEmpty(invalidRect))
         return;
 
-    CGRect rect = CGRectIntersection(invalidRect, [self bounds]);
+    CGRect rect = CGRectIntersection(invalidRect, WKViewGetBounds(viewRef));
     if (CGRectIsEmpty(rect))
         return;
 
@@ -404,7 +430,10 @@ static void _WAKCopyWrapper(const void *value, void *context)
 
 - (void)viewWillDraw
 {
-    [[self subviews] makeObjectsPerformSelector:@selector(viewWillDraw)];
+    SubviewSnapshot subviews;
+    snapshotSubviews(viewRef, subviews);
+    for (auto& subview : subviews)
+        [subview.get() viewWillDraw];
 }
 
 + (WAKView *)focusView
@@ -495,10 +524,15 @@ static void _WAKCopyWrapper(const void *value, void *context)
     [self drawRect:dirtyRect];
 
     if (!_drawsOwnDescendants) {
-        NSArray *subViews = [self subviews];
-        for (WAKView *subView in subViews) {
-            NSRect childDirtyRect = [self convertRect:dirtyRect toView:subView];
-            [subView _drawRect:CGRectIntegral(childDirtyRect) context:context lockFocus:YES];
+        SubviewSnapshot subviews;
+        snapshotSubviews(viewRef, subviews);
+        if (!subviews.isEmpty()) {
+            // One walk up to base for this view instead of one per subview.
+            CGRect dirtyRectInBase = WKViewConvertRectToBase(viewRef, dirtyRect);
+            for (auto& subview : subviews) {
+                NSRect childDirtyRect = WKViewConvertRectFromBase([subview.get() _viewRef], dirtyRectInBase);
+                [subview.get() _drawRect:CGRectIntegral(childDirtyRect) context:context lockFocus:YES];
+            }
         }
     }
 
@@ -595,8 +629,10 @@ static void _WAKCopyWrapper(const void *value, void *context)
         return nil;
 
     CGPoint subviewPoint = WKViewConvertPointFromSuperview(viewRef, point);
-    for (WAKView *subview in [self subviews]) {
-        if (WAKView *hitView = [subview hitTest: subviewPoint])
+    SubviewSnapshot subviews;
+    snapshotSubviews(viewRef, subviews);
+    for (auto& subview : subviews) {
+        if (WAKView *hitView = [subview.get() hitTest:subviewPoint])
             return hitView;
     }
 

@@ -129,6 +129,11 @@ public:
     enum class DrawingFlags { None, Snapshotting };
     void drawLayer(LegacyTileLayer *, CGContextRef, DrawingFlags);
     void prepareToDraw();
+#if defined(WEBKIT_IOS6)
+    static bool mainThreadShouldWaitForEngine();
+    WEBCORE_EXPORT static bool mainThreadMustWaitForEngine();
+    static double& lastPreparedToDraw();
+#endif
     void finishedCreatingTiles(bool didCreateTiles, bool createMore);
     FloatRect visibleRectInLayer(CALayer *) const;
     CALayer* hostLayer() const;
@@ -167,7 +172,7 @@ private:
     void tileCreationTimerFired();
 
     void drawReplacementImage(LegacyTileLayer *, CGContextRef, CGImageRef);
-    void drawWindowContent(LegacyTileLayer *, CGContextRef, CGRect dirtyRect, DrawingFlags);
+    void drawWindowContent(LegacyTileLayer *, CGContextRef, CGRect dirtyRect, DrawingFlags, CGRect layerFrame);
 
     WAKWindow *m_window { nullptr };
 
@@ -178,7 +183,37 @@ private:
 
     std::optional<FloatRect> m_overrideVisibleRect;
 
-    IntSize m_tileSize { 512, 512 };
+    // Tile edge in tile-grid points. The zoomed-in grid's host layer carries no
+    // transform (LegacyTileCache::adjustTileGridTransforms() only scales the
+    // zoomed-out grid), so this space is screen points: a 320x480pt viewport.
+    //
+    // LegacyTileGrid::calculateCoverRect() inflates the visible rect by w/2 on
+    // each side and by h on each side, so the grid must always be able to hold
+    // 2w x 3h = 640 x 1440pt in portrait and 960 x 960pt in landscape.
+    // LegacyTileGrid::centerTileGridOrigin() then tiles that with
+    // ceil(w/T) x ceil(h/T) tiles:
+    //
+    //   T=512: 2x3 =  6 tiles, 1024x1536pt covered -> 71% more than the 640x1440 wanted
+    //   T=320: 2x5 = 10 tiles,  640x1600pt covered -> 11% more (landscape 3x3, exact)
+    //   T=256: 3x6 = 18 tiles,  768x1536pt covered -> 28% more
+    //
+    // 320 is the best fit because it equals the viewport width, so the cover
+    // rect is a whole number of tiles across in both orientations.
+    //
+    // The eviction grain matters as much as the total. computeAvailableMemory()
+    // rounds up to a 128MB multiple, so ramSize() reports 512MB here and
+    // LegacyTileCache::tileCapacityForGrid() caps the cache at 24MB and floors
+    // the active grid at 18MB, rather than letting systemMemoryLevel()
+    // (kern.memorystatus_level, and -1 if that sysctl is unavailable) tier it
+    // down to 6MB. LegacyTileGrid::tileByteSize() charges (T*screenScale)^2*4 per
+    // tile flat, so at screenScale 2:
+    //
+    //   T=512: 4MB/tile      -> 24MB for the cover rect. At the 12MB floor the
+    //          grid holds 3 of the 6 tiles it wants, so dropDistantTiles() and
+    //          createTiles() fight and each round repaints 1024x1024px.
+    //   T=320: 1.5625MB/tile -> 15.6MB for the cover rect, and 7 tiles still fit
+    //          in the 12MB floor while the visible rect needs only 1x2 = 3.1MB.
+    IntSize m_tileSize { 320, 320 };
     
     TilingMode m_tilingMode { Normal };
     TilingDirection m_tilingDirection { TilingDirectionDown };

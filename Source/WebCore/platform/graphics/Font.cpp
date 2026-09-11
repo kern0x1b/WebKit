@@ -396,7 +396,7 @@ static RefPtr<GlyphPage> createAndFillGlyphPage(unsigned pageNumber, const Font&
     unsigned glyphPageSize = GlyphPage::sizeForPageNumber(pageNumber);
 
     unsigned start = GlyphPage::startingCodePointInPageNumber(pageNumber);
-    Vector<char16_t> buffer(glyphPageSize * 2 + 2);
+    Vector<char16_t, GlyphPage::size * 2 + 2> buffer(glyphPageSize * 2 + 2);
     unsigned bufferLength;
     if (U_IS_BMP(start)) {
         bufferLength = glyphPageSize;
@@ -432,14 +432,34 @@ static RefPtr<GlyphPage> createAndFillGlyphPage(unsigned pageNumber, const Font&
 
 const GlyphPage* Font::glyphPage(unsigned pageNumber) const
 {
-    return m_glyphPages.ensure(pageNumber, [&] {
+    static_assert(directMappedGlyphPageCount * GlyphPage::size == 256);
+
+    bool isDirectMapped = pageNumber < directMappedGlyphPageCount;
+    if (isDirectMapped && (m_directMappedGlyphPagesFilled & (1u << pageNumber)))
+        return m_directMappedGlyphPages[pageNumber];
+
+    auto addResult = m_glyphPages.ensure(pageNumber, [&] {
         return createAndFillGlyphPage(pageNumber, *this);
-    }).iterator->value.get();
+    });
+    auto* page = addResult.iterator->value.get();
+
+#if USE(CORE_TEXT) && defined(WEBKIT_IOS6) && !ENABLE(OPENTYPE_VERTICAL)
+    if (addResult.isNewEntry && page)
+        prewarmGlyphAdvances(*page);
+#endif
+
+    if (isDirectMapped) {
+        m_directMappedGlyphPages[pageNumber] = page;
+        m_directMappedGlyphPagesFilled |= 1u << pageNumber;
+    }
+    return page;
 }
 
 Glyph Font::glyphForCharacter(char32_t character) const
 {
-    RefPtr page = glyphPage(GlyphPage::pageNumberForCodePoint(character));
+    // m_glyphPages owns the page; a RefPtr here would be a refcount round trip for every
+    // character measured.
+    auto* page = glyphPage(GlyphPage::pageNumberForCodePoint(character));
     if (!page)
         return 0;
     return page->glyphForCharacter(character);
@@ -447,7 +467,7 @@ Glyph Font::glyphForCharacter(char32_t character) const
 
 GlyphData Font::glyphDataForCharacter(char32_t character) const
 {
-    RefPtr page = glyphPage(GlyphPage::pageNumberForCodePoint(character));
+    auto* page = glyphPage(GlyphPage::pageNumberForCodePoint(character));
     if (!page)
         return GlyphData();
     return page->glyphDataForCharacter(character);
@@ -682,7 +702,7 @@ ColorGlyphType Font::colorGlyphType(Glyph glyph) const
 
     return WTF::switchOn(m_emojiType, [](NoEmojiGlyphs) {
         return ColorGlyphType::Outline;
-#if USE(SKIA)
+#if USE(SKIA) || defined(WEBKIT_IOS6)
     }, [](AllEmojiGlyphs) {
         return ColorGlyphType::Color;
 #endif

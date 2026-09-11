@@ -39,23 +39,13 @@ namespace WebCore {
 WTF_MAKE_TZONE_ALLOCATED_IMPL(SkiaSerializedImageBuffer);
 
 SkiaSerializedImageBuffer::SkiaSerializedImageBuffer(ImageBuffer& imageBuffer)
-    : m_memoryCost(imageBuffer.memoryCost())
+    : m_imageBuffer(imageBuffer)
 {
-    // Non accelerated ImageBuffer can be transferred to other threads.
-    if (imageBuffer.renderingMode() != RenderingMode::Accelerated) {
-        m_imageBuffer = imageBuffer;
+    if (m_imageBuffer->renderingMode() != RenderingMode::Accelerated)
         return;
-    }
 
-    // Accelerated ImageBuffer can't be transferred to other threads, so
-    // we take an image snapshot and the parameters needed to create a
-    // new ImageBuffer to draw the image snapshot into.
-    imageBuffer.flushDrawingContext();
-    m_image = imageBuffer.createNativeImageReference();
-    m_logicalSize = imageBuffer.logicalSize();
-    m_resolutionScale = imageBuffer.resolutionScale();
-    m_colorSpace = imageBuffer.colorSpace();
-    m_bufferFormat = { imageBuffer.pixelFormat() };
+    m_imageBuffer->flushDrawingContext();
+    m_image = m_imageBuffer->createNativeImageReference();
     m_fence = GLFence::create(PlatformDisplay::sharedDisplay().glDisplay());
 }
 
@@ -63,15 +53,18 @@ SkiaSerializedImageBuffer::~SkiaSerializedImageBuffer() = default;
 
 RefPtr<ImageBuffer> SkiaSerializedImageBuffer::sinkIntoImageBuffer()
 {
-    if (m_imageBuffer)
-        return m_imageBuffer;
-
-    ASSERT(m_image);
+    if (!m_image)
+        return m_imageBuffer.get();
 
     if (!PlatformDisplay::sharedDisplay().skiaGLContext()->makeContextCurrent())
         return nullptr;
 
-    auto copiedImageBuffer = ImageBuffer::create(m_logicalSize, RenderingMode::Accelerated, RenderingPurpose::Unspecified, m_resolutionScale, m_colorSpace, m_bufferFormat);
+    auto* grContext = PlatformDisplay::sharedDisplay().skiaGrContext();
+    if (grContext == m_image->grContext())
+        return m_imageBuffer.get();
+
+    auto copiedImageBuffer = m_imageBuffer->context().createImageBuffer(m_imageBuffer->logicalSize(), m_imageBuffer->resolutionScale(),
+        m_imageBuffer->colorSpace(), RenderingMode::Accelerated, std::nullopt, { m_imageBuffer->pixelFormat() });
     if (!copiedImageBuffer)
         return nullptr;
 
@@ -80,9 +73,9 @@ RefPtr<ImageBuffer> SkiaSerializedImageBuffer::sinkIntoImageBuffer()
         m_fence = nullptr;
     }
 
-    FloatRect destination({ }, m_logicalSize);
+    FloatRect destination({ }, m_imageBuffer->logicalSize());
     FloatRect source = destination;
-    source.scale(m_resolutionScale);
+    source.scale(m_imageBuffer->resolutionScale());
     copiedImageBuffer->context().drawNativeImage(*m_image, destination, source, { CompositeOperator::Copy });
     // Flush the context to ensure all operations are done before the source image buffer is destroyed.
     copiedImageBuffer->flushDrawingContext();
@@ -91,7 +84,7 @@ RefPtr<ImageBuffer> SkiaSerializedImageBuffer::sinkIntoImageBuffer()
 
 size_t SkiaSerializedImageBuffer::memoryCost() const
 {
-    return m_memoryCost;
+    return m_imageBuffer->memoryCost();
 }
 
 } // namespace WebCore

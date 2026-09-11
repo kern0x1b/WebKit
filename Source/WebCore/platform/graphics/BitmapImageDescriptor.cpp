@@ -108,6 +108,11 @@ EncodedDataStatus BitmapImageDescriptor::encodedDataStatus() const
 
 IntSize BitmapImageDescriptor::size(ImageOrientation orientation) const
 {
+#if defined(WEBKIT_IOS6)
+    if (RefPtr decoder = m_source->decoderIfExists(); decoder && m_source->frames().isEmpty())
+        return sourceSize(orientation);
+#endif
+
     auto densityCorrectedSize = this->densityCorrectedSize();
     if (!densityCorrectedSize)
         return sourceSize(orientation);
@@ -122,9 +127,7 @@ IntSize BitmapImageDescriptor::sourceSize(ImageOrientation orientation) const
 {
     IntSize size;
 
-#if !USE(CG)
-    // It's possible that we have decoded the metadata, but not frame contents yet. In that case ImageDecoder claims to
-    // have the size available, but the frame cache is empty. Return the decoder size without caching in such case.
+#if !USE(CG) || defined(WEBKIT_IOS6)
     RefPtr decoder = m_source->decoderIfExists();
     if (decoder && m_source->frames().isEmpty())
         size = decoder->size();
@@ -188,6 +191,9 @@ bool BitmapImageDescriptor::hasHDRGainMap() const
 
 bool BitmapImageDescriptor::hasHDRColorSpace() const
 {
+#if defined(WEBKIT_IOS6)
+    return false;
+#else
     if (m_cachedFlags.contains(CachedFlag::ColorSpace))
         return m_colorSpace.usesITUR_2100TF();
 
@@ -196,10 +202,9 @@ bool BitmapImageDescriptor::hasHDRColorSpace() const
 
     bool hasHDRColorSpace = colorSpace().usesITUR_2100TF();
 
-    // FIXME: This frame may not be destroyed. It can be reused for sync image decoding.
-    // Async image decoding should destroy this frame and treat it as if it did not exist.
     m_source->destroyNativeImageAtIndex(m_source->primaryFrameIndex());
     return hasHDRColorSpace;
+#endif
 }
 
 String BitmapImageDescriptor::uti() const
@@ -238,9 +243,9 @@ SubsamplingLevel BitmapImageDescriptor::maximumSubsamplingLevel() const
     if (!isSizeAvailable())
         return SubsamplingLevel::Default;
 
-    // FIXME: this value was chosen to be appropriate for Apple ports since the image
-    // subsampling is only enabled by default on Apple ports. Choose a different value
-    // if image subsampling is enabled on other platform.
+#if defined(WEBKIT_IOS6)
+    auto level = SubsamplingLevel::Last;
+#else
     static constexpr int maximumImageAreaBeforeSubsampling = 5 * 1024 * 1024;
     auto level = SubsamplingLevel::First;
 
@@ -249,6 +254,7 @@ SubsamplingLevel BitmapImageDescriptor::maximumSubsamplingLevel() const
         if (area < maximumImageAreaBeforeSubsampling)
             break;
     }
+#endif
 
     m_maximumSubsamplingLevel = level;
     m_cachedFlags.add(CachedFlag::MaximumSubsamplingLevel);
@@ -269,7 +275,11 @@ SubsamplingLevel BitmapImageDescriptor::subsamplingLevelForScaleFactor(GraphicsC
     if (!(scale > 0 && scale <= 1))
         return SubsamplingLevel::Default;
 
+#if defined(WEBKIT_IOS6)
+    int result = std::floor(std::log2(1 / scale));
+#else
     int result = std::ceil(std::log2(1 / scale));
+#endif
     return static_cast<SubsamplingLevel>(std::min(result, static_cast<int>(maximumSubsamplingLevel())));
 #else
     UNUSED_PARAM(context);

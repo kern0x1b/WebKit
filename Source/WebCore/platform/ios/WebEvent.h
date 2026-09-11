@@ -189,6 +189,8 @@ WEBCORE_EXPORT @interface WebEvent : NSObject {
 @property(nonatomic, readonly) WebKeyboardInputFlags keyboardFlags;
 @property(nonatomic, readonly) uint16_t keyCode;
 @property(nonatomic, readonly, getter = isTabKey) BOOL tabKey;
+@property(nonatomic, readonly, getter = isPopupVariant) BOOL popupVariant;
+@property(nonatomic, readonly) int characterSet;
 
 // Scroll Wheel
 @property(nonatomic, readonly) float deltaX;

@@ -30,11 +30,13 @@
 
 #import "LegacyTileCache.h"
 #import "PlatformScreen.h"
+#import "Scheduling.h"
 #import "WAKViewInternal.h"
 #import "WebCoreThreadRun.h"
 #import "WebEvent.h"
 #import "WKContentObservation.h"
 #import "WKViewPrivate.h"
+#import "WKWindow.h"
 #import <QuartzCore/QuartzCore.h>
 #import <wtf/Lock.h>
 #import <wtf/NeverDestroyed.h>
@@ -83,6 +85,12 @@ static RetainPtr<WebEvent>& currentEvent()
 
     _exposedScrollViewRect = CGRectNull;
 
+    // A window is created to be shown. Left off, WebView::_isViewVisible reports
+    // the page hidden, and a hidden page has requestAnimationFrame switched off
+    // - which silently kills every interaction a phone-shaped site finishes on
+    // a frame callback. Whoever wants it hidden can still say so.
+    _visible = YES;
+
     return self;
 }
 
@@ -97,6 +105,7 @@ static RetainPtr<WebEvent>& currentEvent()
     _screenScale = WebCore::screenScaleFactor();
 
     _exposedScrollViewRect = CGRectNull;
+    _visible = YES;
 
     return self;
 }
@@ -105,6 +114,8 @@ static RetainPtr<WebEvent>& currentEvent()
 {
     delete _tileCache;
     [_hostLayer release];
+    WAKRelease(_windowRef);
+    _windowRef = 0;
     
     [super dealloc];
 }
@@ -134,6 +145,13 @@ static RetainPtr<WebEvent>& currentEvent()
 
     [_responderView release];
     _responderView = nil;
+}
+
+- (WKWindowRef)_windowRef
+{
+    if (!_windowRef)
+        _windowRef = WKWindowCreate(self, _frame);
+    return _windowRef;
 }
 
 - (WAKView *)firstResponder
@@ -384,8 +402,23 @@ static RetainPtr<WebEvent>& currentEvent()
 
 - (void)setExposedScrollViewRect:(CGRect)exposedScrollViewRect
 {
+#if defined(WEBKIT_IOS6)
+    bool moved;
+    {
+        Locker locker { _exposedScrollViewRectLock };
+        moved = !CGRectEqualToRect(_exposedScrollViewRect, exposedScrollViewRect);
+        _exposedScrollViewRect = exposedScrollViewRect;
+    }
+    if (moved)
+        WebCore::ios6NoteScrollMovement();
+    if (getenv("WEBKIT_IOS6_DEBUG_EXPOSED_RECT"))
+        WTFLogAlways("[exposedrect] moved=%d rect=%.1f,%.1f,%.1f,%.1f", moved,
+            exposedScrollViewRect.origin.x, exposedScrollViewRect.origin.y,
+            exposedScrollViewRect.size.width, exposedScrollViewRect.size.height);
+#else
     Locker locker { _exposedScrollViewRectLock };
     _exposedScrollViewRect = exposedScrollViewRect;
+#endif
 }
 
 - (CGRect)exposedScrollViewRect
@@ -478,9 +511,12 @@ static RetainPtr<WebEvent>& currentEvent()
 
     static Class windowClass = NSClassFromString(@"UIWindow");
 
-    while (superlayer && layer != _rootLayer && (!layer.delegate || ![layer.delegate isKindOfClass:windowClass])) {
+    while (superlayer && layer != _rootLayer) {
+        id delegate = [layer delegate];
+        if (delegate && [delegate isKindOfClass:windowClass])
+            break;
         CGRect rectInSuper = [superlayer convertRect:rect fromLayer:layer];
-        if ([superlayer masksToBounds] || !respectsMasksToBounds)
+        if (!respectsMasksToBounds || [superlayer masksToBounds])
             rect = CGRectIntersection([superlayer bounds], rectInSuper);
         else
             rect = rectInSuper;
@@ -618,7 +654,7 @@ static RetainPtr<WebEvent>& currentEvent()
 
 - (void)displayRect:(NSRect)rect
 {
-    [[self contentView] displayRect:rect];
+    [_contentView displayRect:rect];
 }
 
 - (void)willRotate

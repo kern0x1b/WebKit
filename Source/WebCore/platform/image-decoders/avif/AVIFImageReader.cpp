@@ -63,7 +63,8 @@ bool AVIFImageReader::parseHeader(const SharedBuffer& data, bool allDataReceived
         m_dataParsed = true;
 
     const avifImage* firstImage = m_avifDecoder->image;
-    return m_decoder->setSize(IntSize(firstImage->width, firstImage->height));
+    m_decoder->setSize(IntSize(firstImage->width, firstImage->height));
+    return true;
 }
 
 void AVIFImageReader::decodeFrame(size_t frameIndex, ScalableImageDecoderFrame& buffer, const SharedBuffer& data)
@@ -93,12 +94,6 @@ void AVIFImageReader::decodeFrame(size_t frameIndex, ScalableImageDecoderFrame& 
     }
 
     IntSize imageSize(m_decoder->size());
-
-    if (IntSize(m_avifDecoder->image->width, m_avifDecoder->image->height) != imageSize) {
-        m_decoder->setFailed();
-        return;
-    }
-
     if (buffer.isInvalid() && !buffer.initialize(imageSize, m_decoder->premultiplyAlpha())) {
         m_decoder->setFailed();
         return;

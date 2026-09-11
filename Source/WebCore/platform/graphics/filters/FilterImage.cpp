@@ -243,13 +243,12 @@ static RefPtr<PixelBuffer> getConvertedPixelBuffer(PixelBuffer& sourcePixelBuffe
 
 bool FilterImage::requiresPixelBufferColorSpaceConversion(std::optional<DestinationColorSpace> colorSpace) const
 {
-#if USE(CG) || USE(SKIA)
-    // This function determines whether we need the step of an extra color space conversion
-    // We only need extra color conversion when 1) color space is different in the input
-    // AND 2) the filter is manipulating raw pixels
+#if defined(WEBKIT_IOS6)
+    UNUSED_PARAM(colorSpace);
+    return false;
+#elif USE(CG) || USE(SKIA)
     return colorSpace && m_colorSpace != *colorSpace;
 #else
-    // Additional color space conversion is not needed on non-CG
     UNUSED_PARAM(colorSpace);
     return false;
 #endif
@@ -398,15 +397,22 @@ void FilterImage::correctPremultipliedPixelBuffer()
 
 void FilterImage::transformToColorSpace(const DestinationColorSpace& colorSpace)
 {
-#if USE(CG) || USE(SKIA)
-    // CG and SKIA handle color space adjustments internally.
+#if USE(CG) && defined(WEBKIT_IOS6)
+    if (colorSpace == m_colorSpace)
+        return;
+
+    if (RefPtr imageBuffer = this->imageBuffer())
+        imageBuffer->transformToColorSpace(colorSpace);
+
+    m_colorSpace = colorSpace;
+    m_unpremultipliedPixelBuffer = nullptr;
+    m_premultipliedPixelBuffer = nullptr;
+#elif USE(CG) || USE(SKIA)
     UNUSED_PARAM(colorSpace);
 #else
     if (colorSpace == m_colorSpace)
         return;
 
-    // FIXME: We can avoid this potentially unnecessary ImageBuffer conversion by adding
-    // color space transform support for the {pre,un}multiplied arrays.
     if (RefPtr imageBuffer = this->imageBuffer())
         imageBuffer->transformToColorSpace(colorSpace);
 

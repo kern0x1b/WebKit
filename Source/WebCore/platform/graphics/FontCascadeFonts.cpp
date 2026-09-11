@@ -57,7 +57,14 @@ public:
 
     void NODELETE setGlyphDataForCharacter(char32_t c, GlyphData glyphData)
     {
-        setGlyphDataForIndex(GlyphPage::indexForCodePoint(c), glyphData);
+        unsigned index = GlyphPage::indexForCodePoint(c);
+        setGlyphDataForIndex(index, glyphData);
+        m_resolved.set(index);
+    }
+
+    bool NODELETE isResolved(char32_t c) const
+    {
+        return m_resolved.get(GlyphPage::indexForCodePoint(c));
     }
 
 private:
@@ -69,6 +76,9 @@ private:
 
     std::array<Glyph, GlyphPage::size> m_glyphs = { };
     std::array<SingleThreadWeakPtr<const Font>, GlyphPage::size> m_fonts = { };
+    // Set for characters this page has already answered for, whether or not a font was
+    // found. Without it a character no font covers is re-resolved on every measurement.
+    WTF::BitSet<GlyphPage::size> m_resolved;
 };
 
 inline FontCascadeFonts::GlyphPageCacheEntry::GlyphPageCacheEntry(RefPtr<GlyphPage>&& singleFont)
@@ -87,6 +97,11 @@ GlyphData FontCascadeFonts::GlyphPageCacheEntry::glyphDataForCharacter(char32_t 
     if (m_mixedFont)
         return m_mixedFont->glyphDataForCharacter(character);
     return 0;
+}
+
+bool FontCascadeFonts::GlyphPageCacheEntry::isKnownMissing(char32_t character) const
+{
+    return m_mixedFont && m_mixedFont->isResolved(character);
 }
 
 void FontCascadeFonts::GlyphPageCacheEntry::setGlyphDataForCharacter(char32_t character, GlyphData glyphData)
@@ -544,13 +559,31 @@ GlyphData FontCascadeFonts::glyphDataForCharacter(char32_t c, const FontCascadeD
 
     const unsigned pageNumber = GlyphPage::pageNumberForCodePoint(c);
 
-    auto& cacheEntry = m_cachedPages[resolvedEmojiPolicy].ensure(pageNumber, [&] {
-        // Initialize cache with a full page of glyph mappings from a single font.
+    // Initialize cache with a full page of glyph mappings from a single font.
+    auto makePageCacheEntry = [&] {
         return GlyphPageCacheEntry { glyphPageFromFontRanges(pageNumber, realizeFallbackRangesAt(description, fontSelector, 0)) };
-    }).iterator->value;
+    };
+
+    auto& cacheEntry = [&]() -> GlyphPageCacheEntry& {
+        if (pageNumber >= directMappedPageCount)
+            return m_cachedPages[resolvedEmojiPolicy].ensure(pageNumber, makePageCacheEntry).iterator->value;
+        auto& directMapped = m_directMappedPages[resolvedEmojiPolicy];
+        if (!(directMapped.filled & (1u << pageNumber))) {
+            directMapped.pages[pageNumber] = makePageCacheEntry();
+            directMapped.filled |= 1u << pageNumber;
+        }
+        return directMapped.pages[pageNumber];
+    }();
 
     GlyphData glyphData = cacheEntry.glyphDataForCharacter(c);
-    if (!glyphData.isValid()) {
+
+#if defined(WEBKIT_IOS6)
+    bool needsResolution = !glyphData.isValid() && !cacheEntry.isKnownMissing(c);
+#else
+    bool needsResolution = !glyphData.isValid();
+#endif
+
+    if (needsResolution) {
         // No glyph, resolve per-character.
         ASSERT(variant == FontVariant::Normal);
         glyphData = glyphDataForVariant(c, description, fontSelector, variant, resolvedEmojiPolicy);
@@ -570,6 +603,14 @@ void FontCascadeFonts::pruneSystemFallbacks()
         cachedPages.removeIf([](auto& keyAndValue) {
             return keyAndValue.value.isMixedFont();
         });
+    }
+    for (auto& directMapped : m_directMappedPages) {
+        for (unsigned pageNumber = 0; pageNumber < directMappedPageCount; ++pageNumber) {
+            if (!directMapped.pages[pageNumber].isMixedFont())
+                continue;
+            directMapped.pages[pageNumber] = GlyphPageCacheEntry { };
+            directMapped.filled &= ~(1u << pageNumber);
+        }
     }
     m_systemFallbackFontSet.clear();
     m_shapedTextCache.clear();

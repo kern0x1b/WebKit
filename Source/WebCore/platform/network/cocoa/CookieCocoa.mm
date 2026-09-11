@@ -116,7 +116,9 @@ Cookie::Cookie(NSHTTPCookie *cookie)
     , value { cookie.value }
     , domain { cookie.domain }
     , path { cookie.path }
+#if !defined(WEBKIT_IOS6)
     , partitionKey { cookie._storagePartition }
+#endif
     , created { cookieCreated(cookie) }
     , expires { cookieExpiry(cookie) }
     , httpOnly { static_cast<bool>(cookie.HTTPOnly) }
@@ -126,7 +128,11 @@ Cookie::Cookie(NSHTTPCookie *cookie)
     , commentURL { cookie.commentURL }
     , ports { portVectorFromList(retainPtr(cookie.portList).get()) }
 {
+#if defined(WEBKIT_IOS6)
+    sameSite = coreSameSitePolicy(nil);
+#else
     sameSite = coreSameSitePolicy(cookie.sameSitePolicy);
+#endif
 }
 
 RetainPtr<NSHTTPCookie> Cookie::createNSHTTPCookie() const

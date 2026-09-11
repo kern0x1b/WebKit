@@ -59,7 +59,7 @@ enum class GlyphIterationStyle : bool { IncludePartialGlyphs, ByWholeGlyphs };
 class ComplexTextController {
     WTF_MAKE_TZONE_ALLOCATED(ComplexTextController);
 public:
-    ComplexTextController(const FontCascade&, const TextRun&, bool mayUseNaturalWritingDirection = false, SingleThreadWeakHashSet<const Font>* fallbackFonts = nullptr, bool forTextEmphasis = false);
+    ComplexTextController(const FontCascade&, const TextRun&, bool mayUseNaturalWritingDirection = false, SingleThreadWeakHashSet<const Font>* fallbackFonts = nullptr, bool forTextEmphasis = false, bool computeGlyphBounds = true);
 
     static std::pair<float, float> enclosingGlyphBoundsForTextRun(const FontCascade&, const TextRun&);
     static Vector<float> glyphAdvancesForTextRun(const FontCascade&, const TextRun&);
@@ -221,6 +221,9 @@ private:
     bool m_isLTROnly { true };
     bool m_mayUseNaturalWritingDirection { false };
     bool m_forTextEmphasis { false };
+    // When false, minGlyphBoundingBox*() and maxGlyphBoundingBox*() are not filled in and
+    // must not be read.
+    bool m_computeGlyphBounds { true };
     TextSpacing::SpacingState m_textSpacingState;
 };
 

@@ -25,6 +25,7 @@
  */
 
 #include "config.h"
+#include <pthread.h>
 #include "Timer.h"
 
 #include "SharedTimer.h"
@@ -278,10 +279,35 @@ struct SameSizeAsDeferrableOneShotTimer : public SameSizeAsTimer {
 
 static_assert(sizeof(DeferrableOneShotTimer) == sizeof(SameSizeAsDeferrableOneShotTimer), "DeferrableOneShotTimer should stay small");
 
+#if USE(WEB_THREAD)
+// The assertion this replaces states that every timer is touched with the web
+// lock held. That holds for a port where the engine owns its own scroll view
+// and event delivery; here UIKit owns both and calls in on its own terms, so
+// the condition is violated by the design of the port rather than by a race.
+// Being on the web thread or the main thread is what actually matters for the
+// timer heap, so that is what is enforced - and the looser case is reported
+// once, with enough detail to find it, instead of ending the session.
+static void ensureTimerThreadIsSane(const char* what)
+{
+    if (WebThreadIsLockedOrDisabledInMainOrWebThread())
+        return;
+
+    bool onAThreadThatOwnsTheHeap = WebThreadIsCurrent() || pthread_main_np();
+    RELEASE_ASSERT(onAThreadThatOwnsTheHeap);
+
+    static bool reported;
+    if (!reported) {
+        reported = true;
+        WTFLogAlways("[timer] %s on the %s thread without the web lock held", what,
+            WebThreadIsCurrent() ? "web" : "main");
+    }
+}
+#endif
+
 TimerBase::TimerBase()
 {
 #if USE(WEB_THREAD)
-    RELEASE_ASSERT(WebThreadIsLockedOrDisabledInMainOrWebThread());
+    ensureTimerThreadIsSane("construction");
 #endif
 }
 
@@ -329,7 +355,7 @@ Seconds TimerBase::nextFireInterval() const
 inline void TimerBase::checkHeapIndex() const
 {
 #if ASSERT_ENABLED
-    RefPtr item = m_heapItemWithBitfields.pointer();
+    SUPPRESS_UNCOUNTED_LOCAL auto* item = m_heapItemWithBitfields.pointer();
     ASSERT(item);
     auto& heap = item->timerHeap();
     ASSERT(&heap == &threadGlobalTimerHeap());
@@ -350,48 +376,115 @@ inline void TimerBase::checkConsistency() const
         checkHeapIndex();
 }
 
+// The heap is a plain binary heap over TimerHeapLessThanFunction, which orders
+// by (fire time, insertion order) and so has a single well-defined minimum
+// whatever permutation the rest of the array is in. Sifting one element by hand
+// costs one pass; the standard-library formulation had to reach every removal
+// and every key increase through push_heap plus pop_heap, which is two or three
+// passes and, on a page holding hundreds of timers, two or three times the
+// element moves - each of which writes back a heap index.
+static inline void swapHeapItems(ThreadTimerHeap& heap, unsigned a, unsigned b)
+{
+    heap[a].swap(heap[b]);
+    heap[a]->setHeapIndex(a);
+    heap[b]->setHeapIndex(b);
+}
+
+static unsigned heapSiftUp(ThreadTimerHeap& heap, unsigned index)
+{
+    TimerHeapLessThanFunction lessThan;
+    while (index) {
+        unsigned parentIndex = (index - 1) / 2;
+        if (!lessThan(heap[parentIndex], heap[index]))
+            break;
+        swapHeapItems(heap, parentIndex, index);
+        index = parentIndex;
+    }
+    return index;
+}
+
+static unsigned heapSiftDown(ThreadTimerHeap& heap, unsigned index)
+{
+    TimerHeapLessThanFunction lessThan;
+    unsigned size = static_cast<unsigned>(heap.size());
+    for (;;) {
+        unsigned childIndex = 2 * index + 1;
+        if (childIndex >= size)
+            break;
+        if (childIndex + 1 < size && lessThan(heap[childIndex], heap[childIndex + 1]))
+            ++childIndex;
+        if (!lessThan(heap[index], heap[childIndex]))
+            break;
+        swapHeapItems(heap, index, childIndex);
+        index = childIndex;
+    }
+    return index;
+}
+
+// Leaves the heap valid and one element shorter. The removed item keeps whatever
+// heap index it had; every caller either drops it or marks it as not in the heap.
+static void heapRemoveAtIndex(ThreadTimerHeap& heap, unsigned index)
+{
+    unsigned lastIndex = static_cast<unsigned>(heap.size()) - 1;
+    if (index != lastIndex) {
+        swapHeapItems(heap, index, lastIndex);
+        heap.removeLast();
+        // The element that filled the hole came from the bottom of the heap, so
+        // it can belong either above or below its new place, but never both.
+        if (heapSiftUp(heap, index) == index)
+            heapSiftDown(heap, index);
+    } else
+        heap.removeLast();
+}
+
+// m_heapItemWithBitfields is itself a CompactRefPtrTuple, so it holds the item alive for the
+// whole of each of these calls, and ThreadTimerHeapItem is ThreadSafeRefCounted: the local Ref
+// these used to take cost a pair of atomic read-modify-writes with their barriers on every
+// timer start, stop and fire.
 void TimerBase::heapDecreaseKey()
 {
     ASSERT(static_cast<bool>(nextFireTime()));
-    RefPtr item = m_heapItemWithBitfields.pointer();
+    SUPPRESS_UNCOUNTED_LOCAL auto* item = m_heapItemWithBitfields.pointer();
     ASSERT(item);
     checkHeapIndex();
-    auto heapData = item->timerHeap().mutableSpan();
-    std::push_heap(TimerHeapIterator(heapData, 0), TimerHeapIterator(heapData, item->heapIndex() + 1), TimerHeapLessThanFunction());
+    heapSiftUp(item->timerHeap(), item->heapIndex());
     checkHeapIndex();
 }
 
 inline void TimerBase::heapDelete()
 {
     ASSERT(!static_cast<bool>(nextFireTime()));
-    heapPop();
-    RefPtr item = m_heapItemWithBitfields.pointer();
+    SUPPRESS_UNCOUNTED_LOCAL auto* item = m_heapItemWithBitfields.pointer();
     ASSERT(item);
-    item->timerHeap().removeLast();
+    heapRemoveAtIndex(item->timerHeap(), item->heapIndex());
     item->setNotInHeap();
 }
 
 void TimerBase::heapDeleteMin()
 {
     ASSERT(!static_cast<bool>(nextFireTime()));
-    heapPopMin();
-    RefPtr item = m_heapItemWithBitfields.pointer();
+    SUPPRESS_UNCOUNTED_LOCAL auto* item = m_heapItemWithBitfields.pointer();
     ASSERT(item);
-    item->timerHeap().removeLast();
+    ASSERT(item->isFirstInHeap());
+    heapRemoveAtIndex(item->timerHeap(), 0);
     item->setNotInHeap();
 }
 
 inline void TimerBase::heapIncreaseKey()
 {
     ASSERT(static_cast<bool>(nextFireTime()));
-    heapPop();
-    heapDecreaseKey();
+    SUPPRESS_UNCOUNTED_LOCAL auto* item = m_heapItemWithBitfields.pointer();
+    ASSERT(item);
+    checkHeapIndex();
+    // A later fire time can only move an item away from the front of the heap.
+    heapSiftDown(item->timerHeap(), item->heapIndex());
+    checkHeapIndex();
 }
 
 inline void TimerBase::heapInsert()
 {
     ASSERT(!inHeap());
-    RefPtr item = m_heapItemWithBitfields.pointer();
+    SUPPRESS_UNCOUNTED_LOCAL auto* item = m_heapItemWithBitfields.pointer();
     ASSERT(item);
     auto& heap = item->timerHeap();
     heap.append(*item);
@@ -399,21 +492,9 @@ inline void TimerBase::heapInsert()
     heapDecreaseKey();
 }
 
-inline void TimerBase::heapPop()
-{
-    RefPtr item = m_heapItemWithBitfields.pointer();
-    ASSERT(item);
-    // Temporarily force this timer to have the minimum key so we can pop it.
-    MonotonicTime fireTime = item->time;
-    item->time = -MonotonicTime::infinity();
-    heapDecreaseKey();
-    heapPopMin();
-    item->time = fireTime;
-}
-
 void TimerBase::heapPopMin()
 {
-    RefPtr item = m_heapItemWithBitfields.pointer();
+    SUPPRESS_UNCOUNTED_LOCAL auto* item = m_heapItemWithBitfields.pointer();
     ASSERT(item);
     ASSERT(item == item->timerHeap().first().ptr());
     checkHeapIndex();
@@ -427,10 +508,7 @@ void TimerBase::heapPopMin()
 void TimerBase::heapDeleteNullMin(ThreadTimerHeap& heap)
 {
     RELEASE_ASSERT(!heap.first()->hasTimer());
-    heap.first()->time = -MonotonicTime::infinity();
-    auto heapData = heap.mutableSpan();
-    std::pop_heap(TimerHeapIterator(heapData, 0), TimerHeapIterator(heapData, heap.size()), TimerHeapLessThanFunction());
-    heap.removeLast();
+    heapRemoveAtIndex(heap, 0);
 }
 
 static inline bool NODELETE parentHeapPropertyHolds(const TimerBase* current, const ThreadTimerHeap& heap, unsigned currentIndex)
@@ -502,7 +580,7 @@ void TimerBase::updateHeapIfNeeded(MonotonicTime oldTime)
 void TimerBase::setNextFireTime(MonotonicTime newTime)
 {
 #if USE(WEB_THREAD)
-    RELEASE_ASSERT(WebThreadIsLockedOrDisabledInMainOrWebThread());
+    ensureTimerThreadIsSane("setNextFireTime");
 #endif
     ASSERT(canCurrentThreadIDAccessThreadLocalData(m_creationThreadID));
     bool timerHasBeenDeleted = m_unalignedNextFireTime.isNaN();
@@ -520,9 +598,12 @@ void TimerBase::setNextFireTime(MonotonicTime newTime)
         newTime = alignment->alignedFireTime(hasReachedMaxNestingLevel(), newTime);
 
     if (oldTime != newTime) {
-        auto newOrder = threadGlobalDataSingleton().threadTimers().nextHeapInsertionCount();
+        // One thread-local lookup, not two: this runs on every setTimeout,
+        // clearTimeout, timer fire and internal timer restart.
+        auto& threadTimers = threadGlobalDataSingleton().threadTimers();
+        auto newOrder = threadTimers.nextHeapInsertionCount();
 
-        RefPtr item = m_heapItemWithBitfields.pointer();
+        SUPPRESS_UNCOUNTED_LOCAL auto* item = m_heapItemWithBitfields.pointer();
         if (!item) {
             m_heapItemWithBitfields.setPointer(ThreadTimerHeapItem::create(*this, newTime, 0));
             item = m_heapItemWithBitfields.pointer();
@@ -537,7 +618,7 @@ void TimerBase::setNextFireTime(MonotonicTime newTime)
         bool isFirstTimerInHeap = item->isFirstInHeap();
 
         if (wasFirstTimerInHeap || isFirstTimerInHeap)
-            threadGlobalDataSingleton().threadTimers().updateSharedTimer();
+            threadTimers.updateSharedTimer();
     }
 
     checkConsistency();

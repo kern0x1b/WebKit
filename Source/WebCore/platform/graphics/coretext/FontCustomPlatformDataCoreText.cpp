@@ -116,9 +116,29 @@ static RetainPtr<CFDataRef> extractFontCustomPlatformDataMemorySafe(const Shared
 
 RefPtr<FontCustomPlatformData> FontCustomPlatformData::create(SharedBuffer& buffer, const String& itemInCollection)
 {
+#if defined(WEBKIT_IOS6)
+    RetainPtr sfntData = buffer.createCFData();
+    if (!sfntData)
+        return nullptr;
+    RetainPtr provider = adoptCF(CGDataProviderCreateWithCFData(sfntData.get()));
+    if (!provider)
+        return nullptr;
+    RetainPtr cgFont = adoptCF(CGFontCreateWithDataProvider(provider.get()));
+    if (!cgFont)
+        return nullptr;
+    RetainPtr ctFont = adoptCF(CTFontCreateWithGraphicsFont(cgFont.get(), 0, nullptr, nullptr));
+    if (!ctFont)
+        return nullptr;
+    RetainPtr fontDescriptor = adoptCF(CTFontCopyFontDescriptor(ctFont.get()));
+    if (!fontDescriptor)
+        return nullptr;
+
+    Ref bufferRef = SharedBuffer::create(sfntData.get());
+    FontPlatformData::CreationData creationData = { WTF::move(bufferRef), itemInCollection };
+    return adoptRef(new FontCustomPlatformData(fontDescriptor.get(), WTF::move(creationData)));
+#else
     RetainPtr extractedData = extractFontCustomPlatformDataSystemParser(buffer, itemInCollection);
     if (!extractedData) {
-        // Something is wrong with the font.
         return nullptr;
     }
 
@@ -127,6 +147,7 @@ RefPtr<FontCustomPlatformData> FontCustomPlatformData::create(SharedBuffer& buff
 
     FontPlatformData::CreationData creationData = { WTF::move(bufferRef), itemInCollection };
     return adoptRef(new FontCustomPlatformData(fontDescriptor.get(), WTF::move(creationData)));
+#endif
 }
 
 RefPtr<FontCustomPlatformData> FontCustomPlatformData::createMemorySafe(SharedBuffer& buffer, const String& itemInCollection)

@@ -53,7 +53,11 @@ struct TextShapingContext {
 namespace TextMeasurementCacheDefaults {
 static constexpr int minInterval = -3; // A cache hit pays for about 3 cache misses.
 static constexpr int maxInterval = 20; // Sampling at this interval has almost no overhead.
+#if defined(WEBKIT_IOS6)
+static constexpr unsigned maxSize = 20000;
+#else
 static constexpr unsigned maxSize = 500000; // Just enough to guard against pathological growth.
+#endif
 static constexpr unsigned maxTextLength = 64; // Maximum text length for SmallStringKey.
 }
 
@@ -188,8 +192,10 @@ private:
 
     CachedType* addSlowCase(StringView text, CachedType&& entry)
     {
+#if !defined(WEBKIT_IOS6)
         if (MemoryPressureHandler::singleton().isUnderMemoryPressure())
             return nullptr;
+#endif
 
         unsigned length = text.length();
         bool isNewEntry;

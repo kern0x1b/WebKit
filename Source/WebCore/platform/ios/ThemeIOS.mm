@@ -39,21 +39,37 @@ Theme& Theme::singleton()
     return theme;
 }
 
+// UIAccessibilityDarkerSystemColorsEnabled and UIAccessibilityIsReduceMotionEnabled
+// are iOS 8, UIAccessibilityIsOnOffSwitchLabelsEnabled is iOS 7. Soft linking
+// them here is fatal rather than merely unavailable, and a system without the
+// setting has it turned off.
 InterfaceContrastPreference ThemeIOS::userPreferredContrast() const
 {
+#if defined(WEBKIT_IOS6)
+    return InterfaceContrastPreference::NoPreference;
+#else
     if (PAL::softLink_UIKit_UIAccessibilityDarkerSystemColorsEnabled())
         return InterfaceContrastPreference::MoreContrast;
     return InterfaceContrastPreference::NoPreference;
+#endif
 }
 
 bool ThemeIOS::userPrefersReducedMotion() const
 {
+#if defined(WEBKIT_IOS6)
+    return false;
+#else
     return PAL::softLink_UIKit_UIAccessibilityIsReduceMotionEnabled();
+#endif
 }
 
 bool ThemeIOS::userPrefersOnOffLabels() const
 {
+#if defined(WEBKIT_IOS6)
+    return false;
+#else
     return PAL::softLink_UIKit_UIAccessibilityIsOnOffSwitchLabelsEnabled();
+#endif
 }
 
 }

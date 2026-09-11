@@ -306,7 +306,6 @@ GStreamerVideoEncoderFactory::GStreamerVideoEncoderFactory(bool isSupportingVP9P
     , m_isSupportingVP9Profile2(isSupportingVP9Profile2)
 {
     ensureGStreamerInitialized();
-    registerWebKitGStreamerElements();
 
     static std::once_flag debugRegisteredFlag;
     std::call_once(debugRegisteredFlag, [] {

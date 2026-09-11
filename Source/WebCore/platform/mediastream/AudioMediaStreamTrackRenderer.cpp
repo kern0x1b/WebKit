@@ -49,7 +49,7 @@ WTF_MAKE_TZONE_ALLOCATED_IMPL(AudioMediaStreamTrackRenderer);
 
 RefPtr<AudioMediaStreamTrackRenderer> AudioMediaStreamTrackRenderer::create(Init&& init)
 {
-#if PLATFORM(COCOA)
+#if PLATFORM(COCOA) && !defined(WEBKIT_IOS6)
     return AudioMediaStreamTrackRendererCocoa::create(WTF::move(init));
 #else
     UNUSED_PARAM(init);

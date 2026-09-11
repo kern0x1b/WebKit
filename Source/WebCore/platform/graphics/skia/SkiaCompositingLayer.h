@@ -226,8 +226,7 @@ private:
 #if ENABLE(DAMAGE_TRACKING)
     void collectFrameDamage(SkCanvas&, PaintContext&);
     void collectBackdropDamage(SkCanvas&, PaintContext&);
-    void collectGroupDamage(SkCanvas&, PaintContext&);
-    void addGroupDamage(SkCanvas&, PaintContext&, const Vector<IntRect, 1>& overlapRects);
+    void collectMaskDamage(SkCanvas&, PaintContext&);
     static void resolveBackdropDamage(const Vector<FloatRect>& backdropRectsInFrame, Damage&);
 #endif
     void paintSelfAndChildren(SkCanvas&, PaintContext&);
@@ -262,13 +261,6 @@ private:
 #endif
     }
 
-    void groupPropertyChanged()
-    {
-#if ENABLE(DAMAGE_TRACKING)
-        m_groupPropertyChanged = true;
-#endif
-    }
-
 #if ENABLE(DAMAGE_TRACKING)
     bool damagePropagationEnabled() const { return m_damagePropagationEnabled; }
     bool hasLayerDamage() const { return m_layerDamage && !m_layerDamage->isEmpty(); }
@@ -287,7 +279,6 @@ private:
     const TransformationMatrix& localTransform() const;
     const TransformationMatrix& futureLocalTransform() const;
     float opacity() const;
-    float opacityForAnimationsState(const AnimationsState*) const;
     const std::optional<Filter> filter() const;
 
     struct DebugBorder {
@@ -362,7 +353,7 @@ private:
     std::optional<Damage> m_layerDamage;
     std::unique_ptr<LayerRectTracker> m_layerRectTracker;
     uint64_t m_layerRectID { 0 };
-    bool m_groupPropertyChanged { false };
+    bool m_maskChanged { false };
 #endif
 };
 

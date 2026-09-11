@@ -400,7 +400,11 @@ protected:
 
     GraphicsContextState m_state;
 private:
+#if defined(WEBKIT_IOS6)
+    Vector<GraphicsContextState, 4> m_stack;
+#else
     Vector<GraphicsContextState, 1> m_stack;
+#endif
 
     unsigned m_transparencyLayerCount { 0 };
     const IsDeferred m_isDeferred : 1; // NOLINT

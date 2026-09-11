@@ -63,9 +63,11 @@ ImageFrameAnimator::~ImageFrameAnimator()
 
 void ImageFrameAnimator::destroyDecodedData(bool destroyAll)
 {
-    // Animated images over a certain size are considered large enough that we'll
-    // only hang on to one frame at a time.
+#if defined(WEBKIT_IOS6)
+    static constexpr unsigned LargeAnimationCutoff = 2 * 640 * 960 * 4;
+#else
     static constexpr unsigned LargeAnimationCutoff = 30 * 1024 * 1024;
+#endif
 
     Ref source = m_source.get();
     if (source->decodedSize() < LargeAnimationCutoff)

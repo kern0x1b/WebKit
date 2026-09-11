@@ -40,7 +40,11 @@ template<const CFStringRef& colorSpaceNameGlobalConstant> static CGColorSpaceRef
     static LazyNeverDestroyed<RetainPtr<CGColorSpaceRef>> colorSpace;
     static std::once_flag onceFlag;
     std::call_once(onceFlag, [] {
+#if defined(WEBKIT_IOS6)
+        colorSpace.construct(adoptCF(CGColorSpaceCreateDeviceRGB()));
+#else
         colorSpace.construct(adoptCF(CGColorSpaceCreateWithName(RetainPtr { colorSpaceNameGlobalConstant }.get())));
+#endif
         ASSERT(colorSpace.get());
     });
     return colorSpace.get().get();
@@ -51,7 +55,11 @@ template<const CFStringRef& colorSpaceNameGlobalConstant> static CGColorSpaceRef
     static LazyNeverDestroyed<RetainPtr<CGColorSpaceRef>> colorSpace;
     static std::once_flag onceFlag;
     std::call_once(onceFlag, [] {
+#if defined(WEBKIT_IOS6)
+        colorSpace.construct(RetainPtr { namedColorSpace<colorSpaceNameGlobalConstant>() });
+#else
         colorSpace.construct(adoptCF(CGColorSpaceCreateExtended(RetainPtr { namedColorSpace<colorSpaceNameGlobalConstant>() }.get())));
+#endif
         ASSERT(colorSpace.get());
     });
     return colorSpace.get().get();
@@ -119,7 +127,11 @@ CGColorSpaceRef linearDisplayP3ColorSpaceSingleton()
 
 CGColorSpaceRef linearSRGBColorSpaceSingleton()
 {
+#if defined(WEBKIT_IOS6)
+    return sRGBColorSpaceSingleton();
+#else
     return namedColorSpace<kCGColorSpaceLinearSRGB>();
+#endif
 }
 
 CGColorSpaceRef ROMMRGBColorSpaceSingleton()

@@ -120,8 +120,12 @@ public:
     };
 
 private:
-    void setTileNeedsDisplayInRect(const TileIndex&, TileInfo&, const IntRect& repaintRectInTileCoords, const IntRect& coverageRectInTileCoords);
+    void setTileNeedsDisplayInRect(const TileIndex&, TileInfo&, const IntRect& repaintRectInTileCoords, const IntRect& coverageRectInTileCoords, const IntRect& gridBounds);
 
+    // m_controller->bounds() reaches the platform layer for its bounds, so the
+    // loops below read it once and hand it down rather than once per tile.
+    IntRect gridBoundsInTileCoords() const;
+    IntRect rectForTileIndex(const TileIndex&, const IntRect& gridBounds) const;
     IntRect rectForTileIndex(const TileIndex&) const;
     bool getTileIndexRangeForRect(const IntRect&, TileIndex& topLeft, TileIndex& bottomRight) const;
 

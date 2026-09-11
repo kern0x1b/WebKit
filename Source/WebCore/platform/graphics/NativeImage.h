@@ -110,7 +110,10 @@ protected:
 #endif
 
     void computeHeadroom() const;
+    void cacheSize() const;
 
+    mutable int m_cachedWidth { 0 };
+    mutable int m_cachedHeight { 0 };
     mutable PlatformImagePtr m_platformImage;
     mutable std::optional<GainMap> m_gainMap;
     mutable Headroom m_baseImageHeadroom { Headroom::None };

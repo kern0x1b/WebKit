@@ -359,6 +359,7 @@ void MediaSessionHelperIOS::mediaServerConnectionDied()
 
 void MediaSessionHelperIOS::updateCarPlayIsConnected()
 {
+#if HAVE(AVAUDIOSESSION_CARAUDIO_PORT)
     AVAudioSession *audioSession = [PAL::getAVAudioSessionClassSingleton() sharedInstance];
     for (AVAudioSessionPortDescription *output in audioSession.currentRoute.outputs) {
         if ([output.portType isEqualToString:AVAudioSessionPortCarAudio]) {
@@ -366,6 +367,7 @@ void MediaSessionHelperIOS::updateCarPlayIsConnected()
             return;
         }
     }
+#endif
 
     setIsPlayingToAutomotiveHeadUnit(false);
 }
@@ -489,6 +491,11 @@ void MediaSessionHelperIOS::externalOutputDeviceAvailableDidChange()
 
         if (RefPtr callback = _callback.get()) {
             BEGIN_BLOCK_OBJC_EXCEPTIONS
+#if defined(WEBKIT_IOS6)
+            callback->externalOutputDeviceAvailableDidChange();
+            _startMonitoringAirPlayRoutesPending = false;
+            return;
+#endif
             _routeDetector = adoptNS([PAL::allocAVRouteDetectorInstance() init]);
             [_routeDetector setRouteDetectionEnabled:_monitoringAirPlayRoutes];
             [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(wirelessRoutesAvailableDidChange:) name:PAL::AVRouteDetectorMultipleRoutesDetectedDidChangeNotification object:_routeDetector.get()];

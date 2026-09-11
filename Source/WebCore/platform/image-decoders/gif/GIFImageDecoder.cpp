@@ -312,14 +312,9 @@ bool GIFImageDecoder::frameComplete(unsigned frameIndex, unsigned frameDuration,
             // The only remaining case is a DisposalMethod::RestoreToBackground frame. If
             // it had no alpha, and its rect is contained in the current frame's
             // rect, we know the current frame has no alpha.
-            //
-            // A frame evicted from the cache has no backing store, so its rect is unknown and
-            // this frame's opacity cannot be established from it.
-            if (prevBuffer->backingStore()) {
-                IntRect prevRect = prevBuffer->backingStore()->frameRect();
-                if ((prevBuffer->disposalMethod() == ScalableImageDecoderFrame::DisposalMethod::RestoreToBackground) && !prevBuffer->hasAlpha() && rect.contains(prevRect))
-                    buffer.setHasAlpha(false);
-            }
+            IntRect prevRect = prevBuffer->backingStore()->frameRect();
+            if ((prevBuffer->disposalMethod() == ScalableImageDecoderFrame::DisposalMethod::RestoreToBackground) && !prevBuffer->hasAlpha() && rect.contains(prevRect))
+                buffer.setHasAlpha(false);
         }
     }
 
@@ -401,12 +396,11 @@ bool GIFImageDecoder::initFrameBuffer(unsigned frameIndex)
             prevMethod = prevBuffer->disposalMethod();
         }
 
-        if (!prevBuffer->backingStore())
-            return setFailed();
+        ASSERT(prevBuffer->isComplete());
 
         if ((prevMethod == ScalableImageDecoderFrame::DisposalMethod::Unspecified) || (prevMethod == ScalableImageDecoderFrame::DisposalMethod::DoNotDispose)) {
             // Preserve the last frame as the starting state for this frame.
-            if (!buffer->initialize(*prevBuffer->backingStore()))
+            if (!prevBuffer->backingStore() || !buffer->initialize(*prevBuffer->backingStore()))
                 return setFailed();
         } else {
             // We want to clear the previous frame to transparent, without
@@ -420,7 +414,7 @@ bool GIFImageDecoder::initFrameBuffer(unsigned frameIndex)
                     return setFailed();
             } else {
                 // Copy the whole previous buffer, then clear just its frame.
-                if (!buffer->initialize(*prevBuffer->backingStore()))
+                if (!prevBuffer->backingStore() || !buffer->initialize(*prevBuffer->backingStore()))
                     return setFailed();
                 buffer->backingStore()->clearRect(prevRect);
                 buffer->setHasAlpha(true);

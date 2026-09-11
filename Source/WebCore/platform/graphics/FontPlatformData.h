@@ -506,18 +506,24 @@ WEBCORE_EXPORT RetainPtr<CTFontRef> createCTFont(CFDictionaryRef attributes, flo
 
 #if USE(CG)
 
+// Purely stack-scoped inside a call that already holds the context, so it neither retains
+// it nor writes the matrix back when consecutive glyph runs ask for the one already in
+// place - which is every run of a paragraph that has no synthetic oblique.
 class ScopedTextMatrix {
 public:
     ScopedTextMatrix(CGAffineTransform newMatrix, CGContextRef context)
         : m_context(context)
         , m_textMatrix(CGContextGetTextMatrix(context))
+        , m_changed(!CGAffineTransformEqualToTransform(newMatrix, m_textMatrix))
     {
-        CGContextSetTextMatrix(m_context.get(), newMatrix);
+        if (m_changed)
+            CGContextSetTextMatrix(m_context, newMatrix);
     }
 
     ~ScopedTextMatrix()
     {
-        CGContextSetTextMatrix(m_context.get(), m_textMatrix);
+        if (m_changed)
+            CGContextSetTextMatrix(m_context, m_textMatrix);
     }
 
     CGAffineTransform savedMatrix() const
@@ -526,8 +532,9 @@ public:
     }
 
 private:
-    RetainPtr<CGContextRef> m_context;
+    CGContextRef m_context;
     CGAffineTransform m_textMatrix;
+    bool m_changed;
 };
 
 #endif

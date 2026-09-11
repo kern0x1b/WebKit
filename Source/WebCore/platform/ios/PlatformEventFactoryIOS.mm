@@ -96,6 +96,9 @@ public:
         m_button = MouseButton::Left; // This has always been the LeftButton on iOS.
         m_clickCount = 1; // This has always been 1 on iOS.
         m_modifiers = modifiersForEvent(event);
+#if defined(WEBKIT_IOS6)
+        m_syntheticClickType = SyntheticClickType::OneFingerTap;
+#endif
     }
 };
 
@@ -537,24 +540,39 @@ PlatformKeyboardEvent PlatformEventFactory::createPlatformKeyboardEvent(WebEvent
 }
 
 #if ENABLE(TOUCH_EVENTS)
-static PlatformTouchPoint::TouchPhaseType convertTouchPhase(NSNumber *touchPhaseNumber)
+// PlatformTouchPoint/PlatformTouchEvent here are the portable classes GTK and
+// WPE build with (Source/WebCore/platform/PlatformTouch{Point,Event}.h) - see
+// PlatformEventFactoryIOS.h for why. Their State/id()/pos() shape is the older
+// of two APIs that exist for this concept: Apple's private
+// WebKitAdditions/PlatformTouchEventIOS.h defines a second, newer one
+// (TouchPhaseType, gesture scale/rotation, locationInRootView), and this file
+// was written against that one - it is Apple's *sender*, built to feed Apple's
+// *receiver* (WebKitAdditions/EventHandlerIOSTouch.cpp), and we have neither.
+//
+// What actually dispatches a touch on this build is
+// EventHandler::handleTouchEvent() in EventHandler.cpp, guarded by
+// ENABLE(TOUCH_EVENTS) && !ENABLE(IOS_TOUCH_EVENTS) - the same function GTK and
+// WPE use, unmodified, reading event.touchPoints(), point.id(), point.pos(),
+// point.state(). So the sender has to speak the receiver's contract: this
+// builds against the portable API rather than the one nothing here implements.
+static PlatformTouchPoint::State convertTouchPhase(NSNumber *touchPhaseNumber)
 {
     WebEventTouchPhaseType touchPhase = static_cast<WebEventTouchPhaseType>([touchPhaseNumber unsignedIntValue]);
     switch (touchPhase) {
     case WebEventTouchPhaseBegan:
-        return PlatformTouchPoint::TouchPhaseBegan;
+        return PlatformTouchPoint::TouchPressed;
     case WebEventTouchPhaseMoved:
-        return PlatformTouchPoint::TouchPhaseMoved;
+        return PlatformTouchPoint::TouchMoved;
     case WebEventTouchPhaseStationary:
-        return PlatformTouchPoint::TouchPhaseStationary;
+        return PlatformTouchPoint::TouchStationary;
     case WebEventTouchPhaseEnded:
-        return PlatformTouchPoint::TouchPhaseEnded;
+        return PlatformTouchPoint::TouchReleased;
     case WebEventTouchPhaseCancelled:
-        return PlatformTouchPoint::TouchPhaseCancelled;
+        return PlatformTouchPoint::TouchCancelled;
     default:
         ASSERT_NOT_REACHED();
     }
-    return PlatformTouchPoint::TouchPhaseBegan;
+    return PlatformTouchPoint::TouchPressed;
 }
 
 static PlatformEvent::Type touchEventType(WebEvent *event)
@@ -574,26 +592,29 @@ static PlatformEvent::Type touchEventType(WebEvent *event)
     }
 }
     
-static PlatformTouchPoint::TouchPhaseType touchPhaseFromPlatformEventType(PlatformEvent::Type type)
+static PlatformTouchPoint::State touchPhaseFromPlatformEventType(PlatformEvent::Type type)
 {
     switch (type) {
     case PlatformEvent::Type::TouchStart:
-        return PlatformTouchPoint::TouchPhaseBegan;
+        return PlatformTouchPoint::TouchPressed;
     case PlatformEvent::Type::TouchMove:
-        return PlatformTouchPoint::TouchPhaseMoved;
+        return PlatformTouchPoint::TouchMoved;
     case PlatformEvent::Type::TouchEnd:
-        return PlatformTouchPoint::TouchPhaseEnded;
+        return PlatformTouchPoint::TouchReleased;
     default:
         ASSERT_NOT_REACHED();
-        return PlatformTouchPoint::TouchPhaseCancelled;
+        return PlatformTouchPoint::TouchCancelled;
     }
 }
 
 class PlatformTouchPointBuilder : public PlatformTouchPoint {
 public:
-    PlatformTouchPointBuilder(unsigned identifier, const IntPoint& locationInRootView, std::optional<IntPoint>&& locationInViewport, TouchPhaseType phase)
-        : PlatformTouchPoint(identifier, locationInRootView, WTF::move(locationInViewport), phase)
+    PlatformTouchPointBuilder(unsigned identifier, const IntPoint& location, State state)
     {
+        m_id = identifier;
+        m_state = state;
+        m_pos = location;
+        m_screenPos = location;
     }
 };
 
@@ -605,34 +626,31 @@ public:
         m_modifiers = modifiersForEvent(event);
         m_timestamp = MonotonicTime::fromRawSeconds(event.timestamp);
 
-        m_gestureScale = event.gestureScale;
-        m_gestureRotation = event.gestureRotation;
-        m_isGesture = event.isGesture;
-        m_position = pointForEvent(event);
-        m_globalPosition = globalPointForEvent(event);
+        // Gesture scale/rotation (pinch) has no portable-dispatcher equivalent:
+        // handleTouchEvent() never reads it, because a GTK/WPE touchscreen has
+        // no OS-level gesture recognizer to report it from. Nowhere to put it,
+        // not because it was skipped, but because the receiver has no concept
+        // of it.
 
         unsigned touchCount = event.touchCount;
-        m_touchPoints = Vector<PlatformTouchPoint>(touchCount, [&](size_t i) -> PlatformTouchPoint {
+        m_touchPoints.reserveInitialCapacity(touchCount);
+        for (unsigned i = 0; i < touchCount; ++i) {
             unsigned identifier = [(NSNumber *)[event.touchIdentifiers objectAtIndex:i] unsignedIntValue];
             IntPoint location = IntPoint([(NSValue *)[event.touchLocations objectAtIndex:i] pointValue]);
-            PlatformTouchPoint::TouchPhaseType touchPhase = convertTouchPhase([event.touchPhases objectAtIndex:i]);
-            return PlatformTouchPointBuilder(identifier, location, std::nullopt, touchPhase);
-        });
+            PlatformTouchPoint::State state = convertTouchPhase([event.touchPhases objectAtIndex:i]);
+            m_touchPoints.append(PlatformTouchPointBuilder(identifier, location, state));
+        }
     }
     
     PlatformTouchEventBuilder(PlatformEvent::Type type, IntPoint location)
     {
+        // Same reasoning as above: gesture fields and the tap-prediction flag
+        // are Apple's, unread by the dispatcher we actually have, so there is
+        // nothing to set them on.
         m_type = type;
         m_timestamp = MonotonicTime::now();
-        
-        m_gestureScale = 1;
-        m_gestureRotation = 0;
-        m_isGesture = 0;
-        m_position = location;
-        m_globalPosition = location;
-        m_isPotentialTap = true;
-        
-        m_touchPoints = Vector<PlatformTouchPoint>({ PlatformTouchPointBuilder(1, location, std::nullopt, touchPhaseFromPlatformEventType(type)) });
+
+        m_touchPoints.append(PlatformTouchPointBuilder(1, location, touchPhaseFromPlatformEventType(type)));
     }
 };
 

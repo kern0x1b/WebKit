@@ -62,6 +62,7 @@ void ThreadTimers::setSharedTimer(SharedTimer* sharedTimer)
         sharedTimer->stop();
         m_pendingSharedTimerFireTime = MonotonicTime { };
     }
+    m_sharedTimerIsStopped = true;
     
     m_sharedTimer = sharedTimer;
     
@@ -83,10 +84,19 @@ void ThreadTimers::updateSharedTimer()
     ASSERT(m_timerHeap.isEmpty() || m_timerHeap.first()->hasTimer());
 
     if (m_firingTimers || m_timerHeap.isEmpty()) {
+        if (!m_pendingSharedTimerFireTime && m_sharedTimerIsStopped)
+            return;
         m_pendingSharedTimerFireTime = MonotonicTime { };
+        m_sharedTimerIsStopped = true;
         protect(m_sharedTimer)->stop();
     } else {
         MonotonicTime nextFireTime = m_timerHeap.first()->time;
+        // Every start, stop or retime of any timer lands here, but only a change
+        // to the earliest one changes what the shared timer has to do. Rearming
+        // it for the time it is already armed for costs a MonotonicTime::now(),
+        // a run loop timer teardown and a fresh one for no effect at all.
+        if (m_pendingSharedTimerFireTime == nextFireTime && !m_sharedTimerIsStopped)
+            return;
         MonotonicTime currentMonotonicTime = MonotonicTime::now();
         if (m_pendingSharedTimerFireTime) {
             // No need to restart the timer if both the pending fire time and the new fire time are in the past.
@@ -94,6 +104,7 @@ void ThreadTimers::updateSharedTimer()
                 return;
         }
         m_pendingSharedTimerFireTime = nextFireTime;
+        m_sharedTimerIsStopped = false;
         protect(m_sharedTimer)->setFireInterval(std::max(nextFireTime - currentMonotonicTime, 0_s));
     }
 }
@@ -155,6 +166,7 @@ void ThreadTimers::fireTimersInNestedEventLoop()
     if (CheckedPtr sharedTimer = m_sharedTimer) {
         sharedTimer->invalidate();
         m_pendingSharedTimerFireTime = MonotonicTime { };
+        m_sharedTimerIsStopped = true;
     }
 
     updateSharedTimer();

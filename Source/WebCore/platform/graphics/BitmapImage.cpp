@@ -93,6 +93,14 @@ ImageDrawResult BitmapImage::draw(GraphicsContext& context, const FloatRect& des
     auto size = m_source->size(ImageOrientation::Orientation::None);
     auto sourceSize = m_source->sourceSize(ImageOrientation::Orientation::None);
 
+    // Both of the scales below divide by a size, and either can still be empty
+    // here: the frame metadata may not have arrived, in which case the source
+    // reports nothing. Dividing then puts infinities in the source rectangle and
+    // the draw faults further down - the most frequent crash on this port was
+    // here. There is nothing to draw from a zero sized image anyway.
+    if (size.isEmpty() || sourceSize.isEmpty())
+        return ImageDrawResult::DidNothing;
+
     // adjustedSourceRect is in the coordinates of densityCorrectedSize, so map it to the sourceSize.
     auto adjustedSourceRect = sourceRect;
     if (sourceSize != size)
@@ -100,6 +108,19 @@ ImageDrawResult BitmapImage::draw(GraphicsContext& context, const FloatRect& des
 
     auto scaleFactorForDrawing = context.scaleFactorForDrawing(destinationRect, adjustedSourceRect);
     auto sizeForDrawing = expandedIntSize(sourceSize * scaleFactorForDrawing);
+
+#if defined(WEBKIT_IOS6)
+    if (!sourceSize.isEmpty()) {
+        int quantum = std::max(1, sourceSize.maxDimension() / 8);
+        auto quantize = [quantum](int value, int limit) {
+            if (value >= limit)
+                return limit;
+            return std::min(limit, ((value + quantum - 1) / quantum) * quantum);
+        };
+        sizeForDrawing = { quantize(sizeForDrawing.width(), sourceSize.width()), quantize(sizeForDrawing.height(), sourceSize.height()) };
+    }
+#endif
+
     auto subsamplingLevel =  m_source->subsamplingLevelForScaleFactor(context, scaleFactorForDrawing, options.allowImageSubsampling());
     auto preferredDecodingDestination = m_source->preferredDecodingDestination(context, options);
 
@@ -123,8 +144,17 @@ ImageDrawResult BitmapImage::draw(GraphicsContext& context, const FloatRect& des
     else {
         // adjustedSourceRect is in the coordinates of the unsubsampled image, so map it to the subsampled image.
         auto imageSize = nativeImage->size();
+#if defined(WEBKIT_IOS6)
+        if (imageSize != sourceSize && !sourceSize.isEmpty()) {
+            if (adjustedSourceRect == FloatRect { { }, FloatSize { sourceSize } })
+                adjustedSourceRect = FloatRect { { }, FloatSize { imageSize } };
+            else
+                adjustedSourceRect.scale(imageSize / sourceSize);
+        }
+#else
         if (imageSize != sourceSize)
             adjustedSourceRect.scale(imageSize / sourceSize);
+#endif
 
         auto orientation = options.orientation();
         if (orientation == ImageOrientation::Orientation::FromImage)

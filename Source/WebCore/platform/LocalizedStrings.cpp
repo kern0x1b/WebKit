@@ -101,7 +101,14 @@ RetainPtr<CFStringRef> copyLocalizedString(CFStringRef key)
 {
     static CFStringRef notFound = CFSTR("localized string not found");
 
-    auto result = adoptCF(CFBundleCopyLocalizedString(webCoreBundleSingleton(), key, notFound, nullptr));
+    // Substituted for the system engine there is no WebCore bundle on disk to
+    // look strings up in, and CFBundleCopyLocalizedString does not accept a null
+    // bundle. The key is the English string, so it is the right fallback.
+    CFBundleRef bundle = webCoreBundleSingleton();
+    if (!bundle)
+        return key;
+
+    auto result = adoptCF(CFBundleCopyLocalizedString(bundle, key, notFound, nullptr));
 
 #if ASSERT_ENABLED
     if (result.get() == notFound) {
@@ -109,6 +116,11 @@ RetainPtr<CFStringRef> copyLocalizedString(CFStringRef key)
         CFStringGetCString(key, keyCString, sizeof(keyCString), kCFStringEncodingUTF8);
         ASSERT_WITH_MESSAGE(result.get() != notFound, "Could not find localizable string '%s' in bundle", keyCString);
     }
+#endif
+
+#if defined(WEBKIT_IOS6)
+    if (!result || result.get() == notFound)
+        return key;
 #endif
 
     return result;

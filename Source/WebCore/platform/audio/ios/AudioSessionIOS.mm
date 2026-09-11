@@ -235,7 +235,7 @@ void AudioSessionIOS::setCategory(CategoryType newCategory, Mode newMode, RouteS
         ALLOW_DEPRECATED_DECLARATIONS_BEGIN
         options |= AVAudioSessionCategoryOptionAllowBluetooth | AVAudioSessionCategoryOptionAllowBluetoothA2DP | AVAudioSessionCategoryOptionAllowAirPlay;
         ALLOW_DEPRECATED_DECLARATIONS_END
-#if ENABLE(MEDIA_STREAM)
+#if ENABLE(MEDIA_STREAM) && !defined(WEBKIT_IOS6)
         if (!AVAudioSessionCaptureDeviceManager::singleton().isReceiverPreferredSpeaker())
 #endif
             options |= AVAudioSessionCategoryOptionDefaultToSpeaker;
@@ -254,11 +254,15 @@ void AudioSessionIOS::setCategory(CategoryType newCategory, Mode newMode, RouteS
         case Mode::MoviePlayback:
             return AVAudioSessionModeMoviePlayback;
         case Mode::VideoChat:
+#if defined(WEBKIT_IOS6)
+            return AVAudioSessionModeDefault;
+#else
 #if ENABLE(MEDIA_STREAM)
             if (AVAudioSessionCaptureDeviceManager::singleton().isReceiverPreferredSpeaker())
                 return AVAudioSessionModeVoiceChat;
 #endif
             return AVAudioSessionModeVideoChat;
+#endif
         case Mode::Default:
             break;
         }
@@ -266,7 +270,7 @@ void AudioSessionIOS::setCategory(CategoryType newCategory, Mode newMode, RouteS
     }();
 
     bool needDeviceUpdate = false;
-#if ENABLE(MEDIA_STREAM)
+#if ENABLE(MEDIA_STREAM) && !defined(WEBKIT_IOS6)
     auto preferredMicrophoneID = AVAudioSessionCaptureDeviceManager::singleton().preferredMicrophoneID();
     if ((newCategory == CategoryType::PlayAndRecord || newCategory == CategoryType::RecordAudio) && !preferredMicrophoneID.isEmpty()) {
         if (m_lastSetPreferredMicrophoneID != preferredMicrophoneID)
@@ -279,8 +283,12 @@ void AudioSessionIOS::setCategory(CategoryType newCategory, Mode newMode, RouteS
     auto *currentCategory = [session category];
     auto *currentMode = [session mode];
     auto currentOptions = [session categoryOptions];
+#if defined(WEBKIT_IOS6)
+    auto needSessionUpdate = ![currentCategory isEqualToString:categoryString] || ![currentMode isEqualToString:modeString] || currentOptions != options;
+#else
     auto currentPolicy = [session routeSharingPolicy];
     auto needSessionUpdate = ![currentCategory isEqualToString:categoryString] || ![currentMode isEqualToString:modeString] || currentOptions != options || currentPolicy != static_cast<AVAudioSessionRouteSharingPolicy>(policy);
+#endif
 
     if (!needSessionUpdate && !needDeviceUpdate)
         return;
@@ -288,13 +296,20 @@ void AudioSessionIOS::setCategory(CategoryType newCategory, Mode newMode, RouteS
     if (needSessionUpdate) {
         ALWAYS_LOG(identifier, newCategory, ", mode = ", newMode);
         NSError *error = nil;
+#if defined(WEBKIT_IOS6)
+        UNUSED_PARAM(policy);
+        [session setCategory:categoryString withOptions:options error:&error];
+        if (!error)
+            [session setMode:modeString error:&error];
+#else
         [session setCategory:categoryString mode:modeString routeSharingPolicy:static_cast<AVAudioSessionRouteSharingPolicy>(policy) options:options error:&error];
+#endif
 #if !PLATFORM(IOS_FAMILY_SIMULATOR) && !PLATFORM(MACCATALYST)
         ASSERT(!error);
 #endif
     }
 
-#if ENABLE(MEDIA_STREAM)
+#if ENABLE(MEDIA_STREAM) && !defined(WEBKIT_IOS6)
     if (needDeviceUpdate) {
         AVAudioSessionCaptureDeviceManager::singleton().configurePreferredMicrophone();
         m_lastSetPreferredMicrophoneID = AVAudioSessionCaptureDeviceManager::singleton().preferredMicrophoneID();
@@ -330,6 +345,9 @@ AudioSession::CategoryType AudioSessionIOS::category() const
 
 AudioSession::Mode AudioSessionIOS::mode() const
 {
+#if defined(WEBKIT_IOS6)
+    return Mode::Default;
+#else
     AVAudioSession *session = [PAL::getAVAudioSessionClassSingleton() sharedInstance];
     NSString *modeString = [session mode];
     if ([modeString isEqual:AVAudioSessionModeVideoChat] || [modeString isEqual:AVAudioSessionModeVoiceChat])
@@ -337,10 +355,14 @@ AudioSession::Mode AudioSessionIOS::mode() const
     if ([modeString isEqual:AVAudioSessionModeMoviePlayback])
         return Mode::MoviePlayback;
     return Mode::Default;
+#endif
 }
 
 RouteSharingPolicy AudioSessionIOS::routeSharingPolicy() const
 {
+#if defined(WEBKIT_IOS6)
+    return RouteSharingPolicy::Default;
+#else
     static_assert(static_cast<size_t>(RouteSharingPolicy::Default) == static_cast<size_t>(AVAudioSessionRouteSharingPolicyDefault), "RouteSharingPolicy::Default is not AVAudioSessionRouteSharingPolicyDefault as expected");
 #if HAVE(ROUTE_SHARING_POLICY_LONG_FORM_VIDEO)
     static_assert(static_cast<size_t>(RouteSharingPolicy::LongFormAudio) == static_cast<size_t>(AVAudioSessionRouteSharingPolicyLongFormAudio), "RouteSharingPolicy::LongFormAudio is not AVAudioSessionRouteSharingPolicyLongFormAudio as expected");
@@ -355,11 +377,14 @@ ALLOW_DEPRECATED_DECLARATIONS_END
     AVAudioSessionRouteSharingPolicy policy = [[PAL::getAVAudioSessionClassSingleton() sharedInstance] routeSharingPolicy];
     ASSERT(static_cast<RouteSharingPolicy>(policy) <= RouteSharingPolicy::LongFormVideo);
     return static_cast<RouteSharingPolicy>(policy);
+#endif
 }
 
 String AudioSessionIOS::routingContextUID() const
 {
-#if !PLATFORM(IOS_FAMILY_SIMULATOR) && !PLATFORM(MACCATALYST) && !PLATFORM(WATCHOS)
+#if defined(WEBKIT_IOS6)
+    return emptyString();
+#elif !PLATFORM(IOS_FAMILY_SIMULATOR) && !PLATFORM(MACCATALYST) && !PLATFORM(WATCHOS)
     return [[PAL::getAVAudioSessionClassSingleton() sharedInstance] routingContextUID];
 #else
     return emptyString();
@@ -383,7 +408,11 @@ size_t AudioSessionIOS::numberOfOutputChannels() const
 
 size_t AudioSessionIOS::maximumNumberOfOutputChannels() const
 {
+#if defined(WEBKIT_IOS6)
+    return [[PAL::getAVAudioSessionClassSingleton() sharedInstance] outputNumberOfChannels];
+#else
     return [[PAL::getAVAudioSessionClassSingleton() sharedInstance] maximumOutputNumberOfChannels];
+#endif
 }
 
 size_t AudioSessionIOS::preferredBufferSize() const
