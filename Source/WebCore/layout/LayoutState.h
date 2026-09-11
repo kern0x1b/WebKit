@@ -50,7 +50,11 @@ class InlineContentCache;
 class InlineLayoutState;
 class TableFormattingState;
 
+#if defined(WEBKIT_IOS6)
+class LayoutState : public CanMakeWeakPtr<LayoutState>, public CanMakeCheckedPtr<LayoutState> {
+#else
 class LayoutState : public CanMakeWeakPtr<LayoutState>, public CanMakeThreadSafeCheckedPtr<LayoutState> {
+#endif
     WTF_MAKE_NONCOPYABLE(LayoutState);
     WTF_MAKE_TZONE_ALLOCATED(LayoutState);
     WTF_OVERRIDE_DELETE_FOR_CHECKED_PTR(LayoutState);

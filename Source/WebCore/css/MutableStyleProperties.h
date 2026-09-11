@@ -59,11 +59,12 @@ public:
 
     CSSStyleProperties* NODELETE cssStyleProperties();
 
-    bool addParsedProperties(const ParsedPropertyVector&);
+    bool addParsedProperties(std::span<const CSSProperty>);
+    bool addParsedProperties(const ParsedPropertyVector& properties) { return addParsedProperties(properties.span()); }
     bool addParsedProperty(const CSSProperty&);
 
     // These expand shorthand properties into multiple properties.
-    bool setProperty(CSSPropertyID, const String& value, CSSParserContext, IsImportant = IsImportant::No, bool* didFailParsing = nullptr);
+    bool setProperty(CSSPropertyID, const String& value, const CSSParserContext&, IsImportant = IsImportant::No, bool* didFailParsing = nullptr);
     bool setProperty(CSSPropertyID, const String& value, IsImportant = IsImportant::No, bool* didFailParsing = nullptr);
     void setProperty(CSSPropertyID, Ref<CSSValue>&&, IsImportant = IsImportant::No);
 
@@ -77,7 +78,7 @@ public:
     bool mergeAndOverrideOnConflict(const StyleProperties&);
 
     void clear();
-    bool parseDeclaration(const String& styleDeclaration, CSSParserContext);
+    bool parseDeclaration(const String& styleDeclaration, const CSSParserContext&);
 
     WEBCORE_EXPORT CSSStyleProperties& ensureCSSStyleProperties();
     CSSStyleProperties& ensureInlineCSSStyleProperties(StyledElement& parentElement);
@@ -86,7 +87,7 @@ public:
     int NODELETE findCustomPropertyIndex(StringView propertyName) const;
 
     // Methods for querying and altering CSS custom properties.
-    bool setCustomProperty(const String& propertyName, const String& value, CSSParserContext, IsImportant = IsImportant::No);
+    bool setCustomProperty(const String& propertyName, const String& value, const CSSParserContext&, IsImportant = IsImportant::No);
     bool removeCustomProperty(const String& propertyName, String* returnText = nullptr);
 
 private:

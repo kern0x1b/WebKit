@@ -48,6 +48,7 @@
 #include "MutableStyleProperties.h"
 #include "SVGElement.h"
 #include "ScriptableDocumentParser.h"
+#include "StylePropertiesInlines.h"
 #include "StylePropertyMap.h"
 #include "StylePropertyShorthand.h"
 #include "StyleResolver.h"
@@ -129,7 +130,12 @@ CSSStyleProperties* StyledElement::inlineStyleCSSOMWrapper()
 
 static bool usesStyleBasedEditability(const StyleProperties& properties)
 {
+#if defined(WEBKIT_IOS6)
+    int index = properties.findPropertyIndex(CSSPropertyWebkitUserModify);
+    return index != -1 && properties.propertyAt(static_cast<unsigned>(index)).value();
+#else
     return properties.getPropertyCSSValue(CSSPropertyWebkitUserModify);
+#endif
 }
 
 void StyledElement::setInlineStyleFromString(const AtomString& newStyleString)

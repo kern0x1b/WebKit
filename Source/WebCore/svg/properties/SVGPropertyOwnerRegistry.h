@@ -240,7 +240,7 @@ public:
 
     void setAnimatedPropertyDirty(const QualifiedName& attributeName, SVGAnimatedPropertyBase& animatedProperty) const override
     {
-        if (RefPtr property = fastAnimatedPropertyLookup(m_owner, attributeName)) {
+        if (auto* property = fastAnimatedPropertyLookup(m_owner, attributeName)) {
             property->setDirty();
             return;
         }
@@ -273,7 +273,7 @@ public:
     // string through the associated SVGMemberAccessor.
     std::optional<String> synchronize(const QualifiedName& attributeName) const override
     {
-        if (RefPtr property = fastAnimatedPropertyLookup(m_owner, attributeName))
+        if (auto* property = fastAnimatedPropertyLookup(m_owner, attributeName))
             return property->synchronize();
 
         std::optional<String> value;
@@ -321,7 +321,7 @@ public:
             SVGNames::xAttr->impl(),
             SVGNames::yAttr->impl()
         };
-        return isAnimatedLengthAttribute(attributeName) && animatedStyleAttributes.get().contains(attributeName.impl());
+        return animatedStyleAttributes.get().contains(attributeName.impl()) && isAnimatedLengthAttribute(attributeName);
     }
 
     RefPtr<SVGAttributeAnimator> createAnimator(const QualifiedName& attributeName, AnimationMode animationMode, CalcMode calcMode, bool isAccumulated, bool isAdditive) const override

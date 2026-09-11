@@ -699,20 +699,23 @@ void RenderImage::paintReplaced(PaintInfo& paintInfo, const LayoutPoint& paintOf
     if (showBorderForIncompleteImage && (result != ImageDrawResult::DidDraw || (cachedImage() && cachedImage()->isLoading())))
         paintIncompleteImageOutline(paintInfo, paintOffset, missingImageBorderWidth);
 
-    if (cachedImage() && paintInfo.phase == PaintPhase::Foreground && !context.paintingDisabled()) {
+    if (paintInfo.phase != PaintPhase::Foreground || context.paintingDisabled())
+        return;
+
+    if (RefPtr protectedCachedImage = cachedImage()) {
         // For now, count images as unpainted if they are still progressively loading. We may want
         // to refine this in the future to account for the portion of the image that has painted.
         LayoutRect visibleRect = intersection(replacedContentRect, contentBoxRect);
-        if (cachedImage()->isLoading() || result == ImageDrawResult::DidRequestDecoding)
+        if (protectedCachedImage->isLoading() || result == ImageDrawResult::DidRequestDecoding)
             protect(page())->addRelevantUnpaintedObject(*this, visibleRect);
         else
             protect(page())->addRelevantRepaintedObject(*this, visibleRect);
 
-        if (protect(cachedImage())->currentFrameIsComplete(this)) {
+        if (protectedCachedImage->currentFrameIsComplete(this)) {
             if (auto styleable = Styleable::fromRenderer(*this)) {
                 auto localVisibleRect = visibleRect;
                 localVisibleRect.moveBy(-paintOffset);
-                protect(document())->didPaintImage(protect(styleable->element), protect(cachedImage()), localVisibleRect);
+                protect(document())->didPaintImage(protect(styleable->element), protectedCachedImage.get(), localVisibleRect);
             }
         }
     }
@@ -784,8 +787,11 @@ ImageDrawResult RenderImage::paintIntoRect(PaintInfo& paintInfo, const FloatRect
     if (!img || img->isNull())
         return ImageDrawResult::DidNothing;
 
-    // FIXME: Document when image != img.get().
+#if defined(WEBKIT_IOS6)
+    RefPtr image = img;
+#else
     RefPtr image = imageResource().image();
+#endif
 
     ImagePaintingOptions options = {
         CompositeOperator::SourceOver,

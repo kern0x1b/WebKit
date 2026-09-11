@@ -98,6 +98,8 @@ private:
 
     Timer m_cachedCurrentTimeClearanceTimer;
     Vector<Ref<ScrollTimeline>> m_updatedScrollTimelines;
+    Vector<Ref<AnimationTimeline>> m_timelinesScratch;
+    Vector<Ref<WebAnimation>> m_animationsScratch;
     WeakHashSet<AnimationTimeline> m_timelines;
     WeakHashSet<WebAnimation, WeakPtrImplWithEventTargetData> m_pendingAnimations;
     TaskCancellationGroup m_pendingAnimationsProcessingTaskCancellationGroup;

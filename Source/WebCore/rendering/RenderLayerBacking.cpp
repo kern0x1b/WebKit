@@ -398,9 +398,9 @@ void RenderLayerBacking::willDestroyLayer(const GraphicsLayer* layer)
 
 static void clearBackingSharingLayerProviders(InlineWeakKeyListHashSet<RenderLayer>& sharingLayers, const RenderLayer& providerLayer, OptionSet<UpdateBackingSharingFlags> flags)
 {
-    for (CheckedRef layer : sharingLayers | dereferenceView) {
-        if (layer->backingProviderLayer() == &providerLayer)
-            layer->setBackingProviderLayer(nullptr, flags);
+    for (SUPPRESS_UNCHECKED_LOCAL auto& layer : sharingLayers | dereferenceView) {
+        if (layer.backingProviderLayer() == &providerLayer)
+            layer.setBackingProviderLayer(nullptr, flags);
     }
 }
 
@@ -409,7 +409,7 @@ void RenderLayerBacking::setBackingSharingLayers(InlineWeakKeyListHashSet<Render
     bool sharingLayersChanged = m_backingSharingLayers.computeSize() != sharingLayers.computeSize();
     clearBackingSharingLayerProviders(m_backingSharingLayers, m_owningLayer, { UpdateBackingSharingFlags::DuringCompositingUpdate });
 
-    for (CheckedRef oldSharingLayer : m_backingSharingLayers | dereferenceView) {
+    for (SUPPRESS_UNCHECKED_LOCAL auto& oldSharingLayer : m_backingSharingLayers | dereferenceView) {
         if (!sharingLayers.contains(oldSharingLayer))
             sharingLayersChanged = true;
     }
@@ -421,8 +421,8 @@ void RenderLayerBacking::setBackingSharingLayers(InlineWeakKeyListHashSet<Render
 
     auto oldSharingLayers = std::exchange(m_backingSharingLayers, WTF::move(sharingLayers));
 
-    for (CheckedRef layer : m_backingSharingLayers | dereferenceView)
-        layer->setBackingProviderLayer(&m_owningLayer, { UpdateBackingSharingFlags::DuringCompositingUpdate });
+    for (SUPPRESS_UNCHECKED_LOCAL auto& layer : m_backingSharingLayers | dereferenceView)
+        layer.setBackingProviderLayer(&m_owningLayer, { UpdateBackingSharingFlags::DuringCompositingUpdate });
 }
 
 void RenderLayerBacking::removeBackingSharingLayer(RenderLayer& layer, OptionSet<UpdateBackingSharingFlags> flags)
@@ -1075,11 +1075,11 @@ bool RenderLayerBacking::updateCompositedBounds()
 
     // If the backing provider has overflow:clip, we know all sharing layers are affected by the clip because they are containing-block descendants.
     if (!renderer().hasNonVisibleOverflow()) {
-        for (CheckedRef layer : m_backingSharingLayers | dereferenceView) {
-            CheckedPtr boundsRootLayer = &m_owningLayer;
-            ASSERT(layer->isDescendantOf(m_owningLayer));
-            auto offset = layer->offsetFromAncestor(&m_owningLayer);
-            auto bounds = layer->calculateLayerBounds(boundsRootLayer, offset, RenderLayer::defaultCalculateLayerBoundsFlags() | RenderLayer::ExcludeHiddenDescendants | RenderLayer::DontConstrainForMask);
+        for (SUPPRESS_UNCHECKED_LOCAL auto& layer : m_backingSharingLayers | dereferenceView) {
+            SUPPRESS_UNCHECKED_LOCAL auto* boundsRootLayer = &m_owningLayer;
+            ASSERT(layer.isDescendantOf(m_owningLayer));
+            auto offset = layer.offsetFromAncestor(&m_owningLayer);
+            auto bounds = layer.calculateLayerBounds(boundsRootLayer, offset, RenderLayer::defaultCalculateLayerBoundsFlags() | RenderLayer::ExcludeHiddenDescendants | RenderLayer::DontConstrainForMask);
             layerBounds.unite(bounds);
         }
     }
@@ -1661,6 +1661,9 @@ void RenderLayerBacking::updateGeometry(const RenderLayer* compositedAncestor)
     m_graphicsLayer->setBackfaceVisibility(style.backfaceVisibility() == BackfaceVisibility::Visible);
 
     m_graphicsLayer->setPosition(primaryLayerPosition);
+#if defined(WEBKIT_IOS6)
+    m_viewportRectWhenPositioned = renderer().view().frameView().rectForFixedPositionLayout();
+#endif
     m_graphicsLayer->setSize(primaryGraphicsLayerRect.size());
     if (hasTiledBackingFlatteningLayer())
         m_childContainmentLayer->setSize(primaryGraphicsLayerRect.size());
@@ -3551,7 +3554,7 @@ static LayerTraversal traverseVisibleNonCompositedDescendantLayers(RenderLayer& 
     LayerListMutationDetector mutationChecker(parent);
 #endif
 
-    for (CheckedPtr childLayer : parent.normalFlowLayers()) {
+    for (SUPPRESS_UNCHECKED_LOCAL auto* childLayer : parent.normalFlowLayers()) {
         if (compositedWithOwnBackingStore(*childLayer) || childLayer->paintsIntoProvidedBacking())
             continue;
 
@@ -3566,7 +3569,7 @@ static LayerTraversal traverseVisibleNonCompositedDescendantLayers(RenderLayer& 
         return LayerTraversal::Continue;
 
     // Use the m_hasCompositingDescendant bit to optimize?
-    for (CheckedPtr childLayer : parent.negativeZOrderLayers()) {
+    for (SUPPRESS_UNCHECKED_LOCAL auto* childLayer : parent.negativeZOrderLayers()) {
         if (compositedWithOwnBackingStore(*childLayer) || childLayer->paintsIntoProvidedBacking())
             continue;
 
@@ -3577,7 +3580,7 @@ static LayerTraversal traverseVisibleNonCompositedDescendantLayers(RenderLayer& 
             return LayerTraversal::Stop;
     }
 
-    for (CheckedPtr childLayer : parent.positiveZOrderLayers()) {
+    for (SUPPRESS_UNCHECKED_LOCAL auto* childLayer : parent.positiveZOrderLayers()) {
         if (compositedWithOwnBackingStore(*childLayer) || childLayer->paintsIntoProvidedBacking())
             continue;
 
@@ -3597,7 +3600,7 @@ static LayerTraversal traverseLayersForPaintedContentDetection(RenderLayer& back
         return LayerTraversal::Stop;
 
     if (backingOwnerLayer.isComposited() && backingOwnerLayer.backing()->hasBackingSharingLayers()) {
-        for (CheckedRef sharingLayer : backingOwnerLayer.backing()->backingSharingLayers() | dereferenceView) {
+        for (SUPPRESS_UNCHECKED_LOCAL auto& sharingLayer : backingOwnerLayer.backing()->backingSharingLayers() | dereferenceView) {
             if (layerFunc(sharingLayer) == LayerTraversal::Stop)
                 return LayerTraversal::Stop;
 
@@ -4218,7 +4221,7 @@ void RenderLayerBacking::paintIntoLayer(const GraphicsLayer* graphicsLayer, Grap
         if (is<EventRegionContext>(regionContext))
             sharingLayerPaintFlags.add(RenderLayer::PaintLayerFlag::CollectingEventRegion);
 
-        for (CheckedRef layer : m_backingSharingLayers | dereferenceView)
+        for (SUPPRESS_UNCHECKED_LOCAL auto& layer : m_backingSharingLayers | dereferenceView)
             paintOneLayer(layer, sharingLayerPaintFlags);
     }
 

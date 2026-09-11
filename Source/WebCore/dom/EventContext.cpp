@@ -44,7 +44,15 @@ WTF_MAKE_TZONE_ALLOCATED_IMPL(EventContext);
 
 void EventContext::handleLocalEvents(Event& event, EventInvokePhase phase) const
 {
-    event.setTarget(m_target.copyRef());
+#if defined(WEBKIT_IOS6)
+    if (m_node && m_type != Type::Window && m_type != Type::Touch && !m_relatedTargetIsSet
+        && !m_contextNodeIsFormElement && !m_node->hasEventTargetData()
+        && event.target() == m_target.get())
+        return;
+#endif
+
+    if (event.target() != m_target.get())
+        event.setTarget(m_target.copyRef());
     event.setCurrentTarget(m_currentTarget.copyRef(), m_currentTargetIsInShadowTree);
 
     if (m_relatedTargetIsSet) {

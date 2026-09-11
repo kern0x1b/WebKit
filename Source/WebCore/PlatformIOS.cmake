@@ -74,7 +74,9 @@ if (MOBILEGESTALT_LIBRARY)
     list(APPEND WebCore_LIBRARIES ${MOBILEGESTALT_LIBRARY})
 endif ()
 
-if (IOSURFACEACCELERATOR_LIBRARY)
+# The framework exists in the SDK and not on this release, so linking it - even
+# unused - stops the engine loading.
+if (IOSURFACEACCELERATOR_LIBRARY AND NOT WEBKIT_IOS6)
     list(APPEND WebCore_LIBRARIES ${IOSURFACEACCELERATOR_LIBRARY})
 endif ()
 

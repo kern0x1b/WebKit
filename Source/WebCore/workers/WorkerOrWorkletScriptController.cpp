@@ -254,11 +254,15 @@ auto WorkerOrWorkletScriptController::evaluate(const ScriptSourceCode& sourceCod
     const URL& sourceURL = jsSourceCode.provider()->sourceOrigin().url();
 
     RefPtr globalScope = m_globalScope.get();
+#if !defined(WEBKIT_IOS6)
     InspectorInstrumentation::willEvaluateScript(*globalScope, sourceURL.string(), sourceCode.startLine(), sourceCode.startColumn());
+#endif
 
     JSExecState::profiledEvaluate(&globalObject, JSC::ProfilingReason::Other, jsSourceCode, m_globalScopeWrapper->globalThis(), returnedException);
 
+#if !defined(WEBKIT_IOS6)
     InspectorInstrumentation::didEvaluateScript(*globalScope);
+#endif
 
     if ((returnedException && vm.isTerminationException(returnedException)) || isTerminatingExecution()) {
         forbidExecution();
@@ -308,6 +312,7 @@ JSC::JSValue WorkerOrWorkletScriptController::evaluateModule(const URL& sourceUR
     VM& vm = globalObject.vm();
     JSLockHolder lock { vm };
 
+#if !defined(WEBKIT_IOS6)
 #if ENABLE(WEBASSEMBLY)
     const bool isWasmModule = moduleRecord.inherits<WebAssemblyModuleRecord>();
 #else
@@ -316,7 +321,6 @@ JSC::JSValue WorkerOrWorkletScriptController::evaluateModule(const URL& sourceUR
 
     RefPtr globalScope = m_globalScope.get();
     if (isWasmModule) {
-        // FIXME: Provide better inspector support for Wasm scripts.
         InspectorInstrumentation::willEvaluateScript(*globalScope, sourceURL.string(), 1, 1);
     } else if (moduleRecord.inherits<JSC::SyntheticModuleRecord>())
         InspectorInstrumentation::willEvaluateScript(*globalScope, sourceURL.string(), 1, 1);
@@ -325,8 +329,11 @@ JSC::JSValue WorkerOrWorkletScriptController::evaluateModule(const URL& sourceUR
         const auto& jsSourceCode = jsModuleRecord->sourceCode();
         InspectorInstrumentation::willEvaluateScript(*globalScope, sourceURL.string(), jsSourceCode.firstLine().oneBasedInt(), jsSourceCode.startColumn().oneBasedInt());
     }
+#endif
     auto returnValue = moduleRecord.evaluate(&globalObject, awaitedValue, resumeMode);
+#if !defined(WEBKIT_IOS6)
     InspectorInstrumentation::didEvaluateScript(*globalScope);
+#endif
 
     return returnValue;
 }

@@ -209,16 +209,14 @@ void UserAgentStyle::ensureDefaultStyleSheetsForElement(const Element& element)
         }
 #endif // ENABLE(ATTACHMENT_ELEMENT)
 
-        if (!popoverStyleSheet && element.document().settings().popoverAttributeEnabled() && element.hasAttributeWithoutSynchronization(popoverAttr)) {
+        if (!popoverStyleSheet && element.hasAttributesWithoutUpdate() && element.document().settings().popoverAttributeEnabled() && element.hasAttributeWithoutSynchronization(popoverAttr)) {
             popoverStyleSheet = parseUASheet(StringImpl::createWithoutCopying(popoverUserAgentStyleSheet));
             addToDefaultStyle(protect(*popoverStyleSheet));
         }
 
-        if (isAnyOf<HTMLFormControlElement, HTMLMeterElement, HTMLProgressElement>(element) && !element.document().settings().verticalFormControlsEnabled()) {
-            if (!horizontalFormControlsStyleSheet) {
-                horizontalFormControlsStyleSheet = parseUASheet(StringImpl::createWithoutCopying(horizontalFormControlsUserAgentStyleSheet));
-                addToDefaultStyle(protect(*horizontalFormControlsStyleSheet));
-            }
+        if (!horizontalFormControlsStyleSheet && isAnyOf<HTMLFormControlElement, HTMLMeterElement, HTMLProgressElement>(element) && !element.document().settings().verticalFormControlsEnabled()) {
+            horizontalFormControlsStyleSheet = parseUASheet(StringImpl::createWithoutCopying(horizontalFormControlsUserAgentStyleSheet));
+            addToDefaultStyle(protect(*horizontalFormControlsStyleSheet));
         }
 
     } else if (is<SVGElement>(element)) {
@@ -256,13 +254,15 @@ void UserAgentStyle::ensureDefaultStyleSheetsForElement(const Element& element)
 #endif // ENABLE(MATHML)
 
 #if ENABLE(FULLSCREEN_API)
-    if (RefPtr documentFullscreen = element.document().fullscreenIfExists(); !fullscreenStyleSheet && documentFullscreen) {
-        fullscreenStyleSheet = parseUASheet(StringImpl::createWithoutCopying(fullscreenUserAgentStyleSheet));
-        addToDefaultStyle(protect(*fullscreenStyleSheet));
+    if (!fullscreenStyleSheet) {
+        if (RefPtr documentFullscreen = element.document().fullscreenIfExists()) {
+            fullscreenStyleSheet = parseUASheet(StringImpl::createWithoutCopying(fullscreenUserAgentStyleSheet));
+            addToDefaultStyle(protect(*fullscreenStyleSheet));
+        }
     }
 #endif // ENABLE(FULLSCREEN_API)
 
-    if (!viewTransitionsStyleSheet) {
+    if (!viewTransitionsStyleSheet) [[unlikely]] {
         viewTransitionsStyleSheet = parseUASheet(StringImpl::createWithoutCopying(viewTransitionsUserAgentStyleSheet));
         addToDefaultStyle(protect(*viewTransitionsStyleSheet));
         addUserAgentKeyframes(protect(*viewTransitionsStyleSheet));

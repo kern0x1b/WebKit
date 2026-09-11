@@ -139,6 +139,14 @@ inline void setWindowEventHandlerAttribute(HTMLElement& element, const AtomStrin
 
 inline JSC::JSObject* JSEventListener::ensureJSFunction(ScriptExecutionContext& scriptExecutionContext) const
 {
+    if (m_isInitialized) [[likely]] {
+        ASSERT(m_world);
+        ASSERT(m_wrapper);
+        ASSERT(m_jsFunction);
+        ASSERT(static_cast<JSC::JSCell*>(m_jsFunction.get())->isObject());
+        return m_jsFunction.get();
+    }
+
     // initializeJSFunction can trigger code that deletes this event listener
     // before we're done. It should always return null in this case.
     if (!m_world) [[unlikely]]

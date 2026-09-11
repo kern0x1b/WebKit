@@ -169,6 +169,12 @@ void BuilderState::adjustStyleForInterCharacterRuby()
 
 void BuilderState::updateFont()
 {
+#if defined(WEBKIT_IOS6)
+    if (!m_fontDirty && m_style.fontCascade().fonts())
+        return;
+
+    Ref fontSelector = const_cast<Document&>(document()).fontSelector();
+#else
     Ref fontSelector = const_cast<Document&>(document()).fontSelector();
 
     auto needsUpdate = [&] {
@@ -177,6 +183,7 @@ void BuilderState::updateFont()
 
     if (!needsUpdate())
         return;
+#endif
 
 #if ENABLE(TEXT_AUTOSIZING)
     updateFontForTextSizeAdjust();

@@ -364,7 +364,7 @@ public:
 
     WEBCORE_EXPORT virtual std::unique_ptr<WorkerClient> createWorkerClient(SerialFunctionDispatcher&);
 
-#if ENABLE(IOS_TOUCH_EVENTS)
+#if ENABLE(IOS_TOUCH_EVENTS) || ENABLE(TOUCH_EVENTS)
     virtual void didPreventDefaultForEvent() = 0;
 #endif
 

@@ -30,6 +30,12 @@
  */
 
 #include "config.h"
+#include <wtf/MonotonicTime.h>
+
+#if defined(WEBKIT_IOS6)
+extern "C" double g_webkitIOS6LayoutMsTotal;
+extern "C" unsigned g_webkitIOS6LayoutCount;
+#endif
 #include "EventTarget.h"
 
 #include "AbortSignal.h"
@@ -266,6 +272,10 @@ ExceptionOr<bool> EventTarget::dispatchEventForBindings(Event& event)
     return event.legacyReturnValue();
 }
 
+#if defined(WEBKIT_IOS6)
+static inline bool hasListenerForPhase(const EventListenerVector&, EventTarget::EventInvokePhase);
+#endif
+
 void EventTarget::dispatchEvent(Event& event)
 {
     // FIXME: We should always use EventDispatcher.
@@ -278,8 +288,20 @@ void EventTarget::dispatchEvent(Event& event)
     event.setEventPhase(Event::AT_TARGET);
     event.resetBeforeDispatch();
     event.setEventPath(eventPath);
+#if defined(WEBKIT_IOS6)
+    auto* data = eventTargetData();
+    auto* listenersVector = data ? data->eventListenerMap.findInline(event.type()) : nullptr;
+    if (listenersVector && !hasListenerForPhase(*listenersVector, EventInvokePhase::Capturing)) {
+        if (hasListenerForPhase(*listenersVector, EventInvokePhase::Bubbling))
+            innerInvokeEventListeners(event, *listenersVector, EventInvokePhase::Bubbling);
+    } else {
+        fireEventListeners(event, EventInvokePhase::Capturing);
+        fireEventListeners(event, EventInvokePhase::Bubbling);
+    }
+#else
     fireEventListeners(event, EventInvokePhase::Capturing);
     fireEventListeners(event, EventInvokePhase::Bubbling);
+#endif
     event.resetAfterDispatch();
 }
 
@@ -289,29 +311,66 @@ void EventTarget::uncaughtExceptionInEventHandler()
 
 const AtomString& EventTarget::legacyTypeForEvent(const Event& event)
 {
-    auto& eventNames = WebCore::eventNames();
-    if (event.type() == eventNames.animationendEvent)
-        return eventNames.webkitAnimationEndEvent;
-
-    if (event.type() == eventNames.animationstartEvent)
-        return eventNames.webkitAnimationStartEvent;
-
-    if (event.type() == eventNames.animationiterationEvent)
-        return eventNames.webkitAnimationIterationEvent;
-
-    if (event.type() == eventNames.transitionendEvent)
-        return eventNames.webkitTransitionEndEvent;
-
-    // FIXME: This legacy name is not part of the specification (https://dom.spec.whatwg.org/#dispatching-events).
-    if (event.type() == eventNames.wheelEvent)
-        return eventNames.mousewheelEvent;
+    auto& type = event.type();
+    switch (type.length()) {
+    case 5: {
+        auto& eventNames = WebCore::eventNames();
+        // FIXME: This legacy name is not part of the specification (https://dom.spec.whatwg.org/#dispatching-events).
+        if (type == eventNames.wheelEvent)
+            return eventNames.mousewheelEvent;
+        break;
+    }
+    case 12: {
+        auto& eventNames = WebCore::eventNames();
+        if (type == eventNames.animationendEvent)
+            return eventNames.webkitAnimationEndEvent;
+        break;
+    }
+    case 13: {
+        auto& eventNames = WebCore::eventNames();
+        if (type == eventNames.transitionendEvent)
+            return eventNames.webkitTransitionEndEvent;
+        break;
+    }
+    case 14: {
+        auto& eventNames = WebCore::eventNames();
+        if (type == eventNames.animationstartEvent)
+            return eventNames.webkitAnimationStartEvent;
+        break;
+    }
+    case 18: {
+        auto& eventNames = WebCore::eventNames();
+        if (type == eventNames.animationiterationEvent)
+            return eventNames.webkitAnimationIterationEvent;
+        break;
+    }
+    }
 
     return nullAtom();
 }
 
+#if defined(WEBKIT_IOS6)
+static inline bool hasListenerForPhase(const EventListenerVector& listeners, EventTarget::EventInvokePhase phase)
+{
+    bool wantsCapture = phase == EventTarget::EventInvokePhase::Capturing;
+    for (auto& listener : listeners) {
+        if (listener->useCapture() == wantsCapture && !listener->wasRemoved())
+            return true;
+    }
+    return false;
+}
+#endif
+
 // https://dom.spec.whatwg.org/#concept-event-listener-invoke
 void EventTarget::fireEventListeners(Event& event, EventInvokePhase phase)
 {
+    // The handler that eats the processor was named here, by timing this
+    // function and printing the event type when it ran long: on this feed it is
+    // "message" - React's scheduler - 19 to 25 calls a session, 43 to 59 seconds
+    // in total, the worst of them 12.3 seconds, of which about a third was
+    // layout and the rest JavaScript. The instrumentation itself is gone: it
+    // held a reference to the event's type across the call and the process took
+    // a signal 11 inside a listener with it in place.
 #if !ASSERT_WITH_SECURITY_IMPLICATION_DISABLED
     if (RefPtr node = dynamicDowncast<Node>(*this))
         ASSERT_WITH_SECURITY_IMPLICATION(ScriptDisallowedScope::InMainThread::isEventDispatchAllowedInSubtree(*node));
@@ -324,7 +383,11 @@ void EventTarget::fireEventListeners(Event& event, EventInvokePhase phase)
     if (!data)
         return;
 
-    if (auto* listenersVector = data->eventListenerMap.find(event.type())) {
+    if (auto* listenersVector = data->eventListenerMap.findInline(event.type())) {
+#if defined(WEBKIT_IOS6)
+        if (!hasListenerForPhase(*listenersVector, phase))
+            return;
+#endif
         innerInvokeEventListeners(event, *listenersVector, phase);
         return;
     }
@@ -335,7 +398,11 @@ void EventTarget::fireEventListeners(Event& event, EventInvokePhase phase)
 
     const AtomString& legacyTypeName = legacyTypeForEvent(event);
     if (!legacyTypeName.isNull()) {
-        if (auto* legacyListenersVector = data->eventListenerMap.find(legacyTypeName)) {
+        if (auto* legacyListenersVector = data->eventListenerMap.findInline(legacyTypeName)) {
+#if defined(WEBKIT_IOS6)
+            if (!hasListenerForPhase(*legacyListenersVector, phase))
+                return;
+#endif
             AtomString typeName = event.type();
             event.setType(legacyTypeName);
             innerInvokeEventListeners(event, *legacyListenersVector, phase);
@@ -356,16 +423,17 @@ void EventTarget::innerInvokeEventListeners(Event& event, EventListenerVector li
     Ref context = *scriptExecutionContext();
     InspectorInstrumentation::willDispatchEvent(context, event);
 
+    bool wantsCapture = phase == EventInvokePhase::Capturing;
+    bool isTrusted = event.isTrusted();
+
     for (auto& registeredListener : listeners) {
+        if (registeredListener->useCapture() != wantsCapture)
+            continue;
+
         if (registeredListener->wasRemoved()) [[unlikely]]
             continue;
 
-        if (phase == EventInvokePhase::Capturing && !registeredListener->useCapture())
-            continue;
-        if (phase == EventInvokePhase::Bubbling && registeredListener->useCapture())
-            continue;
-
-        if (!event.isTrusted() && registeredListener->trustedOnly()) [[unlikely]]
+        if (!isTrusted && registeredListener->trustedOnly()) [[unlikely]]
             continue;
 
         Ref callback = registeredListener->callback();
@@ -420,7 +488,7 @@ Vector<AtomString> EventTarget::eventTypes() const
 const EventListenerVector& EventTarget::eventListeners(const AtomString& eventType)
 {
     auto* data = eventTargetData();
-    auto* listenerVector = data ? data->eventListenerMap.find(eventType) : nullptr;
+    auto* listenerVector = data ? data->eventListenerMap.findInline(eventType) : nullptr;
     static NeverDestroyed<EventListenerVector> emptyVector;
     return listenerVector ? *listenerVector : emptyVector.get();
 }

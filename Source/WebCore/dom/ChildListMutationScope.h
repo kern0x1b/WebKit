@@ -68,7 +68,11 @@ private:
     Vector<Ref<Node>> m_addedNodes;
     RefPtr<Node> m_previousSibling;
     RefPtr<Node> m_nextSibling;
+#if defined(WEBKIT_IOS6)
+    RefPtr<Node> m_lastAdded;
+#else
     WeakPtr<Node, WeakPtrImplWithEventTargetData> m_lastAdded;
+#endif
 
     std::unique_ptr<MutationObserverInterestGroup> m_observers;
 };

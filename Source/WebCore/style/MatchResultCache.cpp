@@ -24,6 +24,7 @@
  */
 
 #include "config.h"
+#include <unistd.h>
 #include "MatchResultCache.h"
 
 #include "MatchResult.h"
@@ -53,7 +54,9 @@ struct OriginalInlineProperty {
 struct MatchResultCache::Entry : CanMakeCheckedPtr<MatchResultCache::Entry> {
     UnadjustedStyle unadjustedStyle;
     Ref<const MutableStyleProperties> inlineStyle;
-    Vector<OriginalInlineProperty> originalInlineProperties;
+    // Almost every element with inline style has a handful of properties; inline storage keeps the
+    // Entry allocation single.
+    Vector<OriginalInlineProperty, 4> originalInlineProperties;
 
     Entry(UnadjustedStyle&& unadjustedStyle, const MutableStyleProperties& inlineStyle)
         : unadjustedStyle(WTF::move(unadjustedStyle))
@@ -73,7 +76,14 @@ struct MatchResultCache::Entry : CanMakeCheckedPtr<MatchResultCache::Entry> {
     WTF_DEPRECATED_MAKE_STRUCT_FAST_ALLOCATED(MatchResultCache);
 };
 
+#if defined(WEBKIT_IOS6)
+MatchResultCache::MatchResultCache()
+    : m_maximumEntries(access("/tmp/native-small-match-cache", F_OK) == 0 ? 64 : 512)
+{
+}
+#else
 MatchResultCache::MatchResultCache() = default;
+#endif
 MatchResultCache::~MatchResultCache() = default;
 
 inline UnadjustedStyle copy(const UnadjustedStyle& other)
@@ -176,7 +186,7 @@ void MatchResultCache::update(CachedMatchResult& result, const Style::ComputedSt
 
 void MatchResultCache::updateForFastPathInherit(const Element& element, const Style::ComputedStyle& parentStyle)
 {
-    CheckedPtr entry = m_entries.get(element);
+    auto* entry = m_entries.get(element);
     if (!entry)
         return;
     entry->unadjustedStyle.style->fastPathInheritFrom(parentStyle);
@@ -189,9 +199,17 @@ void MatchResultCache::set(const Element& element, const UnadjustedStyle& unadju
     auto* styledElement = dynamicDowncast<StyledElement>(element);
     RefPtr inlineStyle = styledElement ? dynamicDowncast<MutableStyleProperties>(styledElement->inlineStyle()) : nullptr;
 
-    if (inlineStyle)
+    if (inlineStyle) {
+#if defined(WEBKIT_IOS6)
+        constexpr unsigned insertsBetweenSizeChecks = 32;
+        if (++m_insertsSinceSizeCheck >= insertsBetweenSizeChecks) {
+            m_insertsSinceSizeCheck = 0;
+            if (m_entries.computeSize() > m_maximumEntries)
+                m_entries.clear();
+        }
+#endif
         m_entries.set(element, makeUniqueRef<Entry>(copy(unadjustedStyle), *inlineStyle));
-    else
+    } else
         m_entries.remove(element);
 }
 

@@ -35,6 +35,17 @@
 namespace WebCore {
 namespace Style {
 
+#if defined(WEBKIT_IOS6)
+static bool NODELETE attributeChangeFastPathEnabled()
+{
+    static const bool enabled = [] {
+        const char* value = getenv("WEBKIT_IOS6_ATTR_INVALIDATION_FAST_PATH");
+        return !value || value[0] != '0';
+    }();
+    return enabled;
+}
+#endif
+
 static bool NODELETE mayBeAffectedByAttributeChange(const RuleFeatureSet& features, bool isHTML, const QualifiedName& attributeName)
 {
     auto& nameSet = isHTML ? features.attributeLowercaseLocalNamesInRules : features.attributeLocalNamesInRules;
@@ -52,6 +63,16 @@ void AttributeChangeInvalidation::invalidateStyle(const QualifiedName& attribute
     bool mayAffectStyleInShadowTree = false;
 
     auto attributeNameForLookups = attributeName.localNameLowercase();
+
+#if defined(WEBKIT_IOS6)
+    if (attributeChangeFastPathEnabled() && !m_element->shadowRoot() && !m_element->assignedSlot() && !m_element->isInShadowTree()) [[likely]] {
+        auto& features = m_element->styleResolver().ruleSets().features();
+        if (!features.attributeLowercaseLocalNamesInRules.contains(attributeNameForLookups)
+            && !features.attributeLocalNamesInRules.contains(attributeName.localName())
+            && !features.substitutionAttributeNamesInRules.contains(attributeNameForLookups))
+            return;
+    }
+#endif
 
     traverseRuleFeatures(m_element, [&] (const RuleFeatureSet& features, bool mayAffectShadowTree) {
         if (mayAffectShadowTree && mayBeAffectedByAttributeChange(features, isHTML, attributeName))

@@ -91,7 +91,12 @@ private:
     RuleInformation NODELETE collectRuleInformation();
 
     RefPtr<RuleSet> m_ownedRuleSet;
+#if defined(WEBKIT_IOS6)
+    InvalidationRuleSetVector m_ownedRuleSetVector;
+    const InvalidationRuleSetVector& m_ruleSets;
+#else
     const InvalidationRuleSetVector m_ruleSets;
+#endif
 
     RuleInformation m_ruleInformation;
 

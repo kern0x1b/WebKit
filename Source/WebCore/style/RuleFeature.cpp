@@ -350,8 +350,9 @@ void RuleFeatureSet::recursivelyCollectFeaturesFromSelector(SelectorFeatures& se
         } else if (selector->match() == CSSSelector::Match::Class)
             selectorFeatures.classes.append({ selector, matchElement, context.isNegation, scopeSourcesForFeature() });
         else if (selector->isAttributeSelector()) {
-            attributeLowercaseLocalNamesInRules.add(selector->attribute().localNameLowercase());
-            attributeLocalNamesInRules.add(selector->attribute().localName());
+            auto& attribute = selector->attribute();
+            attributeLowercaseLocalNamesInRules.add(attribute.localNameLowercase());
+            attributeLocalNamesInRules.add(attribute.localName());
             selectorFeatures.attributes.append({ selector, matchElement, context.isNegation, scopeSourcesForFeature() });
         } else if (selector->match() == CSSSelector::Match::PseudoElement) {
             // Don't put anything here as selectors that differ by pseudo-element only are collected only once.
@@ -447,8 +448,11 @@ static PseudoClassInvalidationKey makePseudoClassInvalidationKey(CSSSelector::Ps
         if (simpleSelector->match() == CSSSelector::Match::Tag)
             tagName = simpleSelector->tagLowercaseLocalName();
 
-        if (simpleSelector->isAttributeSelector() && !unlikelyToHaveSelectorForAttribute(simpleSelector->attribute().localNameLowercase()))
-            attributeName = simpleSelector->attribute().localNameLowercase();
+        if (simpleSelector->isAttributeSelector()) {
+            auto& lowercaseName = simpleSelector->attribute().localNameLowercase();
+            if (!unlikelyToHaveSelectorForAttribute(lowercaseName))
+                attributeName = lowercaseName;
+        }
     }
     if (!attributeName.isEmpty())
         return makePseudoClassInvalidationKey(pseudoClass, InvalidationKeyType::Attribute, attributeName);
@@ -464,7 +468,11 @@ static PseudoClassInvalidationKey makePseudoClassInvalidationKey(CSSSelector::Ps
 
 void RuleFeatureSet::collectFeatures(CollectionContext& collectionContext, const RuleData& ruleData, const Vector<Ref<const StyleRuleScope>>& scopeRules)
 {
+#if defined(WEBKIT_IOS6)
+    ASSERT(isMainThread());
+#else
     RELEASE_ASSERT(isMainThread());
+#endif
 
     // Empty rules don't affect style so we never need to invalidate for them.
     if (ruleData.styleRule().properties().isEmpty())
@@ -535,7 +543,8 @@ void RuleFeatureSet::collectFeatures(CollectionContext& collectionContext, const
 
     for (auto& entry : selectorFeatures.attributes) {
         auto& [selector, matchElement, isNegation, scopeSources] = entry;
-        auto& featureVector = *attributeRules.ensure(selector->attribute().localNameLowercase(), [] {
+        auto& lowercaseName = selector->attribute().localNameLowercase();
+        auto& featureVector = *attributeRules.ensure(lowercaseName, [] {
             return makeUnique<RuleFeatureVector>();
         }).iterator->value;
 
@@ -548,14 +557,14 @@ void RuleFeatureSet::collectFeatures(CollectionContext& collectionContext, const
         });
 
         if (matchElement.relation == MatchElement::Relation::Host)
-            attributesAffectingHost.add(selector->attribute().localNameLowercase());
+            attributesAffectingHost.add(lowercaseName);
         setUsesRelation(matchElement.relation);
     }
 
     for (auto& entry : selectorFeatures.pseudoClasses) {
         auto& [selector, matchElement, isNegation, scopeSources] = entry;
         auto& featureVector = *pseudoClassRules.ensure(makePseudoClassInvalidationKey(selector->pseudoClass(), *selector), [] {
-            return makeUnique<Vector<RuleFeature>>();
+            return makeUnique<RuleFeatureVector>();
         }).iterator->value;
 
         addToVector(featureVector, RuleFeature {
@@ -630,10 +639,19 @@ void RuleFeatureSet::add(const RuleFeatureSet& other)
     }
 
     auto addMap = [&](auto& map, auto& otherMap) {
+        if (otherMap.isEmpty())
+            return;
+        if (map.isEmpty())
+            map.reserveInitialCapacity(otherMap.size());
         for (auto& keyValuePair : otherMap) {
-            map.ensure(keyValuePair.key, [] {
+            auto& vector = *map.ensure(keyValuePair.key, [] {
                 return makeUnique<std::decay_t<decltype(*keyValuePair.value)>>();
-            }).iterator->value->appendVector(*keyValuePair.value);
+            }).iterator->value;
+            // The merged set is shrunk right after this, and a fresh vector would otherwise round its
+            // capacity up to the growth minimum and then be reallocated to shrink it back down.
+            if (vector.isEmpty())
+                vector.reserveInitialCapacity(keyValuePair.value->size());
+            vector.appendVector(*keyValuePair.value);
         }
     };
 
@@ -694,18 +712,96 @@ void RuleFeatureSet::clear()
     hasStartingStyleRules = false;
 }
 
+#if defined(WEBKIT_IOS6)
+void RuleFeatureSet::recordBaseline(RuleFeatureBaseline& baseline) const
+{
+    baseline.idsInRules = idsInRules;
+    baseline.idsMatchingAncestorsInRules = idsMatchingAncestorsInRules;
+    baseline.attributeLowercaseLocalNamesInRules = attributeLowercaseLocalNamesInRules;
+    baseline.attributeLocalNamesInRules = attributeLocalNamesInRules;
+    baseline.substitutionAttributeNamesInRules = substitutionAttributeNamesInRules;
+
+    auto recordSizes = [](const auto& map, auto& sizes) {
+        sizes.clear();
+        if (map.isEmpty())
+            return;
+        sizes.reserveInitialCapacity(map.size());
+        for (auto& keyValuePair : map)
+            sizes.add(keyValuePair.key, keyValuePair.value->size());
+    };
+    recordSizes(idRules, baseline.idRuleSizes);
+    recordSizes(classRules, baseline.classRuleSizes);
+    recordSizes(attributeRules, baseline.attributeRuleSizes);
+    recordSizes(pseudoClassRules, baseline.pseudoClassRuleSizes);
+    recordSizes(hasPseudoClassRules, baseline.hasPseudoClassRuleSizes);
+
+    baseline.classesAffectingHost = classesAffectingHost;
+    baseline.attributesAffectingHost = attributesAffectingHost;
+    baseline.pseudoClassesAffectingHost = pseudoClassesAffectingHost;
+    baseline.pseudoClasses = pseudoClasses;
+
+    baseline.usesFirstLineRules = usesFirstLineRules;
+    baseline.usesFirstLetterRules = usesFirstLetterRules;
+    baseline.hasStartingStyleRules = hasStartingStyleRules;
+
+    baseline.isValid = true;
+}
+
+void RuleFeatureSet::restoreBaseline(const RuleFeatureBaseline& baseline)
+{
+    RELEASE_ASSERT(isMainThread());
+    ASSERT(baseline.isValid);
+
+    idsInRules = baseline.idsInRules;
+    idsMatchingAncestorsInRules = baseline.idsMatchingAncestorsInRules;
+    attributeLowercaseLocalNamesInRules = baseline.attributeLowercaseLocalNamesInRules;
+    attributeLocalNamesInRules = baseline.attributeLocalNamesInRules;
+    substitutionAttributeNamesInRules = baseline.substitutionAttributeNamesInRules;
+
+    auto restoreSizes = [](auto& map, const auto& sizes) {
+        map.removeIf([&](auto& keyValuePair) {
+            auto it = sizes.find(keyValuePair.key);
+            if (it == sizes.end())
+                return true;
+            if (keyValuePair.value->size() > it->value)
+                keyValuePair.value->shrink(it->value);
+            return false;
+        });
+    };
+    restoreSizes(idRules, baseline.idRuleSizes);
+    restoreSizes(classRules, baseline.classRuleSizes);
+    restoreSizes(attributeRules, baseline.attributeRuleSizes);
+    restoreSizes(pseudoClassRules, baseline.pseudoClassRuleSizes);
+    restoreSizes(hasPseudoClassRules, baseline.hasPseudoClassRuleSizes);
+
+    classesAffectingHost = baseline.classesAffectingHost;
+    attributesAffectingHost = baseline.attributesAffectingHost;
+    pseudoClassesAffectingHost = baseline.pseudoClassesAffectingHost;
+    pseudoClasses = baseline.pseudoClasses;
+
+    usesFirstLineRules = baseline.usesFirstLineRules;
+    usesFirstLetterRules = baseline.usesFirstLetterRules;
+    hasStartingStyleRules = baseline.hasStartingStyleRules;
+}
+#endif
+
 void RuleFeatureSet::shrinkToFit()
 {
-    for (auto& rules : idRules.values())
-        rules->shrinkToFit();
-    for (auto& rules : classRules.values())
-        rules->shrinkToFit();
-    for (auto& rules : attributeRules.values())
-        rules->shrinkToFit();
-    for (auto& rules : pseudoClassRules.values())
-        rules->shrinkToFit();
-    for (auto& rules : hasPseudoClassRules.values())
-        rules->shrinkToFit();
+    auto shrinkAll = [](auto& map) {
+        for (auto& rules : map.values()) {
+#if defined(WEBKIT_IOS6)
+            if (rules->capacity() - rules->size() < 4)
+                continue;
+#endif
+            rules->shrinkToFit();
+        }
+    };
+
+    shrinkAll(idRules);
+    shrinkAll(classRules);
+    shrinkAll(attributeRules);
+    shrinkAll(pseudoClassRules);
+    shrinkAll(hasPseudoClassRules);
 }
 
 } // namespace Style

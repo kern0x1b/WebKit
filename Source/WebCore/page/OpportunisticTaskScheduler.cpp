@@ -34,6 +34,7 @@
 #include "Settings.h"
 #include <JavaScriptCore/HeapInlines.h>
 #include <JavaScriptCore/JSGlobalObject.h>
+#include <stdlib.h>
 #include <wtf/DataLog.h>
 #include <wtf/SystemTracing.h>
 
@@ -52,6 +53,12 @@ OpportunisticTaskScheduler::~OpportunisticTaskScheduler() = default;
 
 void OpportunisticTaskScheduler::rescheduleIfNeeded(MonotonicTime deadline)
 {
+#if defined(WEBKIT_IOS6) && USE(WEB_THREAD)
+    static const bool honourOpportunisticTasks = getenv("WEBKIT_IOS6_OPPORTUNISTIC_TASKS") != nullptr;
+    if (WebThreadIsEnabled() && !honourOpportunisticTasks)
+        return;
+#endif
+
     RefPtr page = m_page.get();
     if (page->isWaitingForLoadToFinish() || !page->isVisibleAndActive())
         return;

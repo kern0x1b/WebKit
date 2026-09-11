@@ -221,6 +221,7 @@
 #include "WorkerOrWorkletScriptController.h"
 #include <JavaScriptCore/VM.h>
 #include <ranges>
+#include <stdlib.h>
 #include <wtf/Borrow.h>
 #include <wtf/FileSystem.h>
 #include <wtf/StdLibExtras.h>
@@ -2227,6 +2228,28 @@ void Page::syncLocalFrameInfoToRemote()
     });
 }
 
+#if defined(WEBKIT_IOS6)
+static void collectDocuments(const Frame& mainFrame, Vector<Ref<Document>, 8>& documents)
+{
+    for (RefPtr frame = &mainFrame; frame; frame = frame->tree().traverseNext()) {
+        RefPtr localFrame = dynamicDowncast<LocalFrame>(*frame);
+        if (!localFrame)
+            continue;
+        RefPtr document = localFrame->document();
+        if (!document)
+            continue;
+        documents.append(document.releaseNonNull());
+    }
+}
+
+static inline bool documentIsStillRenderable(Document& document, const Page& page)
+{
+    return document.page() == &page
+        && !document.renderingIsSuppressedForViewTransition()
+        && document.visualUpdatesAllowed();
+}
+#endif
+
 // https://html.spec.whatwg.org/multipage/webappapis.html#update-the-rendering
 void Page::updateRendering()
 {
@@ -2254,9 +2277,21 @@ void Page::updateRendering()
 
     layoutIfNeeded();
 
-    auto runProcessingStep = [&](RenderingUpdateStep step, NOESCAPE const Function<void(Document&)>& perDocumentFunction) {
+#if defined(WEBKIT_IOS6)
+    Vector<Ref<Document>, 8> documents;
+    collectDocuments(mainFrame(), documents);
+#endif
+
+    auto runProcessingStep = [&](RenderingUpdateStep step, auto&& perDocumentFunction) {
         m_renderingUpdateRemainingSteps.last().remove(step);
-        forEachRenderableDocument(perDocumentFunction);
+#if defined(WEBKIT_IOS6)
+        for (auto& document : documents) {
+            if (documentIsStillRenderable(document, *this))
+                perDocumentFunction(document.get());
+        }
+#else
+        forEachRenderableDocument(std::forward<decltype(perDocumentFunction)>(perDocumentFunction));
+#endif
     };
 
     runProcessingStep(RenderingUpdateStep::RestoreScrollPositionAndViewState, [] (Document& document) {
@@ -2269,12 +2304,16 @@ void Page::updateRendering()
         scrollingCoordinator->willStartRenderingUpdate();
 #endif
 
-    // Timestamps should not change while serving the rendering update steps.
-    Vector<WeakPtr<Document, WeakPtrImplWithEventTargetData>> initialDocuments;
+#if defined(WEBKIT_IOS6)
+    for (auto& document : documents)
+        protect(document->window())->freezeNowTimestamp();
+#else
+    Vector<WeakPtr<Document, WeakPtrImplWithEventTargetData>, 8> initialDocuments;
     forEachDocument([&initialDocuments] (Document& document) {
         protect(document.window())->freezeNowTimestamp();
         initialDocuments.append(document);
     });
+#endif
 
     runProcessingStep(RenderingUpdateStep::Reveal, [] (Document& document) {
         // FIXME: Bug 278193 - Hidden docs should already be excluded.
@@ -2341,10 +2380,16 @@ void Page::updateRendering()
         document.updateResizeObservations(*this);
     });
 
-    // https://drafts.csswg.org/scroll-animations-1/#event-loop
+#if defined(WEBKIT_IOS6)
+    for (auto& document : documents) {
+        if (document->page() == this)
+            document->updateStaleScrollTimelines();
+    }
+#else
     forEachDocument([] (Document& document) {
         document.updateStaleScrollTimelines();
     });
+#endif
 
     runProcessingStep(RenderingUpdateStep::FocusFixup, [&] (Document& document) {
         if (RefPtr focusedElement = document.focusedElement()) {
@@ -2368,7 +2413,10 @@ void Page::updateRendering()
     });
 
     runProcessingStep(RenderingUpdateStep::Images, [] (Document& document) {
-        for (auto& image : protect(document.cachedResourceLoader())->allCachedSVGImages()) {
+        Ref cachedResourceLoader = protect(document.cachedResourceLoader());
+        if (!cachedResourceLoader->hasCachedSVGImages())
+            return;
+        for (auto& image : cachedResourceLoader->allCachedSVGImages()) {
             if (RefPtr page = image->internalPage())
                 page->isolatedUpdateRendering();
         }
@@ -2383,10 +2431,17 @@ void Page::updateRendering()
             Style::AnchorPositionEvaluator::updateScrollAdjustments(*renderView);
     });
 
+#if defined(WEBKIT_IOS6)
+    for (auto& document : documents) {
+        if (RefPtr window = document->window())
+            window->unfreezeNowTimestamp();
+    }
+#else
     for (auto& document : initialDocuments) {
         if (document && document->window())
             document->window()->unfreezeNowTimestamp();
     }
+#endif
 
     m_renderingUpdateRemainingSteps.last().remove(RenderingUpdateStep::WheelEventMonitorCallbacks);
 
@@ -2415,9 +2470,25 @@ void Page::doAfterUpdateRendering()
     // Code here should do once-per-frame work that needs to be done before painting, and requires
     // layout to be up-to-date. It should not run script, trigger layout, or dirty layout.
 
-    auto runProcessingStep = [&](RenderingUpdateStep step, NOESCAPE const Function<void(Document&)>& perDocumentFunction) {
+#if defined(WEBKIT_IOS6)
+    Vector<Ref<Document>, 8> documents;
+    collectDocuments(mainFrame(), documents);
+#endif
+
+    auto forEachRenderable = [&](auto&& perDocumentFunction) {
+#if defined(WEBKIT_IOS6)
+        for (auto& document : documents) {
+            if (documentIsStillRenderable(document, *this))
+                perDocumentFunction(document.get());
+        }
+#else
+        forEachRenderableDocument(std::forward<decltype(perDocumentFunction)>(perDocumentFunction));
+#endif
+    };
+
+    auto runProcessingStep = [&](RenderingUpdateStep step, auto&& perDocumentFunction) {
         m_renderingUpdateRemainingSteps.last().remove(step);
-        forEachRenderableDocument(perDocumentFunction);
+        forEachRenderable(std::forward<decltype(perDocumentFunction)>(perDocumentFunction));
     };
 
     runProcessingStep(RenderingUpdateStep::CursorUpdate, [] (Document& document) {
@@ -2433,11 +2504,11 @@ void Page::doAfterUpdateRendering()
         document.enqueueEventTimingEntriesIfNeeded();
     });
 
-    forEachRenderableDocument([] (Document& document) {
+    forEachRenderable([] (Document& document) {
         document.selection().updateAppearanceAfterUpdatingRendering();
     });
 
-    forEachRenderableDocument([] (Document& document) {
+    forEachRenderable([] (Document& document) {
         document.updateHighlightPositions();
     });
 
@@ -2448,13 +2519,13 @@ void Page::doAfterUpdateRendering()
 #endif
 
 #if ENABLE(APP_HIGHLIGHTS)
-    forEachRenderableDocument([timestamp = m_lastRenderingUpdateTimestamp] (Document& document) {
+    forEachRenderable([timestamp = m_lastRenderingUpdateTimestamp] (Document& document) {
         document.restoreUnrestoredAppHighlights(timestamp);
     });
 #endif
 
 #if ENABLE(VIDEO)
-    forEachRenderableDocument([] (Document& document) {
+    forEachRenderable([] (Document& document) {
         document.updateTextTrackRepresentationImageIfNeeded();
     });
 #endif
@@ -2475,9 +2546,16 @@ void Page::doAfterUpdateRendering()
     if (RefPtr document = localMainFrame ? localMainFrame->document() : nullptr)
         document->updateTouchEventRegions();
 #endif
+#if defined(WEBKIT_IOS6)
+    for (auto& document : documents) {
+        if (document->page() == this)
+            document->updateEventRegions();
+    }
+#else
     forEachDocument([] (Document& document) {
         document.updateEventRegions();
     });
+#endif
 
 #if ENABLE(ACCESSIBILITY_ISOLATED_TREE)
     m_renderingUpdateRemainingSteps.last().remove(RenderingUpdateStep::AccessibilityRegionUpdate);
@@ -2487,7 +2565,7 @@ void Page::doAfterUpdateRendering()
         if (CheckedPtr axObjectCache = existingAXObjectCache())
             axObjectCache->onAccessibilityPaintStarted();
 
-        forEachRenderableDocument([] (Document& document) {
+        forEachRenderable([] (Document& document) {
             document.updateAccessibilityObjectRegions();
         });
 
@@ -2506,9 +2584,7 @@ void Page::doAfterUpdateRendering()
 
     m_renderingUpdateRemainingSteps.last().remove(RenderingUpdateStep::PrepareCanvasesForDisplayOrFlush);
 
-    forEachRenderableDocument([] (Document& document) {
-        document.prepareCanvasesForDisplayOrFlushIfNeeded();
-    });
+    prepareCanvasesForDisplayOrFlushIfNeeded();
 
     if (localMainFrame) {
         ASSERT(!localMainFrame->view() || !localMainFrame->view()->needsLayout());
@@ -2526,8 +2602,19 @@ void Page::doAfterUpdateRendering()
 
     computeSampledPageTopColorIfNecessary();
 
+#if defined(WEBKIT_IOS6)
+    ASSERT(!settings().siteIsolationEnabled());
+#else
     if (settings().siteIsolationEnabled())
         syncLocalFrameInfoToRemote();
+#endif
+}
+
+void Page::prepareCanvasesForDisplayOrFlushIfNeeded()
+{
+    forEachRenderableDocument([] (Document& document) {
+        document.prepareCanvasesForDisplayOrFlushIfNeeded();
+    });
 }
 
 void Page::finalizeRenderingUpdate(OptionSet<FinalizeRenderingUpdateFlags> flags)
@@ -2623,9 +2710,16 @@ void Page::didCompleteRenderingFrame()
 void Page::didUpdateRendering()
 {
     LOG_WITH_STREAM(EventLoop, stream << "Page " << this << " didUpdateRendering()");
+#if defined(WEBKIT_IOS6)
+    Vector<Ref<Document>, 8> documents;
+    collectDocuments(mainFrame(), documents);
+    for (auto& document : documents)
+        document->flushDeferredRenderingIsSuppressedForViewTransitionChanges();
+#else
     forEachDocument([&] (Document& document) {
         document.flushDeferredRenderingIsSuppressedForViewTransitionChanges();
     });
+#endif
 }
 
 void Page::prioritizeVisibleResources()
@@ -2638,10 +2732,19 @@ void Page::prioritizeVisibleResources()
 
     Vector<CachedResourceHandle<CachedResource>> toPrioritize;
 
+#if defined(WEBKIT_IOS6)
+    Vector<Ref<Document>, 8> documents;
+    collectDocuments(mainFrame(), documents);
+    for (auto& document : documents) {
+        if (documentIsStillRenderable(document, *this))
+            toPrioritize.appendVector(protect(document->cachedResourceLoader())->visibleResourcesToPrioritize());
+    }
+#else
     forEachRenderableDocument([&] (Document& document) {
         toPrioritize.appendVector(protect(document.cachedResourceLoader())->visibleResourcesToPrioritize());
     });
-    
+#endif
+
     auto computeSchedulingMode = [&] {
         // Parsing generates resource loads.
         if (localTopDocument->parsing())
@@ -2759,6 +2862,23 @@ void Page::timelineControllerMaximumAnimationFrameRateDidChange(AnimationTimelin
     chrome().client().renderingUpdateFramesPerSecondChanged();
 }
 
+#if defined(WEBKIT_IOS6)
+static FramesPerSecond pageIOS6RenderingUpdateFrameRateCap()
+{
+    static const FramesPerSecond cap = [] -> FramesPerSecond {
+        if (const char* override = getenv("WEBKIT_IOS6_RENDERING_UPDATE_FPS")) {
+            int parsed = atoi(override);
+            if (parsed > 0 && parsed <= FullSpeedFramesPerSecond)
+                return static_cast<FramesPerSecond>(parsed);
+            if (parsed <= 0)
+                return FullSpeedFramesPerSecond;
+        }
+        return 30;
+    }();
+    return cap;
+}
+#endif
+
 std::optional<FramesPerSecond> Page::preferredRenderingUpdateFramesPerSecond(OptionSet<PreferredRenderingUpdateOption> flags) const
 {
     // Unless the call site specifies an explicit set of options, this method will account for both
@@ -2771,6 +2891,14 @@ std::optional<FramesPerSecond> Page::preferredRenderingUpdateFramesPerSecond(Opt
         throttlingReasons = { };
 
     auto frameRate = preferredFramesPerSecond(throttlingReasons, m_displayNominalFramesPerSecond, settings().preferPageRenderingUpdatesNear60FPSEnabled());
+#if defined(WEBKIT_IOS6)
+    auto capped = [] (std::optional<FramesPerSecond> rate) {
+        if (rate && *rate > pageIOS6RenderingUpdateFrameRateCap())
+            rate = pageIOS6RenderingUpdateFrameRateCap();
+        return rate;
+    };
+    frameRate = capped(frameRate);
+#endif
     if (!flags.contains(PreferredRenderingUpdateOption::IncludeAnimationsFrameRate))
         return frameRate;
 
@@ -2780,6 +2908,20 @@ std::optional<FramesPerSecond> Page::preferredRenderingUpdateFramesPerSecond(Opt
     if (isThrottled)
         return frameRate;
 
+#if defined(WEBKIT_IOS6)
+    Vector<Ref<Document>, 8> documents;
+    collectDocuments(mainFrame(), documents);
+    for (auto& document : documents) {
+        if (CheckedPtr timelinesController = document->timelinesController()) {
+            if (auto timelinePreferredFrameRate = timelinesController->maximumAnimationFrameRate()) {
+                if (!frameRate || *frameRate < *timelinePreferredFrameRate)
+                    frameRate = *timelinePreferredFrameRate;
+            }
+        }
+    }
+
+    return capped(frameRate);
+#else
     forEachDocument([&] (Document& document) {
         if (CheckedPtr timelinesController = document.timelinesController()) {
             if (auto timelinePreferredFrameRate = timelinesController->maximumAnimationFrameRate()) {
@@ -2790,11 +2932,18 @@ std::optional<FramesPerSecond> Page::preferredRenderingUpdateFramesPerSecond(Opt
     });
 
     return frameRate;
+#endif
 }
 
 Seconds Page::preferredRenderingUpdateInterval() const
 {
-    return preferredFrameInterval(m_throttlingReasons, m_displayNominalFramesPerSecond, settings().preferPageRenderingUpdatesNear60FPSEnabled());
+    auto interval = preferredFrameInterval(m_throttlingReasons, m_displayNominalFramesPerSecond, settings().preferPageRenderingUpdatesNear60FPSEnabled());
+#if defined(WEBKIT_IOS6)
+    static const Seconds cappedInterval { 1.0 / pageIOS6RenderingUpdateFrameRateCap() };
+    if (interval < cappedInterval)
+        return cappedInterval;
+#endif
+    return interval;
 }
 
 void Page::setIsVisuallyIdleInternal(bool isVisuallyIdle)
@@ -4535,6 +4684,17 @@ RenderingUpdateScheduler* Page::existingRenderingUpdateScheduler()
 
 void Page::forEachDocumentFromMainFrame(const Frame& mainFrame, NOESCAPE const Function<void(Document&)>& functor)
 {
+    // The overwhelmingly common shape is a single local frame with no children:
+    // the gathering Vector exists only so the functor cannot invalidate the walk,
+    // and with one document a protecting Ref does the same job for free.
+    if (!mainFrame.tree().firstChild()) {
+        if (RefPtr localMainFrame = dynamicDowncast<LocalFrame>(mainFrame)) {
+            if (RefPtr document = localMainFrame->document())
+                functor(*document);
+        }
+        return;
+    }
+
     Vector<Ref<Document>, 8> documents;
     for (RefPtr frame = mainFrame; frame; frame = frame->tree().traverseNext()) {
         RefPtr localFrame = dynamicDowncast<LocalFrame>(*frame);
@@ -4585,8 +4745,20 @@ bool Page::findMatchingLocalDocument(NOESCAPE const Function<bool(Document&)>& f
 
 void Page::forEachRenderableDocument(NOESCAPE const Function<void(Document&)>& functor) const
 {
+    Ref mainFrame = this->mainFrame();
+    if (!mainFrame->tree().firstChild()) {
+        RefPtr localMainFrame = dynamicDowncast<LocalFrame>(mainFrame.get());
+        if (!localMainFrame)
+            return;
+        RefPtr document = localMainFrame->document();
+        if (!document || document->renderingIsSuppressedForViewTransition() || !document->visualUpdatesAllowed())
+            return;
+        functor(*document);
+        return;
+    }
+
     Vector<Ref<Document>, 8> documents;
-    for (RefPtr frame = mainFrame(); frame; frame = frame->tree().traverseNext()) {
+    for (RefPtr frame = mainFrame.ptr(); frame; frame = frame->tree().traverseNext()) {
         RefPtr localFrame = dynamicDowncast<LocalFrame>(*frame);
         if (!localFrame)
             continue;
@@ -4616,8 +4788,17 @@ void Page::forEachMediaElement(NOESCAPE const Function<void(HTMLMediaElement&)>&
 
 void Page::forEachLocalFrame(NOESCAPE const Function<void(LocalFrame&)>& functor)
 {
-    Vector<Ref<LocalFrame>> frames;
-    for (RefPtr frame = mainFrame(); frame; frame = frame->tree().traverseNext()) {
+    Ref mainFrame = this->mainFrame();
+    if (!mainFrame->tree().firstChild()) {
+        if (RefPtr localMainFrame = dynamicDowncast<LocalFrame>(mainFrame.get()))
+            functor(*localMainFrame);
+        return;
+    }
+
+    // Inline capacity: this vector exists only to hold the frames alive across
+    // the functor, and it was allocating on the heap for every call.
+    Vector<Ref<LocalFrame>, 8> frames;
+    for (RefPtr frame = mainFrame.ptr(); frame; frame = frame->tree().traverseNext()) {
         if (RefPtr localFrame = dynamicDowncast<LocalFrame>(*frame))
             frames.append(localFrame.releaseNonNull());
     }
@@ -4628,9 +4809,23 @@ void Page::forEachLocalFrame(NOESCAPE const Function<void(LocalFrame&)>& functor
 
 void Page::forEachWindowEventLoop(NOESCAPE const Function<void(WindowEventLoop&)>& functor)
 {
+    // One frame means one event loop, and the hash set below allocates its table
+    // on the heap. This runs after every opportunistic task.
+    Ref mainFrame = this->mainFrame();
+    if (!mainFrame->tree().firstChild()) {
+        RefPtr localMainFrame = dynamicDowncast<LocalFrame>(mainFrame.get());
+        if (!localMainFrame)
+            return;
+        if (RefPtr document = localMainFrame->document()) {
+            Ref eventLoop = document->windowEventLoop();
+            functor(eventLoop);
+        }
+        return;
+    }
+
     HashSet<Ref<WindowEventLoop>> windowEventLoops;
     RefPtr<WindowEventLoop> lastEventLoop;
-    for (RefPtr frame = mainFrame(); frame; frame = frame->tree().traverseNext()) {
+    for (RefPtr frame = mainFrame.ptr(); frame; frame = frame->tree().traverseNext()) {
         RefPtr localFrame = dynamicDowncast<LocalFrame>(*frame);
         if (!localFrame)
             continue;

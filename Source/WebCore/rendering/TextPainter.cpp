@@ -246,7 +246,13 @@ void TextPainter::paintRange(const TextRun& textRun, const FloatRect& boxRect, c
 
 bool TextPainter::shouldUseGlyphDisplayList(const PaintInfo& paintInfo, const Style::ComputedStyle& style)
 {
+#if defined(WEBKIT_IOS6)
+    UNUSED_PARAM(paintInfo);
+    UNUSED_PARAM(style);
+    return false;
+#else
     return !paintInfo.context().paintingDisabled() && paintInfo.enclosingSelfPaintingLayer() && FontCascade::canUseGlyphDisplayList(style);
+#endif
 }
 
 void TextPainter::setForceUseGlyphDisplayListForTesting(bool enabled)

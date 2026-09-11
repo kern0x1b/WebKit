@@ -41,6 +41,15 @@
 namespace WebCore {
 DEFINE_ALLOCATOR_WITH_HEAP_IDENTIFIER(CSSTokenizer);
 
+// File-scope so the predicate is instantiated on the concrete character type of the buffer.
+static constexpr auto isASCIIDigitCharacter = [](auto character) {
+    return isASCIIDigit(character);
+};
+
+static constexpr auto isNameCodePointCharacter = [](auto character) {
+    return isNameCodePoint(character);
+};
+
 // https://drafts.csswg.org/css-syntax/#input-preprocessing
 String CSSTokenizer::preprocessString(const String& string)
 {
@@ -137,11 +146,6 @@ CSSParserTokenRange CSSTokenizer::tokenRange() const LIFETIME_BOUND
 unsigned CSSTokenizer::tokenCount()
 {
     return m_tokens.size();
-}
-
-bool CSSTokenizer::isWhitespace(CSSParserTokenType type)
-{
-    return type == NonNewlineWhitespaceToken || type == NewlineToken;
 }
 
 CSSParserToken CSSTokenizer::newline(char16_t)
@@ -380,139 +384,92 @@ CSSParserToken CSSTokenizer::endOfFile(char16_t)
     return CSSParserToken(EOFToken);
 }
 
-const std::array<CSSTokenizer::CodePoint, 128> CSSTokenizer::codePoints {
-    &CSSTokenizer::endOfFile,
-    0,
-    0,
-    0,
-    0,
-    0,
-    0,
-    0,
-    0,
-    &CSSTokenizer::whitespace,
-    &CSSTokenizer::newline, // '\n'
-    0,
-    &CSSTokenizer::newline, // '\f'
-    &CSSTokenizer::newline, // '\r'
-    0,
-    0,
-    0,
-    0,
-    0,
-    0,
-    0,
-    0,
-    0,
-    0,
-    0,
-    0,
-    0,
-    0,
-    0,
-    0,
-    0,
-    0,
-    &CSSTokenizer::whitespace,
-    0,
-    &CSSTokenizer::stringStart,
-    &CSSTokenizer::hash,
-    &CSSTokenizer::dollarSign,
-    0,
-    0,
-    &CSSTokenizer::stringStart,
-    &CSSTokenizer::leftParenthesis,
-    &CSSTokenizer::rightParenthesis,
-    &CSSTokenizer::asterisk,
-    &CSSTokenizer::plusOrFullStop,
-    &CSSTokenizer::comma,
-    &CSSTokenizer::hyphenMinus,
-    &CSSTokenizer::plusOrFullStop,
-    &CSSTokenizer::solidus,
-    &CSSTokenizer::asciiDigit,
-    &CSSTokenizer::asciiDigit,
-    &CSSTokenizer::asciiDigit,
-    &CSSTokenizer::asciiDigit,
-    &CSSTokenizer::asciiDigit,
-    &CSSTokenizer::asciiDigit,
-    &CSSTokenizer::asciiDigit,
-    &CSSTokenizer::asciiDigit,
-    &CSSTokenizer::asciiDigit,
-    &CSSTokenizer::asciiDigit,
-    &CSSTokenizer::colon,
-    &CSSTokenizer::semiColon,
-    &CSSTokenizer::lessThan,
-    0,
-    0,
-    0,
-    &CSSTokenizer::commercialAt,
-    &CSSTokenizer::nameStart,
-    &CSSTokenizer::nameStart,
-    &CSSTokenizer::nameStart,
-    &CSSTokenizer::nameStart,
-    &CSSTokenizer::nameStart,
-    &CSSTokenizer::nameStart,
-    &CSSTokenizer::nameStart,
-    &CSSTokenizer::nameStart,
-    &CSSTokenizer::nameStart,
-    &CSSTokenizer::nameStart,
-    &CSSTokenizer::nameStart,
-    &CSSTokenizer::nameStart,
-    &CSSTokenizer::nameStart,
-    &CSSTokenizer::nameStart,
-    &CSSTokenizer::nameStart,
-    &CSSTokenizer::nameStart,
-    &CSSTokenizer::nameStart,
-    &CSSTokenizer::nameStart,
-    &CSSTokenizer::nameStart,
-    &CSSTokenizer::nameStart,
-    &CSSTokenizer::nameStart,
-    &CSSTokenizer::nameStart,
-    &CSSTokenizer::nameStart,
-    &CSSTokenizer::nameStart,
-    &CSSTokenizer::nameStart,
-    &CSSTokenizer::nameStart,
-    &CSSTokenizer::leftBracket,
-    &CSSTokenizer::reverseSolidus,
-    &CSSTokenizer::rightBracket,
-    &CSSTokenizer::circumflexAccent,
-    &CSSTokenizer::nameStart,
-    0,
-    &CSSTokenizer::nameStart,
-    &CSSTokenizer::nameStart,
-    &CSSTokenizer::nameStart,
-    &CSSTokenizer::nameStart,
-    &CSSTokenizer::nameStart,
-    &CSSTokenizer::nameStart,
-    &CSSTokenizer::nameStart,
-    &CSSTokenizer::nameStart,
-    &CSSTokenizer::nameStart,
-    &CSSTokenizer::nameStart,
-    &CSSTokenizer::nameStart,
-    &CSSTokenizer::nameStart,
-    &CSSTokenizer::nameStart,
-    &CSSTokenizer::nameStart,
-    &CSSTokenizer::nameStart,
-    &CSSTokenizer::nameStart,
-    &CSSTokenizer::nameStart,
-    &CSSTokenizer::nameStart,
-    &CSSTokenizer::nameStart,
-    &CSSTokenizer::nameStart,
-    &CSSTokenizer::nameStart,
-    &CSSTokenizer::nameStart,
-    &CSSTokenizer::nameStart,
-    &CSSTokenizer::nameStart,
-    &CSSTokenizer::nameStart,
-    &CSSTokenizer::nameStart,
-    &CSSTokenizer::leftBrace,
-    &CSSTokenizer::verticalLine,
-    &CSSTokenizer::rightBrace,
-    &CSSTokenizer::tilde,
-    0,
+namespace {
+
+// The dispatch used to be a 128-entry table of pointers-to-member-function: 1 KB of .data.rel.ro
+// with 128 load-time relocations, and a call sequence that on the 32-bit ARM ABI loads two words
+// and tests the virtual bit before an indirect call that no handler could ever be inlined through.
+// A byte class table plus a dense switch is 128 bytes of .rodata, no relocations, one table branch,
+// and the one-line handlers become inlinable.
+enum CodePointClass : uint8_t {
+    ClassDelimiter = 0,
+    ClassEndOfFile,
+    ClassWhitespace,
+    ClassNewline,
+    ClassStringStart,
+    ClassHash,
+    ClassDollarSign,
+    ClassLeftParenthesis,
+    ClassRightParenthesis,
+    ClassAsterisk,
+    ClassPlusOrFullStop,
+    ClassComma,
+    ClassHyphenMinus,
+    ClassSolidus,
+    ClassAsciiDigit,
+    ClassColon,
+    ClassSemiColon,
+    ClassLessThan,
+    ClassCommercialAt,
+    ClassNameStart,
+    ClassLeftBracket,
+    ClassReverseSolidus,
+    ClassRightBracket,
+    ClassCircumflexAccent,
+    ClassLeftBrace,
+    ClassVerticalLine,
+    ClassRightBrace,
+    ClassTilde,
 };
-#if !ASSERT_WITH_SECURITY_IMPLICATION_DISABLED
-const unsigned codePointsNumber = 128;
-#endif
+
+constexpr std::array<uint8_t, 128> makeCodePointClasses()
+{
+    std::array<uint8_t, 128> table { };
+    for (unsigned i = 0; i < 128; ++i)
+        table[i] = ClassDelimiter;
+    table[0] = ClassEndOfFile;
+    table['\t'] = ClassWhitespace;
+    table[' '] = ClassWhitespace;
+    table['\n'] = ClassNewline;
+    table['\f'] = ClassNewline;
+    table['\r'] = ClassNewline;
+    table['"'] = ClassStringStart;
+    table['\''] = ClassStringStart;
+    table['#'] = ClassHash;
+    table['$'] = ClassDollarSign;
+    table['('] = ClassLeftParenthesis;
+    table[')'] = ClassRightParenthesis;
+    table['*'] = ClassAsterisk;
+    table['+'] = ClassPlusOrFullStop;
+    table['.'] = ClassPlusOrFullStop;
+    table[','] = ClassComma;
+    table['-'] = ClassHyphenMinus;
+    table['/'] = ClassSolidus;
+    for (unsigned i = '0'; i <= '9'; ++i)
+        table[i] = ClassAsciiDigit;
+    table[':'] = ClassColon;
+    table[';'] = ClassSemiColon;
+    table['<'] = ClassLessThan;
+    table['@'] = ClassCommercialAt;
+    for (unsigned i = 'A'; i <= 'Z'; ++i)
+        table[i] = ClassNameStart;
+    for (unsigned i = 'a'; i <= 'z'; ++i)
+        table[i] = ClassNameStart;
+    table['_'] = ClassNameStart;
+    table['['] = ClassLeftBracket;
+    table['\\'] = ClassReverseSolidus;
+    table[']'] = ClassRightBracket;
+    table['^'] = ClassCircumflexAccent;
+    table['{'] = ClassLeftBrace;
+    table['|'] = ClassVerticalLine;
+    table['}'] = ClassRightBrace;
+    table['~'] = ClassTilde;
+    return table;
+}
+
+constexpr std::array<uint8_t, 128> codePointClasses = makeCodePointClasses();
+
+} // namespace
 
 CSSParserToken CSSTokenizer::nextToken()
 {
@@ -524,16 +481,68 @@ CSSParserToken CSSTokenizer::nextToken()
     // incremental tokenization of partial sources.
     // However, for now we follow the spec exactly.
     char16_t cc = consume();
-    CodePoint codePointFunc = 0;
 
-    if (isASCII(cc)) {
-        ASSERT_WITH_SECURITY_IMPLICATION(cc < codePointsNumber);
-        codePointFunc = codePoints[cc];
-    } else
-        codePointFunc = &CSSTokenizer::nameStart;
+    if (!isASCII(cc)) [[unlikely]]
+        return nameStart(cc);
 
-    if (codePointFunc)
-        return ((this)->*(codePointFunc))(cc);
+    switch (codePointClasses[cc]) {
+    case ClassNameStart:
+        return nameStart(cc);
+    case ClassAsciiDigit:
+        return asciiDigit(cc);
+    case ClassWhitespace:
+        return whitespace(cc);
+    case ClassNewline:
+        return newline(cc);
+    case ClassColon:
+        return colon(cc);
+    case ClassSemiColon:
+        return semiColon(cc);
+    case ClassComma:
+        return comma(cc);
+    case ClassLeftBrace:
+        return leftBrace(cc);
+    case ClassRightBrace:
+        return rightBrace(cc);
+    case ClassLeftParenthesis:
+        return leftParenthesis(cc);
+    case ClassRightParenthesis:
+        return rightParenthesis(cc);
+    case ClassLeftBracket:
+        return leftBracket(cc);
+    case ClassRightBracket:
+        return rightBracket(cc);
+    case ClassHyphenMinus:
+        return hyphenMinus(cc);
+    case ClassPlusOrFullStop:
+        return plusOrFullStop(cc);
+    case ClassSolidus:
+        return solidus(cc);
+    case ClassAsterisk:
+        return asterisk(cc);
+    case ClassHash:
+        return hash(cc);
+    case ClassStringStart:
+        return stringStart(cc);
+    case ClassCommercialAt:
+        return commercialAt(cc);
+    case ClassDollarSign:
+        return dollarSign(cc);
+    case ClassCircumflexAccent:
+        return circumflexAccent(cc);
+    case ClassVerticalLine:
+        return verticalLine(cc);
+    case ClassTilde:
+        return tilde(cc);
+    case ClassLessThan:
+        return lessThan(cc);
+    case ClassReverseSolidus:
+        return reverseSolidus(cc);
+    case ClassEndOfFile:
+        return endOfFile(cc);
+    case ClassDelimiter:
+        break;
+    }
     return CSSParserToken(DelimiterToken, cc);
 }
 
@@ -559,11 +568,11 @@ CSSParserToken CSSTokenizer::consumeNumber()
         sign = MinusSign;
     }
 
-    numberLength = m_input.skipWhilePredicate<isASCIIDigit>(numberLength);
+    numberLength = m_input.skipWhile(numberLength, isASCIIDigitCharacter);
     next = m_input.peek(numberLength);
     if (next == '.' && isASCIIDigit(m_input.peek(numberLength + 1))) {
         type = NumberValueType;
-        numberLength = m_input.skipWhilePredicate<isASCIIDigit>(numberLength + 2);
+        numberLength = m_input.skipWhile(numberLength + 2, isASCIIDigitCharacter);
         next = m_input.peek(numberLength);
     }
 
@@ -571,14 +580,28 @@ CSSParserToken CSSTokenizer::consumeNumber()
         next = m_input.peek(numberLength + 1);
         if (isASCIIDigit(next)) {
             type = NumberValueType;
-            numberLength = m_input.skipWhilePredicate<isASCIIDigit>(numberLength + 1);
+            numberLength = m_input.skipWhile(numberLength + 1, isASCIIDigitCharacter);
         } else if ((next == '+' || next == '-') && isASCIIDigit(m_input.peek(numberLength + 2))) {
             type = NumberValueType;
-            numberLength = m_input.skipWhilePredicate<isASCIIDigit>(numberLength + 3);
+            numberLength = m_input.skipWhile(numberLength + 3, isASCIIDigitCharacter);
         }
     }
 
-    double value = m_input.getDouble(0, numberLength);
+    // charactersToDouble is a full strtod. Most numbers in a stylesheet are short unsigned
+    // integers, and for those the value is an exact accumulate-and-convert: a handful of
+    // multiply-adds and one vcvt.f64.u32 instead of a call into the double parser.
+    double value;
+    unsigned digitsStart = (sign == NoSign) ? 0 : 1;
+    unsigned digitCount = numberLength - digitsStart;
+    if (type == IntegerValueType && digitCount && digitCount <= 9) [[likely]] {
+        uint32_t accumulator = 0;
+        for (unsigned i = digitsStart; i < numberLength; ++i)
+            accumulator = accumulator * 10 + static_cast<uint32_t>(m_input.peek(i) - '0');
+        value = accumulator;
+        if (sign == MinusSign)
+            value = -value;
+    } else
+        value = m_input.getDouble(0, numberLength);
     m_input.advance(numberLength);
 
     return CSSParserToken(value, type, sign, m_input.rangeAt(startOffset, m_input.offset() - startOffset));
@@ -616,20 +639,22 @@ CSSParserToken CSSTokenizer::consumeIdentLikeToken()
 // http://dev.w3.org/csswg/css-syntax/#consume-a-string-token
 CSSParserToken CSSTokenizer::consumeStringTokenUntil(char16_t endingCodePoint)
 {
-    // Strings without escapes get handled without allocations
-    for (unsigned size = 0; ; size++) {
-        char16_t cc = m_input.peek(size);
-        if (cc == endingCodePoint) {
-            unsigned startOffset = m_input.offset();
-            m_input.advance(size + 1);
-            return CSSParserToken(StringToken, m_input.rangeAt(startOffset, size));
-        }
-        if (isCSSNewline(cc)) {
-            m_input.advance(size);
-            return CSSParserToken(BadStringToken);
-        }
-        if (cc == kEndOfFileMarker || cc == '\\')
-            break;
+    // Strings without escapes get handled without allocations. The scan walks the raw buffer, so
+    // each character costs one table lookup instead of a bounds test, an is8Bit test and a chain
+    // of five comparisons.
+    unsigned size = m_input.countWhile([endingCodePoint](auto character) {
+        return character != endingCodePoint && character != kEndOfFileMarker && character != '\\'
+            && !(cssCharacterClass(character) & CSSCharacterClassNewline);
+    });
+    char16_t terminator = m_input.peek(size);
+    if (terminator == endingCodePoint) {
+        unsigned startOffset = m_input.offset();
+        m_input.advance(size + 1);
+        return CSSParserToken(StringToken, m_input.rangeAt(startOffset, size));
+    }
+    if (isCSSNewline(terminator)) {
+        m_input.advance(size);
+        return CSSParserToken(BadStringToken);
     }
 
     StringBuilder output;
@@ -665,15 +690,14 @@ CSSParserToken CSSTokenizer::consumeURLToken()
     m_input.advanceUntilNonWhitespace();
 
     // URL tokens without escapes get handled without allocations
-    for (unsigned size = 0; ; size++) {
-        char16_t cc = m_input.peek(size);
-        if (cc == ')') {
-            unsigned startOffset = m_input.offset();
-            m_input.advance(size + 1);
-            return CSSParserToken(UrlToken, m_input.rangeAt(startOffset, size));
-        }
-        if (cc <= ' ' || cc == '\\' || cc == '"' || cc == '\'' || cc == '(' || cc == '\x7f')
-            break;
+    unsigned size = m_input.countWhile([](auto character) {
+        return character != ')' && character > ' ' && character != '\\' && character != '"'
+            && character != '\'' && character != '(' && character != '\x7f';
+    });
+    if (m_input.peek(size) == ')') {
+        unsigned startOffset = m_input.offset();
+        m_input.advance(size + 1);
+        return CSSParserToken(UrlToken, m_input.rangeAt(startOffset, size));
     }
 
     StringBuilder result;
@@ -731,17 +755,22 @@ void CSSTokenizer::consumeSingleWhitespaceIfNext()
 
 void CSSTokenizer::consumeUntilCommentEndFound()
 {
-    char16_t c = consume();
+    // License headers and section banners make comments the longest single runs in a stylesheet.
+    // Scanning the raw buffer for '*' costs one compare per character instead of a bounds test,
+    // an is8Bit test and two compares.
     while (true) {
-        if (c == kEndOfFileMarker)
+        m_input.advance(m_input.countWhile([](auto character) {
+            return character != '*' && character != kEndOfFileMarker;
+        }));
+        if (m_input.nextInputChar() == kEndOfFileMarker) {
+            m_input.advance();
             return;
-        if (c != '*') {
-            c = consume();
-            continue;
         }
-        c = consume();
-        if (c == '/')
+        m_input.advance();
+        if (m_input.nextInputChar() == '/') {
+            m_input.advance();
             return;
+        }
     }
 }
 
@@ -761,18 +790,13 @@ bool CSSTokenizer::consumeIfNext(char16_t character)
 // http://www.w3.org/TR/css3-syntax/#consume-a-name
 StringView CSSTokenizer::consumeName()
 {
-    // Names without escapes get handled without allocations
-    for (unsigned size = 0; ; ++size) {
-        char16_t cc = m_input.peek(size);
-        if (isNameCodePoint(cc))
-            continue;
-        // peek will return NUL when we hit the end of the
-        // input. In that case we want to still use the rangeAt() fast path
-        // below.
-        if (cc == kEndOfFileMarker && m_input.offset() + size < m_input.length())
-            break;
-        if (cc == '\\')
-            break;
+    // Names without escapes get handled without allocations. countWhile walks the raw
+    // 8-bit or 16-bit buffer, so the whole name costs one bounds test instead of one per character.
+    unsigned size = m_input.countWhile(isNameCodePointCharacter);
+    char16_t terminator = m_input.peek(size);
+    // peek returns NUL both for an embedded NUL and for the end of the input; only the former
+    // needs the escape-handling slow path.
+    if (terminator != '\\' && !(terminator == kEndOfFileMarker && m_input.offset() + size < m_input.length())) {
         unsigned startOffset = m_input.offset();
         m_input.advance(size);
         return m_input.rangeAt(startOffset, size);

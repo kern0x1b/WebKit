@@ -31,7 +31,7 @@
 }
 
 .time-control .scrubber {
-    flex-grow: 1;
+    flex: 1 1 0;
 }
 
 /* Support displaying the time labels above or below the scrubber, rather than side-by-side: */

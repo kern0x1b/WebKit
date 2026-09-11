@@ -24,7 +24,14 @@
  */
 
 #include "config.h"
+#include <wtf/MemoryFootprint.h>
 #include "MemoryRelease.h"
+
+#if defined(WEBKIT_IOS6)
+#include <mach/mach.h>
+#include <mach/task.h>
+#include <stdlib.h>
+#endif
 
 #include "AsyncNodeDeletionQueueInlines.h"
 #include "BackForwardCache.h"
@@ -82,6 +89,35 @@
 
 namespace WebCore {
 
+#if defined(WEBKIT_IOS6)
+static double residentMegabytes()
+{
+    struct task_basic_info info;
+    mach_msg_type_number_t count = TASK_BASIC_INFO_COUNT;
+    if (task_info(mach_task_self(), TASK_BASIC_INFO, reinterpret_cast<task_info_t>(&info), &count) != KERN_SUCCESS)
+        return 0;
+    return info.resident_size / 1048576.0;
+}
+
+static double codeDeletionThresholdMegabytes()
+{
+    static const double threshold = [] -> double {
+        if (const char* override = getenv("WEBKIT_IOS6_CODE_DELETION_THRESHOLD_MB")) {
+            double value = atof(override);
+            if (value > 0)
+                return value;
+        }
+        return 275;
+    }();
+    return threshold;
+}
+
+bool shouldDeleteAllCodeForMemoryPressure()
+{
+    return WTF::memoryFootprint() / 1048576.0 >= codeDeletionThresholdMegabytes();
+}
+#endif
+
 static void releaseNoncriticalMemory(MaintainMemoryCache maintainMemoryCache)
 {
     RenderTheme::singleton().purgeCaches();
@@ -113,7 +149,9 @@ static void releaseNoncriticalMemory(MaintainMemoryCache maintainMemoryCache)
     HTMLNameCache::clear();
     ImmutableStyleProperties::clearDeduplicationMap();
     SelectorChecker::clearCompiledHasArgumentSelectors();
+#if !defined(WEBKIT_IOS6)
     SVGPathElement::clearCache();
+#endif
 #if ENABLE(INTERACTION_REGIONS_IN_EVENT_REGION)
     InteractionRegion::clearCache();
 #endif
@@ -142,6 +180,15 @@ static void releaseCriticalMemory(Synchronous synchronous, MaintainBackForwardCa
         page.cookieJar().clearCache();
     });
 
+#if defined(WEBKIT_IOS6)
+    Page::forEachPage([](auto& page) {
+        if (RefPtr localMainFrame = page.localMainFrame()) {
+            if (RefPtr document = localMainFrame->document())
+                document->styleScope().invalidateMatchedDeclarationsCache();
+        }
+    });
+#endif
+
     auto allDocuments = Document::allDocuments();
     auto protectedDocuments = WTF::map(allDocuments, [](auto& document) -> Ref<Document> {
         return document.get();
@@ -160,10 +207,21 @@ static void releaseCriticalMemory(Synchronous synchronous, MaintainBackForwardCa
             protect(localFrame->editor())->releaseMemory();
     }
 
+#if defined(WEBKIT_IOS6)
+    if (shouldDeleteAllCodeForMemoryPressure()) {
+        WTFLogAlways("[codewipe] footprint %.0f MB, resident %.0f MB, threshold %.0f MB",
+            WTF::memoryFootprint() / 1048576.0, residentMegabytes(), codeDeletionThresholdMegabytes());
+        if (synchronous == Synchronous::Yes)
+            GarbageCollectionController::singleton().deleteAllCode(JSC::PreventCollectionAndDeleteAllCode);
+        else
+            GarbageCollectionController::singleton().deleteAllCode(JSC::DeleteAllCodeIfNotCollecting);
+    }
+#else
     if (synchronous == Synchronous::Yes)
         GarbageCollectionController::singleton().deleteAllCode(JSC::PreventCollectionAndDeleteAllCode);
     else
         GarbageCollectionController::singleton().deleteAllCode(JSC::DeleteAllCodeIfNotCollecting);
+#endif
 
 #if ENABLE(VIDEO)
     for (auto& mediaElement : HTMLMediaElement::allMediaElements())

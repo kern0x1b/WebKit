@@ -512,8 +512,11 @@ void RenderBlockFlow::layoutBlockWithNoChildren()
     auto textBoxTrimmer = TextBoxTrimmer { *this };
     auto repainter = LayoutRepainter { *this };
 
-    // FIXME: Instead of taking floats from previous sibling and forwarding them to next unconditionally, we should completely skip these empty block containers.
-    rebuildFloatingObjectSetFromIntrudingFloats();
+    // Only rebuild floats if this block container is involved in a block formatting context
+    // where intruding floats from siblings might affect layout. Skip this expensive rebuild
+    // for non-participating containers (e.g. isolated, overflow:hidden, flex/grid children).
+    if (!avoidsFloats())
+        rebuildFloatingObjectSetFromIntrudingFloats();
 
     auto computeInlineAxisSize =[&] {
         updateLogicalWidth();
@@ -551,6 +554,21 @@ void RenderBlockFlow::layoutBlockWithNoChildren()
 
 void RenderBlockFlow::layoutBlock(RelayoutChildren relayoutChildren, LayoutUnit pageLogicalHeight)
 {
+#if defined(WEBKIT_IOS6)
+    if (g_webkitIOS6LayoutCounters) [[unlikely]] {
+        extern unsigned g_webkitIOS6BlocksLaidOut;
+        extern unsigned g_webkitIOS6BlocksForced;
+        extern unsigned g_webkitIOS6BlocksDirty;
+        extern unsigned g_webkitIOS6BlocksViaChild;
+        ++g_webkitIOS6BlocksLaidOut;
+        if (relayoutChildren == RelayoutChildren::Yes)
+            ++g_webkitIOS6BlocksForced;
+        else if (selfNeedsLayout())
+            ++g_webkitIOS6BlocksDirty;
+        else if (normalChildNeedsLayout())
+            ++g_webkitIOS6BlocksViaChild;
+    }
+#endif
     ASSERT(needsLayout());
 
     if (relayoutChildren == RelayoutChildren::No && simplifiedLayout())
@@ -747,17 +765,13 @@ void RenderBlockFlow::layoutBlock(RelayoutChildren relayoutChildren, LayoutUnit 
             repaintRect = LayoutRect(repaintLogicalTop, repaintLogicalLeft, repaintLogicalBottom - repaintLogicalTop, repaintLogicalRight - repaintLogicalLeft);
 
         if (hasNonVisibleOverflow()) {
-            // Adjust repaint rect for scroll offset
             repaintRect.moveBy(-scrollPosition());
-
-            // Don't allow this rect to spill out of our overflow box.
             repaintRect.intersect(LayoutRect(LayoutPoint(), borderBoxSize()));
         }
 
-        // Make sure the rect is still non-empty after intersecting for overflow above
         if (!repaintRect.isEmpty()) {
-            repaintRectangle(repaintRect); // We need to do a partial repaint of our content.
-            if (hasReflection())
+            repaintRectangle(repaintRect);
+            if (hasReflection()) [[unlikely]]
                 repaintRectangle(reflectedRect(repaintRect));
         }
     }
@@ -800,9 +814,9 @@ void RenderBlockFlow::dirtyForLayoutFromPercentageHeightDescendant(RenderBox& de
         && formattingContextRootIntrinsicLogicalWidthsDependOnOwnHeight(*formattingContextRoot))
         descendant.invalidateContentLogicalWidths();
 
-    for (CheckedPtr<RenderElement> renderer = &descendant; renderer && renderer != this && !renderer->normalChildNeedsLayout(); renderer = renderer->container()) {
+    for (RenderElement* renderer = &descendant; renderer && renderer != this && !renderer->normalChildNeedsLayout(); renderer = renderer->container()) {
         renderer->setChildNeedsLayout(MarkingBehavior::MarkOnlyThis);
-        if (CheckedPtr renderBox = dynamicDowncast<RenderBox>(*renderer)) {
+        if (auto* renderBox = dynamicDowncast<RenderBox>(*renderer)) {
             // If the width of an image is affected by the height of a child (e.g., an image with an aspect ratio),
             // then we have to dirty preferred widths, since even enclosing blocks can become dirty as a result.
             // (A horizontal flexbox that contains an inline image wrapped in an anonymous block for example.)
@@ -812,7 +826,7 @@ void RenderBlockFlow::dirtyForLayoutFromPercentageHeightDescendant(RenderBox& de
             // children themselves have percent-height replaced elements with aspect ratios (e.g.
             // #target -> div[height:100%] -> canvas[height:100%]) needs its own descendants dirtied
             // so that the preferred widths cascade correctly up the tree.
-            if (CheckedPtr blockFlow = dynamicDowncast<RenderBlockFlow>(*renderBox))
+            if (auto* blockFlow = dynamicDowncast<RenderBlockFlow>(*renderBox))
                 blockFlow->dirtyForLayoutFromPercentageHeightDescendants();
         }
     }
@@ -897,9 +911,15 @@ void RenderBlockFlow::layoutInFlowChildren(RelayoutChildren relayoutChildren, La
     }
 
     // FIXME: We should bail out sooner when subtree layout entry point is _inside_ a skipped subtree.
-    if ((layoutContext().isSkippedContentRootForLayout(*this) || layoutContext().isSkippedContentForLayout(*this)) && !(isRenderMultiColumnFlow() || multiColumnFlow())) {
-        clearNeedsLayoutForSkippedContent();
-        return;
+    // The two ...ForLayout() queries are "renderer says so, and the layout context is not ignoring
+    // that kind of skipping". Asking the renderer first keeps two walks of
+    // node -> document -> render view -> frame view off every block flow layout.
+    if (isSkippedContent() || isSkippedContentRoot(*this)) {
+        auto& frameLayoutContext = layoutContext();
+        if ((frameLayoutContext.isSkippedContentRootForLayout(*this) || frameLayoutContext.isSkippedContentForLayout(*this)) && !(isRenderMultiColumnFlow() || multiColumnFlow())) {
+            clearNeedsLayoutForSkippedContent();
+            return;
+        }
     }
 
     {
@@ -935,7 +955,10 @@ void RenderBlockFlow::layoutBlockChildren(RelayoutChildren relayoutChildren, Lay
     ASSERT(firstChild());
 
     setLogicalHeight(borderAndPaddingBefore());
-    auto* layoutState = view().frameView().layoutContext().layoutState(); 
+    // One walk of node -> document -> render view -> frame view for the whole child loop instead
+    // of one per child.
+    auto& frameLayoutContext = view().frameView().layoutContext();
+    auto* layoutState = frameLayoutContext.layoutState();
 
     // The margin struct caches all our current margin collapsing state.
     auto marginInfo = MarginInfo { *this, MarginInfo::IgnoreScrollbarForAfterMargin::No };
@@ -965,6 +988,9 @@ void RenderBlockFlow::layoutBlockChildren(RelayoutChildren relayoutChildren, Lay
 
     RenderBox* next = firstChildBox();
 
+    // Depends only on this block, not on the child being visited.
+    bool inMultiColumnFlow = isRenderMultiColumnFlow() || multiColumnFlow();
+
     while (next) {
         RenderBox& child = *next;
         next = child.nextSiblingBox();
@@ -972,7 +998,7 @@ void RenderBlockFlow::layoutBlockChildren(RelayoutChildren relayoutChildren, Lay
         if (child.isExcludedFromNormalLayout())
             continue; // Skip this child, since it will be positioned by the specialized subclass (fieldsets and ruby runs).
 
-        if (layoutContext().isSkippedContentForLayout(child) && !(isRenderMultiColumnFlow() || multiColumnFlow())) {
+        if (!inMultiColumnFlow && frameLayoutContext.isSkippedContentForLayout(child)) {
             ASSERT(child.isColumnSpanner());
 
             child.clearNeedsLayout();
@@ -1170,6 +1196,11 @@ void RenderBlockFlow::performBlockStepSizing(RenderBox& child, LayoutUnit blockS
 
 void RenderBlockFlow::layoutBlockChild(RenderBox& child, MarginInfo& marginInfo, LayoutUnit& previousFloatLogicalBottom, LayoutUnit& maxFloatLogicalBottom)
 {
+    // view() alone is four dependent loads off the weak node reference and this function used to
+    // walk it three times per child. The frame view and its layout context cannot change while a
+    // child is being laid out, so the walk happens once.
+    auto& layoutContext = view().frameView().layoutContext();
+
     LayoutUnit oldPosMarginBefore = maxPositiveMarginBefore();
     LayoutUnit oldNegMarginBefore = maxNegativeMarginBefore();
 
@@ -1187,7 +1218,7 @@ void RenderBlockFlow::layoutBlockChild(RenderBox& child, MarginInfo& marginInfo,
     LayoutUnit oldLogicalTop = logicalTopForChild(child);
 
 #if ASSERT_ENABLED
-    LayoutSize oldLayoutDelta = view().frameView().layoutContext().layoutDelta();
+    LayoutSize oldLayoutDelta = layoutContext.layoutDelta();
 #endif
     // Position the child as though it didn't collapse with the top.
     setLogicalTopForChild(child, logicalTopEstimate, ApplyLayoutDelta);
@@ -1239,7 +1270,7 @@ void RenderBlockFlow::layoutBlockChild(RenderBox& child, MarginInfo& marginInfo,
     // Now check for clear.
     LayoutUnit logicalTopAfterClear = clearFloatsIfNeeded(child, marginInfo, oldPosMarginBefore, oldNegMarginBefore, logicalTopBeforeClear);
     
-    bool paginated = view().frameView().layoutContext().layoutState()->isPaginated();
+    bool paginated = layoutContext.layoutState()->isPaginated();
     if (paginated)
         logicalTopAfterClear = adjustBlockChildForPagination(logicalTopAfterClear, estimateWithoutPagination, child, atBeforeSideOfBlock && logicalTopBeforeClear == logicalTopAfterClear);
 
@@ -1273,7 +1304,7 @@ void RenderBlockFlow::layoutBlockChild(RenderBox& child, MarginInfo& marginInfo,
     if (marginInfo.atBeforeSideOfBlock() && !child.isSelfCollapsingBlock()) {
         marginInfo.setAtBeforeSideOfBlock(false);
 
-        if (auto* layoutState = frame().view()->layoutContext().layoutState(); layoutState && layoutState->marginTrimBlockStart())
+        if (auto* layoutState = layoutContext.layoutState(); layoutState && layoutState->marginTrimBlockStart())
             layoutState->setMarginTrimBlockStart(false);
     }
     // Now place the child in the correct left position
@@ -1289,7 +1320,7 @@ void RenderBlockFlow::layoutBlockChild(RenderBox& child, MarginInfo& marginInfo,
 
     LayoutSize childOffset = child.location() - oldRect.location();
     if (childOffset.width() || childOffset.height()) {
-        view().frameView().layoutContext().addLayoutDelta(childOffset);
+        layoutContext.addLayoutDelta(childOffset);
 
         // If the child moved, we have to repaint it as well as any floating/positioned
         // descendants. An exception is if we need a layout. In this case, we know we're going to
@@ -1312,7 +1343,7 @@ void RenderBlockFlow::layoutBlockChild(RenderBox& child, MarginInfo& marginInfo,
             setLogicalHeight(newHeight);
     }
 
-    ASSERT(view().frameView().layoutContext().layoutDeltaMatches(oldLayoutDelta));
+    ASSERT(layoutContext.layoutDeltaMatches(oldLayoutDelta));
 }
 
 void RenderBlockFlow::adjustOutOfFlowBlock(RenderBox& child, const MarginInfo& marginInfo)

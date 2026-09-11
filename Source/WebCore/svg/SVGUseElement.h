@@ -86,10 +86,10 @@ private:
 
     RefPtr<SVGElement> findTarget(AtomString* targetID = nullptr) const;
 
-    void cloneTarget(ContainerNode&, SVGElement& target) const;
+    void cloneTarget(ContainerNode&, SVGElement& target, bool* sawEventListeners = nullptr) const;
     RefPtr<SVGElement> NODELETE targetClone() const;
 
-    void expandUseElementsInShadowTree() const;
+    bool expandUseElementsInShadowTree(bool* sawEventListeners = nullptr) const;
     void expandSymbolElementsInShadowTree() const;
     void transferEventListenersToShadowTree() const;
     void transferSizeAttributesToTargetClone(SVGElement&) const;

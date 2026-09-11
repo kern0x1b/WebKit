@@ -28,8 +28,36 @@
 
 #include "StyleSheetContents.h"
 
+#include <stdlib.h>
+
 namespace WebCore {
 namespace Style {
+
+#if defined(WEBKIT_IOS6)
+static size_t maximumCacheEntries()
+{
+    static size_t value = [] -> size_t {
+        if (const char* environmentValue = getenv("WEBKIT_IOS6_SHEET_CACHE_ENTRIES")) {
+            if (int parsed = atoi(environmentValue); parsed > 0)
+                return static_cast<size_t>(parsed);
+        }
+        return 24;
+    }();
+    return value;
+}
+
+static size_t maximumCacheSourceBytes()
+{
+    static size_t value = [] -> size_t {
+        if (const char* environmentValue = getenv("WEBKIT_IOS6_SHEET_CACHE_KB")) {
+            if (int parsed = atoi(environmentValue); parsed > 0)
+                return static_cast<size_t>(parsed) * 1024;
+        }
+        return 3 * 1024 * 1024;
+    }();
+    return value;
+}
+#endif
 
 StyleSheetContentsCache::StyleSheetContentsCache() = default;
 
@@ -48,20 +76,39 @@ void StyleSheetContentsCache::add(Key&& key, Ref<StyleSheetContents> contents)
 {
     ASSERT(contents->isCacheable());
 
+#if defined(WEBKIT_IOS6)
+    auto addedSourceLength = key.first.length();
+    auto addResult = m_cache.add(WTF::move(key), contents);
+    if (addResult.isNewEntry)
+        m_retainedSourceBytes += addedSourceLength;
+    contents->addedToMemoryCache();
+
+    while (m_cache.size() > maximumCacheEntries() || (m_cache.size() > 1 && m_retainedSourceBytes > maximumCacheSourceBytes())) {
+        auto toRemove = m_cache.random();
+        auto removedSourceLength = toRemove->key.first.length();
+        toRemove->value->removedFromMemoryCache();
+        m_cache.remove(toRemove);
+        m_retainedSourceBytes = removedSourceLength < m_retainedSourceBytes ? m_retainedSourceBytes - removedSourceLength : 0;
+    }
+#else
     m_cache.add(WTF::move(key), contents);
     contents->addedToMemoryCache();
 
-    static constexpr auto maximumCacheSize = 256;
+    static constexpr auto maximumCacheSize = 24;
     if (m_cache.size() > maximumCacheSize) {
         auto toRemove = m_cache.random();
         toRemove->value->removedFromMemoryCache();
         m_cache.remove(toRemove);
     }
+#endif
 }
 
 void StyleSheetContentsCache::clear()
 {
     m_cache.clear();
+#if defined(WEBKIT_IOS6)
+    m_retainedSourceBytes = 0;
+#endif
 }
 
 }

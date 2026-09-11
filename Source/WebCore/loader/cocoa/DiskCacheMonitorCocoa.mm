@@ -27,11 +27,17 @@
 #import "DiskCacheMonitorCocoa.h"
 
 #import "CachedResource.h"
+#import "CachedResource.h"
 #import "MemoryCache.h"
 #import "SharedBuffer.h"
 #import <pal/spi/cf/CFNetworkSPI.h>
+#import <wtf/BlockPtr.h>
+#import <wtf/FileHandle.h>
+#import <wtf/FileSystem.h>
 #import <wtf/MainThread.h>
+#import <wtf/NeverDestroyed.h>
 #import <wtf/RefPtr.h>
+#import <wtf/WorkQueue.h>
 #import <wtf/darwin/DispatchExtras.h>
 
 #if USE(WEB_THREAD)
@@ -51,6 +57,50 @@ RefPtr<SharedBuffer> DiskCacheMonitor::tryGetFileBackedSharedBufferFromCFURLCach
 
     return SharedBuffer::create(data.get());
 }
+
+#if defined(WEBKIT_IOS6)
+static WorkQueue& fileBackingQueue()
+{
+    static NeverDestroyed<Ref<WorkQueue>> queue = WorkQueue::create("org.webkit.ios6.image-file-backing"_s);
+    return queue.get();
+}
+
+void fileBackEncodedImageData(const ResourceRequest& request, PAL::SessionID sessionID, Ref<SharedBuffer>&& data)
+{
+    ASSERT(isMainThread());
+
+    fileBackingQueue().dispatch([request = request.isolatedCopy(), sessionID, data = WTF::move(data)]() mutable {
+        auto [path, handle] = FileSystem::openTemporaryFile("revimage"_s);
+        if (!handle)
+            return;
+
+        auto written = handle.write(data->span());
+        handle = { };
+        if (written != data->size()) {
+            FileSystem::deleteFile(path);
+            return;
+        }
+
+        RefPtr fileBacked = SharedBuffer::createWithContentsOfFile(path, FileSystem::MappedFileMode::Shared);
+        FileSystem::deleteFile(path);
+        if (!fileBacked)
+            return;
+
+        auto install = [request = WTF::move(request), sessionID, fileBacked = fileBacked.releaseNonNull()] {
+            if (RefPtr resource = MemoryCache::singleton().resourceForRequest(request, sessionID))
+                resource->tryReplaceEncodedData(fileBacked);
+        };
+
+#if USE(WEB_THREAD)
+        callOnMainThread([install = WTF::move(install)]() mutable {
+            WebThreadRun(makeBlockPtr(WTF::move(install)).get());
+        });
+#else
+        callOnMainThread(WTF::move(install));
+#endif
+    });
+}
+#endif
 
 void DiskCacheMonitor::monitorFileBackingStoreCreation(const ResourceRequest& request, PAL::SessionID sessionID, CFCachedURLResponseRef cachedResponse)
 {

@@ -80,11 +80,11 @@ EffectTiming AnimationEffect::getBindingsTiming() const
 
 AnimationEffectTiming::ResolutionData AnimationEffect::resolutionData(UseCachedCurrentTime useCachedCurrentTime, EndpointInclusiveActiveInterval endpointInclusiveActiveInterval) const
 {
-    if (!m_animation)
+    auto* animation = m_animation.get();
+    if (!animation)
         return { };
 
-    RefPtr animation = m_animation.get();
-    RefPtr timeline = animation->timeline();
+    auto* timeline = animation->timeline();
     return {
         timeline ? timeline->currentTime(useCachedCurrentTime) : std::nullopt,
         timeline ? timeline->duration() : std::nullopt,
@@ -105,28 +105,15 @@ ComputedEffectTiming AnimationEffect::getBindingsComputedTiming()
 {
     if (RefPtr styleOriginatedAnimation = dynamicDowncast<StyleOriginatedAnimation>(animation()))
         styleOriginatedAnimation->flushPendingStyleChanges();
-    return getComputedTiming();
+    return getComputedTiming(UseCachedCurrentTime::Yes, EndpointInclusiveActiveInterval::No, ComputedTimingSerializedProperties::Include);
 }
 
-ComputedEffectTiming AnimationEffect::getComputedTiming(UseCachedCurrentTime useCachedCurrentTime, EndpointInclusiveActiveInterval endpointInclusiveActiveInterval)
+ComputedEffectTiming AnimationEffect::getComputedTiming(UseCachedCurrentTime useCachedCurrentTime, EndpointInclusiveActiveInterval endpointInclusiveActiveInterval, ComputedTimingSerializedProperties serializedProperties)
 {
     updateComputedTimingPropertiesIfNeeded();
 
     auto data = resolutionData(useCachedCurrentTime, endpointInclusiveActiveInterval);
     auto resolvedTiming = m_timing.resolve(data);
-
-    // https://drafts.csswg.org/web-animations-2/#dom-animationeffect-getcomputedtiming
-    // The description of the duration attribute of the object needs to indicate that if timing.duration
-    // is the string auto, this attribute will return the current calculated value of the intrinsic iteration
-    // duration, which may be a expressed as a double representing the duration in milliseconds or a percentage
-    // when the effect is associated with a progress-based timeline.
-    auto computedDuration = [&]() -> DoubleOrCSSNumericValueOrString {
-        auto& duration = m_timing.specifiedIterationDuration ? m_timing.iterationDuration : m_timing.intrinsicIterationDuration;
-        if (auto percent = duration.percentage())
-            return CSSNumericFactory::percent(*percent);
-        ASSERT(duration.time());
-        return secondsToWebAnimationsAPITime(*duration.time());
-    }();
 
     ComputedEffectTiming computedTiming;
     computedTiming.delay = secondsToWebAnimationsAPITime(m_timing.specifiedStartDelay);
@@ -134,9 +121,22 @@ ComputedEffectTiming AnimationEffect::getComputedTiming(UseCachedCurrentTime use
     computedTiming.fill = m_timing.fill == FillMode::Auto ? FillMode::None : m_timing.fill;
     computedTiming.iterationStart = m_timing.iterationStart;
     computedTiming.iterations = m_timing.iterations;
-    computedTiming.duration = computedDuration;
+    if (serializedProperties == ComputedTimingSerializedProperties::Include) {
+        // https://drafts.csswg.org/web-animations-2/#dom-animationeffect-getcomputedtiming
+        // The description of the duration attribute of the object needs to indicate that if timing.duration
+        // is the string auto, this attribute will return the current calculated value of the intrinsic iteration
+        // duration, which may be a expressed as a double representing the duration in milliseconds or a percentage
+        // when the effect is associated with a progress-based timeline.
+        computedTiming.duration = [&]() -> DoubleOrCSSNumericValueOrString {
+            auto& duration = m_timing.specifiedIterationDuration ? m_timing.iterationDuration : m_timing.intrinsicIterationDuration;
+            if (auto percent = duration.percentage())
+                return CSSNumericFactory::percent(*percent);
+            ASSERT(duration.time());
+            return secondsToWebAnimationsAPITime(*duration.time());
+        }();
+        computedTiming.easing = RefPtr { m_timing.timingFunction }->cssText();
+    }
     computedTiming.direction = m_timing.direction;
-    computedTiming.easing = RefPtr { m_timing.timingFunction }->cssText();
     computedTiming.endTime = m_timing.endTime;
     computedTiming.activeDuration = m_timing.activeDuration;
     computedTiming.localTime = data.localTime;

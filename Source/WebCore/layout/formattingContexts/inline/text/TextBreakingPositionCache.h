@@ -50,6 +50,8 @@ public:
     void set(const Key&, List&& breakingPositionList);
     const List* get(const Key&) const;
 
+    bool isEmpty() const { return m_breakingPositionMap.isEmpty(); }
+
     void clear();
 
 private:

@@ -866,7 +866,18 @@ static PlatformFont *_font(Element& element)
     Ref primaryFont = renderer->style().fontCascade().primaryFont();
     if (primaryFont->attributes().origin == FontOrigin::Remote)
         return [PlatformFontClass systemFontOfSize:defaultFontSize];
+#if defined(WEBKIT_IOS6)
+    RetainPtr coreTextFont = primaryFont->ctFont();
+    if (!coreTextFont)
+        return [PlatformFontClass systemFontOfSize:defaultFontSize];
+    CGFloat size = CTFontGetSize(coreTextFont.get());
+    RetainPtr postScriptName = adoptCF(CTFontCopyPostScriptName(coreTextFont.get()));
+    if (RetainPtr platformFont = [PlatformFontClass fontWithName:(__bridge NSString *)postScriptName.get() size:size])
+        return platformFont.autorelease();
+    return [PlatformFontClass systemFontOfSize:size];
+#else
     return (__bridge PlatformFont *)primaryFont->ctFont();
+#endif
 }
 
 NSDictionary *HTMLConverter::computedAttributesForElement(Element& element)

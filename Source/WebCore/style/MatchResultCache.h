@@ -59,6 +59,10 @@ private:
     static PropertyCascade::IncludedProperties computeAndUpdateChangedProperties(MatchResultCache::Entry&);
 
     WeakHashMap<const Element, UniqueRef<Entry>, WeakPtrImplWithEventTargetData> m_entries;
+#if defined(WEBKIT_IOS6)
+    unsigned m_insertsSinceSizeCheck { 0 };
+    unsigned m_maximumEntries { 512 };
+#endif
 };
 
 }

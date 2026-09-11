@@ -1018,8 +1018,11 @@ static std::optional<Color>& cachedInsertionPointColor()
 Color RenderThemeIOS::systemFocusRingColor()
 {
     if (!cachedFocusRingColor().has_value()) {
-        // FIXME: Should be using +keyboardFocusIndicatorColor. For now, work around <rdar://problem/50838886>.
+#if defined(WEBKIT_IOS6)
+        cachedFocusRingColor() = SRGBA<uint8_t> { 0, 122, 255 };
+#else
         cachedFocusRingColor() = colorFromCocoaColor([PAL::getUIColorClassSingleton() systemBlueColor]);
+#endif
     }
     return *cachedFocusRingColor();
 }
@@ -1167,6 +1170,10 @@ static const Vector<CSSValueSystemColorInformation>& cssValueSystemColorInformat
 
 static inline std::optional<Color> systemColorFromCSSValueSystemColorInformation(CSSValueSystemColorInformation systemColorInformation, bool useDarkAppearance)
 {
+#if defined(WEBKIT_IOS6)
+    if (![PAL::getUIColorClassSingleton() respondsToSelector:systemColorInformation.selector])
+        return std::nullopt;
+#endif
     UIColor *color = wtfObjCMsgSend<UIColor *>(PAL::getUIColorClassSingleton(), systemColorInformation.selector);
     if (!color)
         return std::nullopt;
@@ -1193,6 +1200,56 @@ static std::optional<Color> systemColorFromCSSValueID(CSSValueID cssValueID, boo
 
     return std::nullopt;
 }
+
+#if defined(WEBKIT_IOS6)
+static CSSValueID standardEquivalentOfAppleSystemColor(CSSValueID cssValueID)
+{
+    switch (cssValueID) {
+    case CSSValueAppleSystemBlue:
+        return CSSValueAccentcolor;
+
+    case CSSValueWebkitControlBackground:
+    case CSSValueAppleSystemOpaqueFill:
+    case CSSValueAppleSystemOpaqueSecondaryFill:
+    case CSSValueAppleSystemOpaqueSecondaryFillDisabled:
+    case CSSValueAppleSystemOpaqueTertiaryFill:
+        return CSSValueButtonface;
+
+    case CSSValueAppleSystemLabel:
+    case CSSValueAppleSystemHeaderText:
+        return CSSValueCanvastext;
+
+    case CSSValueAppleSystemSecondaryLabel:
+    case CSSValueAppleSystemTertiaryLabel:
+    case CSSValueAppleSystemQuaternaryLabel:
+    case CSSValueAppleSystemPlaceholderText:
+        return CSSValueGraytext;
+
+    case CSSValueAppleSystemBackground:
+    case CSSValueAppleSystemSecondaryBackground:
+    case CSSValueAppleSystemTertiaryBackground:
+    case CSSValueAppleSystemGroupedBackground:
+    case CSSValueAppleSystemSecondaryGroupedBackground:
+    case CSSValueAppleSystemTertiaryGroupedBackground:
+    case CSSValueAppleSystemTextBackground:
+    case CSSValueAppleSystemControlBackground:
+        return CSSValueCanvas;
+
+    case CSSValueAppleSystemSeparator:
+    case CSSValueAppleSystemOpaqueSeparator:
+    case CSSValueAppleSystemContainerBorder:
+    case CSSValueAppleSystemGrid:
+        return CSSValueButtonborder;
+
+    case CSSValueAppleSystemSelectedContentBackground:
+    case CSSValueAppleSystemUnemphasizedSelectedContentBackground:
+        return CSSValueHighlight;
+
+    default:
+        return CSSValueInvalid;
+    }
+}
+#endif
 
 static RenderThemeIOS::CSSValueToSystemColorMap& globalCSSValueToSystemColorMap()
 {
@@ -1263,6 +1320,10 @@ Color RenderThemeIOS::systemColor(CSSValueID cssValueID, OptionSet<StyleColorOpt
         auto color = systemColorFromCSSValueID(cssValueID, useDarkAppearance, useElevatedUserInterfaceLevel);
         if (color)
             return *color;
+#if defined(WEBKIT_IOS6)
+        if (auto standardValueID = standardEquivalentOfAppleSystemColor(cssValueID); standardValueID != CSSValueInvalid)
+            return RenderTheme::systemColor(standardValueID, options);
+#endif
         return RenderTheme::systemColor(cssValueID, options);
     }();
 

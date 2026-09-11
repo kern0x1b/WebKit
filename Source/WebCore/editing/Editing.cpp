@@ -329,12 +329,14 @@ Position lastEditablePositionBeforePositionInRoot(const Position& position, Cont
 // Whether or not content before and after this node will collapse onto the same line as it.
 bool isBlock(const Node& node)
 {
-    return node.renderer() && !node.renderer()->isInline();
+    auto* renderer = node.renderer();
+    return renderer && !renderer->isInline();
 }
 
 bool isInline(const Node& node)
 {
-    return node.renderer() && node.renderer()->isInline();
+    auto* renderer = node.renderer();
+    return renderer && renderer->isInline();
 }
 
 // FIXME: Deploy this in all of the places where enclosingBlockFlow/enclosingBlockFlowOrTableElement are used.
@@ -1099,17 +1101,20 @@ Element* elementIfEquivalent(const Element& first, Node& second)
 
 bool isNonTableCellHTMLBlockElement(const Node* node)
 {
-    return node->hasTagName(listingTag)
-        || node->hasTagName(olTag)
-        || node->hasTagName(preTag)
-        || is<HTMLTableElement>(*node)
-        || node->hasTagName(ulTag)
-        || node->hasTagName(xmpTag)
-        || node->hasTagName(h1Tag)
-        || node->hasTagName(h2Tag)
-        || node->hasTagName(h3Tag)
-        || node->hasTagName(h4Tag)
-        || node->hasTagName(h5Tag);
+    auto* element = dynamicDowncast<HTMLElement>(*node);
+    if (!element)
+        return false;
+    return element->hasTagName(listingTag)
+        || element->hasTagName(olTag)
+        || element->hasTagName(preTag)
+        || is<HTMLTableElement>(*element)
+        || element->hasTagName(ulTag)
+        || element->hasTagName(xmpTag)
+        || element->hasTagName(h1Tag)
+        || element->hasTagName(h2Tag)
+        || element->hasTagName(h3Tag)
+        || element->hasTagName(h4Tag)
+        || element->hasTagName(h5Tag);
 }
 
 Position adjustedSelectionStartForStyleComputation(const VisibleSelection& selection)

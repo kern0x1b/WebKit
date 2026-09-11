@@ -38,6 +38,10 @@ enum class LogMemoryStatisticsReason : uint8_t {
     OutOfMemoryDeath
 };
 
+#if defined(WEBKIT_IOS6)
+bool shouldDeleteAllCodeForMemoryPressure();
+#endif
+
 WEBCORE_EXPORT void releaseMemory(Critical, Synchronous, MaintainBackForwardCache = MaintainBackForwardCache::No, MaintainMemoryCache = MaintainMemoryCache::No);
 void platformReleaseMemory(Critical);
 WEBCORE_EXPORT void releaseGraphicsMemory(Critical, Synchronous);

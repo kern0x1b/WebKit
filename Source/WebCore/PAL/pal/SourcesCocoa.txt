@@ -53,11 +53,11 @@ cocoa/LockdownModeCocoa.mm @nonARC
 cocoa/MediaToolboxSoftLink.cpp
 cocoa/NaturalLanguageSoftLink.mm @nonARC
 cocoa/OpenGLSoftLinkCocoa.mm @nonARC
-cocoa/PassKitSoftLink.mm @nonARC
+// ios6: cocoa/PassKitSoftLink.mm @nonARC
 cocoa/QuartzCoreSoftLink.mm @nonARC
 cocoa/RevealSoftLink.mm @nonARC
 cocoa/ScreenTimeSoftLink.mm @nonARC
-cocoa/SpeechSoftLink.mm @nonARC
+// ios6: cocoa/SpeechSoftLink.mm @nonARC
 cocoa/TranslationUIServicesSoftLink.mm @nonARC
 cocoa/UsageTrackingSoftLink.mm @nonARC
 cocoa/VisionKitCoreSoftLink.mm @nonARC
@@ -67,14 +67,15 @@ cocoa/WebContentRestrictionsSoftLink.mm @nonARC
 cocoa/WebPrivacySoftLink.mm @nonARC
 cocoa/WritingToolsUISoftLink.mm @nonARC
 
-crypto/CryptoAlgorithmAESGCMCocoa.cpp
-crypto/CryptoAlgorithmAESKWCocoaBridging.cpp
-crypto/CryptoAlgorithmEd25519CocoaBridging.cpp
-crypto/CryptoAlgorithmHKDFCocoaBridging.cpp
-crypto/CryptoAlgorithmHMACCocoaBridging.cpp
-crypto/CryptoAlgorithmX25519CocoaBridging.cpp
-crypto/CryptoEDKeyBridging.cpp
-crypto/PlatformECKey.cpp
+// ios6: crypto/PALCryptoUnavailableIOS6.cpp — replaced by WebKit's OpenSSL crypto backend
+// ios6: crypto/CryptoAlgorithmAESGCMCocoa.cpp
+// ios6: crypto/CryptoAlgorithmAESKWCocoaBridging.cpp
+// ios6: crypto/CryptoAlgorithmEd25519CocoaBridging.cpp
+// ios6: crypto/CryptoAlgorithmHKDFCocoaBridging.cpp
+// ios6: crypto/CryptoAlgorithmHMACCocoaBridging.cpp
+// ios6: crypto/CryptoAlgorithmX25519CocoaBridging.cpp
+// ios6: crypto/CryptoEDKeyBridging.cpp
+// ios6: crypto/PlatformECKey.cpp
 
 crypto/commoncrypto/CryptoDigestCommonCrypto.cpp
 

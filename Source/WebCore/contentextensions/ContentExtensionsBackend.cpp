@@ -49,6 +49,7 @@
 #include "ScriptSourceCode.h"
 #include "Settings.h"
 #include "UserContentController.h"
+#include <atomic>
 #include <ranges>
 #include <wtf/NeverDestroyed.h>
 #include <wtf/TZoneMallocInlines.h>
@@ -386,6 +387,11 @@ ContentRuleListResults ContentExtensionsBackend::processContentRuleListsForLoad(
                     frame->script().evaluateIgnoringException(ScriptSourceCode { "try { window.dataLayer.hide.end(); console.log('Called window.dataLayer.hide.end() in frame ' + document.URL + ' because the content blocker blocked the load of the https://www.google-analytics.com/analytics.js script'); } catch (e) { }"_s, JSC::SourceTaintedOrigin::Untainted });
             }
         }
+    }
+
+    if (results.shouldBlock()) {
+        static std::atomic<unsigned> blockedLoadCount { 0 };
+        WTFLogAlways("CONTENTBLOCK blocked %u %s", blockedLoadCount.fetch_add(1) + 1, url.string().utf8().data());
     }
 
     return results;

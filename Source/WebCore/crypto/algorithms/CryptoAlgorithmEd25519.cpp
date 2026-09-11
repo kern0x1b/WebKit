@@ -35,7 +35,11 @@
 
 namespace WebCore {
 
-#if !PLATFORM(COCOA) && !USE(GCRYPT)
+/* The generic answer, for a port with neither the Cocoa nor the GCrypt backend.
+   This port is Darwin but uses the OpenSSL backend, which has no OKP keys, so it
+   needs this one: it reports the curves as unsupported, which is honest, and the
+   OpenSSL registry does not offer Ed25519 or X25519 at all. */
+#if (!PLATFORM(COCOA) || USE(OPENSSL)) && !USE(GCRYPT)
 ExceptionOr<Vector<uint8_t>> CryptoAlgorithmEd25519::platformSign(const CryptoKeyOKP&, const Vector<uint8_t>&)
 {
     ASSERT_NOT_REACHED();

@@ -84,7 +84,18 @@ public:
 
     static bool mayBreakInBetween(const InlineTextItem& previousInlineItem, const InlineTextItem& nextInlineItem);
     // FIXME: Remove when computeInlineIntrinsicLogicalWidths is all IFC.
-    static bool mayBreakInBetween(String previousContent, const Style::ComputedStyle& previousContentStyle, String nextContent, const Style::ComputedStyle& nextContentStyle);
+    static bool mayBreakInBetween(const String& previousContent, const Style::ComputedStyle& previousContentStyle, String nextContent, const Style::ComputedStyle& nextContentStyle);
+    enum class BreakablePositionRule : uint8_t {
+        KeepAllBreakNoBreakSpace,
+        KeepAll,
+        AutoPhrase,
+        NormalRulesBreakNoBreakSpace,
+        NormalRules,
+        SpecialRulesBreakNoBreakSpace,
+        SpecialRules
+    };
+    static BreakablePositionRule breakablePositionRule(const Style::ComputedStyle&, TextBreakIterator::LineMode::Behavior);
+    static unsigned findNextBreakablePosition(CachedLineBreakIteratorFactory&, unsigned startPosition, BreakablePositionRule);
     static unsigned findNextBreakablePosition(CachedLineBreakIteratorFactory&, unsigned startPosition, const Style::ComputedStyle&);
     static TextBreakIterator::LineMode::Behavior NODELETE lineBreakIteratorMode(LineBreak);
     static TextBreakIterator::ContentAnalysis NODELETE contentAnalysis(WordBreak);

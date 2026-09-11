@@ -143,7 +143,9 @@ static String acceptHeaderValueForImageResource(bool usingSecureProtocol)
 {
     static MainThreadNeverDestroyed<String> staticPrefix = [] {
         StringBuilder builder;
+#if !defined(WEBKIT_IOS6) || USE(WEBP)
         builder.append("image/webp,"_s);
+#endif
 #if HAVE(AVIF) || USE(AVIF)
         builder.append("image/avif,"_s);
 #endif

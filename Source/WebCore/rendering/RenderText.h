@@ -176,7 +176,6 @@ public:
 
     Vector<std::pair<unsigned, unsigned>> contentRangesBetweenOffsetsForType(const DocumentMarkerType, unsigned startOffset, unsigned endOffset) const;
 
-    bool hasInlineWrapperForDisplayContents() const { return m_hasInlineWrapperForDisplayContents; }
     RenderInline* NODELETE inlineWrapperForDisplayContents();
     void setInlineWrapperForDisplayContents(RenderInline*);
 
@@ -185,12 +184,12 @@ public:
 
     void resetMinMaxWidth();
 
-    void setCanUseSimplifiedTextMeasuring(bool canUseSimplifiedTextMeasuring) { m_canUseSimplifiedTextMeasuring = canUseSimplifiedTextMeasuring; }
-    std::optional<bool> canUseSimplifiedTextMeasuring() const { return m_canUseSimplifiedTextMeasuring; }
-    void setHasPositionDependentContentWidth(bool hasPositionDependentContentWidth) { m_hasPositionDependentContentWidth = hasPositionDependentContentWidth; }
-    std::optional<bool> hasPositionDependentContentWidth() const { return m_hasPositionDependentContentWidth; }
-    void setHasStrongDirectionalityContent(bool hasStrongDirectionalityContent) { m_hasStrongDirectionalityContent = hasStrongDirectionalityContent; }
-    std::optional<bool> hasStrongDirectionalityContent() const { return m_hasStrongDirectionalityContent; }
+    void setCanUseSimplifiedTextMeasuring(std::optional<bool> canUseSimplifiedTextMeasuring) { m_canUseSimplifiedTextMeasuringState = encodeOptionalBool(canUseSimplifiedTextMeasuring); }
+    std::optional<bool> canUseSimplifiedTextMeasuring() const { return decodeOptionalBool(m_canUseSimplifiedTextMeasuringState); }
+    void setHasPositionDependentContentWidth(std::optional<bool> hasPositionDependentContentWidth) { m_hasPositionDependentContentWidthState = encodeOptionalBool(hasPositionDependentContentWidth); }
+    std::optional<bool> hasPositionDependentContentWidth() const { return decodeOptionalBool(m_hasPositionDependentContentWidthState); }
+    void setHasStrongDirectionalityContent(std::optional<bool> hasStrongDirectionalityContent) { m_hasStrongDirectionalityContentState = encodeOptionalBool(hasStrongDirectionalityContent); }
+    std::optional<bool> hasStrongDirectionalityContent() const { return decodeOptionalBool(m_hasStrongDirectionalityContentState); }
 
 protected:
     virtual void computeMinMaxIntrinsicLogicalWidths(float leadingWidth, bool forcedMinMaxWidthComputation = false);
@@ -247,11 +246,21 @@ private:
 
     String m_text;
 
-protected:
-    std::optional<bool> m_canUseSimplifiedTextMeasuring;
+    enum OptionalBoolState : unsigned { OptionalBoolUnset = 0, OptionalBoolFalse = 1, OptionalBoolTrue = 2 };
+    static unsigned encodeOptionalBool(std::optional<bool> value)
+    {
+        if (!value)
+            return OptionalBoolUnset;
+        return *value ? OptionalBoolTrue : OptionalBoolFalse;
+    }
+    static std::optional<bool> decodeOptionalBool(unsigned state)
+    {
+        if (state == OptionalBoolUnset)
+            return { };
+        return state == OptionalBoolTrue;
+    }
+
 private:
-    std::optional<bool> m_hasPositionDependentContentWidth;
-    std::optional<bool> m_hasStrongDirectionalityContent;
     unsigned m_hasBreakableChar : 1 { false }; // Whether or not we can be broken into multiple lines.
     unsigned m_hasBreak : 1 { false }; // Whether or not we have a hard break (e.g., <pre> with '\n').
     unsigned m_hasTab : 1 { false }; // Whether or not we have a variable width tab character (e.g., <pre> with '\t').
@@ -265,6 +274,9 @@ private:
     unsigned m_hasInlineWrapperForDisplayContents : 1 { false };
     unsigned m_hasSecureTextTimer : 1 { false };
     FontCascade::CodePath m_fontCodePath : 2;
+    unsigned m_canUseSimplifiedTextMeasuringState : 2 { 0 };
+    unsigned m_hasPositionDependentContentWidthState : 2 { 0 };
+    unsigned m_hasStrongDirectionalityContentState : 2 { 0 };
 };
 
 String applyTextTransform(const Style::ComputedStyle&, const String&, char32_t previousCharacter);

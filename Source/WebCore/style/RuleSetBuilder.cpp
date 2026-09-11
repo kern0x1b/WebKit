@@ -100,6 +100,11 @@ void RuleSetBuilder::addRulesFromSheet(const StyleSheetContents& sheet, const MQ
 
     m_mediaQueryCollector.collectDynamic = canUseDynamicMediaQueryEvaluation();
 
+    // The deduplication set takes one entry per selector of every rule. Sizing it from the sheet
+    // saves rehashing it from 16 entries all the way up while the rules are being added.
+    if (m_ruleSet && !m_featureCollectionContext.selectorDeduplicationSet.capacity() && sheet.ruleCount() > 16)
+        m_featureCollectionContext.selectorDeduplicationSet.reserveInitialCapacity(sheet.ruleCount());
+
     if (m_mediaQueryCollector.pushAndEvaluate(sheetQuery))
         addRulesFromSheetContents(sheet);
     m_mediaQueryCollector.pop(sheetQuery);
@@ -107,9 +112,25 @@ void RuleSetBuilder::addRulesFromSheet(const StyleSheetContents& sheet, const MQ
 
 void RuleSetBuilder::addChildRules(const Vector<Ref<StyleRuleBase>>& rules)
 {
+    // With no rule set this is the dynamic media query scan, which walks the sheet a second time.
+    // Rule types that addChildRule() drops on the floor in that mode are skipped here instead, so
+    // the scan no longer pays a refcount round trip and a call per style rule.
+    const bool isScanningForDynamicEvaluation = !m_ruleSet;
+
     for (auto& rule : rules) {
         if (requiresStaticMediaQueryEvaluation)
             return;
+        if (isScanningForDynamicEvaluation) {
+            switch (rule->type()) {
+            case StyleRuleType::Style:
+            case StyleRuleType::StyleWithNesting:
+            case StyleRuleType::NestedDeclarations:
+            case StyleRuleType::Page:
+                continue;
+            default:
+                break;
+            }
+        }
         addChildRule(rule);
     }
 }
@@ -325,7 +346,11 @@ void RuleSetBuilder::addStyleRuleWithSelectorList(const CSSSelectorList& selecto
     for (auto& selector : selectorList) {
         RuleData ruleData(rule, selectorList.indexOfSelector(selector), selectorListIndex++, m_ruleSet->ruleCount(), m_isStartingStyle);
         m_mediaQueryCollector.addRuleIfNeeded(ruleData);
+#if defined(WEBKIT_IOS6)
+        m_ruleSet->addRule(WTF::move(ruleData), m_currentCascadeLayerIdentifier, m_currentContainerQueryIdentifier, m_currentScopeIdentifier, &m_featureCollectionContext);
+#else
         protect(m_ruleSet)->addRule(WTF::move(ruleData), m_currentCascadeLayerIdentifier, m_currentContainerQueryIdentifier, m_currentScopeIdentifier, &m_featureCollectionContext);
+#endif
     }
 }
 

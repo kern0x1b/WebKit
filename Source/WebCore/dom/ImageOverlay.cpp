@@ -326,8 +326,10 @@ static Elements updateSubtree(HTMLElement& element, const TextRecognitionResult&
         }
 
         canUseExistingElements = ([&] {
+#if ENABLE(DATA_DETECTION)
             if (result.dataDetectors.size() != elements.dataDetectors.size())
                 return false;
+#endif
 
             if (result.lines.size() != elements.lines.size())
                 return false;

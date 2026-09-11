@@ -33,9 +33,63 @@
 
 #if ENABLE(CONTENT_EXTENSIONS)
 #include "CompiledContentExtension.h"
+#include "ContentExtensionCompiler.h"
+#include "ContentExtensionParser.h"
+#include <wtf/URL.h>
 #endif
 
 namespace WebCore {
+
+#if ENABLE(CONTENT_EXTENSIONS)
+
+namespace {
+
+class RuleListCompilationClient final : public ContentExtensions::ContentExtensionCompilationClient {
+public:
+    Vector<uint8_t> actions;
+    Vector<uint8_t> urlFilters;
+    Vector<uint8_t> topURLFilters;
+    Vector<uint8_t> frameURLFilters;
+
+private:
+    void writeSource(String&&) final { }
+    void writeActions(Vector<ContentExtensions::SerializedActionByte>&& bytes) final { actions.appendVector(bytes); }
+    void writeURLFiltersBytecode(Vector<ContentExtensions::DFABytecode>&& bytecode) final { urlFilters.appendVector(bytecode); }
+    void writeTopURLFiltersBytecode(Vector<ContentExtensions::DFABytecode>&& bytecode) final { topURLFilters.appendVector(bytecode); }
+    void writeFrameURLFiltersBytecode(Vector<ContentExtensions::DFABytecode>&& bytecode) final { frameURLFilters.appendVector(bytecode); }
+    void finalize() final { }
+};
+
+class InMemoryCompiledContentExtension final : public ContentExtensions::CompiledContentExtension {
+public:
+    static Ref<InMemoryCompiledContentExtension> create(RuleListCompilationClient&& client)
+    {
+        return adoptRef(*new InMemoryCompiledContentExtension(WTF::move(client)));
+    }
+
+private:
+    explicit InMemoryCompiledContentExtension(RuleListCompilationClient&& client)
+        : m_actions(WTF::move(client.actions))
+        , m_urlFilters(WTF::move(client.urlFilters))
+        , m_topURLFilters(WTF::move(client.topURLFilters))
+        , m_frameURLFilters(WTF::move(client.frameURLFilters))
+    {
+    }
+
+    std::span<const uint8_t> serializedActions() const final { return m_actions.span(); }
+    std::span<const uint8_t> urlFiltersBytecode() const final { return m_urlFilters.span(); }
+    std::span<const uint8_t> topURLFiltersBytecode() const final { return m_topURLFilters.span(); }
+    std::span<const uint8_t> frameURLFiltersBytecode() const final { return m_frameURLFilters.span(); }
+
+    Vector<uint8_t> m_actions;
+    Vector<uint8_t> m_urlFilters;
+    Vector<uint8_t> m_topURLFilters;
+    Vector<uint8_t> m_frameURLFilters;
+};
+
+} // namespace
+
+#endif // ENABLE(CONTENT_EXTENSIONS)
 
 Ref<UserContentController> UserContentController::create()
 {
@@ -147,5 +201,40 @@ void UserContentController::removeAllUserContent()
         invalidateInjectedStyleSheetCacheInAllFramesInAllPages();
     }
 }
+
+#if ENABLE(CONTENT_EXTENSIONS)
+
+bool UserContentController::addContentRuleList(const String& identifier, const String& ruleJSON)
+{
+    if (identifier.isEmpty())
+        return false;
+
+    auto parsedRules = ContentExtensions::parseRuleList(ruleJSON, ContentExtensions::CSSSelectorsAllowed::No);
+    if (!parsedRules) {
+        WTFLogAlways("CONTENTBLOCK parse failed: %s", parsedRules.error().message().c_str());
+        return false;
+    }
+
+    RuleListCompilationClient client;
+    if (auto error = ContentExtensions::compileRuleList(client, String { ruleJSON }, WTF::move(parsedRules.value()))) {
+        WTFLogAlways("CONTENTBLOCK compile failed: %s", error.message().c_str());
+        return false;
+    }
+
+    m_contentExtensionBackend.addContentExtension(identifier, InMemoryCompiledContentExtension::create(WTF::move(client)), URL { }, ContentExtensions::ContentExtension::ShouldCompileCSS::No);
+    return true;
+}
+
+void UserContentController::removeContentRuleList(const String& identifier)
+{
+    m_contentExtensionBackend.removeContentExtension(identifier);
+}
+
+void UserContentController::removeAllContentRuleLists()
+{
+    m_contentExtensionBackend.removeAllContentExtensions();
+}
+
+#endif // ENABLE(CONTENT_EXTENSIONS)
 
 } // namespace WebCore

@@ -52,6 +52,7 @@
 #include <ranges>
 #include <wtf/HashSet.h>
 #include <wtf/Ref.h>
+#include <wtf/Scope.h>
 #include <wtf/text/TextStream.h>
 
 #if ENABLE(THREADED_ANIMATIONS)
@@ -109,6 +110,23 @@ void AnimationTimelinesController::updateAnimationsAndSendEvents(ReducedResoluti
     std::optional<FramesPerSecond> defaultTimelineFrameRate;
     // This will hold the frame rate used for this timeline until now.
     std::optional<FramesPerSecond> previousTimelineFrameRate;
+#if defined(WEBKIT_IOS6)
+    bool didQueryTimelineFrameRates = false;
+    auto queryTimelineFrameRates = [&] {
+        if (didQueryTimelineFrameRates)
+            return;
+        didQueryTimelineFrameRates = true;
+        if (RefPtr page = m_document->page()) {
+            defaultTimelineFrameRate = page->preferredRenderingUpdateFramesPerSecond({ Page::PreferredRenderingUpdateOption::IncludeThrottlingReasons });
+            previousTimelineFrameRate = page->preferredRenderingUpdateFramesPerSecond({
+                Page::PreferredRenderingUpdateOption::IncludeThrottlingReasons,
+                Page::PreferredRenderingUpdateOption::IncludeAnimationsFrameRate
+            });
+        }
+    };
+    if (!m_frameRateAligner.isEmpty())
+        queryTimelineFrameRates();
+#else
     if (RefPtr page = m_document->page()) {
         defaultTimelineFrameRate = page->preferredRenderingUpdateFramesPerSecond({ Page::PreferredRenderingUpdateOption::IncludeThrottlingReasons });
         previousTimelineFrameRate = page->preferredRenderingUpdateFramesPerSecond({
@@ -116,11 +134,24 @@ void AnimationTimelinesController::updateAnimationsAndSendEvents(ReducedResoluti
             Page::PreferredRenderingUpdateOption::IncludeAnimationsFrameRate
         });
     }
+#endif
 
     LOG_WITH_STREAM(Animations, stream << "AnimationTimelinesController::updateAnimationsAndSendEvents for time " << timestamp);
 
     // We need to copy m_timelines before iterating over its members since the steps in this procedure may mutate m_timelines.
-    auto protectedTimelines = copyToVectorOf<Ref<AnimationTimeline>>(m_timelines);
+    auto protectedTimelines = std::exchange(m_timelinesScratch, { });
+    protectedTimelines.shrink(0);
+    for (Ref timeline : m_timelines)
+        protectedTimelines.append(WTF::move(timeline));
+
+    auto animationsScratch = std::exchange(m_animationsScratch, { });
+
+    auto restoreScratchBuffers = makeScopeExit([&] {
+        protectedTimelines.shrink(0);
+        animationsScratch.shrink(0);
+        m_timelinesScratch = WTF::move(protectedTimelines);
+        m_animationsScratch = WTF::move(animationsScratch);
+    });
 
     // We need to freeze the current time even if no animation is running.
     // document.timeline.currentTime may be called from a rAF callback and
@@ -132,21 +163,30 @@ void AnimationTimelinesController::updateAnimationsAndSendEvents(ReducedResoluti
 
     // 1. Update the current time of all timelines associated with document passing now as the timestamp.
     ASSERT(m_updatedScrollTimelines.isEmpty());
-    Vector<Ref<AnimationTimeline>> timelinesToUpdate;
-    Vector<Ref<WebAnimation>> animationsToRemove;
-    Vector<Ref<CSSTransition>> completedTransitions;
+    Vector<Ref<AnimationTimeline>, 4> timelinesToUpdate;
+    Vector<Ref<WebAnimation>, 8> animationsToRemove;
+    Vector<Ref<CSSTransition>, 8> completedTransitions;
     for (auto& timeline : protectedTimelines) {
         auto shouldUpdateAnimationsAndSendEvents = timeline->documentWillUpdateAnimationsAndSendEvents();
         if (shouldUpdateAnimationsAndSendEvents == AnimationTimeline::ShouldUpdateAnimationsAndSendEvents::No)
             continue;
 
         timelinesToUpdate.append(timeline.copyRef());
+#if defined(WEBKIT_IOS6)
+        queryTimelineFrameRates();
+#endif
 
         // https://drafts.csswg.org/scroll-animations-1/#event-loop
         if (RefPtr scrollTimeline = dynamicDowncast<ScrollTimeline>(timeline))
             m_updatedScrollTimelines.append(*scrollTimeline);
 
-        for (auto& animation : copyToVector(timeline->relevantAnimations())) {
+        auto& relevantAnimations = timeline->relevantAnimations();
+        animationsScratch.shrink(0);
+        animationsScratch.reserveCapacity(relevantAnimations.size());
+        for (auto& animation : relevantAnimations)
+            animationsScratch.append(animation);
+
+        for (auto& animation : animationsScratch) {
             if (animation->isSkippedContentAnimation())
                 continue;
 
@@ -172,9 +212,12 @@ void AnimationTimelinesController::updateAnimationsAndSendEvents(ReducedResoluti
                     continue;
             }
 
-            // This will notify the animation that timing has changed and will call automatically
-            // schedule invalidation if required for this animation.
+#if defined(WEBKIT_IOS6)
+            if (animation->needsTickForRenderingUpdate())
+                animation->tick();
+#else
             animation->tick();
+#endif
 
             if (!animation->isRelevant() && !animation->needsTick() && !isPendingTimelineAttachment(animation))
                 animationsToRemove.append(animation);

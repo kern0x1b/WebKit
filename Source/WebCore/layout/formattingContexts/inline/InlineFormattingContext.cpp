@@ -311,10 +311,12 @@ UniqueRef<InlineLayoutResult> InlineFormattingContext::lineLayout(AbstractLineBu
     auto previousLineEnd = std::optional<InlineItemPosition> { };
     auto leadingInlineItemPosition = needsLayoutRange.start;
     auto isFirstFormattedLineCandidate = !previousLine;
+    const auto firstLineHeight = formattingUtils().initialLineHeight(true);
+    const auto subsequentLineHeight = formattingUtils().initialLineHeight(false);
 
     while (true) {
-
-        auto lineInitialRect = InlineRect { lineLogicalTop, constraints.horizontal().logicalLeft, constraints.horizontal().logicalWidth, formattingUtils().initialLineHeight(!previousLine.has_value()) };
+        auto lineHeight = previousLine ? subsequentLineHeight : firstLineHeight;
+        auto lineInitialRect = InlineRect { lineLogicalTop, constraints.horizontal().logicalLeft, constraints.horizontal().logicalWidth, lineHeight };
         auto lineInput = LineInput { { leadingInlineItemPosition, needsLayoutRange.end }, lineInitialRect };
         auto lineIndex = previousLine ? (previousLine->lineIndex + 1lu) : 0lu;
 

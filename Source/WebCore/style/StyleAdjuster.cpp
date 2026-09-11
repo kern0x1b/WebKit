@@ -438,8 +438,63 @@ void Adjuster::adjustFirstLineStyle(Style::ComputedStyle& style)
     style.setDisplayMaintainingOriginalDisplay(DisplayType::InlineFlow);
 }
 
+#if defined(WEBKIT_IOS6)
+static bool viewportBoundedLayoutEnabled()
+{
+    static int enabled = -1;
+    if (enabled < 0)
+        enabled = access("/tmp/native-viewport-layout", F_OK) == 0 ? 1 : 0;
+    return enabled > 0;
+}
+
+static bool shouldBoundLayoutToViewport(const Style::ComputedStyle& style, const Element& element)
+{
+    if (style.position() != PositionType::Static && style.position() != PositionType::Relative)
+        return false;
+    if (style.floating() != Float::None)
+        return false;
+
+    auto display = style.display();
+    if (!(display == DisplayType::BlockFlow || display == DisplayType::BlockFlowRoot
+        || display == DisplayType::BlockFlex || display == DisplayType::BlockGrid))
+        return false;
+
+    if (style.contain().toRaw())
+        return false;
+
+    RefPtr parent = element.parentElement();
+    if (!parent)
+        return false;
+    if (parent->childElementCount() < 8)
+        return false;
+    if (parent->hasTagName(HTMLNames::bodyTag) || parent->hasTagName(HTMLNames::htmlTag))
+        return false;
+
+    unsigned following = 0;
+    for (RefPtr sibling = element.nextElementSibling(); sibling && following < 3; sibling = sibling->nextElementSibling())
+        ++following;
+    if (following < 3)
+        return false;
+
+    return true;
+}
+#endif
+
 void Adjuster::adjust(Style::ComputedStyle& style) const
 {
+#if defined(WEBKIT_IOS6)
+    if (style.display() != DisplayType::None && !style.backdropFilter().isNone()) {
+        auto& declared = style.backgroundColor();
+        if (declared.isResolvedColor()) {
+            auto& background = declared.resolvedColor();
+            if (background.isVisible() && !background.isOpaque())
+                style.setBackgroundColor({ background.opaqueColor() });
+        }
+
+        style.setBackdropFilter(Style::Filter { CSS::Keyword::None { } });
+    }
+#endif
+
     if (style.display() == DisplayType::Contents)
         adjustDisplayContentsStyle(style);
     else if (style.display() != DisplayType::None) {
@@ -635,13 +690,13 @@ void Adjuster::adjust(Style::ComputedStyle& style) const
             style.setAutoRevealsWhenFound();
     }
 
-    bool overflowIsClipOrVisible = isOverflowClipOrVisible(style.overflowY()) && isOverflowClipOrVisible(style.overflowX());
+    auto usedDisplay = style.display();
 
     // The overflow property does not apply to table row elements (CSS2 section 11.1.1).
-    if (style.display() == DisplayType::TableRow) {
+    if (usedDisplay == DisplayType::TableRow) {
         style.setOverflowX(ComputedStyle::initialOverflowX());
         style.setOverflowY(ComputedStyle::initialOverflowY());
-    } else if (!overflowIsClipOrVisible && style.display().isTableBox()) {
+    } else if (usedDisplay.isTableBox() && !(isOverflowClipOrVisible(style.overflowY()) && isOverflowClipOrVisible(style.overflowX()))) {
         // Tables only support overflow:hidden and overflow:visible and ignore anything else,
         // see https://drafts.csswg.org/css2/#overflow. As a table is not a block
         // container box the rules for resolving conflicting x and y values in CSS Overflow Module
@@ -793,6 +848,17 @@ void Adjuster::adjust(Style::ComputedStyle& style) const
             adjustForTextAutosizing(style, protect(*m_element));
 #endif
     }
+
+#if defined(WEBKIT_IOS6)
+    if (viewportBoundedLayoutEnabled() && m_element && style.contentVisibility() == ContentVisibility::Visible && shouldBoundLayoutToViewport(style, *m_element)) {
+        style.setContentVisibility(ContentVisibility::Auto);
+
+        if (style.containIntrinsicHeight().isNone())
+            style.setContainIntrinsicHeight({ CSS::Keyword::Auto { }, Style::ContainIntrinsicSize::Length { 320 } });
+        if (style.containIntrinsicWidth().isNone())
+            style.setContainIntrinsicWidth({ CSS::Keyword::Auto { }, Style::ContainIntrinsicSize::Length { 320 } });
+    }
+#endif
 
     if (m_parentStyle.contentVisibility() != ContentVisibility::Hidden && m_element && ContainmentChecker { style, *m_element }.isSkippedContentRoot())
         style.setUsedContentVisibility(style.contentVisibility());

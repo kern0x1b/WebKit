@@ -1075,16 +1075,17 @@ void Node::invalidateNodeListAndCollectionCachesInAncestors()
             lists->clearChildNodeListCache();
     }
 
-    SUPPRESS_UNCOUNTED_ARG document().invalidateQuerySelectorAllResults(*this);
+    Document& unprotectedDocument = document();
+    SUPPRESS_UNCOUNTED_ARG unprotectedDocument.invalidateQuerySelectorAllResults(*this);
 
-    if (!document().shouldInvalidateNodeListAndCollectionCaches())
+    if (!unprotectedDocument.shouldInvalidateNodeListAndCollectionCaches())
         return;
 
-    protect(document())->invalidateNodeListAndCollectionCaches([](auto& list) {
+    protect(unprotectedDocument)->invalidateNodeListAndCollectionCaches([](auto& list) {
         list.invalidateCache();
     });
 
-    for (CheckedPtr node = this; node; node = node->parentNode()) {
+    for (auto* node = this; node; node = node->parentNode()) {
         if (!node->hasRareData())
             continue;
 
@@ -1097,21 +1098,25 @@ void Node::invalidateNodeListCollectionAndInnerHTMLPrefixCachesInAncestorsForAtt
 {
     ASSERT(is<Element>(*this));
 
-    bool shouldInvalidate = document().shouldInvalidateNodeListAndCollectionCachesForAttribute(attrName);
+    Document& unprotectedDocument = document();
+    bool shouldInvalidate = unprotectedDocument.shouldInvalidateNodeListAndCollectionCachesForAttribute(attrName);
 
-    WeakPtr cachedContainer = document().cachedSetInnerHTML().cachedContainer;
-    bool shouldSetMutationBit = isMutationBySetInnerHTML == IsMutationBySetInnerHTML::No && cachedContainer;
+    auto& cachedSetInnerHTML = unprotectedDocument.cachedSetInnerHTML();
+    bool shouldSetMutationBit = isMutationBySetInnerHTML == IsMutationBySetInnerHTML::No && cachedSetInnerHTML.cachedContainer;
 
     if (!shouldInvalidate && !shouldSetMutationBit)
         return;
 
+    // Taking the WeakPtr refs its impl; every attribute change paid for that even when nothing below runs.
+    WeakPtr cachedContainer = cachedSetInnerHTML.cachedContainer;
+
     if (shouldInvalidate) {
-        protect(document())->invalidateNodeListAndCollectionCaches([&attrName](auto& list) {
+        protect(unprotectedDocument)->invalidateNodeListAndCollectionCaches([&attrName](auto& list) {
             list.invalidateCacheForAttribute(attrName);
         });
     }
 
-    for (CheckedPtr node = this; node; node = node->parentNode()) {
+    for (auto* node = this; node; node = node->parentNode()) {
         if (shouldSetMutationBit && !node->hasDidMutateSubtreeAfterSetInnerHTML()) {
             node->setDidMutateSubtreeAfterSetInnerHTML();
             if (node == cachedContainer.get())
@@ -1128,10 +1133,13 @@ void Node::invalidateNodeListCollectionAndInnerHTMLPrefixCachesInAncestorsForAtt
 
 void Node::setDidMutateSubtreeAfterSetInnerHTMLOnAncestors()
 {
-    WeakPtr cachedContainer = document().cachedSetInnerHTML().cachedContainer;
-    if (!cachedContainer)
+    // Every child change and every inline-style write lands here, so test the member before taking a
+    // WeakPtr of it: constructing one refs the impl, and there is normally nothing cached at all.
+    auto& cachedSetInnerHTML = document().cachedSetInnerHTML();
+    if (!cachedSetInnerHTML.cachedContainer) [[likely]]
         return;
 
+    WeakPtr cachedContainer = cachedSetInnerHTML.cachedContainer;
     for (auto* node = this; node; node = node->parentNode()) {
         node->setDidMutateSubtreeAfterSetInnerHTML();
         if (node == cachedContainer.get())
@@ -2610,6 +2618,19 @@ HashMap<Ref<MutationObserver>, MutationRecordDeliveryOptions> Node::registeredMu
         }
     };
 
+#if defined(WEBKIT_IOS6)
+    for (SUPPRESS_UNCOUNTED_LOCAL Node* node = this; node; node = node->parentNode()) {
+        if (!node->hasRareData())
+            continue;
+        auto* data = node->rareData()->mutationObserverDataIfExists();
+        if (!data)
+            continue;
+        for (Ref registration : data->registry)
+            collectMatchingObserversForMutation(registration);
+        for (Ref registration : data->transientRegistry)
+            collectMatchingObserversForMutation(registration);
+    }
+#else
     for (RefPtr node = this; node; node = node->parentNode()) {
         if (auto* registry = node->mutationObserverRegistry()) {
             for (Ref registration : *registry)
@@ -2620,6 +2641,7 @@ HashMap<Ref<MutationObserver>, MutationRecordDeliveryOptions> Node::registeredMu
                 collectMatchingObserversForMutation(registration);
         }
     }
+#endif
 
     return observers;
 }
@@ -2676,6 +2698,19 @@ void Node::notifyMutationObserversNodeWillDetach()
     if (!document().hasMutationObservers())
         return;
 
+#if defined(WEBKIT_IOS6)
+    for (SUPPRESS_UNCOUNTED_LOCAL Node* node = parentNode(); node; node = node->parentNode()) {
+        if (!node->hasRareData())
+            continue;
+        auto* data = node->rareData()->mutationObserverDataIfExists();
+        if (!data)
+            continue;
+        for (Ref registration : data->registry)
+            registration->observedSubtreeNodeWillDetach(*this);
+        for (Ref registration : data->transientRegistry)
+            registration->observedSubtreeNodeWillDetach(*this);
+    }
+#else
     for (CheckedPtr node = parentNode(); node; node = node->parentNode()) {
         if (auto* registry = node->mutationObserverRegistry()) {
             for (Ref registration : *registry)
@@ -2686,6 +2721,7 @@ void Node::notifyMutationObserversNodeWillDetach()
                 registration->observedSubtreeNodeWillDetach(*this);
         }
     }
+#endif
 }
 
 void Node::dispatchScopedEvent(Event& event)
@@ -2700,13 +2736,16 @@ void Node::dispatchEvent(Event& event)
 
 void Node::dispatchSubtreeModifiedEvent()
 {
+    // Ordered cheapest-and-most-selective first: no page in practice registers a DOMSubtreeModified
+    // listener, so this single flag test retires the call before anything else is loaded.
+    if (!document().hasListenerType(Document::ListenerType::DOMSubtreeModified)) [[likely]]
+        return;
+
     if (isInShadowTree() || document().shouldNotFireMutationEvents())
         return;
 
     ASSERT_WITH_SECURITY_IMPLICATION(ScriptDisallowedScope::InMainThread::isEventDispatchAllowedInSubtree(*this));
 
-    if (!document().hasListenerType(Document::ListenerType::DOMSubtreeModified))
-        return;
     const AtomString& subtreeModifiedEventName = eventNames().DOMSubtreeModifiedEvent;
     if (!parentNode() && !hasEventListeners(subtreeModifiedEventName))
         return;
@@ -3065,9 +3104,12 @@ template<TreeType treeType> AncestorAndChildren commonInclusiveAncestorAndChildr
     // common enough to be worth optimizing so we don't have to walk to the root.
     if (&a == &b)
         return { &a, nullptr, nullptr };
-    // FIXME: Could optimize cases where nodes are both in the same shadow tree.
-    // FIXME: Could optimize cases where nodes are in different documents to quickly return false.
-    // FIXME: Could optimize cases where one node is connected and the other is not to quickly return false.
+    // Fast-reject: nodes from different documents can never share a common ancestor.
+    if (&a.document() != &b.document()) [[unlikely]]
+        return { nullptr, nullptr, nullptr };
+    // Fast-reject: if one is connected and the other is not, they can't share the main tree root.
+    if (a.isConnected() != b.isConnected()) [[unlikely]]
+        return { nullptr, nullptr, nullptr };
     auto [depthA, depthB] = std::make_tuple(depth<treeType>(a), depth<treeType>(b));
     auto [x, y, difference] = depthA >= depthB
         ? std::make_tuple(&a, &b, depthA - depthB)
@@ -3184,7 +3226,13 @@ TextStream& operator<<(TextStream& ts, const Node& node)
 
 NodeIdentifier Node::nodeIdentifier() const
 {
-    return nodeIdentifiersMap().ensure(const_cast<Node&>(*this), [&] {
+    auto& map = nodeIdentifiersMap();
+    if (hasStateFlag(StateFlag::HasNodeIdentifier)) {
+        auto iterator = map.find(this);
+        if (iterator != map.end())
+            return iterator->value;
+    }
+    return map.ensure(const_cast<Node&>(*this), [&] {
         setStateFlag(StateFlag::HasNodeIdentifier);
         return NodeIdentifier::generate();
     }).iterator->value;

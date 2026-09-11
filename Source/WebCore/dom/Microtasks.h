@@ -67,6 +67,10 @@ public:
 
     bool isPerformingCheckpoint() const { return m_performingMicrotaskCheckpoint; }
 
+#if defined(WEBKIT_IOS6)
+    bool ios6HasNoQueuedWork() const { return isEmpty() && m_checkpointTasks.isEmpty(); }
+#endif
+
 private:
     WEBCORE_EXPORT MicrotaskQueue(JSC::VM&, EventLoop&);
 

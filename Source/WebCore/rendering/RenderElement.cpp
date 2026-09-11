@@ -592,6 +592,12 @@ static void logStyleDifference(const RenderElement& renderer, const Style::Compu
 
 void RenderElement::setStyle(Style::ComputedStyle&& style, Style::DifferenceResult minimalStyleDifference)
 {
+#if defined(WEBKIT_IOS6)
+    if (g_webkitIOS6LayoutCounters) [[unlikely]] {
+        extern unsigned g_webkitIOS6StylesSet;
+        ++g_webkitIOS6StylesSet;
+    }
+#endif
     // FIXME: Should change RenderView so it can use initializeStyle too.
     // If we do that, we can assert m_hasInitializedStyle unconditionally,
     // and remove the check of m_hasInitializedStyle below too.

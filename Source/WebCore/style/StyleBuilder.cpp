@@ -373,25 +373,46 @@ void Builder::applyProperty(CSSPropertyID id, CSSValue& value, SelectorChecker::
 
     id = CSSProperty::resolveDirectionAwareProperty(id, style.writingMode());
 
-    auto valueToApply = resolveSubstitutionFunctions(id, value);
+#if defined(WEBKIT_IOS6)
+    RefPtr<CSSValue> substitutedValue;
+    if (value.hasSubstitutionFunctions()) [[unlikely]]
+        substitutedValue = resolveSubstitutionFunctions(id, value);
+    CSSValue& valueToApply = substitutedValue ? *substitutedValue : value;
+#else
+    auto valueToApplyRef = resolveSubstitutionFunctions(id, value);
+    CSSValue& valueToApply = valueToApplyRef.get();
+#endif
 
     if (m_state->positionTryFallback())
         id = AnchorPositionEvaluator::resolvePositionTryFallbackProperty(id, style.writingMode(), *m_state->positionTryFallback());
 
-    auto valueID = WebCore::valueID(valueToApply.get());
-    auto valueType = [&] {
-        if (valueID == CSSValueInherit)
-            return ApplyValueType::Inherit;
-        if (valueID == CSSValueInitial)
-            return ApplyValueType::Initial;
-        return ApplyValueType::Value;
-    }();
+    auto valueID = WebCore::valueID(valueToApply);
 
-    bool isUnset = valueID == CSSValueUnset;
-    bool isRevert = valueID == CSSValueRevert;
-    bool isRevertLayer = valueID == CSSValueRevertLayer;
-    bool isRevertRule = valueID == CSSValueRevertRule;
-    bool isAnyRevert = isRevert || isRevertLayer || isRevertRule;
+    // inherit, initial, unset, revert, revert-layer and revert-rule are the
+    // first six entries of the keyword table, so one range test decides whether
+    // any of the six comparisons below is worth making. A declaration that
+    // names a real value - which is nearly all of them - skips them.
+    bool isCSSWideKeyword = valueID >= CSSValueInherit && valueID <= CSSValueRevertRule;
+
+    auto valueType = ApplyValueType::Value;
+    bool isUnset = false;
+    bool isRevert = false;
+    bool isRevertLayer = false;
+    bool isRevertRule = false;
+    bool isAnyRevert = false;
+
+    if (isCSSWideKeyword) [[unlikely]] {
+        if (valueID == CSSValueInherit)
+            valueType = ApplyValueType::Inherit;
+        else if (valueID == CSSValueInitial)
+            valueType = ApplyValueType::Initial;
+
+        isUnset = valueID == CSSValueUnset;
+        isRevert = valueID == CSSValueRevert;
+        isRevertLayer = valueID == CSSValueRevertLayer;
+        isRevertRule = valueID == CSSValueRevertRule;
+        isAnyRevert = isRevert || isRevertLayer || isRevertRule;
+    }
 
     if (isAnyRevert) {
         // In @keyframes, 'revert-layer' and 'revert-rule' roll back the cascaded value to the author level.
@@ -439,7 +460,7 @@ void Builder::applyProperty(CSSPropertyID id, CSSValue& value, SelectorChecker::
     if (valueType == ApplyValueType::Inherit && !isInheritedProperty())
         style.setHasExplicitlyInheritedProperties();
 
-    if (RefPtr paintImageValue = dynamicDowncast<CSSPaintImageValue>(valueToApply.get())) {
+    if (RefPtr paintImageValue = dynamicDowncast<CSSPaintImageValue>(valueToApply)) {
         auto name = toStyle(paintImageValue->name(), m_state).value;
         if (RefPtr paintWorklet = const_cast<Document&>(m_state->document()).paintWorkletGlobalScopeForName(name)) {
             Locker locker { paintWorklet->paintDefinitionLock() };
@@ -451,11 +472,11 @@ void Builder::applyProperty(CSSPropertyID id, CSSValue& value, SelectorChecker::
     }
 
     if (id == CSSPropertySize && valueType == ApplyValueType::Value) [[unlikely]] {
-        applyPageSizeDescriptor(valueToApply.get());
+        applyPageSizeDescriptor(valueToApply);
         return;
     }
 
-    BuilderGenerated::applyProperty(id, m_state, valueToApply.get(), valueType);
+    BuilderGenerated::applyProperty(id, m_state, valueToApply, valueType);
 
     if (!isAnyRevert)
         m_state->disableNativeAppearanceIfNeeded(id, cascadeOrigin);
@@ -466,7 +487,7 @@ void Builder::applyProperty(CSSPropertyID id, CSSValue& value, SelectorChecker::
         // When this happens, the computed value is one of the following...
         // Otherwise: Either the property’s inherited value or its initial value depending on whether the property
         // is inherited or not, respectively, as if the property’s value had been specified as the unset keyword
-        BuilderGenerated::applyProperty(id, m_state, valueToApply.get(), unsetValueType());
+        BuilderGenerated::applyProperty(id, m_state, valueToApply, unsetValueType());
     }
 }
 

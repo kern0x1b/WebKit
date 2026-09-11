@@ -34,7 +34,11 @@ namespace WebCore {
 inline Node& RenderObject::nodeForNonAnonymous() const
 {
     ASSERT(!isAnonymous());
+#if defined(WEBKIT_IOS6)
+    return *m_node;
+#else
     return m_node.get();
+#endif
 }
 
 inline Node* RenderObject::nonPseudoNode() const
@@ -48,7 +52,11 @@ inline Node* RenderObject::node() const
 {
     if (isAnonymous())
         return nullptr;
+#if defined(WEBKIT_IOS6)
+    return m_node;
+#else
     return m_node.ptr();
+#endif
 }
 
 inline bool RenderObject::isBody() const { return node() && node()->hasTagName(HTMLNames::bodyTag); }

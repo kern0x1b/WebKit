@@ -271,9 +271,16 @@ public:
     enum class InMotion : bool { No, Yes };
     void updateTouchLastGlobalPositionAndDelta(PointerID, const DoublePoint&, InTouchEventHandling, InMotion);
     bool dispatchTouchEvent(const PlatformTouchEvent&, const AtomString&, const EventTargetTouchArrayMap&, float, float);
-    WEBCORE_EXPORT bool dispatchSimulatedTouchEvent(IntPoint location);
     Frame* touchEventTargetSubframe() const { return m_touchEventTargetSubframe.get(); }
     const TouchArray& touches() const LIFETIME_BOUND { return m_touches; }
+#endif
+#if ENABLE(IOS_TOUCH_EVENTS) || ENABLE(TOUCH_EVENTS)
+    // EventHandlerIOS.mm defines this either from Apple's private
+    // WebKitAdditions/EventHandlerIOSTouch.cpp (IOS_TOUCH_EVENTS) or, without
+    // it, from the portable dispatcher every other ENABLE(TOUCH_EVENTS) port
+    // already uses - see that file for the reasoning. Declared here on its own
+    // because the rest of this block above is genuinely IOS_TOUCH_EVENTS-only.
+    WEBCORE_EXPORT bool dispatchSimulatedTouchEvent(IntPoint location);
 #endif
 
 #if ENABLE(IOS_GESTURE_EVENTS)
@@ -344,7 +351,8 @@ public:
     WEBCORE_EXPORT bool wheelEvent(WebEvent *);
 #endif
 
-#if ENABLE(IOS_TOUCH_EVENTS)
+#if ENABLE(IOS_TOUCH_EVENTS) || ENABLE(TOUCH_EVENTS)
+    // Same as dispatchSimulatedTouchEvent above.
     WEBCORE_EXPORT void touchEvent(WebEvent *);
 #endif
 

@@ -277,7 +277,7 @@ DDScannerResult *Internals::fakeDataDetectorResultForTesting()
 
 RefPtr<SharedBuffer> Internals::pngDataForTesting()
 {
-    NSBundle *webCoreBundle = [NSBundle bundleForClass:NSClassFromString(@"WebCoreBundleFinder")];
+    NSBundle *webCoreBundle = [NSBundle bundleForClass:NSClassFromString(@IOS6_CLASS_NAME(WebCoreBundleFinder))];
     return SharedBuffer::createWithContentsOfFile([webCoreBundle pathForResource:@"missingImage" ofType:@"png"]);
 }
 

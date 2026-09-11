@@ -32,11 +32,23 @@
 
 #include <wtf/Platform.h>
 #if ENABLE(TOUCH_EVENTS) && PLATFORM(IOS_FAMILY)
+#if USE(APPLE_INTERNAL_SDK)
 // FIXME: Properly support using WKA in modules.
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wnon-modular-include-in-module"
 #include <WebKitAdditions/PlatformTouchEventIOS.h>
 #pragma clang diagnostic pop
+#else
+// This SDK has no WebKitAdditions overlay, and the type this file wants -
+// PlatformTouchEvent, for the MouseEvent::create() overload below that
+// synthesizes a mouse event from a touch - is the fully portable one GTK and
+// WPE already build with. The angle-bracket form matters here specifically:
+// this header is reached from WebKitLegacy (DOMMouseEvent.mm), a different
+// CMake target that only sees WebCore through its framework headers, not
+// through WebCore's own internal directories - see PlatformCocoa.cmake for
+// where platform/PlatformTouchEvent.h stops being stripped from that list.
+#include <WebCore/PlatformTouchEvent.h>
+#endif
 #endif
 
 namespace JSC {

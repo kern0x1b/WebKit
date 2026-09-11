@@ -66,16 +66,22 @@ ScopeRuleSets::~ScopeRuleSets()
     RELEASE_ASSERT(!m_isInvalidatingStyleWithRuleSets);
 }
 
+#if !defined(WEBKIT_IOS6)
 RuleSet* ScopeRuleSets::userAgentMediaQueryStyle() const
 {
     updateUserAgentMediaQueryStyleIfNeeded();
     return m_userAgentMediaQueryStyle.get();
 }
+#endif
 
 void ScopeRuleSets::updateUserAgentMediaQueryStyleIfNeeded() const
 {
     if (!UserAgentStyle::mediaQueryStyleSheet)
         return;
+
+#if defined(WEBKIT_IOS6)
+    m_userAgentMediaQueryStyleVersionOnUpdate = UserAgentStyle::defaultStyleVersion;
+#endif
 
     auto ruleCount = UserAgentStyle::mediaQueryStyleSheet->ruleCount();
     if (m_userAgentMediaQueryStyle && ruleCount == m_userAgentMediaQueryRuleCountOnUpdate)
@@ -96,12 +102,19 @@ RuleSet* ScopeRuleSets::dynamicViewTransitionsStyle() const
     return m_dynamicViewTransitionsStyle.get();
 }
 
+#if defined(WEBKIT_IOS6)
+RuleSet* ScopeRuleSets::sharedUserStyle() const
+{
+    return m_styleResolver.document().styleScope().resolver().ruleSets().userStyle();
+}
+#else
 RuleSet* ScopeRuleSets::userStyle() const
 {
     if (m_usesSharedUserStyle)
         return m_styleResolver.document().styleScope().resolver().ruleSets().userStyle();
     return m_userStyle.get();
 }
+#endif
 
 RuleSet* ScopeRuleSets::styleForDeclarationOrigin(DeclarationOrigin origin)
 {
@@ -269,9 +282,21 @@ void ScopeRuleSets::collectFeatures() const
     RELEASE_ASSERT(isMainThread());
     RELEASE_ASSERT(!m_isInvalidatingStyleWithRuleSets);
 
+#if defined(WEBKIT_IOS6)
+    if (m_userAgentFeatureBaseline.isValid && m_userAgentFeatureBaselineVersion == UserAgentStyle::defaultStyleVersion)
+        m_features.restoreBaseline(m_userAgentFeatureBaseline);
+    else {
+        m_features.clear();
+        if (UserAgentStyle::defaultStyle)
+            m_features.add(UserAgentStyle::defaultStyle->features());
+        m_features.recordBaseline(m_userAgentFeatureBaseline);
+        m_userAgentFeatureBaselineVersion = UserAgentStyle::defaultStyleVersion;
+    }
+#else
     m_features.clear();
     if (UserAgentStyle::defaultStyle)
         m_features.add(UserAgentStyle::defaultStyle->features());
+#endif
     m_defaultStyleVersionOnFeatureCollection = UserAgentStyle::defaultStyleVersion;
 
     if (RefPtr userAgentMediaQueryStyle = this->userAgentMediaQueryStyle())
@@ -342,6 +367,15 @@ static OptionSet<HasArgumentProperty> hasArgumentProperties(const CSSSelectorLis
 template<typename KeyType, typename Hash, typename HashTraits>
 static Vector<InvalidationRuleSet>* ensureInvalidationRuleSets(const KeyType& key, HashMap<KeyType, std::unique_ptr<Vector<InvalidationRuleSet>>, Hash, HashTraits>& ruleSetMap, const HashMap<KeyType, std::unique_ptr<RuleFeatureVector>, Hash, HashTraits>& ruleFeatures)
 {
+#if defined(WEBKIT_IOS6)
+    {
+        auto it = ruleSetMap.find(key);
+        if (it != ruleSetMap.end())
+            return it->value.get();
+        if (!ruleFeatures.get(key))
+            return nullptr;
+    }
+#endif
     return ruleSetMap.ensure(key, [&] () -> std::unique_ptr<Vector<InvalidationRuleSet>> {
         auto* features = ruleFeatures.get(key);
         if (!features)

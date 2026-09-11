@@ -1998,7 +1998,7 @@ static void appendStringToResult(NSMutableString *result, NSString *string)
     // This is needed to correctly calculate the screen position of the AX object.
     static Class webViewClass = nil;
     if (!webViewClass)
-        webViewClass = NSClassFromString(@"WebView");
+        webViewClass = NSClassFromString(@IOS6_CLASS_NAME(WebView));
     if (!webViewClass)
         return nil;
 

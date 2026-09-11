@@ -24,6 +24,11 @@
  */
 
 #import "config.h"
+#if defined(WEBKIT_IOS6)
+#define WEBKIT_IOS6_CONTENT_TYPE_KEY NSURLTypeIdentifierKey
+#else
+#define WEBKIT_IOS6_CONTENT_TYPE_KEY NSURLContentTypeKey
+#endif
 #import "File.h"
 
 #if ENABLE(FILE_REPLACEMENT)
@@ -51,7 +56,7 @@ bool File::shouldReplaceFile(const String& path)
     }
 
     UTType *uti;
-    if (![pathURL getResourceValue:&uti forKey:NSURLContentTypeKey error:&error]) {
+    if (![pathURL getResourceValue:&uti forKey:WEBKIT_IOS6_CONTENT_TYPE_KEY error:&error]) {
         LOG_ERROR("Failed to get type identifier of resource at URL %@ with error %@.\n", pathURL.get(), error);
         return false;
     }

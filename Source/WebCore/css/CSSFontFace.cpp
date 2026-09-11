@@ -582,6 +582,12 @@ auto CSSFontFace::fontLoadTiming() const -> FontLoadTiming
     case FontLoadTimingOverride::None:
         switch (m_loadingBehavior) {
         case FontLoadingBehavior::Auto:
+            // The block period for `font-display: auto` is up to the user agent (CSS Fonts 4 sec.
+            // 11.2). The usual choice of 3 s hides text that is already laid out and ready to paint;
+            // on a device where the whole load takes seconds that is the single longest stretch of
+            // deliberately blank screen there is. Behave as `swap`: paint the fallback immediately
+            // and swap when the web font arrives. An explicit `block` is still honoured below.
+            return { 0_s, Seconds::infinity() };
         case FontLoadingBehavior::Block:
             return { 3_s, Seconds::infinity() };
         case FontLoadingBehavior::Swap:

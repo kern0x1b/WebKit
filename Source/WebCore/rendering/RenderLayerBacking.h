@@ -75,6 +75,10 @@ class RenderLayerBacking final : public GraphicsLayerClient {
     WTF_MAKE_TZONE_ALLOCATED(RenderLayerBacking);
     WTF_MAKE_NONCOPYABLE(RenderLayerBacking);
 public:
+#if defined(WEBKIT_IOS6)
+    WebCore::LayoutRect viewportRectWhenPositioned() const { return m_viewportRectWhenPositioned; }
+#endif
+
     explicit RenderLayerBacking(RenderLayer&);
     ~RenderLayerBacking();
 
@@ -332,6 +336,9 @@ public:
     void purgeBackBufferForTesting();
     void markFrontBufferVolatileForTesting();
 private:
+#if defined(WEBKIT_IOS6)
+    LayoutRect m_viewportRectWhenPositioned;
+#endif
     friend class PaintedContentsInfo;
 
     FloatRect backgroundBoxForSimpleContainerPainting() const;

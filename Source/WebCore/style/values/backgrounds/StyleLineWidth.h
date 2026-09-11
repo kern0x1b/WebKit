@@ -74,12 +74,38 @@ template<> struct Blending<LineWidth> {
 
 // MARK: - Evaluation
 
+#if defined(WEBKIT_IOS6)
+
+WEBCORE_EXPORT float evaluateNonZeroLineWidth(const LineWidth&, ZoomFactor, float deviceScaleFactor);
+WEBCORE_EXPORT LayoutUnit evaluateNonZeroLineWidthAsLayoutUnit(const LineWidth&, ZoomFactor, float deviceScaleFactor);
+
+template<> struct Evaluation<LineWidth, float> {
+    ALWAYS_INLINE auto operator()(const LineWidth& value, ZoomFactor zoom, float deviceScaleFactor) -> float
+    {
+        if (value.isZero())
+            return 0;
+        return evaluateNonZeroLineWidth(value, zoom, deviceScaleFactor);
+    }
+};
+template<> struct Evaluation<LineWidth, LayoutUnit> {
+    ALWAYS_INLINE auto operator()(const LineWidth& value, ZoomFactor zoom, float deviceScaleFactor) -> LayoutUnit
+    {
+        if (value.isZero())
+            return LayoutUnit();
+        return evaluateNonZeroLineWidthAsLayoutUnit(value, zoom, deviceScaleFactor);
+    }
+};
+
+#else
+
 template<> struct Evaluation<LineWidth, float> {
     WEBCORE_EXPORT auto operator()(const LineWidth&, ZoomFactor, float deviceScaleFactor) -> float;
 };
 template<> struct Evaluation<LineWidth, LayoutUnit> {
     WEBCORE_EXPORT auto operator()(const LineWidth&, ZoomFactor, float deviceScaleFactor) -> LayoutUnit;
 };
+
+#endif
 
 template<> struct Evaluation<LineWidthBox, FloatBoxExtent> {
     auto operator()(const LineWidthBox&, ZoomFactor, float deviceScaleFactor) -> FloatBoxExtent;

@@ -533,7 +533,9 @@ bool RenderLayerScrollableArea::canUseCompositedScrolling() const
     if (renderer.settings().asyncOverflowScrollingEnabled())
         return isVisible && scrollsOverflow() && !m_layer.isInsideSVGForeignObject();
 
-#if PLATFORM(IOS_FAMILY) && ENABLE(WEBKIT_OVERFLOW_SCROLLING_CSS_PROPERTY)
+#if defined(WEBKIT_IOS6)
+    return isVisible && scrollsOverflow() && !m_layer.isInsideSVGForeignObject();
+#elif PLATFORM(IOS_FAMILY) && ENABLE(WEBKIT_OVERFLOW_SCROLLING_CSS_PROPERTY)
     return isVisible && scrollsOverflow() && renderer.style().overflowScrolling() == Style::WebkitOverflowScrolling::Touch;
 #else
     return false;

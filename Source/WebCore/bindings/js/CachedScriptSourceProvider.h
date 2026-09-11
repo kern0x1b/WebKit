@@ -29,6 +29,7 @@
 #include "CachedResourceHandle.h"
 #include "CachedScript.h"
 #include "CachedScriptFetcher.h"
+#include "ScriptBytecodeCache.h"
 #include <JavaScriptCore/SourceProvider.h>
 
 namespace WebCore {
@@ -50,6 +51,12 @@ public:
     unsigned hash() const final;
     StringView source() const final;
 
+    RefPtr<JSC::CachedBytecode> cachedBytecode() const final { return m_bytecodeCache.load(); }
+    void cacheBytecode(const JSC::BytecodeCacheGenerator& generator) const final { m_bytecodeCache.store(generator); }
+    void updateCache(const JSC::UnlinkedFunctionExecutable* executable, const JSC::SourceCode&, JSC::CodeSpecializationKind kind, const JSC::UnlinkedFunctionCodeBlock* codeBlock) const final { m_bytecodeCache.update(executable, kind, codeBlock); }
+    void commitCachedBytecode() const final { m_bytecodeCache.commit(); }
+    bool wantsBytecodeCache() const final { return ScriptBytecodeCache::singleton().isEnabled(); }
+
     JSC::CodeBlockHash codeBlockHashConcurrently(int startOffset, int endOffset, JSC::CodeSpecializationKind kind) override
     {
         // We cannot protect m_cachedScript here since this function gets called on the GC thread.
@@ -60,11 +67,13 @@ private:
     CachedScriptSourceProvider(CachedScript* cachedScript, JSC::SourceProviderSourceType sourceType, Ref<CachedScriptFetcher>&& scriptFetcher)
         : SourceProvider(JSC::SourceOrigin { cachedScript->response().url(), WTF::move(scriptFetcher) }, String(cachedScript->response().url().string()), cachedScript->response().isRedirected() ? String(cachedScript->url().string()) : String(), cachedScript->requiresPrivacyProtections() ? JSC::SourceTaintedOrigin::KnownTainted : JSC::SourceTaintedOrigin::Untainted, TextPosition(), sourceType)
         , m_cachedScript(cachedScript)
+        , m_bytecodeCache(*this)
     {
         cachedScript->addClient(*this);
     }
 
     const CachedResourceHandle<CachedScript> m_cachedScript;
+    mutable ScriptBytecodeCacheEntry m_bytecodeCache;
 };
 
 inline unsigned CachedScriptSourceProvider::hash() const

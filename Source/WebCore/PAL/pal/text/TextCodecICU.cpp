@@ -240,10 +240,22 @@ String TextCodecICU::decode(std::span<const uint8_t> source, bool flush, bool st
     int32_t* offsets = nullptr;
     UErrorCode err = U_ZERO_ERROR;
 
+#if defined(WEBKIT_IOS6)
+    size_t firstCount = decodeToBuffer(target, source, offsets, flush, err);
+    if (firstCount && !needsToGrowToProduceBuffer(err) && U_SUCCESS(err))
+        return StringImpl::create8BitIfPossible(target.first(firstCount));
+
+    result.append(target.first(firstCount));
+    while (needsToGrowToProduceBuffer(err)) {
+        size_t count = decodeToBuffer(target, source, offsets, flush, err);
+        result.append(target.first(count));
+    }
+#else
     do {
         size_t count = decodeToBuffer(target, source, offsets, flush, err);
         result.append(target.first(count));
     } while (needsToGrowToProduceBuffer(err));
+#endif
 
     if (U_FAILURE(err)) {
         // flush the converter so it can be reused, and not be bothered by this error.

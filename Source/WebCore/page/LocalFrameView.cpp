@@ -162,6 +162,11 @@
 #define FRAME_ID m_frame->frameID().toUInt64()
 #define FRAMEVIEW_RELEASE_LOG(channel, fmt, ...) RELEASE_LOG_FORWARDABLE(channel, fmt, PAGE_ID, FRAME_ID, m_frame->isMainFrame(), ##__VA_ARGS__)
 
+#if defined(WEBKIT_IOS6)
+extern "C" int g_webkitIOS6PendingDrawWork;
+extern "C" unsigned g_webkitIOS6PaintsRefusedForLayout;
+#endif
+
 namespace WebCore {
 
 using namespace HTMLNames;
@@ -3818,7 +3823,8 @@ void LocalFrameView::scrollPositionChanged(const ScrollPosition& oldPosition, co
         static_cast<Frame&>(m_frame).loaderClient().broadcastFrameScrollPositionToOtherProcesses(newPosition);
 }
 
-void LocalFrameView::applyRecursivelyWithVisibleRect(NOESCAPE const Function<void(LocalFrameView& frameView, const IntRect& visibleRect)>& apply)
+template<typename ApplyFunction>
+void LocalFrameView::applyRecursivelyWithVisibleRect(NOESCAPE const ApplyFunction& apply)
 {
     IntRect windowClipRect = this->windowClipRect();
     auto visibleRect = windowToContents(windowClipRect);
@@ -5475,6 +5481,8 @@ bool LocalFrameView::shouldSuspendScrollAnimations() const
 
 void LocalFrameView::notifyAllFramesThatContentAreaWillPaint() const
 {
+#if defined(WEBKIT_IOS6)
+#else
     notifyScrollableAreasThatContentAreaWillPaint();
 
     for (RefPtr child = m_frame->tree().firstRenderedChild(); child; child = child->tree().traverseNextRendered(m_frame.ptr())) {
@@ -5484,10 +5492,13 @@ void LocalFrameView::notifyAllFramesThatContentAreaWillPaint() const
         if (RefPtr frameView = localChild->view())
             frameView->notifyScrollableAreasThatContentAreaWillPaint();
     }
+#endif
 }
 
 void LocalFrameView::notifyScrollableAreasThatContentAreaWillPaint() const
 {
+#if defined(WEBKIT_IOS6)
+#else
     RefPtr page = m_frame->page();
     if (!page)
         return;
@@ -5499,10 +5510,10 @@ void LocalFrameView::notifyScrollableAreasThatContentAreaWillPaint() const
 
     for (CheckedRef area : *m_scrollableAreas) {
         CheckedPtr<ScrollableArea> scrollableArea(area);
-        // ScrollView ScrollableAreas will be handled via the Frame tree traversal above.
         if (!is<ScrollView>(scrollableArea))
             scrollableArea->contentAreaWillPaint();
     }
+#endif
 }
 
 void LocalFrameView::updateScrollCorner()
@@ -5851,6 +5862,15 @@ void LocalFrameView::paintContents(GraphicsContext& context, const IntRect& dirt
 
 void LocalFrameView::paintContents(GraphicsContext& context, const IntRect& dirtyRect, Node* subtreePaintRoot, SecurityOriginPaintPolicy securityOriginPaintPolicy, RegionContext* regionContext)
 {
+#if defined(WEBKIT_IOS6)
+    if (([]() { static const bool logPaintOnce = getenv("WEBKIT_IOS6_LOG_PAINT") != nullptr; return logPaintOnce; }())) {
+        fprintf(stderr, "[ios6 paint] paintContents %d,%d %dx%d transparent %d disabled %d base %s\n",
+            dirtyRect.x(), dirtyRect.y(), dirtyRect.width(), dirtyRect.height(),
+            isTransparent(), context.paintingDisabled(),
+            baseBackgroundColor().isOpaque() ? "opaque" : "not opaque");
+        fflush(stderr);
+    }
+#endif
 #ifndef NDEBUG
     bool fillWithWarningColor = [&] {
         if (m_frame->document()->printing())
@@ -5884,6 +5904,13 @@ void LocalFrameView::paintContents(GraphicsContext& context, const IntRect& dirt
         return;
     }
 
+#if defined(WEBKIT_IOS6)
+    if (!layoutContext().inPaintableState() || needsLayout()) {
+        ++g_webkitIOS6PaintsRefusedForLayout;
+        g_webkitIOS6PendingDrawWork = 1;
+        return;
+    }
+#else
     if (!layoutContext().inPaintableState())
         return;
 
@@ -5892,6 +5919,7 @@ void LocalFrameView::paintContents(GraphicsContext& context, const IntRect& dirt
         FRAMEVIEW_RELEASE_LOG(Layout, LocalFrameViewNotPaintingLayoutNeeded);
         return;
     }
+#endif
 
     PaintingState paintingState;
     willPaintContents(context, dirtyRect, paintingState, regionContext);
@@ -6125,7 +6153,7 @@ void LocalFrameView::checkAndDispatchDidReachVisuallyNonEmptyState()
             return true;
 
         // FIXME: We should also ignore renderers with non-final style.
-        if (document->styleScope().hasPendingSheetsBeforeBody())
+        if (document->styleScope().blocksRenderingBeforeBody())
             return false;
 
         auto finishedParsingMainDocument = m_frame->loader().stateMachine().committedFirstRealDocumentLoad()
@@ -6701,12 +6729,20 @@ bool LocalFrameView::updateFixedPositionLayoutRect()
     if (!page || !page->chrome().client().fetchCustomFixedPositionLayoutRect(newRect))
         return false;
 
-    if (newRect != m_customFixedPositionLayoutRect) {
-        m_customFixedPositionLayoutRect = newRect;
-        setViewportConstrainedObjectsNeedLayout();
-        return true;
-    }
-    return false;
+    if (newRect == m_customFixedPositionLayoutRect)
+        return false;
+
+#if defined(WEBKIT_IOS6)
+    bool onlyScrolled = newRect.size() == m_customFixedPositionLayoutRect.size();
+    m_customFixedPositionLayoutRect = newRect;
+    if (onlyScrolled)
+        return false;
+#else
+    m_customFixedPositionLayoutRect = newRect;
+#endif
+
+    setViewportConstrainedObjectsNeedLayout();
+    return true;
 }
 
 void LocalFrameView::setCustomSizeForResizeEvent(IntSize customSize)
@@ -6905,6 +6941,9 @@ static Vector<Ref<Widget>> collectAndProtectWidgets(const HashSet<SingleThreadWe
 void LocalFrameView::updateWidgetPositions()
 {
     m_updateWidgetPositionsTimer.stop();
+    // Building the protecting vector allocates and takes a ref per widget; a feed has none.
+    if (m_widgetsInRenderTree.isEmpty())
+        return;
     // updateWidgetPosition() can possibly cause layout to be re-entered (via plug-ins running
     // scripts in response to NPP_SetWindow, for example), so we need to keep the Widgets
     // alive during enumeration.

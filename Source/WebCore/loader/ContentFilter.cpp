@@ -72,6 +72,11 @@ Vector<ContentFilter::Type>& ContentFilter::types()
 
 RefPtr<ContentFilter> ContentFilter::create(ContentFilterClient& client, IsMainFrameLoad isMainFrameLoad)
 {
+#if defined(WEBKIT_IOS6)
+    UNUSED_PARAM(client);
+    UNUSED_PARAM(isMainFrameLoad);
+    return nullptr;
+#else
     PlatformContentFilter::FilterParameters params;
 #if HAVE(WEBCONTENTRESTRICTIONS)
     params = PlatformContentFilter::FilterParameters {
@@ -92,6 +97,7 @@ RefPtr<ContentFilter> ContentFilter::create(ContentFilterClient& client, IsMainF
         return nullptr;
 
     return adoptRef(*new ContentFilter(WTF::move(filters), client));
+#endif
 }
 
 ContentFilter::ContentFilter(Container&& contentFilters, ContentFilterClient& client)

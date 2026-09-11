@@ -111,7 +111,9 @@ static_assert(sizeof(RuleFeature) <= 32, "RuleFeature is a frequently allocated 
 
 using PseudoClassInvalidationKey = std::tuple<unsigned, uint8_t, AtomString>;
 
-using RuleFeatureVector = Vector<RuleFeature>;
+// Nearly every key holds one or two features; growing from 4 rather than from the default minimum of
+// 16 keeps the buckets close to their final size, so shrinkToFit() has almost nothing left to copy.
+using RuleFeatureVector = Vector<RuleFeature, 0, WTF::CrashOnOverflow, 4>;
 
 struct SelectorDeduplicationKey {
     SelectorDeduplicationKey(const CSSSelector&);
@@ -123,10 +125,16 @@ struct SelectorDeduplicationKey {
     bool operator==(const SelectorDeduplicationKey&) const;
 };
 
+struct RuleFeatureBaseline;
+
 struct RuleFeatureSet {
     void add(const RuleFeatureSet&);
     void clear();
     void shrinkToFit();
+#if defined(WEBKIT_IOS6)
+    void recordBaseline(RuleFeatureBaseline&) const;
+    void restoreBaseline(const RuleFeatureBaseline&);
+#endif
 
     struct CollectionContext {
         HashSet<GenericHashKey<SelectorDeduplicationKey>> selectorDeduplicationSet;
@@ -169,10 +177,12 @@ private:
     struct SelectorFeatures {
         using InvalidationFeature = std::tuple<const CSSSelector*, MatchElement, IsNegation, Vector<const CSSSelector*>>;
 
-        Vector<InvalidationFeature> ids;
-        Vector<InvalidationFeature> classes;
-        Vector<InvalidationFeature> attributes;
-        Vector<InvalidationFeature> pseudoClasses;
+        // This is rebuilt for every rule in every sheet. Inline storage keeps the common rule from
+        // hitting the allocator at all; the default heap vector allocates 16 entries on first append.
+        Vector<InvalidationFeature, 2> ids;
+        Vector<InvalidationFeature, 4> classes;
+        Vector<InvalidationFeature, 2> attributes;
+        Vector<InvalidationFeature, 4> pseudoClasses;
         Vector<InvalidationFeature> hasPseudoClasses;
     };
     struct RecursiveCollectionContext;
@@ -180,6 +190,33 @@ private:
     void recursivelyCollectFeaturesFromSelector(SelectorFeatures&, const CSSSelector&, const RecursiveCollectionContext&);
     void NODELETE collectPseudoElementFeatures(const RuleData&);
 };
+
+#if defined(WEBKIT_IOS6)
+struct RuleFeatureBaseline {
+    bool isValid { false };
+
+    HashSet<AtomString> idsInRules;
+    HashSet<AtomString> idsMatchingAncestorsInRules;
+    HashSet<AtomString> attributeLowercaseLocalNamesInRules;
+    HashSet<AtomString> attributeLocalNamesInRules;
+    HashMap<AtomString, RuleFeatureSet::AffectsShadowTree> substitutionAttributeNamesInRules;
+
+    HashMap<AtomString, unsigned> idRuleSizes;
+    HashMap<AtomString, unsigned> classRuleSizes;
+    HashMap<AtomString, unsigned> attributeRuleSizes;
+    HashMap<PseudoClassInvalidationKey, unsigned> pseudoClassRuleSizes;
+    HashMap<PseudoClassInvalidationKey, unsigned> hasPseudoClassRuleSizes;
+
+    HashSet<AtomString> classesAffectingHost;
+    HashSet<AtomString> attributesAffectingHost;
+    HashSet<CSSSelector::PseudoClass, IntHash<CSSSelector::PseudoClass>, WTF::StrongEnumHashTraits<CSSSelector::PseudoClass>> pseudoClassesAffectingHost;
+    HashSet<CSSSelector::PseudoClass, IntHash<CSSSelector::PseudoClass>, WTF::StrongEnumHashTraits<CSSSelector::PseudoClass>> pseudoClasses;
+
+    bool usesFirstLineRules { false };
+    bool usesFirstLetterRules { false };
+    bool hasStartingStyleRules { false };
+};
+#endif
 
 MatchElement::HasRelation computeHasArgumentRelation(const CSSSelector&);
 

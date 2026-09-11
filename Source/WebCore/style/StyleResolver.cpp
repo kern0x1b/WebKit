@@ -123,7 +123,8 @@ public:
 
         auto& document = element.document();
         auto* documentElement = document.documentElement();
-        if (!documentElement || documentElement == &element)
+        m_isDocumentElement = documentElement == &element;
+        if (!documentElement || m_isDocumentElement)
             m_rootElementStyle = document.initialContainingBlockStyle();
         else if (documentElementStyle)
             m_rootElementStyle = documentElementStyle;
@@ -134,6 +135,7 @@ public:
     }
 
     const Element* NODELETE element() const { return m_element; }
+    bool isDocumentElement() const { return m_isDocumentElement; }
 
     void setStyle(std::unique_ptr<Style::ComputedStyle> style) { m_style = WTF::move(style); }
     Style::ComputedStyle* NODELETE style() const { return m_style.get(); }
@@ -147,7 +149,7 @@ public:
     const Style::ComputedStyle* NODELETE parentStyle() const { return m_parentStyle; }
     const Style::ComputedStyle* NODELETE rootElementStyle() const { return m_rootElementStyle; }
 
-    CheckedPtr<TreeResolutionState> NODELETE treeResolutionState() { return m_treeResolutionState; }
+    TreeResolutionState* NODELETE treeResolutionState() const { return m_treeResolutionState; }
 
 private:
     const Element* m_element { };
@@ -156,7 +158,8 @@ private:
     std::unique_ptr<const Style::ComputedStyle> m_ownedParentStyle;
     const Style::ComputedStyle* m_rootElementStyle { };
 
-    CheckedPtr<TreeResolutionState> m_treeResolutionState;
+    TreeResolutionState* m_treeResolutionState { };
+    bool m_isDocumentElement { false };
 };
 
 Ref<Resolver> Resolver::create(Document& document, ScopeType scopeType)
@@ -253,7 +256,7 @@ auto Resolver::initializeStateAndStyle(const Element& element, const ResolutionC
         state.setStyle(WTF::move(initialStyle));
     else if (state.parentStyle()) {
         state.setStyle(Style::ComputedStyle::createPtrWithRegisteredInitialValues(document().customPropertyRegistry()));
-        if (&element == document().documentElement() && !context.isSVGUseTreeRoot) {
+        if (state.isDocumentElement() && !context.isSVGUseTreeRoot) {
             // Initial values for custom properties are inserted to the document element style. Don't overwrite them.
             state.style()->inheritIgnoringCustomPropertiesFrom(*state.parentStyle());
         } else
@@ -307,7 +310,10 @@ UnadjustedStyle Resolver::unadjustedStyleForElement(Element& element, const Reso
     if (collector.matchedPseudoElements())
         style.setHasPseudoStyles(collector.matchedPseudoElements());
 
-    auto elementStyleRelations = commitRelationsToRenderStyle(style, element, collector.styleRelations());
+    // With no relations the callee walks nothing and returns null, so skip the out-of-line call.
+    std::unique_ptr<Relations> elementStyleRelations;
+    if (!collector.styleRelations().isEmpty())
+        elementStyleRelations = commitRelationsToRenderStyle(style, element, collector.styleRelations());
 
     applyMatchedProperties(state, collector.matchResult(), PropertyCascade::normalProperties());
 
@@ -651,8 +657,6 @@ Vector<Ref<const StyleRule>> Resolver::pseudoStyleRulesForElement(const Element*
     if (!element)
         return { };
 
-    auto state = State(*element, nullptr, nullptr, nullptr);
-
     ElementRuleCollector collector(*element, m_ruleSets, nullptr, SelectorChecker::Mode::CollectingRules);
     if (pseudoElementIdentifier)
         collector.setPseudoElementRequest(*pseudoElementIdentifier);
@@ -688,13 +692,15 @@ void Resolver::applyMatchedProperties(State& state, const MatchResult& matchResu
 {
     auto& style = *state.style();
     auto& parentStyle = *state.parentStyle();
-    Ref element = *state.element();
+    auto& element = *state.element();
 
-    unsigned cacheHash = MatchedDeclarationsCache::computeHash(matchResult, parentStyle.inheritedCustomProperties());
+    auto& parentInheritedCustomProperties = parentStyle.inheritedCustomProperties();
 
-    auto cacheResult = m_matchedDeclarationsCache.find(cacheHash, matchResult, parentStyle.inheritedCustomProperties(), parentStyle);
+    unsigned cacheHash = MatchedDeclarationsCache::computeHash(matchResult, parentInheritedCustomProperties);
 
-    auto hasUsableEntry = cacheResult && MatchedDeclarationsCache::isCacheable(element.get(), style, parentStyle);
+    auto cacheResult = m_matchedDeclarationsCache.find(cacheHash, matchResult, parentInheritedCustomProperties, parentStyle);
+
+    auto hasUsableEntry = cacheResult && MatchedDeclarationsCache::isCacheable(element, style, parentStyle);
     if (hasUsableEntry) {
         auto& cacheEntry = cacheResult->entry;
         bool inheritedEqual = cacheResult->inheritedEqual;
@@ -756,17 +762,23 @@ void Resolver::applyMatchedProperties(State& state, const MatchResult& matchResu
 void Resolver::setGlobalStateAfterApplyingProperties(const BuilderState& builderState)
 {
     // FIXME: This stuff should be somewhere else.
-    auto* currentScope = builderState.element() ? &Scope::forNode(*builderState.element()) : nullptr;
-    for (auto& entry : builderState.registeredSubstitutionAttributes()) {
-        ruleSets().mutableFeatures().registerSubstitutionAttribute(entry.name);
-        // For attr() applied to a pseudo-element, the originating element's scope may be
-        // different from this resolver's (e.g. ::placeholder styled in a UA shadow scope, with
-        // the originating <input> in the document scope). Register there too so attribute
-        // changes on the originating element trigger AttributeChangeInvalidation; mark the entry
-        // as shadow-tree-affecting on the originating scope so we only invalidate the host's
-        // shadow subtree when a shadow-piercing rule is the source of the dependency.
-        if (CheckedPtr targetScope = entry.targetScope.get(); targetScope && targetScope.get() != currentScope)
-            const_cast<Scope&>(*targetScope).resolver().ruleSets().mutableFeatures().registerSubstitutionAttribute(entry.name, RuleFeatureSet::AffectsShadowTree::Yes);
+    // Scope::forNode() walks to the containing shadow root; only elements that actually used attr()
+    // have anything to register, so nothing below is reachable for the overwhelming majority.
+    auto& registeredSubstitutionAttributes = builderState.registeredSubstitutionAttributes();
+    if (!registeredSubstitutionAttributes.isEmpty()) [[unlikely]] {
+        auto* currentScope = builderState.element() ? &Scope::forNode(*builderState.element()) : nullptr;
+        auto& features = ruleSets().mutableFeatures();
+        for (auto& entry : registeredSubstitutionAttributes) {
+            features.registerSubstitutionAttribute(entry.name);
+            // For attr() applied to a pseudo-element, the originating element's scope may be
+            // different from this resolver's (e.g. ::placeholder styled in a UA shadow scope, with
+            // the originating <input> in the document scope). Register there too so attribute
+            // changes on the originating element trigger AttributeChangeInvalidation; mark the entry
+            // as shadow-tree-affecting on the originating scope so we only invalidate the host's
+            // shadow subtree when a shadow-piercing rule is the source of the dependency.
+            if (const Scope* targetScope = entry.targetScope.get(); targetScope && targetScope != currentScope)
+                const_cast<Scope&>(*targetScope).resolver().ruleSets().mutableFeatures().registerSubstitutionAttribute(entry.name, RuleFeatureSet::AffectsShadowTree::Yes);
+        }
     }
     if (builderState.style().usesViewportUnits())
         document().setHasStyleWithViewportUnits();

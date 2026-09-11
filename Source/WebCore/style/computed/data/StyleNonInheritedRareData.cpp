@@ -266,19 +266,84 @@ NonInheritedRareData::~NonInheritedRareData() = default;
 
 bool NonInheritedRareData::operator==(const NonInheritedRareData& o) const
 {
-    return containIntrinsicWidth == o.containIntrinsicWidth
+    unsigned packedDelta = (blockStepAlign ^ o.blockStepAlign)
+        | (blockStepInsert ^ o.blockStepInsert)
+        | (blockStepRound ^ o.blockStepRound)
+        | (spatial ^ o.spatial)
+        | (overscrollBehaviorX ^ o.overscrollBehaviorX)
+        | (overscrollBehaviorY ^ o.overscrollBehaviorY)
+        | (transformStyle3D ^ o.transformStyle3D)
+        | (transformStyleForcedToFlat ^ o.transformStyleForcedToFlat)
+        | (backfaceVisibility ^ o.backfaceVisibility)
+        | (scrollBehavior ^ o.scrollBehavior)
+        | (textDecorationStyle ^ o.textDecorationStyle)
+        | (textGroupAlign ^ o.textGroupAlign)
+        | (contentVisibility ^ o.contentVisibility)
+        | (effectiveBlendMode ^ o.effectiveBlendMode)
+        | (isolation ^ o.isolation)
+        | (inputSecurity ^ o.inputSecurity)
+#if ENABLE(APPLE_PAY)
+        | (applePayButtonStyle ^ o.applePayButtonStyle)
+        | (applePayButtonType ^ o.applePayButtonType)
+#endif
+        | (breakBefore ^ o.breakBefore)
+        | (breakAfter ^ o.breakAfter)
+        | (breakInside ^ o.breakInside)
+        | (textBoxTrim ^ o.textBoxTrim)
+        | (overflowAnchor ^ o.overflowAnchor)
+        | (positionTryOrder ^ o.positionTryOrder)
+        | (positionVisibility ^ o.positionVisibility)
+        | (fieldSizing ^ o.fieldSizing)
+        | (wrapInside ^ o.wrapInside)
+        | (nativeAppearanceDisabled ^ o.nativeAppearanceDisabled)
+#if HAVE(CORE_MATERIAL)
+        | (appleVisualEffect ^ o.appleVisualEffect)
+#endif
+        | (scrollbarWidth ^ o.scrollbarWidth)
+        | (usesAnchorFunctions ^ o.usesAnchorFunctions)
+        | (anchorFunctionScrollCompensatedAxes ^ o.anchorFunctionScrollCompensatedAxes)
+        | (isPopoverInvoker ^ o.isPopoverInvoker)
+        | (useSVGZoomRulesForLength ^ o.useSVGZoomRulesForLength)
+        | (marginTrim ^ o.marginTrim)
+        | (contain ^ o.contain)
+        | (overflowContinue ^ o.overflowContinue)
+        | (scrollSnapStop ^ o.scrollSnapStop)
+        | (whiteSpaceTrim ^ o.whiteSpaceTrim);
+    if (packedDelta)
+        return false;
+
+    return marquee == o.marquee
+        && backdropFilter == o.backdropFilter
+        && grid == o.grid
+        && gridItem == o.gridItem
+        && maskBorder == o.maskBorder
+        && customProperties == o.customProperties
+        && containIntrinsicWidth == o.containIntrinsicWidth
         && containIntrinsicHeight == o.containIntrinsicHeight
         && lineClamp == o.lineClamp
         && zoom == o.zoom
         && maxLines == o.maxLines
         && touchAction == o.touchAction
         && initialLetter == o.initialLetter
-        && marquee == o.marquee
-        && backdropFilter == o.backdropFilter
-        && grid == o.grid
-        && gridItem == o.gridItem
-        && maskBorder == o.maskBorder
         && clip == o.clip
+        && blockStepSize == o.blockStepSize
+        && shapeMargin == o.shapeMargin
+        && shapeImageThreshold == o.shapeImageThreshold
+        && perspective == o.perspective
+        && perspectiveOrigin == o.perspectiveOrigin
+        && columnGap == o.columnGap
+        && rowGap == o.rowGap
+        && offsetDistance == o.offsetDistance
+        && offsetRotate == o.offsetRotate
+        && textDecorationThickness == o.textDecorationThickness
+        && textDecorationInset == o.textDecorationInset
+        && scrollbarGutter == o.scrollbarGutter
+        && containerType == o.containerType
+        && scrollSnapType == o.scrollSnapType
+        && scrollSnapAlign == o.scrollSnapAlign
+        && usedPositionOptionIndex == o.usedPositionOptionIndex
+        && overflowClipMargin == o.overflowClipMargin
+        && textDecorationColor == o.textDecorationColor
         && scrollMargin == o.scrollMargin
         && scrollPadding == o.scrollPadding
         && counterIncrement == o.counterIncrement
@@ -289,90 +354,28 @@ bool NonInheritedRareData::operator==(const NonInheritedRareData& o) const
         && boxReflect == o.boxReflect
         && pageSize == o.pageSize
         && shapeOutside == o.shapeOutside
-        && shapeMargin == o.shapeMargin
-        && shapeImageThreshold == o.shapeImageThreshold
-        && perspective == o.perspective
-        && perspectiveOrigin == o.perspectiveOrigin
         && clipPath == o.clipPath
-        && textDecorationColor == o.textDecorationColor
-        && customProperties == o.customProperties
         && customPaintWatchedProperties == o.customPaintWatchedProperties
         && rotate == o.rotate
         && scale == o.scale
         && translate == o.translate
         && containerNames == o.containerNames
-        && columnGap == o.columnGap
-        && rowGap == o.rowGap
+        && viewTransitionClasses == o.viewTransitionClasses
+        && viewTransitionName == o.viewTransitionName
         && offsetPath == o.offsetPath
-        && offsetDistance == o.offsetDistance
         && offsetPosition == o.offsetPosition
         && offsetAnchor == o.offsetAnchor
-        && offsetRotate == o.offsetRotate
-        && textDecorationThickness == o.textDecorationThickness
-        && textDecorationInset == o.textDecorationInset
         && scrollTimelines == o.scrollTimelines
         && viewTimelines == o.viewTimelines
         && timelineScope == o.timelineScope
         && triggerScope == o.triggerScope
         && timelineTriggers == o.timelineTriggers
-        && scrollbarGutter == o.scrollbarGutter
-        && containerType == o.containerType
-        && scrollSnapType == o.scrollSnapType
-        && scrollSnapAlign == o.scrollSnapAlign
         && pseudoElementNameArgument == o.pseudoElementNameArgument
         && anchorNames == o.anchorNames
         && anchorScope == o.anchorScope
         && positionAnchor == o.positionAnchor
         && positionArea == o.positionArea
-        && positionTryFallbacks == o.positionTryFallbacks
-        && usedPositionOptionIndex == o.usedPositionOptionIndex
-        && overflowClipMargin == o.overflowClipMargin
-        && blockStepSize == o.blockStepSize
-        && blockStepAlign == o.blockStepAlign
-        && blockStepInsert == o.blockStepInsert
-        && blockStepRound == o.blockStepRound
-        && spatial == o.spatial
-        && overscrollBehaviorX == o.overscrollBehaviorX
-        && overscrollBehaviorY == o.overscrollBehaviorY
-        && transformStyle3D == o.transformStyle3D
-        && transformStyleForcedToFlat == o.transformStyleForcedToFlat
-        && backfaceVisibility == o.backfaceVisibility
-        && scrollBehavior == o.scrollBehavior
-        && textDecorationStyle == o.textDecorationStyle
-        && textGroupAlign == o.textGroupAlign
-        && effectiveBlendMode == o.effectiveBlendMode
-        && isolation == o.isolation
-        && inputSecurity == o.inputSecurity
-#if ENABLE(APPLE_PAY)
-        && applePayButtonStyle == o.applePayButtonStyle
-        && applePayButtonType == o.applePayButtonType
-#endif
-        && contentVisibility == o.contentVisibility
-        && breakAfter == o.breakAfter
-        && breakBefore == o.breakBefore
-        && breakInside == o.breakInside
-        && textBoxTrim == o.textBoxTrim
-        && overflowAnchor == o.overflowAnchor
-        && viewTransitionClasses == o.viewTransitionClasses
-        && viewTransitionName == o.viewTransitionName
-        && positionTryOrder == o.positionTryOrder
-        && positionVisibility == o.positionVisibility
-        && fieldSizing == o.fieldSizing
-        && wrapInside == o.wrapInside
-        && nativeAppearanceDisabled == o.nativeAppearanceDisabled
-#if HAVE(CORE_MATERIAL)
-        && appleVisualEffect == o.appleVisualEffect
-#endif
-        && scrollbarWidth == o.scrollbarWidth
-        && usesAnchorFunctions == o.usesAnchorFunctions
-        && anchorFunctionScrollCompensatedAxes == o.anchorFunctionScrollCompensatedAxes
-        && isPopoverInvoker == o.isPopoverInvoker
-        && useSVGZoomRulesForLength == o.useSVGZoomRulesForLength
-        && marginTrim == o.marginTrim
-        && contain == o.contain
-        && overflowContinue == o.overflowContinue
-        && scrollSnapStop == o.scrollSnapStop
-        && whiteSpaceTrim == o.whiteSpaceTrim;
+        && positionTryFallbacks == o.positionTryFallbacks;
 }
 
 Contain NonInheritedRareData::usedContain() const

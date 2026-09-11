@@ -67,6 +67,12 @@ Vector<FloatPoint> convertCornerPoints(const FloatSize& imageSize, VNRectangleOb
     return { topLeft, topRight, bottomRight, bottomLeft };
 }
 
+#if defined(WEBKIT_IOS6)
+void configureRequestToUseCPUOrGPU(VNRequest *request)
+{
+    UNUSED_PARAM(request);
+}
+#else
 void configureRequestToUseCPUOrGPU(VNRequest *request)
 {
     NSError *error = nil;
@@ -77,7 +83,6 @@ void configureRequestToUseCPUOrGPU(VNRequest *request)
     for (VNComputeStage computeStage in supportedComputeStageDevices.get()) {
         bool set = false;
         for (id<MLComputeDeviceProtocol> device in supportedComputeStageDevices.get()[computeStage]) {
-            // FIXME: This is a safer cpp false positive (rdar://160259918).
             SUPPRESS_UNRETAINED_ARG if ([device isKindOfClass:PAL::getMLGPUComputeDeviceClassSingleton()]) {
                 [request setComputeDevice:device forComputeStage:computeStage];
                 set = true;
@@ -86,7 +91,6 @@ void configureRequestToUseCPUOrGPU(VNRequest *request)
         }
         if (!set) {
             for (id<MLComputeDeviceProtocol> device in supportedComputeStageDevices.get()[computeStage]) {
-                // FIXME: This is a safer cpp false positive (rdar://160259918).
                 SUPPRESS_UNRETAINED_ARG if ([device isKindOfClass:PAL::getMLGPUComputeDeviceClassSingleton()]) {
                     [request setComputeDevice:device forComputeStage:computeStage];
                     break;
@@ -95,6 +99,7 @@ void configureRequestToUseCPUOrGPU(VNRequest *request)
         }
     }
 }
+#endif
 
 } // namespace WebCore::ShapeDetection
 

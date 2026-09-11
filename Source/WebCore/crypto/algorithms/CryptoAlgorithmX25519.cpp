@@ -58,7 +58,11 @@ void CryptoAlgorithmX25519::generateKey(const CryptoAlgorithmParameters&, bool e
     callback(WTF::move(pair));
 }
 
-#if !PLATFORM(COCOA) && !USE(GCRYPT)
+/* The generic answer, for a port with neither the Cocoa nor the GCrypt backend.
+   This port is Darwin but uses the OpenSSL backend, which has no OKP keys, so it
+   needs this one: it reports the curves as unsupported, which is honest, and the
+   OpenSSL registry does not offer Ed25519 or X25519 at all. */
+#if (!PLATFORM(COCOA) || USE(OPENSSL)) && !USE(GCRYPT)
 std::optional<Vector<uint8_t>> CryptoAlgorithmX25519::platformDeriveBits(const CryptoKeyOKP&, const CryptoKeyOKP&)
 {
     return std::nullopt;

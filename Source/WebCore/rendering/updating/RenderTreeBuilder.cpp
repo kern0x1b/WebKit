@@ -256,6 +256,9 @@ void RenderTreeBuilder::destroy(RenderObject& renderer, CanCollapseAnonymousBloc
             rendererToDelete->willBeDestroyed();
             rendererToDelete->setIsBeingDestroyed();
             rendererToDelete->weakPtrFactory().revokeAll();
+#if defined(WEBKIT_IOS6)
+            rendererToDelete->clearNodeForDetachedDestruction();
+#endif
         }
     };
     delayDestroyRendererIfApplicable();

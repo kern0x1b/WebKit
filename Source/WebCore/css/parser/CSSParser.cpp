@@ -87,11 +87,21 @@
 #include <bitset>
 #include <memory>
 #include <optional>
+#include <wtf/NeverDestroyed.h>
 #include <wtf/StdLibExtras.h>
 
 namespace WebCore {
 
 static constexpr auto maximumRuleListNestingLevel = 128;
+
+// Returning a reference avoids copying the whole HashMap once per declaration.
+static const CSSNamespacePrefixMap& namespacePrefixMapFor(StyleSheetContents* styleSheet)
+{
+    if (styleSheet)
+        return styleSheet->namespacePrefixMap();
+    static NeverDestroyed<CSSNamespacePrefixMap> emptyMap;
+    return emptyMap.get();
+}
 
 CSSParser::~CSSParser() = default;
 
@@ -202,18 +212,19 @@ bool CSSParser::parseDeclarationList(MutableStyleProperties& declaration, const 
     CSSParser parser(context, string);
     auto ruleType = context.enclosingRuleType.value_or(StyleRuleType::Style);
     parser.consumeDeclarationList(parser.tokenizer()->tokenRange(), ruleType);
-    if (parser.topContext().m_parsedProperties.isEmpty())
+    auto& parsedProperties = parser.topContext().m_parsedProperties;
+    if (parsedProperties.isEmpty())
         return false;
 
     std::bitset<numCSSProperties> seenProperties;
-    size_t unusedEntries = parser.topContext().m_parsedProperties.size();
+    size_t unusedEntries = parsedProperties.size();
     ParsedPropertyVector results(unusedEntries);
     HashSet<AtomString> seenCustomProperties;
-    filterProperties(IsImportant::Yes, parser.topContext().m_parsedProperties, results, unusedEntries, seenProperties, seenCustomProperties);
-    filterProperties(IsImportant::No, parser.topContext().m_parsedProperties, results, unusedEntries, seenProperties, seenCustomProperties);
-    if (unusedEntries)
-        results.removeAt(0, unusedEntries);
-    return declaration.addParsedProperties(results);
+    filterProperties(IsImportant::Yes, parsedProperties, results, unusedEntries, seenProperties, seenCustomProperties);
+    filterProperties(IsImportant::No, parsedProperties, results, unusedEntries, seenProperties, seenCustomProperties);
+    // The survivors sit at the tail of the vector. Hand over a subspan instead of memmoving them
+    // down to index zero, the same way createStyleProperties() does.
+    return declaration.addParsedProperties(results.subspan(unusedEntries));
 }
 
 RefPtr<StyleRuleBase> CSSParser::parseRule(const String& string, const CSSParserContext& context, StyleSheetContents* styleSheet, AllowedRules allowedRules, CSSParserEnum::NestedContext nestedContext)
@@ -509,23 +520,29 @@ RefPtr<StyleRuleBase> CSSParser::consumeQualifiedRule(CSSParserTokenRange& range
 {
     const auto initialRange = range;
 
-    auto isNestedStyleRule = [&] {
-        return hasStyleRuleAncestor() && allowedRules <= AllowedRules::RegularRules;
-    };
+    // hasStyleRuleAncestor() scans the ancestor stack and neither operand changes while the
+    // prelude is consumed, so resolve it once instead of per prelude token.
+    const bool isNestedStyleRule = hasStyleRuleAncestor() && allowedRules <= AllowedRules::RegularRules;
 
     auto preludeStart = range;
 
     // Parsing a selector (aka a component value) should stop at the first semicolon (and goes to error recovery)
     // instead of consuming the whole list of declarations (in nested context).
     // At top level (aka non nested context), it's the normal rule list error recovery and we don't need this.
-    while (!range.atEnd() && range.peek().type() != LeftBraceToken && (!isNestedStyleRule() || range.peek().type() != SemicolonToken))
+    while (!range.atEnd()) {
+        auto tokenType = range.peek().type();
+        if (tokenType == LeftBraceToken)
+            break;
+        if (isNestedStyleRule && tokenType == SemicolonToken)
+            break;
         range.consumeComponentValue();
+    }
 
     if (range.atEnd())
         return { }; // Parse error, EOF instead of qualified rule block
 
     // See comment above
-    if (isNestedStyleRule() && range.peek().type() == SemicolonToken) {
+    if (isNestedStyleRule && range.peek().type() == SemicolonToken) {
         range.consume();
         return { };
     }
@@ -948,8 +965,8 @@ RefPtr<StyleRuleFontPaletteValues> CSSParser::consumeFontPaletteValuesRule(CSSPa
         if (!cssFontFamily)
             return fontFamilies;
         if (RefPtr families = dynamicDowncast<CSSValueList>(*cssFontFamily)) {
-            for (Ref item : *families)
-                append(item.get());
+            for (auto& item : *families)
+                append(item);
             return fontFamilies;
         }
         append(*cssFontFamily);
@@ -1708,8 +1725,12 @@ void CSSParser::consumeBlockContent(CSSParserTokenRange range, StyleRuleType rul
         }
     }
 
-    // Store trailing declarations if any
-    storeDeclarations();
+    // Store trailing declarations if any.
+    // When no nested rule split the block there is nothing to store: storeDeclarations() would
+    // allocate an initial block, swap the properties into it, and the restore below would swap
+    // them straight back. Skipping that saves a ~2KB allocation per style rule.
+    if (initialDeclarationBlock || ruleType == StyleRuleType::Function)
+        storeDeclarations();
 
     // Restore the initial declaration block
     if (initialDeclarationBlock)
@@ -1810,9 +1831,11 @@ bool CSSParser::consumeDeclaration(CSSParserTokenRange range, StyleRuleType rule
     if (important == IsImportant::Yes && ruleDoesNotAllowImportant(ruleType))
         return false;
 
-    const size_t oldPropertiesCount = topContext().m_parsedProperties.size();
+    // Nothing below pushes a nesting context, so this reference stays valid for the whole function.
+    auto& parsedProperties = topContext().m_parsedProperties;
+    const size_t oldPropertiesCount = parsedProperties.size();
     auto didParseNewProperties = [&] {
-        return topContext().m_parsedProperties.size() != oldPropertiesCount;
+        return parsedProperties.size() != oldPropertiesCount;
     };
 
     if (!isExposed(propertyID, &m_context.propertySettings))
@@ -1843,7 +1866,7 @@ void CSSParser::consumeCustomPropertyValue(CSSParserTokenRange range, const Atom
     if (range.atEnd())
         topContext().m_parsedProperties.append(CSSProperty(CSSPropertyCustom, CSSCustomPropertyValue::createEmpty(variableName), important));
     else {
-        auto namespaceMap = m_styleSheet ? m_styleSheet->namespacePrefixMap() : CSSNamespacePrefixMap { };
+        auto& namespaceMap = namespacePrefixMapFor(m_styleSheet.get());
         if (auto value = CSSSubstitutionParser::parseDeclarationValue(variableName, range, m_context, namespaceMap))
             topContext().m_parsedProperties.append(CSSProperty(CSSPropertyCustom, value.releaseNonNull(), important));
     }
@@ -1851,8 +1874,7 @@ void CSSParser::consumeCustomPropertyValue(CSSParserTokenRange range, const Atom
 
 void CSSParser::consumeDeclarationValue(CSSParserTokenRange range, CSSPropertyID propertyID, IsImportant important, StyleRuleType ruleType)
 {
-    auto namespaceMap = m_styleSheet ? m_styleSheet->namespacePrefixMap() : CSSNamespacePrefixMap { };
-    CSSPropertyParser::parseValue(propertyID, important, range, m_context, topContext().m_parsedProperties, ruleType, namespaceMap);
+    CSSPropertyParser::parseValue(propertyID, important, range, m_context, topContext().m_parsedProperties, ruleType, namespacePrefixMapFor(m_styleSheet.get()));
 }
 
 } // namespace WebCore

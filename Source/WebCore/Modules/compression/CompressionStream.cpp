@@ -48,7 +48,7 @@ bool CompressionStream::initializeIfNecessary(Algorithm algorithm, Operation ope
 {
     if (m_isInitialized)
         return true;
-#if PLATFORM(COCOA)
+#if PLATFORM(COCOA) && !defined(WEBKIT_IOS6)
     switch (algorithm) {
     case Algorithm::Brotli:
         auto result = compression_stream_init(&m_stream, operation == Operation::Compression ? COMPRESSION_STREAM_ENCODE : COMPRESSION_STREAM_DECODE, COMPRESSION_BROTLI);
@@ -59,6 +59,7 @@ bool CompressionStream::initializeIfNecessary(Algorithm algorithm, Operation ope
 #else
     UNUSED_PARAM(algorithm);
     UNUSED_PARAM(operation);
+    return false;
 #endif
     m_isInitialized = true;
     return true;

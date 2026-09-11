@@ -38,7 +38,7 @@ using namespace JSC;
 
 JSObject* cachedDocumentWrapper(JSGlobalObject& lexicalGlobalObject, JSDOMGlobalObject& globalObject, Document& document)
 {
-    if (auto* wrapper = getCachedWrapper(globalObject.world(), document))
+    if (auto* wrapper = getCachedWrapper(globalObject, document))
         return wrapper;
 
     RefPtr window = document.window();
@@ -50,7 +50,7 @@ JSObject* cachedDocumentWrapper(JSGlobalObject& lexicalGlobalObject, JSDOMGlobal
         return nullptr;
 
     // Creating a wrapper for domWindow might have created a wrapper for document as well.
-    return getCachedWrapper(documentGlobalObject->world(), document);
+    return getCachedWrapper(*documentGlobalObject, document);
 }
 
 void reportMemoryForDocumentIfFrameless(JSGlobalObject& lexicalGlobalObject, Document& document)

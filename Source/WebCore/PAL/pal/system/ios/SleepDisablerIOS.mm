@@ -70,7 +70,11 @@ private:
         ensureOnMainRunLoop([this, shouldKeepScreenAwake] {
             if (m_screenWakeLockHandler && m_screenWakeLockHandler(shouldKeepScreenAwake))
                 return;
+#if defined(WEBKIT_IOS6)
+            [[PAL::getUIApplicationClassSingleton() sharedApplication] setIdleTimerDisabled:shouldKeepScreenAwake];
+#else
             [[PAL::getUIApplicationClassSingleton() sharedApplication] _setIdleTimerDisabled:shouldKeepScreenAwake forReason:@"WebKit SleepDisabler"];
+#endif
         });
     }
     ScreenSleepDisablerCounter m_screenSleepDisablerCount;

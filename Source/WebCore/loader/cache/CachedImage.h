@@ -183,6 +183,9 @@ private:
     void updateBufferInternal(const FragmentedSharedBuffer&);
 
     void didReplaceSharedBufferContents() override;
+#if defined(WEBKIT_IOS6)
+    void fileBackEncodedDataIfWorthwhile();
+#endif
 
     struct ContainerContext {
         LayoutSize containerSize;
@@ -210,6 +213,9 @@ private:
     bool m_shouldPaintBrokenImage : 1;
     bool m_forceUpdateImageDataEnabledForTesting : 1;
     bool m_allowsOrientationOverride : 1;
+#if defined(WEBKIT_IOS6)
+    bool m_intrinsicSizeIsAvailable { false };
+#endif
 };
 
 } // namespace WebCore

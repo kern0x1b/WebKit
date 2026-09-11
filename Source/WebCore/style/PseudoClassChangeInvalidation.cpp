@@ -33,6 +33,17 @@
 namespace WebCore {
 namespace Style {
 
+#if defined(WEBKIT_IOS6)
+static bool NODELETE pseudoClassInvalidationFastPathEnabled()
+{
+    static const bool enabled = [] {
+        const char* value = getenv("WEBKIT_IOS6_PSEUDOCLASS_INVALIDATION_FAST_PATH");
+        return !value || value[0] != '0';
+    }();
+    return enabled;
+}
+#endif
+
 Vector<PseudoClassInvalidationKey, 4> makePseudoClassInvalidationKeys(CSSSelector::PseudoClass pseudoClass, const Element& element)
 {
     Vector<PseudoClassInvalidationKey, 4> keys;
@@ -80,6 +91,20 @@ void PseudoClassChangeInvalidation::computeInvalidation(CSSSelector::PseudoClass
     if (shouldInvalidateCurrent)
         protect(m_element)->invalidateStyle();
 
+#if defined(WEBKIT_IOS6)
+    if (!m_didResolveRuleSets) {
+        m_didResolveRuleSets = true;
+        m_ownRuleSets = &protect(m_element)->styleResolver().ruleSets();
+        if (RefPtr shadowRoot = m_element.shadowRoot())
+            m_shadowRuleSets = &shadowRoot->styleScope().resolver().ruleSets();
+    }
+
+    bool anyScopeUsesPseudoClass = m_ownRuleSets->features().pseudoClasses.contains(pseudoClass)
+        || (m_shadowRuleSets && m_shadowRuleSets->features().pseudoClasses.contains(pseudoClass));
+    if (pseudoClassInvalidationFastPathEnabled() && !anyScopeUsesPseudoClass)
+        return;
+#endif
+
     for (auto& key : makePseudoClassInvalidationKeys(pseudoClass, protect(m_element)))
         collectRuleSets(key, value, invalidationScope);
 }
@@ -126,10 +151,17 @@ void PseudoClassChangeInvalidation::collectRuleSets(const PseudoClassInvalidatio
         }
     };
 
+#if defined(WEBKIT_IOS6)
+    collect(*m_ownRuleSets);
+
+    if (m_shadowRuleSets)
+        collect(*m_shadowRuleSets, MatchElement::Relation::Host);
+#else
     collect(protect(m_element)->styleResolver().ruleSets());
 
     if (RefPtr shadowRoot = m_element.shadowRoot())
         collect(shadowRoot->styleScope().resolver().ruleSets(), MatchElement::Relation::Host);
+#endif
 }
 
 void PseudoClassChangeInvalidation::invalidateBeforeChange()

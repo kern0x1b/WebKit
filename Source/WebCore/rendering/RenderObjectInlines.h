@@ -93,8 +93,12 @@ inline void RenderObject::setNeedsLayout(MarkingBehavior markParents)
     if (InspectorInstrumentationPublic::hasFrontends()) [[unlikely]]
         notifyInspectorOfLayoutInvalidate();
     m_stateBitfields.setFlag(StateFlag::NeedsLayout);
+#if defined(WEBKIT_IOS6)
+    if (WebCore::g_webkitIOS6NeedsLayoutRecording) [[unlikely]]
+        WebCore::recordNeedsLayoutCaller(__builtin_return_address(0));
+#endif
     if (markParents == MarkingBehavior::MarkContainingBlockChain)
-        scheduleLayout(CheckedPtr { markContainingBlocksForLayout() });
+        scheduleLayout(markContainingBlocksForLayout());
     if (hasLayer())
         setLayerNeedsFullRepaint();
 }

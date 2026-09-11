@@ -349,8 +349,13 @@ public:
     static void firstFrontendCreated();
     static void lastFrontendDeleted();
 
+#if defined(WEBKIT_IOS6)
+    static bool consoleAgentEnabled(ScriptExecutionContext*) { return false; }
+    static bool timelineAgentTracking(ScriptExecutionContext*) { return false; }
+#else
     static bool consoleAgentEnabled(ScriptExecutionContext*);
     static bool timelineAgentTracking(ScriptExecutionContext*);
+#endif
 
     static InstrumentingAgents* instrumentingAgents(Page*);
     static InstrumentingAgents* instrumentingAgents(ScriptExecutionContext*);
@@ -629,9 +634,13 @@ inline void InspectorInstrumentation::willDestroyDOMNode(Node& node)
 
 inline void InspectorInstrumentation::didChangeRendererForDOMNode(Node& node)
 {
+#if defined(WEBKIT_IOS6)
+    return;
+#else
     ASSERT(InspectorInstrumentationPublic::hasFrontends());
     if (RefPtr agents = instrumentingAgents(node.document()))
         didChangeRendererForDOMNodeImpl(*agents, node);
+#endif
 }
 
 inline void InspectorInstrumentation::didAddOrRemoveScrollbars(LocalFrameView& frameView)
@@ -690,7 +699,11 @@ inline void InspectorInstrumentation::documentDetached(Document& document)
 
 inline void InspectorInstrumentation::frameWindowDiscarded(LocalFrame& frame, LocalDOMWindow* domWindow)
 {
+#if defined(WEBKIT_IOS6)
+    return;
+#else
     frameWindowDiscardedImpl(protect(instrumentingAgents(frame)), domWindow);
+#endif
 }
 
 inline void InspectorInstrumentation::mediaQueryResultChanged(Document& document)
@@ -1137,12 +1150,20 @@ inline void InspectorInstrumentation::didLoadResourceFromMemoryCache(Page& page,
 
 inline void InspectorInstrumentation::didReceiveResourceResponse(LocalFrame& frame, ResourceLoaderIdentifier identifier, DocumentLoader* loader, const ResourceResponse& response, ResourceLoader* resourceLoader)
 {
+#if defined(WEBKIT_IOS6)
+    return;
+#else
     didReceiveResourceResponseImpl(protect(instrumentingAgents(frame)), identifier, loader, response, resourceLoader);
+#endif
 }
 
 inline void InspectorInstrumentation::didReceiveResourceResponse(ServiceWorkerGlobalScope& globalScope, ResourceLoaderIdentifier identifier, const ResourceResponse& response)
 {
+#if defined(WEBKIT_IOS6)
+    return;
+#else
     didReceiveResourceResponseImpl(protect(instrumentingAgents(globalScope)), identifier, nullptr, response, nullptr);
+#endif
 }
 
 inline void InspectorInstrumentation::didReceiveThreadableLoaderResponse(Document& document, DocumentThreadableLoader& documentThreadableLoader, ResourceLoaderIdentifier identifier)
@@ -1180,31 +1201,48 @@ inline void InspectorInstrumentation::didFinishLoading(ServiceWorkerGlobalScope&
 
 inline void InspectorInstrumentation::didFailLoading(LocalFrame* frame, DocumentLoader* loader, ResourceLoaderIdentifier identifier, const ResourceError& error)
 {
+#if defined(WEBKIT_IOS6)
+    return;
+#else
     if (RefPtr agents = instrumentingAgents(frame))
         didFailLoadingImpl(*agents, identifier, loader, error);
+#endif
 }
 
 inline void InspectorInstrumentation::didFailLoading(ServiceWorkerGlobalScope& globalScope, ResourceLoaderIdentifier identifier, const ResourceError& error)
 {
+#if defined(WEBKIT_IOS6)
+    return;
+#else
     didFailLoadingImpl(protect(instrumentingAgents(globalScope)), identifier, nullptr, error);
+#endif
 }
 
 inline void InspectorInstrumentation::continueAfterXFrameOptionsDenied(LocalFrame& frame, ResourceLoaderIdentifier identifier, DocumentLoader& loader, const ResourceResponse& response)
 {
-    // Treat the same as didReceiveResponse.
+#if defined(WEBKIT_IOS6)
+    return;
+#else
     didReceiveResourceResponseImpl(protect(instrumentingAgents(frame)), identifier, &loader, response, nullptr);
+#endif
 }
 
 inline void InspectorInstrumentation::continueWithPolicyDownload(LocalFrame& frame, ResourceLoaderIdentifier identifier, DocumentLoader& loader, const ResourceResponse& response)
 {
-    // Treat the same as didReceiveResponse.
+#if defined(WEBKIT_IOS6)
+    return;
+#else
     didReceiveResourceResponseImpl(protect(instrumentingAgents(frame)), identifier, &loader, response, nullptr);
+#endif
 }
 
 inline void InspectorInstrumentation::continueWithPolicyIgnore(LocalFrame& frame, ResourceLoaderIdentifier identifier, DocumentLoader& loader, const ResourceResponse& response)
 {
-    // Treat the same as didReceiveResponse.
+#if defined(WEBKIT_IOS6)
+    return;
+#else
     didReceiveResourceResponseImpl(protect(instrumentingAgents(frame)), identifier, &loader, response, nullptr);
+#endif
 }
 
 inline void InspectorInstrumentation::willLoadXHRSynchronously(ScriptExecutionContext* context)
@@ -1263,7 +1301,11 @@ inline void InspectorInstrumentation::frameDetachedFromParent(LocalFrame& frame)
 
 inline void InspectorInstrumentation::didCommitLoad(LocalFrame& frame, DocumentLoader* loader)
 {
+#if defined(WEBKIT_IOS6)
+    return;
+#else
     didCommitLoadImpl(protect(instrumentingAgents(frame)), frame, loader);
+#endif
 }
 
 inline void InspectorInstrumentation::frameDocumentUpdated(LocalFrame& frame)
@@ -1326,16 +1368,24 @@ inline bool InspectorInstrumentation::willIntercept(const LocalFrame* frame, con
 
 inline bool InspectorInstrumentation::shouldInterceptRequest(const ResourceLoader& loader)
 {
+#if defined(WEBKIT_IOS6)
+    return false;
+#else
     ASSERT(InspectorInstrumentationPublic::hasFrontends());
     if (RefPtr agents = instrumentingAgents(loader.frame()))
         return shouldInterceptRequestImpl(*agents, loader);
     return false;
+#endif
 }
 
 inline bool InspectorInstrumentation::shouldInterceptResponse(const LocalFrame& frame, const ResourceResponse& response)
 {
+#if defined(WEBKIT_IOS6)
+    return false;
+#else
     ASSERT(InspectorInstrumentationPublic::hasFrontends());
     return shouldInterceptResponseImpl(protect(instrumentingAgents(frame)), response);
+#endif
 }
 
 inline void InspectorInstrumentation::interceptRequest(ResourceLoader& loader, Function<void(const ResourceRequest&)>&& handler)
@@ -1561,32 +1611,56 @@ inline void InspectorInstrumentation::willDestroyWebAnimation(WebAnimation& anim
 
 inline void InspectorInstrumentation::addMessageToConsole(LocalFrame& frame, std::unique_ptr<Inspector::ConsoleMessage> message)
 {
+#if defined(WEBKIT_IOS6)
+    return;
+#else
     addMessageToConsoleImpl(protect(instrumentingAgents(frame)), WTF::move(message));
+#endif
 }
 
 inline void InspectorInstrumentation::addMessageToConsole(WorkerOrWorkletGlobalScope& globalScope, std::unique_ptr<Inspector::ConsoleMessage> message)
 {
+#if defined(WEBKIT_IOS6)
+    return;
+#else
     addMessageToConsoleImpl(protect(instrumentingAgents(globalScope)), WTF::move(message));
+#endif
 }
 
 inline void InspectorInstrumentation::consoleCount(LocalFrame& frame, JSC::JSGlobalObject* state, const String& label)
 {
+#if defined(WEBKIT_IOS6)
+    return;
+#else
     consoleCountImpl(protect(instrumentingAgents(frame)), state, label);
+#endif
 }
 
 inline void InspectorInstrumentation::consoleCount(WorkerOrWorkletGlobalScope& globalScope, JSC::JSGlobalObject* state, const String& label)
 {
+#if defined(WEBKIT_IOS6)
+    return;
+#else
     consoleCountImpl(protect(instrumentingAgents(globalScope)), state, label);
+#endif
 }
 
 inline void InspectorInstrumentation::consoleCountReset(LocalFrame& frame, JSC::JSGlobalObject* state, const String& label)
 {
+#if defined(WEBKIT_IOS6)
+    return;
+#else
     consoleCountResetImpl(protect(instrumentingAgents(frame)), state, label);
+#endif
 }
 
 inline void InspectorInstrumentation::consoleCountReset(WorkerOrWorkletGlobalScope& globalScope, JSC::JSGlobalObject* state, const String& label)
 {
+#if defined(WEBKIT_IOS6)
+    return;
+#else
     consoleCountResetImpl(protect(instrumentingAgents(globalScope)), state, label);
+#endif
 }
 
 inline void InspectorInstrumentation::takeHeapSnapshot(LocalFrame& frame, const String& title)
@@ -1603,32 +1677,56 @@ inline void InspectorInstrumentation::takeHeapSnapshot(WorkerOrWorkletGlobalScop
 
 inline void InspectorInstrumentation::startConsoleTiming(LocalFrame& frame, JSC::JSGlobalObject* exec, const String& label)
 {
+#if defined(WEBKIT_IOS6)
+    return;
+#else
     startConsoleTimingImpl(protect(instrumentingAgents(frame)), exec, label);
+#endif
 }
 
 inline void InspectorInstrumentation::startConsoleTiming(WorkerOrWorkletGlobalScope& globalScope, JSC::JSGlobalObject* exec, const String& label)
 {
+#if defined(WEBKIT_IOS6)
+    return;
+#else
     startConsoleTimingImpl(protect(instrumentingAgents(globalScope)), exec, label);
+#endif
 }
 
 inline void InspectorInstrumentation::logConsoleTiming(LocalFrame& frame, JSC::JSGlobalObject* exec, const String& label, Ref<Inspector::ScriptArguments>&& arguments)
 {
+#if defined(WEBKIT_IOS6)
+    return;
+#else
     logConsoleTimingImpl(protect(instrumentingAgents(frame)), exec, label, WTF::move(arguments));
+#endif
 }
 
 inline void InspectorInstrumentation::logConsoleTiming(WorkerOrWorkletGlobalScope& globalScope, JSC::JSGlobalObject* exec, const String& label, Ref<Inspector::ScriptArguments>&& arguments)
 {
+#if defined(WEBKIT_IOS6)
+    return;
+#else
     logConsoleTimingImpl(protect(instrumentingAgents(globalScope)), exec, label, WTF::move(arguments));
+#endif
 }
 
 inline void InspectorInstrumentation::stopConsoleTiming(LocalFrame& frame, JSC::JSGlobalObject* exec, const String& label)
 {
+#if defined(WEBKIT_IOS6)
+    return;
+#else
     stopConsoleTimingImpl(protect(instrumentingAgents(frame)), exec, label);
+#endif
 }
 
 inline void InspectorInstrumentation::stopConsoleTiming(WorkerOrWorkletGlobalScope& globalScope, JSC::JSGlobalObject* exec, const String& label)
 {
+#if defined(WEBKIT_IOS6)
+    return;
+#else
     stopConsoleTimingImpl(protect(instrumentingAgents(globalScope)), exec, label);
+#endif
 }
 
 inline void InspectorInstrumentation::consoleTimeStamp(LocalFrame& frame, Ref<Inspector::ScriptArguments>&& arguments)
@@ -1670,14 +1768,22 @@ inline void InspectorInstrumentation::stopProfiling(WorkerOrWorkletGlobalScope& 
 
 inline void InspectorInstrumentation::consoleStartRecordingCanvas(CanvasRenderingContext& context, JSC::JSGlobalObject& exec, JSC::JSObject* options)
 {
+#if defined(WEBKIT_IOS6)
+    return;
+#else
     if (RefPtr agents = instrumentingAgents(protect(protect(context.canvasBase())->scriptExecutionContext())))
         consoleStartRecordingCanvasImpl(*agents, context, exec, options);
+#endif
 }
 
 inline void InspectorInstrumentation::consoleStopRecordingCanvas(CanvasRenderingContext& context)
 {
+#if defined(WEBKIT_IOS6)
+    return;
+#else
     if (RefPtr agents = instrumentingAgents(protect(protect(context.canvasBase())->scriptExecutionContext())))
         consoleStopRecordingCanvasImpl(*agents, context);
+#endif
 }
 
 inline void InspectorInstrumentation::performanceMark(ScriptExecutionContext& context, const String& label, std::optional<MonotonicTime> startTime)

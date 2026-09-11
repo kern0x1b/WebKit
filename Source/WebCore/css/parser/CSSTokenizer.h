@@ -55,7 +55,13 @@ public:
     WEBCORE_EXPORT CSSParserTokenRange NODELETE tokenRange() const LIFETIME_BOUND;
     unsigned NODELETE tokenCount();
 
-    static bool NODELETE isWhitespace(CSSParserTokenType);
+    // Defined here rather than out of line: this is the per-token test in
+    // CSSParserTokenRange::consumeWhitespace and in the selector/substitution walks.
+    static bool isWhitespace(CSSParserTokenType type)
+    {
+        static_assert(NewlineToken == NonNewlineWhitespaceToken + 1);
+        return static_cast<unsigned>(type) - NonNewlineWhitespaceToken <= 1;
+    }
 
     Vector<String>&& escapedStringsForAdoption() { return WTF::move(m_stringPool); }
 
@@ -123,9 +129,6 @@ private:
     CSSParserToken endOfFile(char16_t);
 
     StringView registerString(const String&);
-
-    using CodePoint = CSSParserToken (CSSTokenizer::*)(char16_t);
-    static const std::array<CodePoint, 128> codePoints;
 
     Vector<CSSParserTokenType, 8> m_blockStack;
     Vector<CSSParserToken, 32> m_tokens;

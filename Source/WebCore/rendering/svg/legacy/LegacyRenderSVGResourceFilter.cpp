@@ -143,7 +143,7 @@ auto LegacyRenderSVGResourceFilter::applyResource(RenderElement& renderer, const
 
     filterData->filter->clampFilterRegionIfNeeded();
 
-#if USE(CAIRO)
+#if USE(CAIRO) || defined(WEBKIT_IOS6)
     auto colorSpace = DestinationColorSpace::SRGB();
 #else
     auto colorSpace = DestinationColorSpace::LinearSRGB();

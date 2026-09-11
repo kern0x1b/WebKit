@@ -53,8 +53,7 @@ public:
         // fast-reject branch for characters that don't require special
         // handling. Please run the parser benchmark whenever you touch
         // this function. It's very hot.
-        constexpr char16_t specialCharacterMask = '\n' | '\r' | '\0';
-        if (m_nextInputCharacter & ~specialCharacterMask) [[likely]] {
+        if ((m_nextInputCharacter > '\r') | (m_nextInputCharacter == '\t')) [[likely]] {
             m_skipNextNewLine = false;
             return true;
         }

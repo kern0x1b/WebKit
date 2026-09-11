@@ -95,6 +95,7 @@ private:
     void prepareToStopParsing() final;
     void stopParsing() final;
     bool NODELETE isWaitingForScripts() const;
+    bool NODELETE isWaitingForScriptsWhenNotParsingFragment() const;
     bool isExecutingScript() const final;
     bool hasScriptsWaitingForStylesheets() const final;
     void executeScriptsWaitingForStylesheets() final;
@@ -155,6 +156,11 @@ private:
     bool m_endWasDelayed { false };
     unsigned m_pumpSessionNestingLevel { 0 };
     bool m_shouldEmitTracePoints { false };
+
+    // The response headers do not change while we parse, so the Link header is fetched once
+    // instead of on every exit from the pump (once per parser-blocking script).
+    bool m_checkedForLinkHeader { false };
+    String m_linkHeader;
 };
 
 inline HTMLTokenizer& HTMLDocumentParser::tokenizer()

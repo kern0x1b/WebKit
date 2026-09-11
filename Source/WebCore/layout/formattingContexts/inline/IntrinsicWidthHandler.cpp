@@ -32,6 +32,7 @@
 #include "StyleComputedStyle+GettersInlines.h"
 #include "StyleComputedStyle+InitialInlines.h"
 #include "TextOnlySimpleLineBuilder.h"
+#include <array>
 #include <wtf/unicode/CharacterNames.h>
 
 namespace WebCore {
@@ -269,17 +270,59 @@ InlineLayoutUnit IntrinsicWidthHandler::simplifiedMinimumWidth(const ElementBox&
         if (auto* inlineTextBox = dynamicDowncast<InlineTextBox>(*child)) {
             ASSERT(inlineTextBox->style().whiteSpaceCollapse() != WhiteSpaceCollapse::Preserve);
             auto& fontCascade = inlineTextBox->style().fontCascade();
-            auto contentLength = inlineTextBox->content().length();
-            size_t index = 0;
+            auto& content = inlineTextBox->content();
+            auto contentLength = content.length();
             auto isTreatedAsSpaceCharacter = [&](auto character) {
                 return character == space || character == newlineCharacter || character == tabCharacter;
             };
+            std::array<uint32_t, 8> measuredLatin1Characters { };
+            auto needsMeasuring = [&](unsigned character) {
+                auto& measuredBucket = measuredLatin1Characters[character >> 5];
+                auto measuredBit = uint32_t { 1 } << (character & 31);
+                if (measuredBucket & measuredBit)
+                    return false;
+                measuredBucket |= measuredBit;
+                return true;
+            };
+            if (content.is8Bit()) {
+                auto characters = content.span8();
+                for (size_t index = 0; index < contentLength; ++index) {
+                    unsigned character = characters[index];
+                    if (isTreatedAsSpaceCharacter(character))
+                        continue;
+                    if (!needsMeasuring(character))
+                        continue;
+                    maximumWidth = std::max(maximumWidth, TextUtil::width(*inlineTextBox, fontCascade, index, index + 1, { }, TextUtil::UseTrailingWhitespaceMeasuringOptimization::No));
+                }
+                continue;
+            }
+            auto characters = content.span16();
+            auto canUseSimpleFontCodePath = inlineTextBox->canUseSimpleFontCodePath();
+            size_t index = 0;
             while (index < contentLength) {
-                auto characterLength = TextUtil::firstUserPerceivedCharacterLength(*inlineTextBox, index, contentLength - index);
+                size_t characterLength = 1;
+                if (canUseSimpleFontCodePath) {
+                    auto lead = characters[index];
+                    if (lead >= 0xD800 && lead < 0xDC00 && index + 1 < contentLength) {
+                        auto trail = characters[index + 1];
+                        if (trail >= 0xDC00 && trail < 0xE000)
+                            characterLength = 2;
+                    }
+                } else
+                    characterLength = TextUtil::firstUserPerceivedCharacterLength(*inlineTextBox, index, contentLength - index);
                 ASSERT(characterLength);
-                auto isCollapsedWhitespace = characterLength == 1 && isTreatedAsSpaceCharacter(inlineTextBox->content()[index]);
-                if (!isCollapsedWhitespace)
-                    maximumWidth = std::max(maximumWidth, TextUtil::width(*inlineTextBox, fontCascade, index, index + characterLength, { }, TextUtil::UseTrailingWhitespaceMeasuringOptimization::No));
+                if (characterLength == 1) {
+                    unsigned character = characters[index];
+                    if (isTreatedAsSpaceCharacter(character)) {
+                        ++index;
+                        continue;
+                    }
+                    if (character < 256 && !needsMeasuring(character)) {
+                        ++index;
+                        continue;
+                    }
+                }
+                maximumWidth = std::max(maximumWidth, TextUtil::width(*inlineTextBox, fontCascade, index, index + characterLength, { }, TextUtil::UseTrailingWhitespaceMeasuringOptimization::No));
                 index += characterLength;
             }
             continue;

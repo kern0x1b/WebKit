@@ -25,6 +25,10 @@
  */
 
 #include "config.h"
+#include <wtf/MonotonicTime.h>
+
+extern "C" unsigned long long g_webkitIOS6BoxGeometryNs;
+extern "C" unsigned g_webkitIOS6BoxGeometryCount;
 #include "LayoutIntegrationBoxGeometryUpdater.h"
 
 #include "FontCascadeInlines.h"
@@ -707,6 +711,21 @@ void BoxGeometryUpdater::updateInlineBoxDimensions(const RenderInline& renderInl
 
 void BoxGeometryUpdater::setFormattingContextContentGeometry(std::optional<LayoutUnit> availableLogicalWidth, std::optional<Layout::IntrinsicWidthMode> intrinsicWidthMode)
 {
+#if defined(WEBKIT_IOS6)
+    auto ios6Recording = WebCore::g_webkitIOS6NeedsLayoutRecording;
+    auto ios6PhaseStart = ios6Recording ? MonotonicTime::now() : MonotonicTime();
+    struct Ios6PhaseScope {
+        bool recording;
+        MonotonicTime start;
+        ~Ios6PhaseScope()
+        {
+            if (!recording)
+                return;
+            g_webkitIOS6BoxGeometryNs += (MonotonicTime::now() - start).nanoseconds();
+            ++g_webkitIOS6BoxGeometryCount;
+        }
+    } ios6PhaseScope { ios6Recording, ios6PhaseStart };
+#endif
     ASSERT(availableLogicalWidth || intrinsicWidthMode);
 
     if (rootLayoutBox().establishesInlineFormattingContext()) {

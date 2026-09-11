@@ -32,7 +32,11 @@
 
 namespace WebCore {
 
+#if defined(WEBKIT_IOS6)
+static constexpr size_t defaultInlineCapacity = 2;
+#else
 static constexpr size_t defaultInlineCapacity = 8;
+#endif
 
 template <size_t ContextInlineCapacity = defaultInlineCapacity>
 class ComposedTreeIterator {

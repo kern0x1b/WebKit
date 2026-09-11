@@ -46,22 +46,31 @@ CSSParserTokenRange CSSParserTokenRange::consumeBlock()
 {
     ASSERT(peek().getBlockType() == CSSParserToken::BlockStart);
     auto start = m_tokens.subspan(1);
+    // Walk by index: the do/while already guarantees we never step past the end, so the
+    // emptiness test and the span update that consume() performs per token are dead weight.
+    size_t size = m_tokens.size();
+    size_t consumed = 0;
     unsigned nestingLevel = 0;
     do {
-        const CSSParserToken& token = consume();
-        if (token.getBlockType() == CSSParserToken::BlockStart)
+        auto blockType = m_tokens[consumed++].getBlockType();
+        if (blockType == CSSParserToken::BlockStart)
             nestingLevel++;
-        else if (token.getBlockType() == CSSParserToken::BlockEnd)
+        else if (blockType == CSSParserToken::BlockEnd)
             nestingLevel--;
-    } while (nestingLevel && !m_tokens.empty());
+    } while (nestingLevel && consumed < size);
+    skip(m_tokens, consumed);
 
     if (nestingLevel)
-        return start.first(m_tokens.data() - start.data()); // Ended at EOF
-    return start.first(m_tokens.data() - start.data() - 1);
+        return start.first(consumed - 1); // Ended at EOF
+    return start.first(consumed - 2);
 }
 
 CSSParserTokenRange CSSParserTokenRange::consumeBlockCheckingForEditability(StyleSheetContents* styleSheet)
 {
+#if defined(WEBKIT_IOS6)
+    UNUSED_PARAM(styleSheet);
+    return consumeBlock();
+#else
     ASSERT(peek().getBlockType() == CSSParserToken::BlockStart);
     auto start = m_tokens.subspan(1);
     unsigned nestingLevel = 0;
@@ -79,20 +88,34 @@ CSSParserTokenRange CSSParserTokenRange::consumeBlockCheckingForEditability(Styl
     if (nestingLevel)
         return start.first(m_tokens.data() - start.data()); // Ended at EOF
     return start.first(m_tokens.data() - start.data() - 1);
+#endif
 }
 
 void CSSParserTokenRange::consumeComponentValue()
 {
     // FIXME: This is going to do multiple passes over large sections of a stylesheet.
     // We should consider optimising this by precomputing where each block ends.
+    if (m_tokens.empty()) [[unlikely]]
+        return;
+
+    // The overwhelmingly common case is a single non-block token; take it without entering the
+    // nesting loop, and walk by index otherwise so consume()'s per-token bookkeeping is skipped.
+    if (m_tokens[0].getBlockType() == CSSParserToken::NotBlock) {
+        skip(m_tokens, 1);
+        return;
+    }
+
+    size_t size = m_tokens.size();
+    size_t consumed = 0;
     unsigned nestingLevel = 0;
     do {
-        const CSSParserToken& token = consume();
-        if (token.getBlockType() == CSSParserToken::BlockStart)
+        auto type = m_tokens[consumed++].getBlockType();
+        if (type == CSSParserToken::BlockStart)
             nestingLevel++;
-        else if (token.getBlockType() == CSSParserToken::BlockEnd)
+        else if (type == CSSParserToken::BlockEnd)
             nestingLevel--;
-    } while (nestingLevel && !m_tokens.empty());
+    } while (nestingLevel && consumed < size);
+    skip(m_tokens, consumed);
 }
 
 void CSSParserTokenRange::trimTrailingWhitespace()

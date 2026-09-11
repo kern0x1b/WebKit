@@ -82,6 +82,9 @@ private:
     HashMap<unsigned, Vector<Entry>, AlreadyHashed> m_entries;
     Timer m_sweepTimer;
     unsigned m_additionsSinceLastSweep { 0 };
+#if defined(WEBKIT_IOS6)
+    unsigned m_maxEntriesPerHash { 4 };
+#endif
 };
 
 }

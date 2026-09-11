@@ -154,6 +154,32 @@ void EventHandler::touchEvent(WebEvent *event)
 
     event.wasHandled = handleTouchEvent(PlatformEventFactory::createPlatformTouchEvent(event)).value_or(false);
 }
+#elif ENABLE(TOUCH_EVENTS)
+// The two functions above are Apple's, and their bodies live in
+// WebKitAdditions/EventHandlerIOSTouch.cpp - a file this open-source tree does
+// not carry, so ENABLE(IOS_TOUCH_EVENTS) cannot be turned on here. But nothing
+// in those two functions is itself proprietary: handleTouchEvent() is the
+// portable dispatcher GTK and WPE already build Touch/TouchList/TouchEvent DOM
+// objects with (EventHandler.cpp, guarded by
+// ENABLE(TOUCH_EVENTS) && !ENABLE(IOS_TOUCH_EVENTS)), and createPlatformTouchEvent()
+// already reads a WebEvent's touch fields with no WebKitAdditions include in
+// this configuration - PlatformEventFactoryIOS.h's WebKitAdditions include is
+// itself gated on USE(APPLE_INTERNAL_SDK), which this SDK is not. So this is
+// the same four lines Apple's version is, reassembled from parts that were
+// already open, rather than a stand-in for something missing.
+bool EventHandler::dispatchSimulatedTouchEvent(IntPoint location)
+{
+    bool handled = handleTouchEvent(PlatformEventFactory::createPlatformSimulatedTouchEvent(PlatformEvent::Type::TouchStart, location)).value_or(false);
+    handled |= handleTouchEvent(PlatformEventFactory::createPlatformSimulatedTouchEvent(PlatformEvent::Type::TouchEnd, location)).value_or(false);
+    return handled;
+}
+
+void EventHandler::touchEvent(WebEvent *event)
+{
+    CurrentEventScope scope(event);
+
+    event.wasHandled = handleTouchEvent(PlatformEventFactory::createPlatformTouchEvent(event)).value_or(false);
+}
 #endif
 
 bool EventHandler::keyEvent(WebEvent *event)
@@ -486,6 +512,16 @@ void EventHandler::mouseUp(WebEvent *event)
     BEGIN_BLOCK_OBJC_EXCEPTIONS
 
     CurrentEventScope scope(event);
+
+    // UIKit turns a tap into mouse events and nothing else, so a page served
+    // the mobile site - which binds its handlers to touchstart/touchend - would
+    // see nothing at all. The mouse release still follows: a touch listener
+    // that only paints the pressed state reports the event as handled, and
+    // dropping the click on that basis leaves the control looking pressed and
+    // doing nothing.
+#if ENABLE(TOUCH_EVENTS) && !ENABLE(IOS_TOUCH_EVENTS)
+    dispatchSimulatedTouchEvent(roundedIntPoint(FloatPoint(event.locationInWindow)));
+#endif
 
     event.wasHandled = handleMouseReleaseEvent(currentPlatformMouseEvent()).wasHandled();
 
@@ -821,6 +857,12 @@ bool EventHandler::shouldAllowMouseDownToStartDrag() const
 }
 
 #endif // ENABLE(DRAG_SUPPORT)
+
+#if !ENABLE(IOS_TOUCH_EVENTS)
+void EventHandler::defaultTouchEventHandler(Node&, TouchEvent&)
+{
+}
+#endif
 
 }
 

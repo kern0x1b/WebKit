@@ -629,9 +629,15 @@ void HTMLPreloadScanner::scan(HTMLResourcePreloader& preloader, Document& docume
 
     PreloadRequestStream requests;
 
-    while (auto token = m_tokenizer.nextToken(m_source)) {
+    while (true) {
+#if defined(WEBKIT_IOS6)
+        m_tokenizer.setShouldDiscardCharacterData(!m_scanner.inStyle());
+#endif
+        auto token = m_tokenizer.nextToken(m_source);
+        if (!token)
+            break;
         if (token->type() == HTMLToken::Type::StartTag)
-            m_tokenizer.updateStateFor(AtomString::lookUp(token->name().span()));
+            m_tokenizer.updateStateFor(token->name().span());
         m_scanner.scan(*token, requests, document);
     }
 

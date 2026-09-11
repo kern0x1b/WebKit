@@ -85,8 +85,7 @@ static void callDefaultEventHandlersInBubblingOrder(Event& event, const EventPat
 
 static bool NODELETE isInShadowTree(EventTarget* target)
 {
-    auto* node = dynamicDowncast<Node>(target);
-    return node && node->isInShadowTree();
+    return target && target->isInShadowTree();
 }
 
 static void dispatchEventInDOM(Event& event, const EventPath& path, const Document::EventListenerCounts& listenerCounts)
@@ -108,11 +107,12 @@ static void dispatchEventInDOM(Event& event, const EventPath& path, const Docume
     // Invoke bubbling event listeners. (We don't use listenerCounts here as handleLocalEvents()
     // needs to update event and it's highly unlikely there's no bubble listeners.)
     size_t size = path.size();
+    bool bubbles = event.bubbles();
     for (size_t i = 0; i < size; ++i) {
         const EventContext& eventContext = path.contextAt(i);
         if (eventContext.currentTarget() == eventContext.target())
             event.setEventPhase(Event::AT_TARGET);
-        else if (event.bubbles())
+        else if (bubbles)
             event.setEventPhase(Event::BUBBLING_PHASE);
         else
             continue;
@@ -192,17 +192,23 @@ void EventDispatcher::dispatchEvent(Node& node, Event& event)
 
     RefPtr window = document->window();
     std::optional<PerformanceEventTimingCandidate> pendingEventTiming;
-    if (typeInfo.isInCategory(EventCategory::EventTimingEligible) && window && document->settings().eventTimingEnabled() && event.isTrusted())
+    if (typeInfo.isInCategory(EventCategory::EventTimingEligible) && window && document->settings().eventTimingEnabled() && event.isTrusted()) [[unlikely]]
         pendingEventTiming = window->initializeEventTiming(event, typeInfo.type());
-    auto finalizeEntry(WTF::makeScopeExit([&, event = Ref(event)] {
-        if (pendingEventTiming)
-            window->markEndOfProcessingForEventTiming(*pendingEventTiming, event, typeInfo.type());
-    }));
+    struct EventTimingScope {
+        LocalDOMWindow* window;
+        std::optional<PerformanceEventTimingCandidate>& candidate;
+        Event& event;
+        EventType type;
+        ~EventTimingScope()
+        {
+            if (candidate && window)
+                window->markEndOfProcessingForEventTiming(*candidate, event, type);
+        }
+    } eventTimingScope { window.get(), pendingEventTiming, event, typeInfo.type() };
 
     bool targetOrRelatedTargetIsInShadowTree = node.isInShadowTree() || isInShadowTree(event.relatedTarget());
-    // FIXME: We should also check touch target list.
-    bool hasNoEventListenerOrDefaultEventHandler = !listenerCounts.hasAny() && !typeInfo.hasDefaultEventHandler() && !node.document().hasConnectedPluginElements();
-    if (hasNoEventListenerOrDefaultEventHandler && !targetOrRelatedTargetIsInShadowTree) {
+    bool hasNoEventListenerOrDefaultEventHandler = !listenerCounts.hasAny() && !typeInfo.hasDefaultEventHandler() && !document->hasConnectedPluginElements();
+    if (hasNoEventListenerOrDefaultEventHandler && !targetOrRelatedTargetIsInShadowTree) [[likely]] {
         event.resetBeforeDispatch();
         event.setTarget(RefPtr { EventPath::eventTargetRespectingTargetRules(node) });
         return;
@@ -269,14 +275,8 @@ void EventDispatcher::dispatchEvent(Node& node, Event& event)
     // Call default event handlers. While the DOM does have a concept of preventing
     // default handling, the detail of which handlers are called is an internal
     // implementation detail and not part of the DOM.
-    if (typeInfo.hasDefaultEventHandler() && !event.defaultPrevented() && !event.defaultHandled() && !event.isDefaultEventHandlerIgnored()) {
-        // FIXME: Not clear why we need to reset the target for the default event handlers.
-        // We should research this, and remove this code if possible.
-        RefPtr finalTarget = event.target();
-        event.setTarget(RefPtr { EventPath::eventTargetRespectingTargetRules(node) });
+    if (typeInfo.hasDefaultEventHandler() && !event.defaultPrevented() && !event.defaultHandled() && !event.isDefaultEventHandlerIgnored())
         callDefaultEventHandlersInBubblingOrder(event, eventPath);
-        event.setTarget(WTF::move(finalTarget));
-    }
 
     if (shouldClearTargetsAfterDispatch)
         resetAfterDispatchInShadowTree(event);

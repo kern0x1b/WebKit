@@ -53,7 +53,14 @@ public:
         enum class IsPopulatedFromCache : bool { No, Yes };
         void set(InlineItemList&&, ContentAttributes, IsPopulatedFromCache);
         void replace(size_t insertionPosition, InlineItemList&&, ContentAttributes, IsPopulatedFromCache);
-        void shrinkToFit() { m_inlineItemList.shrinkToFit(); }
+        void shrinkToFit()
+        {
+#if defined(WEBKIT_IOS6)
+            if (m_inlineItemList.capacity() <= m_inlineItemList.size() + m_inlineItemList.size() / 4)
+                return;
+#endif
+            m_inlineItemList.shrinkToFit();
+        }
 
         bool isEmpty() const { return content().isEmpty(); }
         size_t size() const { return content().size(); }

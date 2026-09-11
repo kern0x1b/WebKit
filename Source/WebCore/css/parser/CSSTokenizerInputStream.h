@@ -46,18 +46,19 @@ public:
     // end of the stream.
     char16_t nextInputChar() const
     {
-        if (m_offset >= m_stringLength)
+        if (m_offset >= m_stringLength) [[unlikely]]
             return kEndOfFileMarker;
-        return (*m_string)[m_offset];
+        return characterAt(m_offset);
     }
 
     // Gets the char at lookaheadOffset from the current stream position. Will
     // return NUL (kEndOfFileMarker) if the stream position is at the end.
     char16_t peek(unsigned lookaheadOffset) const
     {
-        if ((m_offset + lookaheadOffset) >= m_stringLength)
+        size_t index = m_offset + lookaheadOffset;
+        if (index >= m_stringLength) [[unlikely]]
             return kEndOfFileMarker;
-        return (*m_string)[m_offset + lookaheadOffset];
+        return characterAt(index);
     }
 
     void advance(unsigned offset = 1) { m_offset += offset; }
@@ -69,19 +70,35 @@ public:
 
     double getDouble(unsigned start, unsigned end) const;
 
-    template<bool characterPredicate(char16_t)>
-    unsigned skipWhilePredicate(unsigned offset)
+    // Advances offset past every character satisfying the predicate and returns the new offset.
+    // The end bound and the buffer pointer are hoisted out of the loop, and the predicate is
+    // instantiated on the concrete character type, so the Latin-1 path is one indexed byte load
+    // per character with no is8Bit test and no widening to char16_t.
+    template<typename Predicate>
+    unsigned skipWhile(unsigned offset, Predicate predicate) const
     {
-        if (m_string->is8Bit()) {
-            auto characters8 = m_string->span8();
-            while ((m_offset + offset) < m_stringLength && characterPredicate(characters8[m_offset + offset]))
-                ++offset;
+        size_t start = m_offset + offset;
+        if (start >= m_stringLength) [[unlikely]]
+            return offset;
+        size_t index = start;
+        size_t length = m_stringLength;
+        if (m_is8Bit) {
+            const Latin1Character* characters = m_characters8;
+            while (index < length && predicate(characters[index]))
+                ++index;
         } else {
-            auto characters16 = m_string->span16();
-            while ((m_offset + offset) < m_stringLength && characterPredicate(characters16[m_offset + offset]))
-                ++offset;
+            const char16_t* characters = m_characters16;
+            while (index < length && predicate(characters[index]))
+                ++index;
         }
-        return offset;
+        return offset + static_cast<unsigned>(index - start);
+    }
+
+    // Number of characters from the current position for which the predicate holds.
+    template<typename Predicate>
+    unsigned countWhile(Predicate predicate) const
+    {
+        return skipWhile(0, predicate);
     }
 
     void advanceUntilNonWhitespace();
@@ -93,12 +110,24 @@ public:
     StringView rangeAt(unsigned start, unsigned length) const
     {
         ASSERT(start + length <= m_stringLength);
-        return StringView(m_string.get()).substring(start, length); // FIXME: Should make a constructor on StringView for this.
+        if (m_is8Bit)
+            return StringView(static_cast<const void*>(m_characters8 + start), length, true);
+        return StringView(static_cast<const void*>(m_characters16 + start), length, false);
     }
 
 private:
+    char16_t characterAt(size_t index) const
+    {
+        return m_is8Bit ? m_characters8[index] : m_characters16[index];
+    }
+
     size_t m_offset;
     const size_t m_stringLength;
+    // The buffer pointer is hoisted out of the StringImpl once so that every character
+    // access is a single indexed load instead of re-testing the is8Bit flag.
+    const Latin1Character* m_characters8 { nullptr };
+    const char16_t* m_characters16 { nullptr };
+    bool m_is8Bit { false };
     RefPtr<StringImpl> m_string;
 };
 

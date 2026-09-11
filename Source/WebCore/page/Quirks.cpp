@@ -2185,8 +2185,26 @@ static constexpr auto frozenVersion = "18_6"_s;
 static constexpr auto frozenVersion = "18_7"_s;
 #endif
 
-String Quirks::standardUserAgentWithApplicationNameIncludingCompatOverrides(const String& applicationName, const String& userAgentOSVersion, UserAgentType type)
+#if defined(WEBKIT_IOS6)
+static constexpr auto frozenMobileBuild = "15E148"_s;
+static constexpr auto frozenSafariVersion = "604.1"_s;
+
+static String applicationNameMatchingFrozenVersion(const String& applicationName)
 {
+    if (!applicationName.contains("Safari/"_s))
+        return applicationName;
+    return makeString("Version/"_s, makeStringByReplacingAll(StringView(frozenVersion), '_', '.'),
+        " Mobile/"_s, frozenMobileBuild, " Safari/"_s, frozenSafariVersion);
+}
+#endif
+
+String Quirks::standardUserAgentWithApplicationNameIncludingCompatOverrides(const String& originalApplicationName, const String& userAgentOSVersion, UserAgentType type)
+{
+#if defined(WEBKIT_IOS6)
+    auto applicationName = applicationNameMatchingFrozenVersion(originalApplicationName);
+#else
+    auto& applicationName = originalApplicationName;
+#endif
     auto overriddenUAString = standardUserAgentWithApplicationNameIncludingCompatOverridesInternal(applicationName, userAgentOSVersion, type);
     if (overriddenUAString.length())
         return overriddenUAString;

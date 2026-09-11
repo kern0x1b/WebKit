@@ -226,8 +226,7 @@ void SVGGraphicsElement::attributeChanged(const QualifiedName& name, const AtomS
 
 void SVGGraphicsElement::svgAttributeChanged(const QualifiedName& attrName)
 {
-    if (PropertyRegistry::isKnownAttribute(attrName)) {
-        ASSERT(attrName == SVGNames::transformAttr);
+    if (attrName.matches(SVGNames::transformAttr)) {
         InstanceInvalidationGuard guard(*this);
 
         invalidateConcatenatedTransformCache();

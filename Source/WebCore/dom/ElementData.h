@@ -27,10 +27,12 @@
 
 #include <WebCore/Attribute.h>
 #include <WebCore/SpaceSplitString.h>
+#include <wtf/ASCIICType.h>
 #include <wtf/IndexedRange.h>
 #include <wtf/StdLibExtras.h>
 #include <wtf/TypeCasts.h>
 #include <wtf/Vector.h>
+#include <wtf/text/StringView.h>
 
 namespace WebCore {
 
@@ -198,22 +200,22 @@ inline void ElementData::deref()
 
 inline unsigned ElementData::length() const
 {
-    if (auto* uniqueData = dynamicDowncast<UniqueElementData>(*this))
-        return uniqueData->m_attributeVector.size();
+    if (isUnique())
+        return uncheckedDowncast<UniqueElementData>(*this).m_attributeVector.size();
     return arraySize();
 }
 
 inline const Attribute* ElementData::attributeBase() const
 {
-    if (auto* uniqueData = dynamicDowncast<UniqueElementData>(*this))
-        return uniqueData->m_attributeVector.span().data();
+    if (isUnique())
+        return uncheckedDowncast<UniqueElementData>(*this).m_attributeVector.span().data();
     return uncheckedDowncast<ShareableElementData>(*this).m_attributeArray;
 }
 
 inline const ImmutableStyleProperties* ElementData::presentationalHintStyle() const
 {
-    if (auto* uniqueData = dynamicDowncast<UniqueElementData>(*this))
-        return uniqueData->m_presentationalHintStyle.get();
+    if (isUnique())
+        return uncheckedDowncast<UniqueElementData>(*this).m_presentationalHintStyle.get();
     return nullptr;
 }
 
@@ -232,11 +234,49 @@ ALWAYS_INLINE const Attribute* NODELETE ElementData::findAttributeByName(const A
     return nullptr;
 }
 
+// QualifiedName::matches() succeeds either on impl identity or on (localName, namespaceURI) identity,
+// and impl identity implies localName identity, so a mismatching localName rules the attribute out
+// after a single load. Everything derived from the searched-for name is loaded once, before the loop.
+ALWAYS_INLINE bool attributeNameMatchesLoweredString(const QualifiedName& name, const AtomString& value)
+{
+    auto* valueImpl = value.impl();
+    if (!valueImpl)
+        return false;
+    StringView prefix { name.prefix().string() };
+    StringView localName { name.localName().string() };
+    unsigned prefixLength = prefix.length();
+    if (valueImpl->length() != prefixLength + 1 + localName.length())
+        return false;
+    StringView candidate { *valueImpl };
+    return candidate[prefixLength] == ':' && candidate.left(prefixLength) == prefix && candidate.substring(prefixLength + 1) == localName;
+}
+
+ALWAYS_INLINE bool atomStringIsASCIILowercase(const AtomString& name)
+{
+    auto* impl = name.impl();
+    if (!impl)
+        return true;
+    if (!impl->is8Bit()) [[unlikely]]
+        return false;
+    for (auto character : impl->span8()) {
+        if (isASCIIUpper(character)) [[unlikely]]
+            return false;
+    }
+    return true;
+}
+
 SUPPRESS_NODELETE ALWAYS_INLINE unsigned NODELETE ElementData::findAttributeIndexByName(const QualifiedName& name) const
 {
     auto attributes = attributeSpan();
-    for (auto [i, attribute] : indexedRange(attributes)) {
-        if (attribute.name().matches(name))
+    auto* targetImpl = name.impl();
+    unsigned count = static_cast<unsigned>(attributes.size());
+    auto* targetLocalName = targetImpl->m_localName.impl();
+    auto* targetNamespaceURI = targetImpl->m_namespaceURI.impl();
+    for (unsigned i = 0; i < count; ++i) {
+        auto* impl = attributes[i].name().impl();
+        if (impl == targetImpl) [[likely]]
+            return i;
+        if (impl->m_localName.impl() == targetLocalName && impl->m_namespaceURI.impl() == targetNamespaceURI)
             return i;
     }
     return attributeNotFound;
@@ -250,16 +290,22 @@ SUPPRESS_NODELETE ALWAYS_INLINE unsigned NODELETE ElementData::findAttributeInde
     if (attributes.empty())
         return attributeNotFound;
 
-    auto& caseAdjustedName = shouldIgnoreAttributeCase ? name.convertToASCIILowercase() : name;
+    // The overwhelmingly common query is an already-lowercase name, where lowercasing is a no-op.
+    // Detecting that inline avoids an out-of-line WTF call plus an AtomString copy per lookup.
+    AtomString loweredName;
+    if (shouldIgnoreAttributeCase && !atomStringIsASCIILowercase(name)) [[unlikely]]
+        loweredName = name.convertToASCIILowercase();
+    const AtomString& caseAdjustedName = loweredName.isNull() ? name : loweredName;
+    auto* caseAdjustedNameImpl = caseAdjustedName.impl();
 
-    for (auto [i, attribute] : indexedRange(attributes)) {
-        if (!attribute.name().hasPrefix()) {
-            if (attribute.localName() == caseAdjustedName)
+    unsigned count = static_cast<unsigned>(attributes.size());
+    for (unsigned i = 0; i < count; ++i) {
+        auto& attributeName = attributes[i].name();
+        if (attributeName.impl()->m_prefix.isNull()) [[likely]] {
+            if (attributeName.impl()->m_localName.impl() == caseAdjustedNameImpl)
                 return i;
-        } else {
-            if (attribute.name().toString() == caseAdjustedName)
-                return i;
-        }
+        } else if (attributeNameMatchesLoweredString(attributeName, caseAdjustedName))
+            return i;
     }
 
     return attributeNotFound;
@@ -267,8 +313,14 @@ SUPPRESS_NODELETE ALWAYS_INLINE unsigned NODELETE ElementData::findAttributeInde
 
 SUPPRESS_NODELETE ALWAYS_INLINE const Attribute* NODELETE ElementData::findAttributeByName(const QualifiedName& name) const
 {
+    auto* targetImpl = name.impl();
+    auto* targetLocalName = targetImpl->m_localName.impl();
+    auto* targetNamespaceURI = targetImpl->m_namespaceURI.impl();
     for (auto& attribute : attributeSpan()) {
-        if (attribute.name().matches(name))
+        auto* impl = attribute.name().impl();
+        if (impl == targetImpl) [[likely]]
+            return &attribute;
+        if (impl->m_localName.impl() == targetLocalName && impl->m_namespaceURI.impl() == targetNamespaceURI)
             return &attribute;
     }
     return nullptr;

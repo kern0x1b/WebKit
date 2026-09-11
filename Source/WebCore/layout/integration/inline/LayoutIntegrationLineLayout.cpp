@@ -24,6 +24,10 @@
  */
 
 #include "config.h"
+#include <wtf/MonotonicTime.h>
+
+extern "C" unsigned long long g_webkitIOS6InlineLayoutNs;
+extern "C" unsigned g_webkitIOS6InlineLayoutCount;
 #include "LayoutIntegrationLineLayout.h"
 
 #include "BlockFormattingState.h"
@@ -469,6 +473,21 @@ static inline std::optional<Layout::BlockLayoutState::LineGrid> lineGrid(const R
 
 std::optional<LayoutRect> LineLayout::layout(RenderBlockFlow::MarginInfo& marginInfo, ForceFullLayout forcedFullLayout)
 {
+#if defined(WEBKIT_IOS6)
+    auto ios6Recording = WebCore::g_webkitIOS6NeedsLayoutRecording;
+    auto ios6PhaseStart = ios6Recording ? MonotonicTime::now() : MonotonicTime();
+    struct Ios6PhaseScope {
+        bool recording;
+        MonotonicTime start;
+        ~Ios6PhaseScope()
+        {
+            if (!recording)
+                return;
+            g_webkitIOS6InlineLayoutNs += (MonotonicTime::now() - start).nanoseconds();
+            ++g_webkitIOS6InlineLayoutCount;
+        }
+    } ios6PhaseScope { ios6Recording, ios6PhaseStart };
+#endif
     if (forcedFullLayout == ForceFullLayout::Yes && m_lineDamage)
         Layout::InlineInvalidation::resetInlineDamage(*m_lineDamage);
 

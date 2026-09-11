@@ -980,6 +980,7 @@ set(WebCore_PRIVATE_FRAMEWORK_HEADERS
     bindings/js/ReadableStreamDefaultController.h
     bindings/js/RunJavaScriptParameters.h
     bindings/js/ScriptCachedFrameData.h
+    bindings/js/ScriptBytecodeCache.h
     bindings/js/ScriptController.h
     bindings/js/ScriptWrappable.h
     bindings/js/ScriptWrappableInlines.h
@@ -2086,6 +2087,7 @@ set(WebCore_PRIVATE_FRAMEWORK_HEADERS
     page/SettingsBase.h
     page/ShadowRealmGlobalScope.h
     page/ShareData.h
+    page/Scheduling.h
     page/SocketProvider.h
     page/SpeechRecognitionProvider.h
     page/SpeechSynthesisClient.h
@@ -2569,7 +2571,6 @@ set(WebCore_PRIVATE_FRAMEWORK_HEADERS
     platform/graphics/Icon.h
     platform/graphics/Image.h
     platform/graphics/ImageAdapter.h
-    platform/graphics/ImageBackingStore.h
     platform/graphics/ImageBuffer.h
     platform/graphics/ImageBufferAllocator.h
     platform/graphics/ImageBufferBackend.h

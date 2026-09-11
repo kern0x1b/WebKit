@@ -49,10 +49,23 @@
 #include "StyleComputedStyle+GettersInlines.h"
 #include <wtf/TZoneMallocInlines.h>
 #include <wtf/text/TextStream.h>
+#if defined(WEBKIT_IOS6)
+#include <unistd.h>
+#endif
 
 namespace WebCore {
 
 static const Seconds maximumDelayForTimers { 400_ms };
+
+#if defined(WEBKIT_IOS6)
+static bool waitForSpeculativeContentChange()
+{
+    static int wait = -1;
+    if (wait < 0)
+        wait = access("/tmp/native-wait-for-content-change", F_OK) == 0 ? 1 : 0;
+    return wait != 0;
+}
+#endif
 
 WTF_MAKE_TZONE_ALLOCATED_IMPL(ContentChangeObserver);
 
@@ -589,11 +602,17 @@ void ContentChangeObserver::adjustObservedState(Event event)
             return;
         }
 
-        // The fixed observation window (which is the final step in content observation) is closed and now we check if are still waiting for timers or animations to finish.
+#if defined(WEBKIT_IOS6)
+        if (hasPendingActivity() && waitForSpeculativeContentChange()) {
+            LOG(ContentObservation, "notifyClientIfNeeded: We are still waiting on some events.");
+            return;
+        }
+#else
         if (hasPendingActivity()) {
             LOG(ContentObservation, "notifyClientIfNeeded: We are still waiting on some events.");
             return;
         }
+#endif
 
         // First demote to "no change" because we've got no pending activity anymore.
         if (observedContentChange() == ContentChange::Indeterminate)

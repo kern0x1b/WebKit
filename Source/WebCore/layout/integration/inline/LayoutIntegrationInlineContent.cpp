@@ -218,8 +218,18 @@ void InlineContent::clearFormattingContextRoot()
 
 void InlineContent::shrinkToFit()
 {
+#if defined(WEBKIT_IOS6)
+    auto hasWorthwhileSlack = [](const auto& vector) {
+        return vector.capacity() > vector.size() + vector.size() / 4;
+    };
+    if (hasWorthwhileSlack(m_displayContent.boxes))
+        m_displayContent.boxes.shrinkToFit();
+    if (hasWorthwhileSlack(m_displayContent.lines))
+        m_displayContent.lines.shrinkToFit();
+#else
     m_displayContent.boxes.shrinkToFit();
     m_displayContent.lines.shrinkToFit();
+#endif
 }
 
 }

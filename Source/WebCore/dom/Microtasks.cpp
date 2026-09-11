@@ -66,10 +66,31 @@ MicrotaskQueue::MicrotaskQueue(JSC::VM& vm, EventLoop& eventLoop)
 
 MicrotaskQueue::~MicrotaskQueue() = default;
 
+#if defined(WEBKIT_IOS6)
+static bool ios6CheckpointHasRejectionsToNotify(EventLoop& eventLoop)
+{
+    SUPPRESS_UNCOUNTED_LOCAL auto& contexts = eventLoop.ios6AssociatedContexts();
+    for (auto it = contexts.begin(), end = contexts.end(); it != end; ++it) {
+        SUPPRESS_UNCOUNTED_LOCAL auto* context = it.get();
+        if (!context)
+            continue;
+        CheckedPtr tracker = context->rejectedPromiseTracker();
+        if (tracker && tracker->hasPendingRejections())
+            return true;
+    }
+    return false;
+}
+#endif
+
 void MicrotaskQueue::performMicrotaskCheckpoint(JSC::VM& vm)
 {
     if (m_performingMicrotaskCheckpoint)
         return;
+
+#if defined(WEBKIT_IOS6)
+    if (RefPtr eventLoop = m_eventLoop.get(); eventLoop && ios6HasNoQueuedWork() && !ios6CheckpointHasRejectionsToNotify(*eventLoop))
+        return;
+#endif
 
     SetForScope change(m_performingMicrotaskCheckpoint, true);
     JSC::JSLockHolder locker(vm);

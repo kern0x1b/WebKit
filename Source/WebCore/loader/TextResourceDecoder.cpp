@@ -614,7 +614,10 @@ String TextResourceDecoder::flush()
 String TextResourceDecoder::decodeAndFlush(std::span<const uint8_t> data)
 {
     auto decoded = decode(data);
-    auto result = tryMakeString(decoded, flush());
+    auto flushed = flush();
+    if (flushed.isEmpty() && !decoded.isEmpty())
+        return decoded;
+    auto result = tryMakeString(decoded, flushed);
     if (result.isNull())
         RELEASE_LOG_ERROR(TextDecoding, "TextResourceDecoder::decodeAndFlush() failed, size too large (%zu)", data.size());
     return result;

@@ -132,6 +132,10 @@ public:
 
     void forEachAssociatedContext(NOESCAPE const Function<void(ScriptExecutionContext&)>&);
     bool findMatchingAssociatedContext(NOESCAPE const Function<bool(ScriptExecutionContext&)>&);
+#if defined(WEBKIT_IOS6)
+    WeakHashSet<ScriptExecutionContext>& ios6AssociatedContexts() LIFETIME_BOUND { return m_associatedContexts; }
+    bool ios6HasQueuedTasks() const { return !m_tasks.isEmpty(); }
+#endif
     void addAssociatedContext(ScriptExecutionContext&);
     void removeAssociatedContext(ScriptExecutionContext&);
 

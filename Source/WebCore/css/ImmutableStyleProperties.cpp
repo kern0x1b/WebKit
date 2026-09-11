@@ -43,8 +43,8 @@ ImmutableStyleProperties::ImmutableStyleProperties(std::span<const CSSProperty> 
     auto valueSpan = this->valueSpan();
     for (auto [i, property] : indexedRange(properties)) {
         metadataSpan[i] = property.metadata();
-        RefPtr value = property.value();
-        valueSpan[i] = value.get();
+        CSSValue* value = property.value();
+        valueSpan[i] = value;
         value->ref();
     }
 }
@@ -77,7 +77,7 @@ Ref<ImmutableStyleProperties> ImmutableStyleProperties::createDeduplicating(std:
         Hasher hasher;
         add(hasher, mode);
         for (auto& property : properties) {
-            if (!protect(property.value())->addHash(hasher))
+            if (!property.value()->addHash(hasher))
                 return 0u;
             add(hasher, property.id(), property.isImportant());
         }
@@ -98,7 +98,10 @@ Ref<ImmutableStyleProperties> ImmutableStyleProperties::createDeduplicating(std:
         if (existingValue.cssParserMode() != mode)
             return false;
         for (auto [i, property] : indexedRange(properties)) {
-            if (existingValue.propertyAt(i).toCSSProperty() != property)
+            auto existingProperty = existingValue.propertyAt(i);
+            if (!(existingProperty.metadata() == property.metadata()))
+                return false;
+            if (!existingProperty.value()->equals(*property.value()))
                 return false;
         }
         return true;

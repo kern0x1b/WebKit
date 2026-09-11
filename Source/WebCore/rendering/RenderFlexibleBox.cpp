@@ -345,7 +345,7 @@ bool RenderFlexibleBox::hitTestChildren(const HitTestRequest& request, HitTestRe
 void RenderFlexibleBox::paintChildren(PaintInfo& paintInfo, const LayoutPoint& paintOffset, PaintInfo& paintInfoForFlexItem, bool usePrintRect)
 {
     for (auto& renderer : m_flexItems) {
-        CheckedPtr flexItem = renderer.get();
+        auto* flexItem = renderer.get();
         if (flexItem && !paintChild(*flexItem, paintInfo, paintOffset, paintInfoForFlexItem, usePrintRect, PaintAsInlineBlock))
             return;
     }
@@ -671,13 +671,14 @@ void RenderFlexibleBox::layoutFlexItemWithMainSize(FlexLayoutItem& flexLayoutIte
     // We may have already forced relayout for orthogonal flowing children in
     // computeInnerFlexBaseSizeForFlexItem.
     bool forceFlexItemRelayout = flexLayoutItem.shouldInvalidateChildContent && !hasFlexItemCompletedLayout(flexItem);
+#if defined(WEBKIT_IOS6)
+    if (!forceFlexItemRelayout && flexItemHasPercentHeightDescendants(flexItem) && hasFlexItemCompletedLayout(flexItem))
+        forceFlexItemRelayout = true;
+#else
     if (!forceFlexItemRelayout && flexItemHasPercentHeightDescendants(flexItem)) {
-        // Have to force another relayout even though the child is sized
-        // correctly, because its descendants are not sized correctly yet. Our
-        // previous layout of the child was done without an override height set.
-        // So, redo it here.
         forceFlexItemRelayout = true;
     }
+#endif
     updateFlexItemDirtyBitsBeforeLayout(forceFlexItemRelayout, flexItem);
     if (!flexItem.needsLayout())
         flexItem.markForPaginationRelayoutIfNeeded();
@@ -940,13 +941,19 @@ void RenderFlexibleBox::prepareFlexItemsAndMargins()
     // Out-of-flow and excluded children are not flex items, so they are left out; the list holds weak pointers
     // because painting/hit-testing/baseline queries read it after layout, when a child may have been removed.
     m_flexItems.clear();
+    bool hasNonZeroOrder = false;
     for (auto& child : childrenOfType<RenderBox>(*this)) {
-        if (!child.isOutOfFlowPositioned() && !child.isExcludedFromNormalLayout())
+        if (!child.isOutOfFlowPositioned() && !child.isExcludedFromNormalLayout()) {
+            if (child.style().order().value != 0) [[unlikely]]
+                hasNonZeroOrder = true;
             m_flexItems.append(child);
+        }
     }
-    std::stable_sort(m_flexItems.begin(), m_flexItems.end(), [](auto& a, auto& b) {
-        return a->style().order().value < b->style().order().value;
-    });
+    if (hasNonZeroOrder) [[unlikely]] {
+        std::stable_sort(m_flexItems.begin(), m_flexItems.end(), [](auto& a, auto& b) {
+            return a->style().order().value < b->style().order().value;
+        });
+    }
 
     for (auto& flexItem : m_flexItems) {
         // Before running the flex algorithm, 'auto' has a margin of 0.

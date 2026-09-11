@@ -40,7 +40,15 @@ void ResourceLoader::willCacheResponseAsync(ResourceHandle*, NSCachedURLResponse
 {
     if (m_options.sendLoadCallbacks == SendCallbackPolicy::DoNotSendCallbacks)
         return completionHandler(nullptr);
-    protect(frameLoader()->client())->willCacheResponse(protect(documentLoader()).get(), *identifier(), response, WTF::move(completionHandler));
+
+    // Same reason as in SubresourceLoader: this callback can arrive after the
+    // frame has gone, which is what closing a tab does while a cache decision is
+    // still in flight. Everywhere else in this class the frame loader is reached
+    // through a checked pointer; here it was not.
+    RefPtr frameLoader = this->frameLoader();
+    if (!frameLoader || !identifier())
+        return completionHandler(nullptr);
+    protect(frameLoader->client())->willCacheResponse(protect(documentLoader()).get(), *identifier(), response, WTF::move(completionHandler));
 }
 
 }

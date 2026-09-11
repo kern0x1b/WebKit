@@ -9,6 +9,25 @@ if (CMAKE_SYSTEM_NAME STREQUAL "iOS")
     )
 endif ()
 
+if (USE_WEBP)
+    # Only the WebP decoder, not platform/ImageDecoders.cmake: that module brings
+    # every software decoder and libjpeg and libpng with it, and this platform
+    # decodes those formats itself. WebP is the one it cannot.
+    list(APPEND WebCore_LIBRARIES WebP::libwebp WebP::demux)
+endif ()
+
+if (USE_OPENSSL)
+    include(platform/OpenSSL.cmake)
+    # The headers sit beside the library the port passes in, so the path is
+    # derived from it rather than written here.
+    get_filename_component(IOS6_OPENSSL_LIB_DIR "${WEBKIT_IOS6_CRYPTO_LIB}" DIRECTORY)
+    get_filename_component(IOS6_OPENSSL_ROOT "${IOS6_OPENSSL_LIB_DIR}" DIRECTORY)
+    list(APPEND WebCore_PRIVATE_INCLUDE_DIRECTORIES
+        "${WEBCORE_DIR}/crypto/openssl"
+        "${IOS6_OPENSSL_ROOT}/include"
+    )
+endif ()
+
 make_directory("${CMAKE_BINARY_DIR}/WebCore/Modules")
 configure_file(${WEBCORE_DIR}/WebCore.modulemap ${CMAKE_BINARY_DIR}/WebCore/Modules/module.modulemap COPYONLY)
 configure_file(${WEBCORE_DIR}/WebCore_Private.modulemap ${CMAKE_BINARY_DIR}/WebCore/Modules/module.private.modulemap COPYONLY)
@@ -18,32 +37,100 @@ target_compile_options(WebCore PRIVATE
 
 target_compile_options(WebCore PRIVATE ${WEBKIT_PRIVATE_FRAMEWORKS_COMPILE_FLAG})
 
-target_link_options(WebCore PRIVATE -weak_framework BrowserEngineKit)
+# ios6: BrowserEngineKit is iOS 17. -weak_framework still requires the framework
+# to be found at link time; it only makes the runtime reference weak.
+find_library(BROWSERENGINEKIT_LIBRARY BrowserEngineKit
+    PATHS "${CMAKE_OSX_SYSROOT}/System/Library/Frameworks"
+    NO_DEFAULT_PATH
+)
+if (BROWSERENGINEKIT_LIBRARY)
+    target_link_options(WebCore PRIVATE -weak_framework BrowserEngineKit)
+endif ()
 
 target_link_options(WebCore PRIVATE
     -Wl,-unexported_symbols_list,${WEBCORE_DIR}/Configurations/WebCore.unexp
 )
 
 find_library(ACCELERATE_LIBRARY Accelerate)
+if (NOT ACCELERATE_LIBRARY)  # ios6: allow missing frameworks
+    set(ACCELERATE_LIBRARY "")
+endif ()
 find_library(AUDIOTOOLBOX_LIBRARY AudioToolbox)
+if (NOT AUDIOTOOLBOX_LIBRARY)  # ios6: allow missing frameworks
+    set(AUDIOTOOLBOX_LIBRARY "")
+endif ()
 find_library(AVFOUNDATION_LIBRARY AVFoundation)
+if (NOT AVFOUNDATION_LIBRARY)  # ios6: allow missing frameworks
+    set(AVFOUNDATION_LIBRARY "")
+endif ()
 find_library(CFNETWORK_LIBRARY CFNetwork)
+if (NOT CFNETWORK_LIBRARY)  # ios6: allow missing frameworks
+    set(CFNETWORK_LIBRARY "")
+endif ()
 find_library(COMPRESSION_LIBRARY Compression)
+if (NOT COMPRESSION_LIBRARY)  # ios6: allow missing frameworks
+    set(COMPRESSION_LIBRARY "")
+endif ()
 find_library(COREAUDIO_LIBRARY CoreAudio)
+if (NOT COREAUDIO_LIBRARY)  # ios6: allow missing frameworks
+    set(COREAUDIO_LIBRARY "")
+endif ()
 find_library(COREMEDIA_LIBRARY CoreMedia)
+if (NOT COREMEDIA_LIBRARY)  # ios6: allow missing frameworks
+    set(COREMEDIA_LIBRARY "")
+endif ()
 find_library(FONTPARSER_LIBRARY FontParser HINTS ${CMAKE_OSX_SYSROOT}/System/Library/PrivateFrameworks/FontServices.framework)
+if (NOT FONTPARSER_LIBRARY)  # ios6: allow missing frameworks
+    set(FONTPARSER_LIBRARY "")
+endif ()
 find_library(IOKIT_LIBRARY IOKit)
+if (NOT IOKIT_LIBRARY)  # ios6: allow missing frameworks
+    set(IOKIT_LIBRARY "")
+endif ()
 find_library(IOSURFACE_LIBRARY IOSurface)
+if (NOT IOSURFACE_LIBRARY)  # ios6: allow missing frameworks
+    set(IOSURFACE_LIBRARY "")
+endif ()
 find_library(LIBACCESSIBILITY_LIBRARY Accessibility PATHS ${CMAKE_OSX_SYSROOT}/usr/lib NO_CMAKE_FIND_ROOT_PATH NO_DEFAULT_PATH)
+if (NOT LIBACCESSIBILITY_LIBRARY)  # ios6: allow missing frameworks
+    set(LIBACCESSIBILITY_LIBRARY "")
+endif ()
 find_library(ACCESSIBILITYSUPPORT_LIBRARY AccessibilitySupport HINTS ${CMAKE_OSX_SYSROOT}/System/Library/PrivateFrameworks)
+if (NOT ACCESSIBILITYSUPPORT_LIBRARY)  # ios6: allow missing frameworks
+    set(ACCESSIBILITYSUPPORT_LIBRARY "")
+endif ()
 find_library(METAL_LIBRARY Metal)
+if (NOT METAL_LIBRARY)  # ios6: allow missing frameworks
+    set(METAL_LIBRARY "")
+endif ()
 find_library(NETWORKEXTENSION_LIBRARY NetworkExtension)
+if (NOT NETWORKEXTENSION_LIBRARY)  # ios6: allow missing frameworks
+    set(NETWORKEXTENSION_LIBRARY "")
+endif ()
 find_library(QUARTZCORE_LIBRARY QuartzCore)
+if (NOT QUARTZCORE_LIBRARY)  # ios6: allow missing frameworks
+    set(QUARTZCORE_LIBRARY "")
+endif ()
 find_library(SECURITY_LIBRARY Security)
+if (NOT SECURITY_LIBRARY)  # ios6: allow missing frameworks
+    set(SECURITY_LIBRARY "")
+endif ()
 find_library(SYSTEMCONFIGURATION_LIBRARY SystemConfiguration)
+if (NOT SYSTEMCONFIGURATION_LIBRARY)  # ios6: allow missing frameworks
+    set(SYSTEMCONFIGURATION_LIBRARY "")
+endif ()
 find_library(UNIFORMTYPEIDENTIFIERS_LIBRARY UniformTypeIdentifiers)
+if (NOT UNIFORMTYPEIDENTIFIERS_LIBRARY)  # ios6: allow missing frameworks
+    set(UNIFORMTYPEIDENTIFIERS_LIBRARY "")
+endif ()
 find_library(VIDEOTOOLBOX_LIBRARY VideoToolbox)
+if (NOT VIDEOTOOLBOX_LIBRARY)  # ios6: allow missing frameworks
+    set(VIDEOTOOLBOX_LIBRARY "")
+endif ()
 find_library(XML2_LIBRARY XML2)
+if (NOT XML2_LIBRARY)  # ios6: allow missing frameworks
+    set(XML2_LIBRARY "")
+endif ()
 
 # SQLite3::SQLite3 and ZLIB::ZLIB are declared in OptionsCocoa.cmake; only search
 # if missing (e.g. ANGLE/WebCore configured standalone).
@@ -133,14 +220,36 @@ else ()
     list(APPEND WebCore_PRIVATE_INCLUDE_DIRECTORIES "${CMAKE_BINARY_DIR}/WebGPU/Headers")
 endif ()
 
+# The Objective-C DOM bindings live in WebKitLegacy upstream, but iOS 6's UIKit
+# expects those classes to be exported by WebCore, which is where that OS had
+# them. They are compiled here and no longer in WebKitLegacy; the headers stay
+# where they are.
+list(APPEND WebCore_PRIVATE_INCLUDE_DIRECTORIES
+    "${CMAKE_SOURCE_DIR}/Source/WebKitLegacy/mac/DOM"
+    "${CMAKE_SOURCE_DIR}/Source/WebKitLegacy/mac/WebCoreSupport"
+    "${CMAKE_SOURCE_DIR}/Source/WebKitLegacy/mac"
+)
+
 set(WebCore_EXTRA_LINK_OPTIONS "SHELL:-Wl,-force_load $<TARGET_FILE:PAL>")
 
 find_library(COREUI_FRAMEWORK CoreUI HINTS ${CMAKE_OSX_SYSROOT}/System/Library/PrivateFrameworks)
+
+if (NOT COREUI_FRAMEWORK)  # ios6: allow missing frameworks
+
+    set(COREUI_FRAMEWORK "")
+
+endif ()
 if (COREUI_FRAMEWORK)
     list(APPEND WebCore_LIBRARIES ${COREUI_FRAMEWORK})
 endif ()
 
 find_library(DATADETECTORSCORE_FRAMEWORK DataDetectorsCore HINTS ${CMAKE_OSX_SYSROOT}/System/Library/PrivateFrameworks)
+
+if (NOT DATADETECTORSCORE_FRAMEWORK)  # ios6: allow missing frameworks
+
+    set(DATADETECTORSCORE_FRAMEWORK "")
+
+endif ()
 if (DATADETECTORSCORE_FRAMEWORK)
     list(APPEND WebCore_LIBRARIES ${DATADETECTORSCORE_FRAMEWORK})
 endif ()
@@ -218,6 +327,7 @@ list(APPEND WebCore_PRIVATE_INCLUDE_DIRECTORIES
     "${WEBCORE_DIR}/platform/graphics/opengl"
     "${WEBCORE_DIR}/platform/graphics/re"
     "${WEBCORE_DIR}/platform/image-decoders"
+    "${WEBCORE_DIR}/platform/image-decoders/webp"
     "${WEBCORE_DIR}/platform/mediacapabilities"
     "${WEBCORE_DIR}/platform/mediarecorder/cocoa"
     "${WEBCORE_DIR}/platform/mediastream/cocoa"
@@ -295,7 +405,7 @@ list(APPEND WebCore_SOURCES
     platform/cocoa/LoggingCocoa.mm
     platform/cocoa/MIMETypeRegistryCocoa.mm
     platform/cocoa/MediaRemoteSoftLink.mm
-    platform/cocoa/NetworkExtensionContentFilter.mm
+    # ios6: platform/cocoa/NetworkExtensionContentFilter.mm
     platform/cocoa/ParentalControlsContentFilter.mm
     platform/cocoa/PasteboardCocoa.mm
     platform/cocoa/SearchPopupMenuCocoa.mm
@@ -335,23 +445,23 @@ list(APPEND WebCore_SOURCES
     platform/graphics/avfoundation/MediaSelectionGroupAVFObjC.mm
     platform/graphics/avfoundation/WebAVSampleBufferListener.mm
 
-    platform/graphics/avfoundation/objc/AVAssetTrackUtilities.mm
-    platform/graphics/avfoundation/objc/AudioTrackPrivateAVFObjC.mm
-    platform/graphics/avfoundation/objc/AudioTrackPrivateMediaSourceAVFObjC.cpp
-    platform/graphics/avfoundation/objc/CDMInstanceFairPlayStreamingAVFObjC.mm
-    platform/graphics/avfoundation/objc/CDMSessionAVContentKeySession.mm
-    platform/graphics/avfoundation/objc/CDMSessionAVFoundationObjC.mm
-    platform/graphics/avfoundation/objc/ImageDecoderAVFObjC.mm
-    platform/graphics/avfoundation/objc/InbandTextTrackPrivateAVFObjC.mm
-    platform/graphics/avfoundation/objc/MediaPlayerPrivateAVFoundationObjC.mm
-    platform/graphics/avfoundation/objc/MediaPlayerPrivateMediaSourceAVFObjC.mm
-    platform/graphics/avfoundation/objc/MediaSampleAVFObjC.mm
-    platform/graphics/avfoundation/objc/MediaSourcePrivateAVFObjC.mm
-    platform/graphics/avfoundation/objc/QueuedVideoOutput.mm
-    platform/graphics/avfoundation/objc/SourceBufferPrivateAVFObjC.mm
-    platform/graphics/avfoundation/objc/VideoTrackPrivateAVFObjC.cpp
-    platform/graphics/avfoundation/objc/VideoTrackPrivateMediaSourceAVFObjC.mm
-    platform/graphics/avfoundation/objc/WebCoreAVFResourceLoader.mm
+    # ios6: platform/graphics/avfoundation/objc/AVAssetTrackUtilities.mm
+    # ios6: platform/graphics/avfoundation/objc/AudioTrackPrivateAVFObjC.mm
+    # ios6: platform/graphics/avfoundation/objc/AudioTrackPrivateMediaSourceAVFObjC.cpp
+    # ios6: platform/graphics/avfoundation/objc/CDMInstanceFairPlayStreamingAVFObjC.mm
+    # ios6: platform/graphics/avfoundation/objc/CDMSessionAVContentKeySession.mm
+    # ios6: platform/graphics/avfoundation/objc/CDMSessionAVFoundationObjC.mm
+    # ios6: platform/graphics/avfoundation/objc/ImageDecoderAVFObjC.mm
+    # ios6: platform/graphics/avfoundation/objc/InbandTextTrackPrivateAVFObjC.mm
+    # ios6: platform/graphics/avfoundation/objc/MediaPlayerPrivateAVFoundationObjC.mm
+    # ios6: platform/graphics/avfoundation/objc/MediaPlayerPrivateMediaSourceAVFObjC.mm
+    # ios6: platform/graphics/avfoundation/objc/MediaSampleAVFObjC.mm
+    # ios6: platform/graphics/avfoundation/objc/MediaSourcePrivateAVFObjC.mm
+    # ios6: platform/graphics/avfoundation/objc/QueuedVideoOutput.mm
+    # ios6: platform/graphics/avfoundation/objc/SourceBufferPrivateAVFObjC.mm
+    # ios6: platform/graphics/avfoundation/objc/VideoTrackPrivateAVFObjC.cpp
+    # ios6: platform/graphics/avfoundation/objc/VideoTrackPrivateMediaSourceAVFObjC.mm
+    # ios6: platform/graphics/avfoundation/objc/WebCoreAVFResourceLoader.mm
 
     platform/graphics/ca/GraphicsLayerCA.cpp
     platform/graphics/ca/LayerPool.cpp
@@ -409,16 +519,14 @@ list(APPEND WebCore_SOURCES
     platform/graphics/cocoa/FontPlatformDataCocoa.mm
     platform/graphics/cocoa/GraphicsContextCocoa.mm
     platform/graphics/cocoa/GraphicsContextGLCocoa.mm
-    platform/graphics/cocoa/IOSurface.mm
     platform/graphics/cocoa/IOSurfaceDrawingBuffer.cpp
-    platform/graphics/cocoa/IOSurfacePoolCocoa.mm
     platform/graphics/cocoa/IntRectCocoa.mm
     platform/graphics/cocoa/MediaPlayerEnumsCocoa.mm
     platform/graphics/cocoa/TextTransformCocoa.cpp
     platform/graphics/cocoa/UnrealizedCoreTextFont.cpp
     platform/graphics/cocoa/WebActionDisablingCALayerDelegate.mm
     platform/graphics/cocoa/WebCoreCALayerExtras.mm
-    platform/graphics/cocoa/WebCoreDecompressionSession.mm
+    # ios6: platform/graphics/cocoa/WebCoreDecompressionSession.mm
     platform/graphics/cocoa/WebLayer.mm
     platform/graphics/cocoa/WebMAudioUtilitiesCocoa.mm
     platform/graphics/cocoa/WebProcessGraphicsContextGLCocoa.mm
@@ -444,12 +552,13 @@ list(APPEND WebCore_SOURCES
 
     platform/mediarecorder/MediaRecorderPrivateWriter.cpp
 
-    platform/mediastream/cocoa/CoreAudioCaptureUnit.mm
-    platform/mediastream/cocoa/MockRealtimeVideoSourceCocoa.mm
-    platform/mediastream/cocoa/RealtimeOutgoingVideoSourceCocoa.cpp
+    # REV-EXCLUDED cocoa/libwebrtc mediastream capture backend (modern AVFoundation, not on iOS 6)
+    # platform/mediastream/cocoa/CoreAudioCaptureUnit.mm
+    # platform/mediastream/cocoa/MockRealtimeVideoSourceCocoa.mm
+    # platform/mediastream/cocoa/RealtimeOutgoingVideoSourceCocoa.cpp
 
-    platform/mediastream/libwebrtc/LibWebRTCAudioModule.cpp
-    platform/mediastream/libwebrtc/LibWebRTCDav1dDecoder.cpp
+    # platform/mediastream/libwebrtc/LibWebRTCAudioModule.cpp
+    # platform/mediastream/libwebrtc/LibWebRTCDav1dDecoder.cpp
 
     platform/network/cf/CertificateInfoCFNet.cpp
     platform/network/cf/DNSResolveQueueCFNet.cpp
@@ -850,8 +959,14 @@ list(REMOVE_ITEM WebCore_PRIVATE_FRAMEWORK_HEADERS
     page/WebKitNamespace.h
 
     platform/AbortableTaskQueue.h
-    platform/PlatformTouchEvent.h
-    platform/PlatformTouchPoint.h
+    // PlatformTouchEvent.h/PlatformTouchPoint.h stay in WebCore_PRIVATE_FRAMEWORK_HEADERS
+    // (i.e. NOT removed here) on this configuration: without WebKitAdditions, dom/
+    // MouseEvent.h needs a real <WebCore/PlatformTouchEvent.h> forwarding header, because
+    // it is reached from WebKitLegacy (DOMMouseEvent.mm), a different CMake target with no
+    // access to WebCore's own internal directories - only to WebCore's framework headers.
+    // A quoted #include "PlatformTouchEvent.h" only works for consumers inside WebCore's own
+    // compilation (proven: dom/PointerEvent.h's identical quoted include compiles fine, and
+    // is never reached from WebKitLegacy at all); MouseEvent.h needs the real thing.
     platform/StringEntropyHelpers.h
 
     platform/encryptedmedia/CDMUtilities.h
@@ -1083,7 +1198,7 @@ list(APPEND WebCore_PRIVATE_FRAMEWORK_HEADERS
     platform/cocoa/CoreVideoSoftLink.h
     platform/cocoa/LocalCurrentGraphicsContext.h
     platform/cocoa/NSURLUtilities.h
-    platform/cocoa/NetworkExtensionContentFilter.h
+    # ios6: platform/cocoa/NetworkExtensionContentFilter.h
     platform/cocoa/ParentalControlsContentFilter.h
     platform/cocoa/ParentalControlsURLFilter.h
     platform/cocoa/ParentalControlsURLFilterParameters.h
@@ -1244,6 +1359,7 @@ list(APPEND WebCore_PRIVATE_FRAMEWORK_HEADERS
     platform/ios/wak/WKUtilities.h
     platform/ios/wak/WKView.h
     platform/ios/wak/WKViewPrivate.h
+    platform/ios/wak/WKWindow.h
     platform/ios/wak/WebCoreThread.h
     platform/ios/wak/WebCoreThreadInternal.h
     platform/ios/wak/WebCoreThreadMessage.h
@@ -1313,6 +1429,7 @@ list(APPEND WebCore_PRIVATE_FRAMEWORK_HEADERS
     accessibility/cocoa/CocoaAccessibilityConstants.h
 )
 
+if (NOT WEBKIT_IOS6_COMPAT_LIB)
 list(APPEND WebCore_IDL_FILES
     Modules/applepay/ApplePayAutomaticReloadPaymentRequest.idl
     Modules/applepay/ApplePayCancelEvent.idl
@@ -1373,6 +1490,7 @@ list(APPEND WebCore_IDL_FILES
     Modules/applepay/paymentrequest/ApplePayPaymentCompleteDetails.idl
     Modules/applepay/paymentrequest/ApplePayRequest.idl
 )
+endif ()
 
 set(FEATURE_DEFINES_OBJECTIVE_C "LANGUAGE_OBJECTIVE_C=1 ${FEATURE_DEFINES_WITH_SPACE_SEPARATOR}")
 set(ADDITIONAL_BINDINGS_DEPENDENCIES
@@ -1435,4 +1553,13 @@ list(APPEND WebCore_PRIVATE_FRAMEWORK_HEADERS
     platform/mac/WebCoreFullScreenWindow.h
     platform/mac/WebCoreNSFontManagerExtras.h
     platform/mac/WebCoreView.h
+)
+
+# The surface WebGL presents through. IOSurface is a private framework on this
+# release, so what these files call that came later is answered by the
+# compatibility library.
+list(APPEND WebCore_SOURCES
+    platform/graphics/cg/IOSurfacePool.cpp
+    platform/graphics/cocoa/IOSurface.mm
+    platform/graphics/cocoa/IOSurfacePoolCocoa.mm
 )

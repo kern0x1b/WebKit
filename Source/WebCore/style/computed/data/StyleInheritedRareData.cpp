@@ -256,9 +256,88 @@ InheritedRareData::~InheritedRareData() = default;
 
 bool InheritedRareData::operator==(const InheritedRareData& o) const
 {
-    return usedZoom == o.usedZoom
+    unsigned packedDelta = (textSecurity ^ o.textSecurity)
+        | (userModify ^ o.userModify)
+        | (wordBreak ^ o.wordBreak)
+        | (overflowWrap ^ o.overflowWrap)
+        | (nbspMode ^ o.nbspMode)
+        | (lineBreak ^ o.lineBreak)
+        | (userSelect ^ o.userSelect)
+        | (speakAs ^ o.speakAs)
+        | (hyphens ^ o.hyphens)
+        | (textCombine ^ o.textCombine)
+        | (textEmphasisPosition ^ o.textEmphasisPosition)
+        | (textUnderlinePosition ^ o.textUnderlinePosition)
+        | (lineBoxContain ^ o.lineBoxContain)
+        | (imageOrientation ^ o.imageOrientation)
+        | (imageRendering ^ o.imageRendering)
+        | (lineSnap ^ o.lineSnap)
+        | (lineAlign ^ o.lineAlign)
+#if ENABLE(WEBKIT_OVERFLOW_SCROLLING_CSS_PROPERTY)
+        | (overflowScrolling ^ o.overflowScrolling)
+#endif
+        | (textAlignLast ^ o.textAlignLast)
+        | (textJustify ^ o.textJustify)
+        | (textDecorationSkipInk ^ o.textDecorationSkipInk)
+        | (mathShift ^ o.mathShift)
+        | (mathStyle ^ o.mathStyle)
+        | (rubyPosition ^ o.rubyPosition)
+        | (rubyAlign ^ o.rubyAlign)
+        | (rubyOverhang ^ o.rubyOverhang)
+        | (textZoom ^ o.textZoom)
+#if ENABLE(WEBKIT_TOUCH_CALLOUT_CSS_PROPERTY)
+        | (touchCallout ^ o.touchCallout)
+#endif
+        | (hangingPunctuation ^ o.hangingPunctuation)
+        | (paintOrder ^ o.paintOrder)
+        | (capStyle ^ o.capStyle)
+        | (joinStyle ^ o.joinStyle)
+        | (hasExplicitlySetStrokeWidth ^ o.hasExplicitlySetStrokeWidth)
+        | (hasExplicitlySetStrokeColor ^ o.hasExplicitlySetStrokeColor)
+        | (effectiveInert ^ o.effectiveInert)
+        | (effectivelyTransparent ^ o.effectivelyTransparent)
+        | (effectiveWrapInsideAvoid ^ o.effectiveWrapInsideAvoid)
+        | (isInSubtreeWithBlendMode ^ o.isInSubtreeWithBlendMode)
+        | (isForceHidden ^ o.isForceHidden)
+        | (usedContentVisibility ^ o.usedContentVisibility)
+        | (autoRevealsWhenFound ^ o.autoRevealsWhenFound)
+        | (insideDefaultButton ^ o.insideDefaultButton)
+        | (insideSubmitButton ^ o.insideSubmitButton)
+        | (evaluationTimeZoomEnabled ^ o.evaluationTimeZoomEnabled)
+#if HAVE(CORE_MATERIAL)
+        | (usedAppleVisualEffectForSubtree ^ o.usedAppleVisualEffectForSubtree)
+#endif
+        ;
+    if (packedDelta)
+        return false;
+
+    return appleColorFilter == o.appleColorFilter
+        && customProperties == o.customProperties
+        && usedZoom == o.usedZoom
         && deviceScaleFactor == o.deviceScaleFactor
         && textStrokeWidth == o.textStrokeWidth
+        && eventListenerRegionTypes == o.eventListenerRegionTypes
+        && widows == o.widows
+        && orphans == o.orphans
+        && mathDepth == o.mathDepth
+        && tabSize == o.tabSize
+        && strokeMiterLimit == o.strokeMiterLimit
+        && hyphenateLimitBefore == o.hyphenateLimitBefore
+        && hyphenateLimitAfter == o.hyphenateLimitAfter
+        && hyphenateLimitLines == o.hyphenateLimitLines
+        && textBoxEdge == o.textBoxEdge
+        && lineFitEdge == o.lineFitEdge
+        && textUnderlineOffset == o.textUnderlineOffset
+        && usedTouchAction == o.usedTouchAction
+        && strokeWidth == o.strokeWidth
+#if ENABLE(TEXT_AUTOSIZING)
+        && textSizeAdjust == o.textSizeAdjust
+#endif
+#if ENABLE(DARK_MODE_CSS)
+        && colorScheme == o.colorScheme
+#endif
+        && dynamicRangeLimit == o.dynamicRangeLimit
+        && textIndent == o.textIndent
         && textStrokeColor == o.textStrokeColor
         && textFillColor == o.textFillColor
         && textEmphasisColor == o.textEmphasisColor
@@ -269,95 +348,20 @@ bool InheritedRareData::operator==(const InheritedRareData& o) const
         && visitedLinkCaretColor == o.visitedLinkCaretColor
         && accentColor == o.accentColor
         && scrollbarColor == o.scrollbarColor
-        && dynamicRangeLimit == o.dynamicRangeLimit
+        && strokeColor == o.strokeColor
+        && visitedLinkStrokeColor == o.visitedLinkStrokeColor
 #if ENABLE(CSS_TAP_HIGHLIGHT_COLOR)
         && tapHighlightColor == o.tapHighlightColor
 #endif
         && textShadow == o.textShadow
         && cursorImages == o.cursorImages
         && textEmphasisStyle == o.textEmphasisStyle
-        && textIndent == o.textIndent
-        && textUnderlineOffset == o.textUnderlineOffset
-        && textBoxEdge == o.textBoxEdge
-        && lineFitEdge == o.lineFitEdge
-        && strokeMiterLimit == o.strokeMiterLimit
-        && widows == o.widows
-        && orphans == o.orphans
-        && textSecurity == o.textSecurity
-        && userModify == o.userModify
-        && wordBreak == o.wordBreak
-        && overflowWrap == o.overflowWrap
-        && nbspMode == o.nbspMode
-        && lineBreak == o.lineBreak
-#if ENABLE(WEBKIT_OVERFLOW_SCROLLING_CSS_PROPERTY)
-        && overflowScrolling == o.overflowScrolling
-#endif
-#if ENABLE(TEXT_AUTOSIZING)
-        && textSizeAdjust == o.textSizeAdjust
-#endif
-        && userSelect == o.userSelect
-        && speakAs == o.speakAs
-        && hyphens == o.hyphens
-        && hyphenateLimitBefore == o.hyphenateLimitBefore
-        && hyphenateLimitAfter == o.hyphenateLimitAfter
-        && hyphenateLimitLines == o.hyphenateLimitLines
-#if ENABLE(DARK_MODE_CSS)
-        && colorScheme == o.colorScheme
-#endif
-        && textCombine == o.textCombine
-        && textEmphasisPosition == o.textEmphasisPosition
-        && lineBoxContain == o.lineBoxContain
-#if ENABLE(WEBKIT_TOUCH_CALLOUT_CSS_PROPERTY)
-        && touchCallout == o.touchCallout
-#endif
-        && hyphenateCharacter == o.hyphenateCharacter
         && quotes == o.quotes
-        && appleColorFilter == o.appleColorFilter
-        && tabSize == o.tabSize
+        && hyphenateCharacter == o.hyphenateCharacter
         && lineGrid == o.lineGrid
-        && imageOrientation == o.imageOrientation
-        && imageRendering == o.imageRendering
-        && textAlignLast == o.textAlignLast
-        && textJustify == o.textJustify
-        && textDecorationSkipInk == o.textDecorationSkipInk
-        && textUnderlinePosition == o.textUnderlinePosition
-        && rubyPosition == o.rubyPosition
-        && rubyAlign == o.rubyAlign
-        && rubyOverhang == o.rubyOverhang
-        && textZoom == o.textZoom
-        && lineSnap == o.lineSnap
-        && lineAlign == o.lineAlign
-        && hangingPunctuation == o.hangingPunctuation
-        && paintOrder == o.paintOrder
-        && capStyle == o.capStyle
-        && joinStyle == o.joinStyle
-        && hasExplicitlySetStrokeWidth == o.hasExplicitlySetStrokeWidth
-        && hasExplicitlySetStrokeColor == o.hasExplicitlySetStrokeColor
-        && mathShift == o.mathShift
-        && mathStyle == o.mathStyle
-        && isInSubtreeWithBlendMode == o.isInSubtreeWithBlendMode
-        && isForceHidden == o.isForceHidden
-        && autoRevealsWhenFound == o.autoRevealsWhenFound
-        && usedTouchAction == o.usedTouchAction
-        && eventListenerRegionTypes == o.eventListenerRegionTypes
-        && effectiveInert == o.effectiveInert
-        && effectivelyTransparent == o.effectivelyTransparent
-        && effectiveWrapInsideAvoid == o.effectiveWrapInsideAvoid
-        && usedContentVisibility == o.usedContentVisibility
-        && insideDefaultButton == o.insideDefaultButton
-        && insideSubmitButton == o.insideSubmitButton
-#if HAVE(CORE_MATERIAL)
-        && usedAppleVisualEffectForSubtree == o.usedAppleVisualEffectForSubtree
-#endif
-        && strokeWidth == o.strokeWidth
-        && strokeColor == o.strokeColor
-        && visitedLinkStrokeColor == o.visitedLinkStrokeColor
-        && customProperties == o.customProperties
         && listStyleImage == o.listStyleImage
         && listStyleType == o.listStyleType
-        && blockEllipsis == o.blockEllipsis
-        && evaluationTimeZoomEnabled == o.evaluationTimeZoomEnabled
-        && mathDepth == o.mathDepth;
+        && blockEllipsis == o.blockEllipsis;
 }
 
 #if !LOG_DISABLED

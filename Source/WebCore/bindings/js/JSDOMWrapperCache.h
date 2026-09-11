@@ -117,7 +117,7 @@ inline bool clearInlineCachedWrapper(DOMWrapperWorld&, void*, JSC::JSObject*) { 
 
 inline std::optional<JSC::JSObject*> getInlineCachedWrapper(DOMWrapperWorld& world, ScriptWrappable* domObject)
 {
-    if (!world.isNormal())
+    if (!world.isNormal()) [[unlikely]]
         return std::nullopt;
     return domObject->wrapper();
 }
@@ -163,9 +163,18 @@ inline bool clearInlineCachedWrapper(DOMWrapperWorld& world, JSC::ArrayBuffer* d
 
 template<typename DOMClass> inline JSC::JSObject* getCachedWrapper(DOMWrapperWorld& world, DOMClass& domObject)
 {
-    if (auto wrapper = getInlineCachedWrapper(world, &domObject))
+    if (auto wrapper = getInlineCachedWrapper(world, &domObject)) [[likely]]
         return *wrapper;
     return world.wrappers().get(wrapperKey(&domObject));
+}
+
+template<typename DOMClass> inline JSC::JSObject* getCachedWrapper(JSDOMGlobalObject& globalObject, DOMClass& domObject)
+{
+    if constexpr (std::is_convertible_v<DOMClass*, ScriptWrappable*>) {
+        if (globalObject.worldIsNormal()) [[likely]]
+            return static_cast<ScriptWrappable&>(domObject).wrapper();
+    }
+    return getCachedWrapper(globalObject.world(), domObject);
 }
 
 template<typename DOMClass, typename WrapperClass> inline void cacheWrapper(DOMWrapperWorld& world, DOMClass* domObject, WrapperClass* wrapper)
@@ -203,7 +212,7 @@ template<typename DOMClass, typename T> inline auto createWrapper(JSDOMGlobalObj
 
 template<typename DOMClass> inline JSC::JSValue wrap(JSC::JSGlobalObject* lexicalGlobalObject, JSDOMGlobalObject* globalObject, DOMClass& domObject)
 {
-    if (auto* wrapper = getCachedWrapper(globalObject->world(), domObject))
+    if (auto* wrapper = getCachedWrapper(*globalObject, domObject)) [[likely]]
         return wrapper;
     return toJSNewlyCreated(lexicalGlobalObject, globalObject, Ref<DOMClass>(domObject));
 }

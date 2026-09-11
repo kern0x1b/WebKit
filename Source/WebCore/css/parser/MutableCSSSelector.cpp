@@ -111,16 +111,13 @@ MutableCSSSelector::MutableCSSSelector(const CSSSelector& selector, SimpleSelect
 
 MutableCSSSelector::~MutableCSSSelector()
 {
-    if (!m_precedingInComplexSelector)
-        return;
-    Vector<std::unique_ptr<MutableCSSSelector>, 16> toDelete;
-    std::unique_ptr<MutableCSSSelector> selector = WTF::move(m_precedingInComplexSelector);
-    while (true) {
-        std::unique_ptr<MutableCSSSelector> next = WTF::move(selector->m_precedingInComplexSelector);
-        toDelete.append(WTF::move(selector));
-        if (!next)
-            break;
-        selector = WTF::move(next);
+    // Unlink each link before deleting it, so the nested destructor bottoms out immediately.
+    // Staying iterative needs no side vector, which keeps this off the allocator entirely.
+    auto* selector = m_precedingInComplexSelector.release();
+    while (selector) {
+        auto* next = selector->m_precedingInComplexSelector.release();
+        delete selector;
+        selector = next;
     }
 }
 

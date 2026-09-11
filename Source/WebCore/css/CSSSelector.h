@@ -344,18 +344,29 @@ inline bool CSSSelector::isSiblingSelector() const
 
 inline bool CSSSelector::isAttributeSelector() const
 {
-    return match() == CSSSelector::Match::Exact
-        || match() == CSSSelector::Match::Set
-        || match() == CSSSelector::Match::List
-        || match() == CSSSelector::Match::Hyphen
-        || match() == CSSSelector::Match::Contain
-        || match() == CSSSelector::Match::Begin
-        || match() == CSSSelector::Match::End;
+    constexpr unsigned attributeMatchTypeMask = (1U << std::to_underlying(Match::Exact))
+        | (1U << std::to_underlying(Match::Set))
+        | (1U << std::to_underlying(Match::List))
+        | (1U << std::to_underlying(Match::Hyphen))
+        | (1U << std::to_underlying(Match::Contain))
+        | (1U << std::to_underlying(Match::Begin))
+        | (1U << std::to_underlying(Match::End));
+    static_assert(std::to_underlying(Match::ForgivingUnknownNestContaining) < 32);
+    return !!((1U << m_match) & attributeMatchTypeMask);
 }
 
 inline void CSSSelector::setValue(const AtomString& value, bool matchLowerCase)
 {
     ASSERT(match() != Match::Tag);
+
+    if (!matchLowerCase && !m_hasRareData) {
+        if (m_data.value)
+            m_data.value->deref();
+        m_data.value = value.impl();
+        m_data.value->ref();
+        return;
+    }
+
     auto matchingValue = matchLowerCase ? value.convertToASCIILowercase() : value;
     if (!m_hasRareData && matchingValue != value)
         createRareData();

@@ -1347,6 +1347,7 @@ set(WebCore_NON_SVG_IDL_FILES
     html/TimeRanges.idl
     html/URLSearchParams.idl
     html/UserActivation.idl
+    page/Scheduling.idl
     html/ValidityState.idl
     html/VideoFrameMetadata.idl
     html/VideoFrameRequestCallback.idl
@@ -2116,6 +2117,7 @@ set(WebCore_SUPPLEMENTAL_IDL_FILES
     page/DOMWindow+RequestIdleCallback.idl
     page/DOMWindow+Selection.idl
     page/DOMWindow+VisualViewport.idl
+    page/Navigator+Scheduling.idl
     page/Navigator+UserActivation.idl
     page/NavigatorCookies.idl
     page/NavigatorGlobalPrivacyControl.idl
@@ -2263,7 +2265,7 @@ if (USE_ANGLE_EGL)
     )
 elseif (USE_LIBEPOXY)
     list(APPEND WebCore_LIBRARIES Epoxy::Epoxy)
-else ()
+elseif (ENABLE_WEBGL)
     list(APPEND WebCore_LIBRARIES OpenGL::GLES)
 
     list(APPEND WebCore_SYSTEM_INCLUDE_DIRECTORIES
@@ -2662,6 +2664,7 @@ set(MODERN_MEDIA_CONTROLS_STYLE_SHEETS
     "${WEBCORE_DIR}/Modules/modern-media-controls/controls/slider.css"
     "${WEBCORE_DIR}/Modules/modern-media-controls/controls/status-label.css"
     "${WEBCORE_DIR}/Modules/modern-media-controls/controls/text-tracks.css"
+    "${WEBCORE_DIR}/Modules/modern-media-controls/controls/time-control.css"
     "${WEBCORE_DIR}/Modules/modern-media-controls/controls/time-label.css"
     "${WEBCORE_DIR}/Modules/modern-media-controls/controls/watchos-activity-indicator.css"
     "${WEBCORE_DIR}/Modules/modern-media-controls/controls/watchos-media-controls.css"
@@ -3250,6 +3253,30 @@ if (NOT USE_HEADER_MAPS)
 endif ()
 
 WEBKIT_FRAMEWORK(WebCore)
+
+# Size is speed on this hardware: the Cortex-A9 has a 32 KB instruction cache,
+# and -O3's aggressive unrolling and inlining thrash it. -Oz makes the code
+# smaller on disk, in resident memory, and in the cache.
+#
+# Whole-program vtable elimination is NOT safe here and crashed on first launch:
+# WebKitLegacy subclasses WebCore types from outside this library, so "whole
+# program" is a lie at this boundary and devirtualized calls dispatched into
+# the wrong code - the very first virtual call in the frame loader.
+if (WEBKIT_IOS6_SIZE_OPTIMIZED)
+    # The engine's own code is the largest single consumer of this device's
+    # memory: forty six megabytes of WebCore and forty three of JavaScriptCore,
+    # mapped privately into a process that gets killed at about a hundred and
+    # seventy. The page itself accounts for forty. So size is the lever, and it
+    # applies to every target that carries code, not just the umbrella one.
+    foreach (_sizeTarget WebCore WebCoreDOMAndRendering WebCoreBindings WebCoreSVG WebCoreHTML WebCorePAL)
+        if (TARGET ${_sizeTarget})
+            get_target_property(_sizeTargetType ${_sizeTarget} TYPE)
+            if (NOT _sizeTargetType STREQUAL "INTERFACE_LIBRARY" AND NOT _sizeTargetType STREQUAL "UTILITY")
+                target_compile_options(${_sizeTarget} PRIVATE -Oz)
+            endif ()
+        endif ()
+    endforeach ()
+endif ()
 
 if (USE_APPLE_INTERNAL_SDK)
     WEBKIT_TARGET_USE_PGO(WebCore PROFILE WebCore)

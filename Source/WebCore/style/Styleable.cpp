@@ -240,17 +240,23 @@ bool Styleable::mayHaveNonZeroOpacity() const
 bool Styleable::isRunningAcceleratedAnimationOfProperty(CSSPropertyID property) const
 {
     auto* effectStack = keyframeEffectStack();
-    return effectStack && effectStack->hasMatchingEffect([property](auto& effect) {
+    if (!effectStack)
+        return false;
+    auto matches = [property](const KeyframeEffect& effect) {
         return effect.isCurrentlyAffectingProperty(property, KeyframeEffect::Accelerated::Yes);
-    });
+    };
+    return effectStack->hasMatchingEffect(scopedLambdaRef<bool(const KeyframeEffect&)>(matches));
 }
 
 bool Styleable::isRunningAcceleratedTransformRelatedAnimation() const
 {
     auto* effectStack = keyframeEffectStack();
-    return effectStack && effectStack->hasMatchingEffect([](auto& effect) {
+    if (!effectStack)
+        return false;
+    auto matches = [](const KeyframeEffect& effect) {
         return effect.isRunningAcceleratedTransformRelatedAnimation();
-    });
+    };
+    return effectStack->hasMatchingEffect(scopedLambdaRef<bool(const KeyframeEffect&)>(matches));
 }
 
 bool Styleable::hasRunningAcceleratedAnimations() const
@@ -403,7 +409,8 @@ void Styleable::updateCSSAnimations(const Style::ComputedStyle* currentStyle, co
 
     auto& currentAnimationList = newStyle.animations();
     auto& previousAnimationList = keyframeEffectStack.cssAnimationList();
-    if (!element.hasPendingKeyframesUpdate(pseudoElementIdentifier) && previousAnimationList && !previousAnimationList->isInitial() && !newStyle.animations().isInitial() && *previousAnimationList == newStyle.animations() && !animationListContainsNewlyValidAnimation(newStyle.animations()))
+    if (!element.hasPendingKeyframesUpdate(pseudoElementIdentifier) && previousAnimationList && *previousAnimationList == currentAnimationList
+        && !previousAnimationList->isInitial() && !currentAnimationList.isInitial() && !animationListContainsNewlyValidAnimation(currentAnimationList))
         return;
 
     CSSAnimationCollection newAnimations;
@@ -569,6 +576,28 @@ static void compileTransitionPropertiesInStyle(const Style::ComputedStyle& style
 
 static void updateCSSTransitionsForStyleableAndProperty(const Styleable& styleable, const AnimatableCSSProperty& property, const Style::ComputedStyle& currentStyle, const Style::ComputedStyle& newStyle, const MonotonicTime generationTime, WeakStyleOriginatedAnimations& newStyleOriginatedAnimations)
 {
+    auto hasMatchingTransitionProperty = false;
+    auto matchingTransitionDuration = 0.0;
+    const Style::Transition* matchingTransition = nullptr;
+    if (auto& transitions = newStyle.transitions(); !transitions.isInitial()) {
+        for (auto& transition : transitions.usedValues()) {
+            if (transitionMatchesProperty(transition, property, newStyle)) {
+                hasMatchingTransitionProperty = true;
+                matchingTransition = &transition;
+                matchingTransitionDuration = std::max(0.0, matchingTransition->duration().value) + matchingTransition->delay().value;
+            }
+        }
+    } else if (!styleable.element.document().quirks().needsResettingTransitionCancelsRunningTransitionQuirk()) {
+        // If we don't have any transitions in the map, this means that the initial value "all 0s" was set
+        // and thus all properties match.
+        hasMatchingTransitionProperty = true;
+    }
+
+    bool hasRunningTransition = styleable.hasRunningTransitionForProperty(property);
+    bool hadCompletedTransition = styleable.hasCompletedTransitionForProperty(property);
+    if (!hasRunningTransition && !hadCompletedTransition && !(hasMatchingTransitionProperty && matchingTransitionDuration > 0))
+        return;
+
     RefPtr keyframeEffect = keyframeEffectForElementAndProperty(styleable, property);
     RefPtr animation = keyframeEffect ? keyframeEffect->animation() : nullptr;
 
@@ -583,54 +612,38 @@ static void updateCSSTransitionsForStyleableAndProperty(const Styleable& styleab
 
     Ref document = styleable.element.document();
 
-    auto hasMatchingTransitionProperty = false;
-    auto matchingTransitionDuration = 0.0;
-    std::optional<Style::Transition> matchingTransition;
-    if (auto& transitions = newStyle.transitions(); !transitions.isInitial()) {
-        for (auto& transition : transitions.usedValues()) {
-            if (transitionMatchesProperty(transition, property, newStyle)) {
-                hasMatchingTransitionProperty = true;
-                matchingTransition = transition;
-                matchingTransitionDuration = std::max(0.0, matchingTransition->duration().value) + matchingTransition->delay().value;
-            }
-        }
-    } else if (!document->quirks().needsResettingTransitionCancelsRunningTransitionQuirk()) {
-        // If we don't have any transitions in the map, this means that the initial value "all 0s" was set
-        // and thus all properties match.
-        hasMatchingTransitionProperty = true;
-    }
-
     // https://drafts.csswg.org/css-transitions-1/#before-change-style
     // Define the before-change style as the computed values of all properties on the element as of the previous style change event, except with
     // any styles derived from declarative animations such as CSS Transitions, CSS Animations, and SMIL Animations updated to the current time.
-    auto beforeChangeStyle = [&]() -> const Style::ComputedStyle {
-        if (auto* lastStyleChangeEventStyle = styleable.lastStyleChangeEventStyle()) {
-            auto style = Style::ComputedStyle::clone(*lastStyleChangeEventStyle);
-            if (auto* keyframeEffectStack = styleable.keyframeEffectStack()) {
-                for (const auto& effect : keyframeEffectStack->sortedEffects()) {
-                    if (effect->animatesProperty(property))
-                        protect(*effect)->apply(style, { nullptr });
+    std::unique_ptr<Style::ComputedStyle> animatedBeforeChangeStyle;
+    const Style::ComputedStyle* beforeChangeStylePtr = &currentStyle;
+    if (auto* lastStyleChangeEventStyle = styleable.lastStyleChangeEventStyle()) {
+        beforeChangeStylePtr = lastStyleChangeEventStyle;
+        if (auto* keyframeEffectStack = styleable.keyframeEffectStack()) {
+            for (const auto& effect : keyframeEffectStack->sortedEffects()) {
+                if (!effect->animatesProperty(property))
+                    continue;
+                if (!animatedBeforeChangeStyle) {
+                    animatedBeforeChangeStyle = Style::ComputedStyle::clonePtr(*lastStyleChangeEventStyle);
+                    beforeChangeStylePtr = animatedBeforeChangeStyle.get();
                 }
+                protect(*effect)->apply(*animatedBeforeChangeStyle, { nullptr });
             }
-            return style;
         }
-        return Style::ComputedStyle::clone(currentStyle);
-    }();
+    }
+    const Style::ComputedStyle& beforeChangeStyle = *beforeChangeStylePtr;
 
     // https://drafts.csswg.org/css-transitions-1/#after-change-style
     // Likewise, define the after-change style as the computed values of all properties on the element based on the information known at the start
     // of that style change event, but using the computed values of the animation-* properties from the before-change style, excluding any styles
     // from CSS Transitions in the computation, and inheriting from the after-change style of the parent. Note that this means the after-change
     // style does not differ from the before-change style due to newly created or canceled CSS Animations.
-    auto afterChangeStyle = [&]() -> const Style::ComputedStyle {
-        if (is<CSSAnimation>(animation) && animation->isRelevant()) {
-            auto animatedStyle = Style::ComputedStyle::clone(newStyle);
-            animation->resolve(animatedStyle, { nullptr });
-            return animatedStyle;
-        }
-
-        return Style::ComputedStyle::clone(newStyle);
-    }();
+    std::unique_ptr<Style::ComputedStyle> animatedAfterChangeStyle;
+    if (is<CSSAnimation>(animation) && animation->isRelevant()) {
+        animatedAfterChangeStyle = Style::ComputedStyle::clonePtr(newStyle);
+        animation->resolve(*animatedAfterChangeStyle, { nullptr });
+    }
+    const Style::ComputedStyle& afterChangeStyle = animatedAfterChangeStyle ? *animatedAfterChangeStyle : newStyle;
 
     auto allowsDiscreteTransitions = matchingTransition && matchingTransition->behavior() == TransitionBehavior::AllowDiscrete;
     auto propertyCanBeInterpolated = [&](const AnimatableCSSProperty& property, const Style::ComputedStyle& a, const Style::ComputedStyle& b) {
@@ -643,7 +656,6 @@ static void updateCSSTransitionsForStyleableAndProperty(const Styleable& styleab
         styleable.ensureRunningTransitionsByProperty().set(property, WTF::move(cssTransition));
     };
 
-    bool hasRunningTransition = styleable.hasRunningTransitionForProperty(property);
     if (!hasRunningTransition
         && hasMatchingTransitionProperty && matchingTransitionDuration > 0
         && !Style::Interpolation::equals(property, beforeChangeStyle, afterChangeStyle, document.get())
@@ -674,7 +686,7 @@ static void updateCSSTransitionsForStyleableAndProperty(const Styleable& styleab
         createCSSTransition(beforeChangeStyle, delay, duration, reversingAdjustedStartStyle, reversingShorteningFactor);
         ASSERT(styleable.hasRunningTransitionForProperty(property));
         hasRunningTransition = true;
-    } else if (styleable.hasCompletedTransitionForProperty(property) && !propertyInStyleMatchesValueForTransitionInMap(property, afterChangeStyle, styleable.ensureCompletedTransitionsByProperty(), document)) {
+    } else if (hadCompletedTransition && !propertyInStyleMatchesValueForTransitionInMap(property, afterChangeStyle, styleable.ensureCompletedTransitionsByProperty(), document)) {
         // 2. Otherwise, if the element has a completed transition for the property and the end value of the completed transition is different from
         //    the after-change style for the property, then implementations must remove the completed transition from the set of completed transitions.
         styleable.ensureCompletedTransitionsByProperty().remove(property);
@@ -778,8 +790,6 @@ void Styleable::updateCSSTransitions(const Style::ComputedStyle& currentStyle, c
     // Section 3 "Starting of transitions" from the CSS Transitions Level 1 specification.
     // https://drafts.csswg.org/css-transitions-1/#starting
 
-    auto generationTime = MonotonicTime::now();
-
     // First, let's compile the list of all CSS properties found in the current style and the after-change style.
     bool transitionPropertiesContainAll = false;
     CSSPropertiesBitSet transitionProperties;
@@ -849,6 +859,11 @@ void Styleable::updateCSSTransitions(const Style::ComputedStyle& currentStyle, c
         gatherAnimatableCustomProperties(protect(newStyle.inheritedCustomProperties()));
         gatherAnimatableCustomProperties(protect(newStyle.nonInheritedCustomProperties()));
     }
+
+    if (transitionProperties.m_properties.isEmpty() && transitionCustomProperties.isEmpty())
+        return;
+
+    auto generationTime = MonotonicTime::now();
 
     transitionProperties.m_properties.forEachSetBit([&](unsigned index) {
         CSSPropertyID propertyId = static_cast<CSSPropertyID>(index);

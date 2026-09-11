@@ -43,6 +43,7 @@ struct MatchedRule {
     const RuleData* ruleData { nullptr };
     unsigned specificity { 0 };
     unsigned scopingRootDistance { 0 };
+    unsigned position { 0 };
     ScopeOrdinal styleScopeOrdinal;
     CascadeLayerPriority cascadeLayerPriority;
 };
@@ -60,6 +61,9 @@ public:
     void matchUserRules();
 
     bool matchesAnyAuthorRules();
+#if defined(WEBKIT_IOS6)
+    bool matchesAnyAuthorRules(const RuleSet&);
+#endif
 
     void setPseudoElementRequest(const std::optional<PseudoElementRequest>& request) { m_pseudoElementRequest = request; }
     void setMedium(const MQ::MediaQueryEvaluator& medium) { m_isPrintStyle = medium.isPrintMedia(); }
@@ -118,25 +122,58 @@ private:
     void addMatchedProperties(MatchedProperties&&, DeclarationOrigin);
 
     const Element& element() const { return m_element.get(); }
+#if defined(WEBKIT_IOS6)
+    const RuleSet& authorStyle() const { return *m_authorStyle; }
+#else
+    const RuleSet& authorStyle() const { return m_authorStyle.get(); }
+#endif
 
     const Ref<const Element> m_element;
+#if defined(WEBKIT_IOS6)
+    const RuleSet* m_authorStyle;
+    const RuleSet* m_userStyle { nullptr };
+    const RuleSet* m_userAgentMediaQueryStyle { nullptr };
+    const RuleSet* m_dynamicViewTransitionsStyle { nullptr };
+#else
     Ref<const RuleSet> m_authorStyle;
     RefPtr<const RuleSet> m_userStyle;
     RefPtr<const RuleSet> m_userAgentMediaQueryStyle;
     RefPtr<const RuleSet> m_dynamicViewTransitionsStyle;
+#endif
     SelectorMatchingState* m_selectorMatchingState;
+#if defined(WEBKIT_IOS6)
+    SelectorChecker m_selectorChecker;
+#endif
+#if ENABLE(CSS_SELECTOR_JIT)
+    const bool m_cssSelectorJITEnabled;
+#endif
 
     bool m_shouldIncludeEmptyRules { false };
     bool m_isPrintStyle { false };
+    const bool m_isForLink { false };
+    // ruleMatches() runs once per rule in every bucket the element hashes into and re-read this
+    // through the Ref and the node flags word every time; it cannot change while we collect.
+    const bool m_isHTMLElement { false };
+#if defined(WEBKIT_IOS6)
+    const bool m_compoundFastPathEnabled { false };
+#endif
     std::optional<PseudoElementRequest> m_pseudoElementRequest { };
     const SelectorChecker::Mode m_mode { SelectorChecker::Mode::ResolvingStyle };
 
     Vector<MatchedRule, 64> m_matchedRules;
     size_t m_matchedRuleTransferIndex { 0 };
 
-    // Output.
+    // Output. Style invalidation and rule collection never touch the result, so it is only allocated
+    // once something is actually put in it.
+    MatchResult& result() const
+    {
+        if (!m_result)
+            m_result = MatchResult::create(m_isForLink);
+        return *m_result;
+    }
+
     Vector<Ref<const StyleRule>> m_matchedRuleList;
-    Ref<MatchResult> m_result;
+    mutable RefPtr<MatchResult> m_result;
     Relations m_styleRelations;
     EnumSet<PseudoElementType> m_matchedPseudoElements;
 };

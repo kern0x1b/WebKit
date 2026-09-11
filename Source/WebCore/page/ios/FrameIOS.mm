@@ -579,6 +579,18 @@ void LocalFrame::overflowScrollPositionChangedForNode(const IntPoint& position, 
 {
     LOG_WITH_STREAM(Scrolling, stream << "Frame::overflowScrollPositionChangedForNode " << node << " position " << position);
 
+#if defined(WEBKIT_IOS6)
+    if (RefPtr owner = dynamicDowncast<HTMLFrameOwnerElement>(node)) {
+        RefPtr contentFrame = dynamicDowncast<LocalFrame>(owner->contentFrame());
+        RefPtr frameView = contentFrame ? contentFrame->view() : nullptr;
+        if (frameView) {
+            auto scope = ScrollTypeScope(*frameView, isUserScroll ? ScrollType::User : ScrollType::Programmatic);
+            frameView->setScrollPosition(position);
+        }
+        return;
+    }
+#endif
+
     RenderObject* renderer = node->renderer();
     if (!renderer || !renderer->hasLayer())
         return;

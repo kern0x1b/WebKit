@@ -193,6 +193,11 @@ private:
     unsigned deadCapacity() const;
     bool NODELETE needsPruning() const;
 
+#if defined(WEBKIT_IOS6)
+    unsigned liveDecodedSize() const;
+    static unsigned liveDecodedCapacity();
+#endif
+
     CachedResource* resourceForRequestImpl(const ResourceRequest&, CachedResourceMap&);
 
     CachedResourceMap& ensureSessionResourceMap(PAL::SessionID);

@@ -64,6 +64,51 @@ static_assert(JSEmbedderArrayLikeType != JSDOMWrapperType && JSC::EmbedderArrayL
 static_assert(JSEmbedderArrayLikeType < JSNodeType, "EmbedderArrayLikeType must be below JSNodeType to avoid breaking node range checks.");
 static_assert(lastNodeType <= JSNodeTypeMask, "NodeType should be represented in 4bit.");
 
+class WEBCORE_EXPORT JSDocument;
+class WEBCORE_EXPORT JSElement;
+class WEBCORE_EXPORT JSNode;
+
+} // namespace WebCore
+
+namespace JSC {
+namespace JSCastingHelpers {
+
+template<>
+struct InheritsTraits<WebCore::JSNode> {
+    static constexpr std::optional<JSTypeRange> typeRange { { static_cast<JSType>(WebCore::JSNodeType), static_cast<JSType>(WebCore::JSNodeType + WebCore::JSNodeTypeMask) } };
+    static_assert(WebCore::JSNodeType + WebCore::JSNodeTypeMask == 255);
+    template<typename From>
+    static inline bool inherits(From* from)
+    {
+        return inheritsJSTypeImpl<WebCore::JSNode>(from, *typeRange);
+    }
+};
+
+template<>
+struct InheritsTraits<WebCore::JSElement> {
+    static constexpr std::optional<JSTypeRange> typeRange { { static_cast<JSType>(WebCore::JSElementType), static_cast<JSType>(WebCore::JSElementType) } };
+    template<typename From>
+    static inline bool inherits(From* from)
+    {
+        return inheritsJSTypeImpl<WebCore::JSElement>(from, *typeRange);
+    }
+};
+
+template<>
+struct InheritsTraits<WebCore::JSDocument> {
+    static constexpr std::optional<JSTypeRange> typeRange { { static_cast<JSType>(WebCore::JSDocumentWrapperType), static_cast<JSType>(WebCore::JSDocumentWrapperType) } };
+    template<typename From>
+    static inline bool inherits(From* from)
+    {
+        return inheritsJSTypeImpl<WebCore::JSDocument>(from, *typeRange);
+    }
+};
+
+} // namespace JSCastingHelpers
+} // namespace JSC
+
+namespace WebCore {
+
 class JSDOMObject : public JSC::JSDestructibleObject {
 public:
     typedef JSC::JSDestructibleObject Base;

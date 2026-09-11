@@ -177,12 +177,16 @@ ValueOrException ScriptController::evaluateInWorld(const ScriptSourceCode& sourc
             evaluateIgnoringException({ WTF::move(script), JSC::SourceTaintedOrigin::Untainted });
     }
 
+#if !defined(WEBKIT_IOS6)
     InspectorInstrumentation::willEvaluateScript(protect(m_frame), sourceURL.string(), sourceCode.startLine(), sourceCode.startColumn());
+#endif
 
     NakedPtr<JSC::Exception> evaluationException;
     JSValue returnValue = JSExecState::profiledEvaluate(&globalObject, JSC::ProfilingReason::Other, jsSourceCode, &proxy, evaluationException);
 
+#if !defined(WEBKIT_IOS6)
     InspectorInstrumentation::didEvaluateScript(protect(m_frame));
+#endif
 
     std::optional<ExceptionDetails> optionalDetails;
     if (evaluationException) {
@@ -293,13 +297,13 @@ JSC::JSValue ScriptController::evaluateModule(const URL& sourceURL, AbstractModu
     Ref frame = m_frame.get();
     SetForScope sourceURLScope(m_sourceURL, &sourceURL);
 
+#if !defined(WEBKIT_IOS6)
 #if ENABLE(WEBASSEMBLY)
     const bool isWasmModule = moduleRecord.inherits<WebAssemblyModuleRecord>();
 #else
     constexpr bool isWasmModule = false;
 #endif
     if (isWasmModule) {
-        // FIXME: Provide better inspector support for Wasm scripts.
         InspectorInstrumentation::willEvaluateScript(protect(m_frame), sourceURL.string(), 1, 1);
     } else if (moduleRecord.inherits<JSC::SyntheticModuleRecord>())
         InspectorInstrumentation::willEvaluateScript(frame.get(), sourceURL.string(), 1, 1);
@@ -308,8 +312,11 @@ JSC::JSValue ScriptController::evaluateModule(const URL& sourceURL, AbstractModu
         const auto& jsSourceCode = jsModuleRecord->sourceCode();
         InspectorInstrumentation::willEvaluateScript(protect(m_frame), sourceURL.string(), jsSourceCode.firstLine().oneBasedInt(), jsSourceCode.startColumn().oneBasedInt());
     }
+#endif
     auto returnValue = moduleRecord.evaluate(&lexicalGlobalObject, awaitedValue, resumeMode);
+#if !defined(WEBKIT_IOS6)
     InspectorInstrumentation::didEvaluateScript(protect(m_frame));
+#endif
 
     return returnValue;
 }
@@ -725,7 +732,9 @@ ValueOrException ScriptController::callInWorld(RunJavaScriptParameters&& paramet
     Ref protector { m_frame.get() };
     SetForScope sourceURLScope(m_sourceURL, &sourceURL);
 
+#if !defined(WEBKIT_IOS6)
     InspectorInstrumentation::willEvaluateScript(protect(m_frame), sourceURL.string(), sourceCode.startLine(), sourceCode.startColumn());
+#endif
 
     NakedPtr<JSC::Exception> evaluationException;
     std::optional<ExceptionDetails> optionalDetails;
@@ -752,7 +761,9 @@ ValueOrException ScriptController::callInWorld(RunJavaScriptParameters&& paramet
         returnValue = JSExecState::profiledCall(&globalObject, JSC::ProfilingReason::Other, functionObject, callData, &proxy, markedArguments, evaluationException);
     } while (false);
 
+#if !defined(WEBKIT_IOS6)
     InspectorInstrumentation::didEvaluateScript(protect(m_frame));
+#endif
 
     if (evaluationException && !optionalDetails) {
         ExceptionDetails details;

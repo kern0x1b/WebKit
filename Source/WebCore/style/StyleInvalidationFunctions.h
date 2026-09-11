@@ -53,6 +53,10 @@ inline void traverseRuleFeaturesInShadowTree(Element& element, TraverseFunction&
 template <typename TraverseFunction>
 inline void traverseRuleFeaturesForSlotted(Element& element, TraverseFunction&& function)
 {
+#if defined(WEBKIT_IOS6)
+    if (!element.assignedSlot()) [[likely]]
+        return;
+#endif
     auto assignedShadowRoots = assignedShadowRootsIfSlotted(element);
     for (auto& assignedShadowRoot : assignedShadowRoots) {
         auto& ruleSets = assignedShadowRoot->styleScope().resolver().ruleSets();

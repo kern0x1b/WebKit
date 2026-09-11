@@ -69,11 +69,12 @@ InlineLayoutUnit TextUtil::width(const InlineTextBox& inlineTextBox, const FontC
 
     auto& text = inlineTextBox.content();
     ASSERT(to <= text.length());
-    auto hasKerningOrLigatures = fontCascade.enableKerning() || fontCascade.requiresShaping();
-    // The "non-whitespace" + "whitespace" pattern is very common for inline content and since most of the "non-whitespace" runs end up with
-    // their "whitespace" pair on the line (notable exception is when trailing whitespace is trimmed).
-    // Including the trailing whitespace here enables us to cut the number of text measures when placing content on the line.
-    auto extendedMeasuring = useTrailingWhitespaceMeasuringOptimization == UseTrailingWhitespaceMeasuringOptimization::Yes && hasKerningOrLigatures && to < text.length() && text[to] == space;
+#if defined(WEBKIT_IOS6)
+    UNUSED_PARAM(useTrailingWhitespaceMeasuringOptimization);
+    auto extendedMeasuring = false;
+#else
+    auto extendedMeasuring = useTrailingWhitespaceMeasuringOptimization == UseTrailingWhitespaceMeasuringOptimization::Yes && to < text.length() && text[to] == space && (fontCascade.enableKerning() || fontCascade.requiresShaping());
+#endif
     if (extendedMeasuring)
         ++to;
     auto width = 0.f;
@@ -85,11 +86,11 @@ InlineLayoutUnit TextUtil::width(const InlineTextBox& inlineTextBox, const FontC
         else
             width = fontCascade.widthForTextUsingSimplifiedMeasuring(view);
     } else {
-        CheckedRef style = inlineTextBox.style();
-        auto directionalOverride = isOverride(style->unicodeBidi());
-        auto run = WebCore::TextRun { StringView(text).substring(from, to - from), contentLogicalLeft, { }, ExpansionBehavior::defaultBehavior(), directionalOverride ? style->writingMode().bidiDirection() : TextDirection::LTR, directionalOverride };
-        if (!style->collapseWhiteSpace() && !style->tabSize().isZero())
-            run.setTabSize(true, Style::toPlatform(style->tabSize(), style->usedZoomForLength()));
+        auto& style = inlineTextBox.style();
+        auto directionalOverride = isOverride(style.unicodeBidi());
+        auto run = WebCore::TextRun { StringView(text).substring(from, to - from), contentLogicalLeft, { }, ExpansionBehavior::defaultBehavior(), directionalOverride ? style.writingMode().bidiDirection() : TextDirection::LTR, directionalOverride };
+        if (!style.collapseWhiteSpace() && !style.tabSize().isZero())
+            run.setTabSize(true, Style::toPlatform(style.tabSize(), style.usedZoomForLength()));
         // FIXME: consider moving this to TextRun ctor
         run.setTextSpacingState(spacingState);
         width = fontCascade.width(run, { }, glyphOverflow);
@@ -113,12 +114,12 @@ InlineLayoutUnit TextUtil::width(const InlineTextItem& inlineTextItem, const Fon
     RELEASE_ASSERT(from >= inlineTextItem.start());
     RELEASE_ASSERT(to <= inlineTextItem.end());
 
+    auto& inlineTextBox = inlineTextItem.inlineTextBox();
     if (inlineTextItem.isWhitespace()) {
-        CheckedRef inlineTextBox = inlineTextItem.inlineTextBox();
-        if (!TextUtil::shouldPreserveSpacesAndTabs(inlineTextBox) || (to - from == 1 && inlineTextBox->content()[from] == space))
-            return std::max(0.f, singleSpaceWidth(fontCascade, inlineTextBox->canUseSimplifiedContentMeasuring()));
+        if (!TextUtil::shouldPreserveSpacesAndTabs(inlineTextBox) || (to - from == 1 && inlineTextBox.content()[from] == space))
+            return std::max(0.f, singleSpaceWidth(fontCascade, inlineTextBox.canUseSimplifiedContentMeasuring()));
     }
-    return width(protect(inlineTextItem.inlineTextBox()), fontCascade, from, to, contentLogicalLeft, useTrailingWhitespaceMeasuringOptimization, spacingState, glyphOverflow);
+    return width(inlineTextBox, fontCascade, from, to, contentLogicalLeft, useTrailingWhitespaceMeasuringOptimization, spacingState, glyphOverflow);
 }
 
 InlineLayoutUnit TextUtil::trailingWhitespaceWidth(const InlineTextBox& inlineTextBox, const FontCascade& fontCascade, size_t startPosition, size_t endPosition)
@@ -203,8 +204,8 @@ static TextUtil::EnclosingAscentDescent enclosingGlyphBoundsForRunWithIterator(c
                 character = u_toupper(character);
 
             auto glyphData = fontCascade.glyphDataForCharacter(character, isRTL);
-            Ref font = glyphData.font ? Ref { *glyphData.font } : primaryFont;
-            auto bounds = font->boundsForGlyph(glyphData.glyph);
+            auto& font = glyphData.font ? *glyphData.font : primaryFont.get();
+            auto bounds = font.boundsForGlyph(glyphData.glyph);
 
             enclosingAscent = std::min(enclosingAscent.value_or(bounds.y()), bounds.y());
             enclosingDescent = std::max(enclosingDescent.value_or(bounds.maxY()), bounds.maxY());
@@ -221,22 +222,22 @@ TextUtil::EnclosingAscentDescent TextUtil::enclosingGlyphBoundsForText(StringVie
         return { };
 
     if (shouldUseSimpleGlyphOverflowCodePath == ShouldUseSimpleGlyphOverflowCodePath::No) {
-        auto overflow = ComplexTextController::enclosingGlyphBoundsForTextRun(protect(style.fontCascade()), TextRun { textContent });
+        auto overflow = ComplexTextController::enclosingGlyphBoundsForTextRun(style.fontCascade(), TextRun { textContent });
         return { overflow.first, overflow.second };
     }
 
     if (textContent.is8Bit()) {
         Latin1TextIterator textIterator { textContent.span8(), 0, textContent.length() };
-        return enclosingGlyphBoundsForRunWithIterator(protect(style.fontCascade()), style.writingMode().isBidiRTL(), textIterator);
+        return enclosingGlyphBoundsForRunWithIterator(style.fontCascade(), style.writingMode().isBidiRTL(), textIterator);
     }
 
     SurrogatePairAwareTextIterator textIterator { textContent.span16(), 0, textContent.length() };
-    return enclosingGlyphBoundsForRunWithIterator(protect(style.fontCascade()), style.writingMode().isBidiRTL(), textIterator);
+    return enclosingGlyphBoundsForRunWithIterator(style.fontCascade(), style.writingMode().isBidiRTL(), textIterator);
 }
 
 TextUtil::WordBreakLeft TextUtil::breakWord(const InlineTextItem& inlineTextItem, const FontCascade& fontCascade, InlineLayoutUnit textWidth, InlineLayoutUnit availableWidth, InlineLayoutUnit contentLogicalLeft)
 {
-    return breakWord(protect(inlineTextItem.inlineTextBox()), inlineTextItem.start(), inlineTextItem.length(), textWidth, availableWidth, contentLogicalLeft, fontCascade);
+    return breakWord(inlineTextItem.inlineTextBox(), inlineTextItem.start(), inlineTextItem.length(), textWidth, availableWidth, contentLogicalLeft, fontCascade);
 }
 
 TextUtil::WordBreakLeft TextUtil::breakWord(const InlineTextBox& inlineTextBox, size_t startPosition, size_t length, InlineLayoutUnit textWidth, InlineLayoutUnit availableWidth, InlineLayoutUnit contentLogicalLeft, const FontCascade& fontCascade)
@@ -371,11 +372,12 @@ bool TextUtil::mayBreakInBetween(const InlineTextItem& previousInlineItem, const
     // Only the next item's leading edge decides breakability here, so when it starts at the beginning of
     // its text box we can pass the box content directly. Only when leading content was dropped (e.g.
     // white-space-trim moves start() past 0) do we take the item's substring and pay for the allocation.
-    String nextContent = nextInlineItem.start() ? nextInlineItem.content() : nextInlineItem.inlineTextBox().content();
-    return mayBreakInBetween(previousInlineItem.inlineTextBox().content(), protect(previousInlineItem.style()), nextContent, protect(nextInlineItem.style()));
+    return mayBreakInBetween(previousInlineItem.inlineTextBox().content(), previousInlineItem.style()
+        , nextInlineItem.start() ? nextInlineItem.content() : nextInlineItem.inlineTextBox().content()
+        , nextInlineItem.style());
 }
 
-bool TextUtil::mayBreakInBetween(String previousContent, const Style::ComputedStyle& previousContentStyle, String nextContent, const Style::ComputedStyle& nextContentStyle)
+bool TextUtil::mayBreakInBetween(const String& previousContent, const Style::ComputedStyle& previousContentStyle, String nextContent, const Style::ComputedStyle& nextContentStyle)
 {
     // Now we need to collect at least 3 adjacent characters to be able to make a decision whether the previous text item ends with breaking opportunity.
     // [ex-][ample] <- second to last[x] last[-] current[a]
@@ -399,30 +401,48 @@ bool TextUtil::mayBreakInBetween(String previousContent, const Style::ComputedSt
     return !findNextBreakablePosition(lineBreakIteratorFactory, 0, nextContentStyle);
 }
 
-unsigned TextUtil::findNextBreakablePosition(CachedLineBreakIteratorFactory& lineBreakIteratorFactory, unsigned startPosition, const Style::ComputedStyle& style)
+TextUtil::BreakablePositionRule TextUtil::breakablePositionRule(const Style::ComputedStyle& style, TextBreakIterator::LineMode::Behavior mode)
 {
     auto wordBreak = style.wordBreak();
     auto breakNBSP = style.textWrapMode() != TextWrapMode::NoWrap && style.nbspMode() == NBSPMode::Space;
 
-    if (wordBreak == WordBreak::KeepAll) {
-        if (breakNBSP)
-            return BreakablePositions::next<BreakablePositions::LineBreakRules::Special, BreakablePositions::WordBreakBehavior::KeepAll, BreakablePositions::NoBreakSpaceBehavior::Break>(lineBreakIteratorFactory, startPosition);
-        return BreakablePositions::next<BreakablePositions::LineBreakRules::Special, BreakablePositions::WordBreakBehavior::KeepAll, BreakablePositions::NoBreakSpaceBehavior::Normal>(lineBreakIteratorFactory, startPosition);
-    }
+    if (wordBreak == WordBreak::KeepAll)
+        return breakNBSP ? BreakablePositionRule::KeepAllBreakNoBreakSpace : BreakablePositionRule::KeepAll;
 
     if (wordBreak == WordBreak::AutoPhrase)
+        return BreakablePositionRule::AutoPhrase;
+
+    if (mode == TextBreakIterator::LineMode::Behavior::Default)
+        return breakNBSP ? BreakablePositionRule::NormalRulesBreakNoBreakSpace : BreakablePositionRule::NormalRules;
+
+    return breakNBSP ? BreakablePositionRule::SpecialRulesBreakNoBreakSpace : BreakablePositionRule::SpecialRules;
+}
+
+unsigned TextUtil::findNextBreakablePosition(CachedLineBreakIteratorFactory& lineBreakIteratorFactory, unsigned startPosition, BreakablePositionRule rule)
+{
+    switch (rule) {
+    case BreakablePositionRule::KeepAllBreakNoBreakSpace:
+        return BreakablePositions::next<BreakablePositions::LineBreakRules::Special, BreakablePositions::WordBreakBehavior::KeepAll, BreakablePositions::NoBreakSpaceBehavior::Break>(lineBreakIteratorFactory, startPosition);
+    case BreakablePositionRule::KeepAll:
+        return BreakablePositions::next<BreakablePositions::LineBreakRules::Special, BreakablePositions::WordBreakBehavior::KeepAll, BreakablePositions::NoBreakSpaceBehavior::Normal>(lineBreakIteratorFactory, startPosition);
+    case BreakablePositionRule::AutoPhrase:
         return BreakablePositions::next<BreakablePositions::LineBreakRules::Special, BreakablePositions::WordBreakBehavior::AutoPhrase, BreakablePositions::NoBreakSpaceBehavior::Normal>(lineBreakIteratorFactory, startPosition);
-
-    if (lineBreakIteratorFactory.mode() == TextBreakIterator::LineMode::Behavior::Default) {
-        if (breakNBSP)
-            return BreakablePositions::next<BreakablePositions::LineBreakRules::Normal, BreakablePositions::WordBreakBehavior::Normal, BreakablePositions::NoBreakSpaceBehavior::Break>(lineBreakIteratorFactory, startPosition);
+    case BreakablePositionRule::NormalRulesBreakNoBreakSpace:
+        return BreakablePositions::next<BreakablePositions::LineBreakRules::Normal, BreakablePositions::WordBreakBehavior::Normal, BreakablePositions::NoBreakSpaceBehavior::Break>(lineBreakIteratorFactory, startPosition);
+    case BreakablePositionRule::NormalRules:
         return BreakablePositions::next<BreakablePositions::LineBreakRules::Normal, BreakablePositions::WordBreakBehavior::Normal, BreakablePositions::NoBreakSpaceBehavior::Normal>(lineBreakIteratorFactory, startPosition);
-    }
-
-    if (breakNBSP)
+    case BreakablePositionRule::SpecialRulesBreakNoBreakSpace:
         return BreakablePositions::next<BreakablePositions::LineBreakRules::Special, BreakablePositions::WordBreakBehavior::Normal, BreakablePositions::NoBreakSpaceBehavior::Break>(lineBreakIteratorFactory, startPosition);
-
+    case BreakablePositionRule::SpecialRules:
+        return BreakablePositions::next<BreakablePositions::LineBreakRules::Special, BreakablePositions::WordBreakBehavior::Normal, BreakablePositions::NoBreakSpaceBehavior::Normal>(lineBreakIteratorFactory, startPosition);
+    }
+    ASSERT_NOT_REACHED();
     return BreakablePositions::next<BreakablePositions::LineBreakRules::Special, BreakablePositions::WordBreakBehavior::Normal, BreakablePositions::NoBreakSpaceBehavior::Normal>(lineBreakIteratorFactory, startPosition);
+}
+
+unsigned TextUtil::findNextBreakablePosition(CachedLineBreakIteratorFactory& lineBreakIteratorFactory, unsigned startPosition, const Style::ComputedStyle& style)
+{
+    return findNextBreakablePosition(lineBreakIteratorFactory, startPosition, breakablePositionRule(style, lineBreakIteratorFactory.mode()));
 }
 
 bool TextUtil::shouldPreserveSpacesAndTabs(const Box& layoutBox)
@@ -603,7 +623,7 @@ size_t TextUtil::firstUserPerceivedCharacterLength(const InlineTextBox& inlineTe
 
 size_t TextUtil::firstUserPerceivedCharacterLength(const InlineTextItem& inlineTextItem)
 {
-    auto length = firstUserPerceivedCharacterLength(protect(inlineTextItem.inlineTextBox()), inlineTextItem.start(), inlineTextItem.length());
+    auto length = firstUserPerceivedCharacterLength(inlineTextItem.inlineTextBox(), inlineTextItem.start(), inlineTextItem.length());
     return std::min<size_t>(inlineTextItem.length(), length);
 }
 
@@ -624,7 +644,7 @@ AtomString TextUtil::ellipsisTextInInlineDirection(bool isHorizontal)
 
 InlineLayoutUnit TextUtil::hyphenWidth(const Style::ComputedStyle& style)
 {
-    return std::max(0.f, protect(style.fontCascade())->width(StringView { style.hyphenString() }));
+    return std::max(0.f, style.fontCascade().width(StringView { style.hyphenString() }));
 }
 
 static bool NODELETE isASCIIHangableQuote(char32_t character)
@@ -662,7 +682,7 @@ float TextUtil::hangablePunctuationStartWidth(const InlineTextItem& inlineTextIt
         return { };
     ASSERT(inlineTextItem.length());
     auto leadingPosition = inlineTextItem.start();
-    return width(inlineTextItem, protect(style.fontCascade()), leadingPosition, leadingPosition + 1, { });
+    return width(inlineTextItem, style.fontCascade(), leadingPosition, leadingPosition + 1, { });
 }
 
 bool TextUtil::hasHangablePunctuationEnd(const InlineTextItem& inlineTextItem, const Style::ComputedStyle& style)
@@ -679,7 +699,7 @@ float TextUtil::hangablePunctuationEndWidth(const InlineTextItem& inlineTextItem
         return { };
     ASSERT(inlineTextItem.length());
     auto trailingPosition = inlineTextItem.end() - 1;
-    return width(inlineTextItem, protect(style.fontCascade()), trailingPosition, trailingPosition + 1, { });
+    return width(inlineTextItem, style.fontCascade(), trailingPosition, trailingPosition + 1, { });
 }
 
 bool TextUtil::hasHangableStopOrCommaEnd(const InlineTextItem& inlineTextItem, const Style::ComputedStyle& style)
@@ -704,7 +724,7 @@ float TextUtil::hangableStopOrCommaEndWidth(const InlineTextItem& inlineTextItem
         return { };
     ASSERT(inlineTextItem.length());
     auto trailingPosition = inlineTextItem.end() - 1;
-    return width(inlineTextItem, protect(style.fontCascade()), trailingPosition, trailingPosition + 1, { });
+    return width(inlineTextItem, style.fontCascade(), trailingPosition, trailingPosition + 1, { });
 }
 
 template<typename CharacterType>

@@ -29,6 +29,7 @@
 #include <WebCore/CSSPropertyNames.h>
 #include <WebCore/StyleAnimations.h>
 #include <WebCore/WebAnimationTypes.h>
+#include <wtf/ScopedLambda.h>
 #include <wtf/Vector.h>
 #include <wtf/WeakPtr.h>
 
@@ -60,6 +61,7 @@ public:
     bool requiresPseudoElement() const;
     OptionSet<AnimationImpact> applyKeyframeEffects(Style::ComputedStyle& targetStyle, HashSet<AnimatableCSSProperty>& affectedProperties, const Style::ComputedStyle* previousLastStyleChangeEventStyle, const Style::ResolutionContext&);
     bool hasMatchingEffect(NOESCAPE const Function<bool(const KeyframeEffect&)>&) const;
+    bool hasMatchingEffect(const ScopedLambda<bool(const KeyframeEffect&)>&) const;
 
     void effectAbilityToBeAcceleratedDidChange(const KeyframeEffect&);
     bool allowsAcceleration() const;

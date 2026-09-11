@@ -43,6 +43,12 @@ class TextStream;
 
 namespace WebCore {
 
+#if defined(WEBKIT_IOS6)
+WEBCORE_EXPORT void recordNeedsLayoutCaller(void*);
+WEBCORE_EXPORT extern bool g_webkitIOS6NeedsLayoutRecording;
+WEBCORE_EXPORT extern bool g_webkitIOS6LayoutCounters;
+#endif
+
 class AffineTransform;
 class Color;
 class ControlPart;
@@ -1107,6 +1113,9 @@ protected:
 
     virtual void willBeDestroyed();
     void setIsBeingDestroyed() { m_stateBitfields.setFlag(StateFlag::BeingDestroyed); }
+#if defined(WEBKIT_IOS6)
+    void clearNodeForDetachedDestruction() { m_node = nullptr; }
+#endif
 
     void scheduleLayout(RenderElement* layoutRoot);
     void setNeedsOutOfFlowMovementLayoutBit(bool b) { m_stateBitfields.setFlag(StateFlag::NeedsOutOfFlowMovementLayout, b); }
@@ -1269,7 +1278,11 @@ private:
 
     StateBitfields m_stateBitfields;
 
+#if defined(WEBKIT_IOS6)
+    Node* m_node;
+#else
     WeakRef<Node, WeakPtrImplWithEventTargetData> m_node;
+#endif
 
     SingleThreadWeakPtr<RenderElement> m_parent;
     SingleThreadPackedWeakPtr<RenderObject> m_previous;
@@ -1417,18 +1430,18 @@ inline RenderObject::SetLayoutNeededForbiddenScope::SetLayoutNeededForbiddenScop
 
 inline RenderObject* RenderObject::previousInFlowSibling() const
 {
-    CheckedPtr previousSibling = this->previousSibling();
+    auto* previousSibling = this->previousSibling();
     while (previousSibling && !previousSibling->isInFlow())
         previousSibling = previousSibling->previousSibling();
-    return previousSibling.unsafeGet();
+    return previousSibling;
 }
 
 inline RenderObject* RenderObject::nextInFlowSibling() const
 {
-    CheckedPtr nextSibling = this->nextSibling();
+    auto* nextSibling = this->nextSibling();
     while (nextSibling && !nextSibling->isInFlow())
         nextSibling = nextSibling->nextSibling();
-    return nextSibling.unsafeGet();
+    return nextSibling;
 }
 
 #if ENABLE(MATHML)

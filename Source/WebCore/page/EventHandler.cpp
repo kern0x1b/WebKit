@@ -362,7 +362,14 @@ static inline ScrollGranularity NODELETE wheelGranularityToScrollGranularity(uns
     }
 }
 
-#if (ENABLE(TOUCH_EVENTS) && !PLATFORM(IOS_FAMILY))
+// This guard used to be exactly the guard on the dispatcher that calls it
+// (ENABLE(TOUCH_EVENTS) && !ENABLE(IOS_TOUCH_EVENTS), further down in this
+// file) inverted onto PLATFORM(IOS_FAMILY) - a fair simplification everywhere
+// else, because until this port nothing had ENABLE(TOUCH_EVENTS) on without
+// ENABLE(IOS_TOUCH_EVENTS) also on for PLATFORM(IOS_FAMILY). This build is the
+// first thing in this tree to be exactly that combination, so the two guards
+// have to be written out separately now instead of one implying the other.
+#if (ENABLE(TOUCH_EVENTS) && (!PLATFORM(IOS_FAMILY) || !ENABLE(IOS_TOUCH_EVENTS)))
 static bool shouldGesturesTriggerActive()
 {
     // If the platform we're on supports GestureTapDown and GestureTapCancel then we'll
@@ -3081,8 +3088,11 @@ void EventHandler::updateMouseEventTargetNode(const AtomString& eventType, Node*
         m_textRecognitionHoverTimer.restart();
 #endif // ENABLE(IMAGE_ANALYSIS)
 
+#if !defined(WEBKIT_IOS6)
     if (RefPtr page = frame->page())
         protect(page->imageOverlayController())->elementUnderMouseDidChange(frame, m_elementUnderMouse);
+#else
+#endif
 
     ASSERT_IMPLIES(m_elementUnderMouse, &m_elementUnderMouse->document() == frame->document());
     ASSERT_IMPLIES(m_lastElementUnderMouse, &m_lastElementUnderMouse->document() == frame->document());
@@ -3111,17 +3121,21 @@ void EventHandler::updateMouseEventTargetNode(const AtomString& eventType, Node*
             for (RefPtr element = m_elementUnderMouse; element; element = element->parentElementInComposedTree())
                 elementsUnderMouse.append(element);
 
-            Vector enteredElementsChain = elementsUnderMouse;
-            if (!leftElementsChain.isEmpty() && !enteredElementsChain.isEmpty() && leftElementsChain.last().ptr() == enteredElementsChain.last().get()) {
-                size_t minHeight = std::min(leftElementsChain.size(), enteredElementsChain.size());
+            // The entered chain is the head of elementsUnderMouse; tracking its
+            // length is enough, and saves copying a vector of weak pointers -
+            // one ref count pair per ancestor - on every change of hovered
+            // element, which on a touch port is every tap.
+            size_t enteredElementsChainSize = elementsUnderMouse.size();
+            if (!leftElementsChain.isEmpty() && enteredElementsChainSize && leftElementsChain.last().ptr() == elementsUnderMouse.last().get()) {
+                size_t minHeight = std::min(leftElementsChain.size(), enteredElementsChainSize);
                 size_t i;
                 for (i = 0; i < minHeight; ++i) {
-                    WeakPtr enteredElement = enteredElementsChain[enteredElementsChain.size() - i - 1];
+                    WeakPtr enteredElement = elementsUnderMouse[enteredElementsChainSize - i - 1];
                     if (leftElementsChain[leftElementsChain.size() - i - 1].ptr() != enteredElement.get())
                         break;
                 }
                 leftElementsChain.shrink(leftElementsChain.size() - i);
-                enteredElementsChain.shrink(enteredElementsChain.size() - i);
+                enteredElementsChainSize -= i;
             }
 
             if (auto lastElementUnderMouse = m_lastElementUnderMouse)
@@ -3135,7 +3149,8 @@ void EventHandler::updateMouseEventTargetNode(const AtomString& eventType, Node*
             if (auto elementUnderMouse = m_elementUnderMouse)
                 elementUnderMouse->dispatchMouseEvent(platformMouseEvent, eventNames.mouseoverEvent, 0, m_lastElementUnderMouse);
 
-            for (auto& chain : enteredElementsChain | std::views::reverse) {
+            for (size_t i = enteredElementsChainSize; i > 0; --i) {
+                RefPtr chain = elementsUnderMouse[i - 1].get();
                 if (!chain)
                     continue;
 
@@ -5443,9 +5458,28 @@ static HitTestResult hitTestResultInFrame(LocalFrame* frame, const LayoutPoint& 
     return result;
 }
 
+#if defined(WEBKIT_IOS6)
+static FILE* touchLatencyLog()
+{
+    static FILE* file = [] () -> FILE* {
+        const char* path = getenv("WEBKIT_IOS6_TOUCH_LATENCY_LOG");
+        if (!path || !path[0])
+            return nullptr;
+        FILE* opened = fopen(path, "a");
+        if (opened)
+            setvbuf(opened, nullptr, _IOLBF, 0);
+        return opened;
+    }();
+    return file;
+}
+#endif
+
 Expected<bool, RemoteFrameGeometryTransformer> EventHandler::handleTouchEvent(const PlatformTouchEvent& event)
 {
     Ref frame = m_frame.get();
+#if defined(WEBKIT_IOS6)
+    MonotonicTime touchHandleEntry = MonotonicTime::now();
+#endif
 
     // First build up the lists to use for the 'touches', 'targetTouches' and 'changedTouches' attributes
     // in the JS event. See https://www.sitepen.com/blog/touching-and-gesturing-on-the-iphone/
@@ -5574,7 +5608,7 @@ Expected<bool, RemoteFrameGeometryTransformer> EventHandler::handleTouchEvent(co
         if (!targetFrame)
             continue;
 
-#if PLATFORM(WPE) || PLATFORM(GTK)
+#if PLATFORM(WPE) || PLATFORM(GTK) || defined(WEBKIT_IOS6)
         RefPtr<EventTarget> pointerTarget = touchTarget;
 
         if (pointState != PlatformTouchPoint::TouchPressed) {
@@ -5589,16 +5623,10 @@ Expected<bool, RemoteFrameGeometryTransformer> EventHandler::handleTouchEvent(co
             }
         }
 
-        // FIXME: Pass the touch delta for pointermove events by remembering the position per pointerID similar to
-        // Apple's m_touchLastGlobalPositionAndDeltaMap
         Ref page = *document->page();
         page->pointerCaptureController().dispatchEventForTouchAtIndex(
             *pointerTarget, event, index, !index, *document->windowProxy(), { 0, 0 });
 
-        // https://w3c.github.io/pointerevents/#suppressing-a-compatibility-mouse-event
-        // If pointerdown was canceled via preventDefault(), suppress compatibility mouse events
-        // by marking the touch event as handled. This propagates to the UIProcess via
-        // doneWithTouchEvent(wasEventHandled=true), preventing gesture-based mouse synthesis.
         if (page->pointerCaptureController().preventsCompatibilityMouseEventsForIdentifier(PointerEvent::pointerIdForTouchPoint(point)))
             swallowedEvent = true;
 #endif
@@ -5645,13 +5673,17 @@ Expected<bool, RemoteFrameGeometryTransformer> EventHandler::handleTouchEvent(co
         m_originatingTouchPointDocument = nullptr;
 
     // Now iterate the changedTouches list and m_targets within it, sending events to the targets as required.
-    RefPtr<TouchList> emptyList = TouchList::create();
+    // The empty list is only ever read for a touch cancel, so it is built on demand rather than
+    // allocated on every touchmove of every drag.
+    RefPtr<TouchList> emptyList;
     for (unsigned state = 0; state != PlatformTouchPoint::TouchStateEnd; ++state) {
         if (!changedTouches[state].m_touches)
             continue;
 
         // When sending a touch cancel event, use empty touches and targetTouches lists.
         bool isTouchCancelEvent = (state == PlatformTouchPoint::TouchCancelled);
+        if (isTouchCancelEvent && !emptyList)
+            emptyList = TouchList::create();
         RefPtr<TouchList>& effectiveTouches(isTouchCancelEvent ? emptyList : touches);
         const AtomString& stateName(eventNameForTouchPointState(static_cast<PlatformTouchPoint::State>(state)));
 
@@ -5664,6 +5696,18 @@ Expected<bool, RemoteFrameGeometryTransformer> EventHandler::handleTouchEvent(co
             Ref<TouchEvent> touchEvent = TouchEvent::create(effectiveTouches.get(), targetTouches.get(), changedTouches[state].m_touches.get(),
                 stateName, downcast<Node>(*target).document().windowProxy(), { }, event.modifiers());
             target->dispatchEvent(touchEvent);
+#if defined(WEBKIT_IOS6)
+            if (state == PlatformTouchPoint::TouchPressed) {
+                if (FILE* log = touchLatencyLog()) {
+                    MonotonicTime dispatchDone = MonotonicTime::now();
+                    fprintf(log, "%.3f touchstart capture->entry=%.1fms entry->dispatched=%.1fms capture->dispatched=%.1fms\n",
+                        dispatchDone.secondsSinceEpoch().value(),
+                        (touchHandleEntry - event.timestamp()).milliseconds(),
+                        (dispatchDone - touchHandleEntry).milliseconds(),
+                        (dispatchDone - event.timestamp()).milliseconds());
+                }
+            }
+#endif
             swallowedEvent = swallowedEvent || touchEvent->defaultPrevented() || touchEvent->defaultHandled();
         }
     }

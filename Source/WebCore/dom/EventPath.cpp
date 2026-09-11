@@ -81,7 +81,7 @@ EventPath::EventPath(Node& originalTarget, Event& event)
         setRelatedTarget(originalTarget, *relatedTarget);
 
 #if ENABLE(TOUCH_EVENTS)
-    if (RefPtr touchEvent = dynamicDowncast<TouchEvent>(event))
+    if (auto* touchEvent = dynamicDowncast<TouchEvent>(event))
         retargetTouchLists(*touchEvent);
 #endif
 }
@@ -106,7 +106,7 @@ void EventPath::buildPath(Node& originalTarget, Event& event)
     RefPtr<ShadowRoot> shadowRoot;
     while (node) {
         while (node) {
-            m_path.append(EventContext { contextType, *node, eventTargetRespectingTargetRules(*node), target.get(), closedShadowDepth });
+            m_path.constructAndAppend(contextType, *node, eventTargetRespectingTargetRules(*node), target.get(), closedShadowDepth);
 
             if (RefPtr maybeShadowRoot = dynamicDowncast<ShadowRoot>(*node)) {
                 shadowRoot = WTF::move(maybeShadowRoot);
@@ -120,7 +120,7 @@ void EventPath::buildPath(Node& originalTarget, Event& event)
                     ASSERT(target);
                     if (target) {
                         if (RefPtr window = document->window())
-                            m_path.append(EventContext { EventContext::Type::Window, node.get(), window.get(), target.get(), closedShadowDepth });
+                            m_path.constructAndAppend(EventContext::Type::Window, node.get(), static_cast<EventTarget*>(window.get()), target.get(), closedShadowDepth);
                     }
                 }
                 return;
@@ -208,20 +208,29 @@ void EventPath::retargetTouch(EventContext::TouchListType type, const Touch& tou
         return;
 
     RelatedNodeRetargeter retargeter(eventTarget.releaseNonNull(), Ref { *m_path[0].node() });
-    RefPtr<TreeScope> previousTreeScope;
+    TreeScope* previousTreeScope = nullptr;
+#if defined(WEBKIT_IOS6)
+    RefPtr<Touch> lastClone;
+#endif
     for (auto& context : m_path) {
-        Ref currentTarget = *context.node();
-        Ref currentTreeScope = currentTarget->treeScope();
-        if (previousTreeScope && currentTreeScope.ptr() != previousTreeScope) [[unlikely]]
-            retargeter.moveToNewTreeScope(previousTreeScope.get(), currentTreeScope);
+        Node& currentTarget = *context.node();
+        TreeScope& currentTreeScope = currentTarget.treeScope();
+        if (previousTreeScope && &currentTreeScope != previousTreeScope) [[unlikely]]
+            retargeter.moveToNewTreeScope(previousTreeScope, currentTreeScope);
 
         if (context.isTouchEventContext()) {
-            RefPtr currentRelatedNode = retargeter.currentNode(currentTarget);
-            context.touchList(type).append(touch.cloneWithNewTarget(currentRelatedNode.get()));
+            Node* currentRelatedNode = retargeter.currentNode(currentTarget);
+#if defined(WEBKIT_IOS6)
+            if (!lastClone || lastClone->target() != currentRelatedNode) [[unlikely]]
+                lastClone = touch.cloneWithNewTarget(currentRelatedNode);
+            context.touchList(type).append(Ref { *lastClone });
+#else
+            context.touchList(type).append(touch.cloneWithNewTarget(currentRelatedNode));
+#endif
         } else
             ASSERT(context.isWindowContext());
 
-        previousTreeScope = WTF::move(currentTreeScope);
+        previousTreeScope = &currentTreeScope;
     }
 }
 
@@ -231,8 +240,69 @@ void EventPath::retargetTouchList(EventContext::TouchListType type, const TouchL
         retargetTouch(type, *list->item(i));
 }
 
+#if defined(WEBKIT_IOS6)
+
+static bool ios6TouchListStaysInScope(const TouchList* list, const TreeScope& scope)
+{
+    for (unsigned i = 0, length = list ? list->length() : 0; i < length; ++i) {
+        auto* target = dynamicDowncast<Node>(list->item(i)->target());
+        if (!target || &target->treeScope() != &scope || !target->isConnected())
+            return false;
+    }
+    return true;
+}
+
+bool EventPath::ios6ShareTouchListsAcrossPath(const TouchEvent& event)
+{
+    if (m_path.isEmpty())
+        return true;
+
+    auto* firstNode = m_path[0].node();
+    if (!firstNode || !firstNode->isConnected())
+        return false;
+
+    SUPPRESS_UNCOUNTED_LOCAL TreeScope& scope = firstNode->treeScope();
+    for (auto& context : m_path) {
+        auto* node = context.node();
+        if (!node || &node->treeScope() != &scope)
+            return false;
+    }
+
+    if (!ios6TouchListStaysInScope(event.touches(), scope)
+        || !ios6TouchListStaysInScope(event.targetTouches(), scope)
+        || !ios6TouchListStaysInScope(event.changedTouches(), scope))
+        return false;
+
+    auto listOrEmpty = [](TouchList* list) -> Ref<TouchList> {
+        if (list)
+            return *list;
+        return TouchList::create();
+    };
+
+    Ref<TouchList> touches = listOrEmpty(event.touches());
+    Ref<TouchList> targetTouches = listOrEmpty(event.targetTouches());
+    Ref<TouchList> changedTouches = listOrEmpty(event.changedTouches());
+
+    for (auto& context : m_path) {
+        if (context.isTouchEventContext())
+            context.ios6AdoptTouchLists(touches.get(), targetTouches.get(), changedTouches.get());
+    }
+    return true;
+}
+
+#endif
+
 void EventPath::retargetTouchLists(const TouchEvent& event)
 {
+#if defined(WEBKIT_IOS6)
+    if (ios6ShareTouchListsAcrossPath(event))
+        return;
+
+    for (auto& context : m_path) {
+        if (context.isTouchEventContext())
+            context.ios6EnsureTouchLists();
+    }
+#endif
     retargetTouchList(EventContext::TouchListType::Touches, event.touches());
     retargetTouchList(EventContext::TouchListType::TargetTouches, event.targetTouches());
     retargetTouchList(EventContext::TouchListType::ChangedTouches, event.changedTouches());
@@ -298,16 +368,21 @@ Vector<Ref<EventTarget>> EventPath::computePathTreatingAllShadowRootsAsOpen() co
 
 EventPath::EventPath(std::span<EventTarget* const> targets)
 {
-    m_path = WTF::map(targets, [&](auto* target) {
+    if (targets.empty())
+        return;
+
+    m_path.reserveInitialCapacity(targets.size());
+    EventTarget* origin = *targets.begin();
+    for (auto* target : targets) {
         ASSERT(target);
         ASSERT(!is<Node>(target));
-        return EventContext { EventContext::Type::Normal, nullptr, target, *targets.begin(), 0 };
-    });
+        m_path.constructAndAppend(EventContext::Type::Normal, static_cast<Node*>(nullptr), target, origin, 0);
+    }
 }
 
 EventPath::EventPath(EventTarget& target)
 {
-    m_path = { EventContext { EventContext::Type::Normal, nullptr, &target, &target, 0 } };
+    m_path.constructAndAppend(EventContext::Type::Normal, static_cast<Node*>(nullptr), &target, static_cast<EventTarget*>(&target), 0);
 }
 
 static Node* NODELETE moveOutOfAllShadowRoots(Node& startingNode)

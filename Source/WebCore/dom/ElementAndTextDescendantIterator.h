@@ -69,11 +69,19 @@ private:
 
     void popAncestorSiblingStack();
 
+#if defined(WEBKIT_IOS6)
+    Node* m_current { nullptr };
+    struct AncestorSibling {
+        Node* node;
+        unsigned depth;
+    };
+#else
     CheckedPtr<Node> m_current;
     struct AncestorSibling {
         CheckedPtr<Node> node;
         unsigned depth;
     };
+#endif
     Vector<AncestorSibling, 16> m_ancestorSiblingStack;
     unsigned m_depth { 0 };
 
@@ -99,7 +107,7 @@ ElementAndTextDescendantRange elementAndTextDescendants(ContainerNode&);
 inline ElementAndTextDescendantIterator::ElementAndTextDescendantIterator(const ContainerNode& root, FirstChildTag)
     : m_current(firstChild(root))
 #if ASSERT_ENABLED
-    , m_assertions(m_current.get())
+    , m_assertions(m_current)
 #endif
 {
     if (!m_current)
@@ -111,7 +119,7 @@ inline ElementAndTextDescendantIterator::ElementAndTextDescendantIterator(const 
 inline ElementAndTextDescendantIterator::ElementAndTextDescendantIterator(const ContainerNode& root, Node* current)
     : m_current(current)
 #if ASSERT_ENABLED
-    , m_assertions(m_current.get())
+    , m_assertions(m_current)
 #endif
 {
     if (!m_current)
@@ -121,16 +129,13 @@ inline ElementAndTextDescendantIterator::ElementAndTextDescendantIterator(const 
         return;
 
     Vector<Node*, 20> ancestorStack;
-    RefPtr ancestor = m_current->parentNode();
-    while (ancestor != &root) {
-        ancestorStack.append(ancestor.get());
-        ancestor = ancestor->parentNode();
-    }
+    for (auto* ancestor = m_current->parentNode(); ancestor != &root; ancestor = ancestor->parentNode())
+        ancestorStack.append(ancestor);
 
     m_ancestorSiblingStack.append({ nullptr, 0 });
     for (unsigned i = ancestorStack.size(); i; --i) {
-        if (RefPtr sibling = nextSibling(*ancestorStack[i - 1]))
-            m_ancestorSiblingStack.append({ sibling.get(), i });
+        if (auto* sibling = nextSibling(*ancestorStack[i - 1]))
+            m_ancestorSiblingStack.append({ sibling, i });
     }
 
     m_depth = ancestorStack.size() + 1;
@@ -185,13 +190,13 @@ inline ElementAndTextDescendantIterator& ElementAndTextDescendantIterator::trave
     ASSERT(m_current);
     ASSERT(!m_assertions.domTreeHasMutated());
 
-    RefPtr firstChild = ElementAndTextDescendantIterator::firstChild(*m_current);
-    RefPtr nextSibling = ElementAndTextDescendantIterator::nextSibling(*m_current);
+    auto* firstChild = ElementAndTextDescendantIterator::firstChild(*m_current);
+    auto* nextSibling = ElementAndTextDescendantIterator::nextSibling(*m_current);
     if (firstChild) {
         if (nextSibling)
-            m_ancestorSiblingStack.append({ nextSibling.get(), m_depth });
+            m_ancestorSiblingStack.append({ nextSibling, m_depth });
         ++m_depth;
-        m_current = firstChild.get();
+        m_current = firstChild;
         return *this;
     }
     if (!nextSibling) {
@@ -199,7 +204,7 @@ inline ElementAndTextDescendantIterator& ElementAndTextDescendantIterator::trave
         return *this;
     }
 
-    m_current = nextSibling.get();
+    m_current = nextSibling;
     return *this;
 }
 
@@ -259,7 +264,7 @@ inline Node* ElementAndTextDescendantIterator::operator->()
     ASSERT(m_current);
     ASSERT(isElementOrText(*m_current));
     ASSERT(!m_assertions.domTreeHasMutated());
-    return m_current.get();
+    return m_current;
 }
 
 inline const Node& ElementAndTextDescendantIterator::operator*() const
@@ -275,7 +280,7 @@ inline const Node* ElementAndTextDescendantIterator::operator->() const
     ASSERT(m_current);
     ASSERT(isElementOrText(*m_current));
     ASSERT(!m_assertions.domTreeHasMutated());
-    return m_current.get();
+    return m_current;
 }
 
 inline bool ElementAndTextDescendantIterator::operator==(const ElementAndTextDescendantIterator& other) const

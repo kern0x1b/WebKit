@@ -60,11 +60,23 @@
 #if ENABLE(VIDEO)
 #include "UserAgentParts.h"
 #endif
+#include <cstdlib>
 #include <ranges>
 #include <wtf/SetForScope.h>
 
 namespace WebCore {
 namespace Style {
+
+#if defined(WEBKIT_IOS6)
+static bool NODELETE elementRuleCollectorCompoundFastPathEnabled()
+{
+    static const bool enabled = [] {
+        const char* value = getenv("WEBKIT_IOS6_COMPOUND_FAST_PATH");
+        return !value || value[0] != '0';
+    }();
+    return enabled;
+}
+#endif
 
 static const StyleProperties& leftToRightDeclaration()
 {
@@ -103,23 +115,51 @@ struct MatchRequest {
 
 ElementRuleCollector::ElementRuleCollector(const Element& element, const ScopeRuleSets& ruleSets, SelectorMatchingState* selectorMatchingState, SelectorChecker::Mode mode)
     : m_element(element)
+#if defined(WEBKIT_IOS6)
+    , m_authorStyle(&ruleSets.authorStyle())
+#else
     , m_authorStyle(ruleSets.authorStyle())
+#endif
     , m_userStyle(ruleSets.userStyle())
     , m_userAgentMediaQueryStyle(ruleSets.userAgentMediaQueryStyle())
     , m_dynamicViewTransitionsStyle(ruleSets.dynamicViewTransitionsStyle())
     , m_selectorMatchingState(selectorMatchingState)
+#if defined(WEBKIT_IOS6)
+    , m_selectorChecker(element.document())
+#endif
+#if ENABLE(CSS_SELECTOR_JIT)
+    , m_cssSelectorJITEnabled(element.document().settings().cssSelectorJITCompilerEnabled())
+#endif
+    , m_isForLink(element.isLink())
+    , m_isHTMLElement(element.isHTMLElement())
+#if defined(WEBKIT_IOS6)
+    , m_compoundFastPathEnabled(elementRuleCollectorCompoundFastPathEnabled())
+#endif
     , m_mode(mode)
-    , m_result(MatchResult::create(element.isLink()))
 {
     ASSERT(!m_selectorMatchingState || m_selectorMatchingState->selectorFilter.parentStackIsConsistent(element.parentNode()));
 }
 
 ElementRuleCollector::ElementRuleCollector(const Element& element, const RuleSet& authorStyle, SelectorMatchingState* selectorMatchingState, SelectorChecker::Mode mode)
     : m_element(element)
+#if defined(WEBKIT_IOS6)
+    , m_authorStyle(&authorStyle)
+#else
     , m_authorStyle(authorStyle)
+#endif
     , m_selectorMatchingState(selectorMatchingState)
+#if defined(WEBKIT_IOS6)
+    , m_selectorChecker(element.document())
+#endif
+#if ENABLE(CSS_SELECTOR_JIT)
+    , m_cssSelectorJITEnabled(element.document().settings().cssSelectorJITCompilerEnabled())
+#endif
+    , m_isForLink(element.isLink())
+    , m_isHTMLElement(element.isHTMLElement())
+#if defined(WEBKIT_IOS6)
+    , m_compoundFastPathEnabled(elementRuleCollectorCompoundFastPathEnabled())
+#endif
     , m_mode(mode)
-    , m_result(MatchResult::create(element.isLink()))
 {
     ASSERT(!m_selectorMatchingState || m_selectorMatchingState->selectorFilter.parentStackIsConsistent(element.parentNode()));
 }
@@ -127,12 +167,13 @@ ElementRuleCollector::ElementRuleCollector(const Element& element, const RuleSet
 const MatchResult& ElementRuleCollector::matchResult() const
 {
     ASSERT(m_mode == SelectorChecker::Mode::ResolvingStyle);
-    return m_result;
+    return result();
 }
 
 Ref<MatchResult> ElementRuleCollector::releaseMatchResult()
 {
-    return WTF::move(m_result);
+    result();
+    return m_result.releaseNonNull();
 }
 
 const Vector<Ref<const StyleRule>>& ElementRuleCollector::matchedRuleList() const
@@ -144,7 +185,7 @@ const Vector<Ref<const StyleRule>>& ElementRuleCollector::matchedRuleList() cons
 inline void ElementRuleCollector::addMatchedRule(const RuleData& ruleData, unsigned specificity, unsigned scopingRootDistance, const MatchRequest& matchRequest)
 {
     auto cascadeLayerPriority = matchRequest.ruleSet.cascadeLayerPriorityFor(ruleData);
-    m_matchedRules.append({ &ruleData, specificity, scopingRootDistance, matchRequest.styleScopeOrdinal, cascadeLayerPriority });
+    m_matchedRules.append({ &ruleData, specificity, scopingRootDistance, ruleData.position(), matchRequest.styleScopeOrdinal, cascadeLayerPriority });
 }
 
 void ElementRuleCollector::clearMatchedRules()
@@ -174,7 +215,7 @@ void ElementRuleCollector::collectMatchingRules(DeclarationOrigin origin)
 {
     switch (origin) {
     case DeclarationOrigin::Author: {
-        MatchRequest matchRequest(m_authorStyle);
+        MatchRequest matchRequest(authorStyle());
         collectMatchingRules(matchRequest);
         if (isFirstMatchModeAndHasMatchedAnyRules())
             return;
@@ -228,27 +269,27 @@ void ElementRuleCollector::collectMatchingRules(const MatchRequest& matchRequest
     if (shadowRoot && shadowRoot->mode() == ShadowRootMode::UserAgent)
         collectMatchingUserAgentPartRules(matchRequest);
 
-    bool isHTMLElement = element.isHTMLElement();
-    bool isCaseInsensitiveForHTML = isHTMLElement && element.document().isHTMLDocument();
+    auto& document = element.document();
+    bool isHTMLElement = m_isHTMLElement;
+    bool isCaseInsensitiveForHTML = isHTMLElement && document.isHTMLDocument();
     auto& ruleSet = matchRequest.ruleSet;
 
     // We need to collect the rules for id, class, tag, and everything else into a buffer and
     // then sort the buffer.
-    auto& id = element.idForStyleResolution();
-    if (!id.isNull())
-        collectMatchingRulesForList(ruleSet.idRules(id), matchRequest);
-    if (element.hasClass()) {
+    if (ruleSet.hasIdRules()) {
+        auto& id = element.idForStyleResolution();
+        if (!id.isNull())
+            collectMatchingRulesForList(ruleSet.idRules(id), matchRequest);
+    }
+    if (ruleSet.hasClassRules() && element.hasClass()) {
         for (auto& className : element.classNames())
             collectMatchingRulesForList(ruleSet.classRules(className), matchRequest);
     }
     if (element.hasAttributesWithoutUpdate() && ruleSet.hasAttributeRules()) {
-        Vector<const RuleSet::RuleDataVector*, 4> ruleVectors;
         for (auto& attribute : element.attributes()) {
             if (auto* rules = ruleSet.attributeRules(attribute.localName(), isCaseInsensitiveForHTML))
-                ruleVectors.append(rules);
+                collectMatchingRulesForList(rules, matchRequest);
         }
-        for (auto* rules : ruleVectors)
-            collectMatchingRulesForList(rules, matchRequest);
     }
 
     if (m_pseudoElementRequest) {
@@ -258,17 +299,23 @@ void ElementRuleCollector::collectMatchingRules(const MatchRequest& matchRequest
             collectMatchingRulesForList(ruleSet.namedPseudoElementRules(m_pseudoElementRequest->nameOrPart()), matchRequest);
     }
 
-    if (element.isLink())
+    // The state tests come second: collectMatchingRulesForList does nothing for an empty bucket,
+    // so asking the rule set first turns each of these into one load and a branch. The focus
+    // predicates in particular reach into InspectorInstrumentation and walk the shadow tree, and
+    // they ran for every element resolved whether or not the sheet had a single :focus rule.
+    if (m_isForLink)
         collectMatchingRulesForList(ruleSet.linkPseudoClassRules(), matchRequest);
-    if (matchesFocusPseudoClass(element))
+    if (!ruleSet.focusPseudoClassRules().isEmpty() && matchesFocusPseudoClass(element))
         collectMatchingRulesForList(ruleSet.focusPseudoClassRules(), matchRequest);
-    if (matchesFocusVisiblePseudoClass(element))
+    if (!ruleSet.focusVisiblePseudoClassRules().isEmpty() && matchesFocusVisiblePseudoClass(element))
         collectMatchingRulesForList(ruleSet.focusVisiblePseudoClassRules(), matchRequest);
 #if ENABLE(FULLSCREEN_API)
-    if (auto* fullscreen = element.document().fullscreenIfExists(); fullscreen && fullscreen->isFullscreen())
-        collectMatchingRulesForList(ruleSet.fullscreenPseudoClassRules(), matchRequest);
+    if (!ruleSet.fullscreenPseudoClassRules().isEmpty()) {
+        if (auto* fullscreen = document.fullscreenIfExists(); fullscreen && fullscreen->isFullscreen())
+            collectMatchingRulesForList(ruleSet.fullscreenPseudoClassRules(), matchRequest);
+    }
 #endif
-    if (&element == element.document().documentElement())
+    if (!ruleSet.rootElementRules().isEmpty() && &element == document.documentElement())
         collectMatchingRulesForList(ruleSet.rootElementRules(), matchRequest);
     collectMatchingRulesForList(ruleSet.tagRules(element.localName(), isCaseInsensitiveForHTML), matchRequest);
     collectMatchingRulesForList(ruleSet.universalRules(), matchRequest);
@@ -287,13 +334,14 @@ void ElementRuleCollector::collectMatchingRules(const MatchRequest& matchRequest
 
 Vector<MatchedProperties>& ElementRuleCollector::declarationsForOrigin(DeclarationOrigin declarationOrigin)
 {
+    auto& matchResult = result();
     switch (declarationOrigin) {
-    case DeclarationOrigin::UserAgent: return m_result->userAgentDeclarations;
-    case DeclarationOrigin::User: return m_result->userDeclarations;
-    case DeclarationOrigin::Author: return m_result->authorDeclarations;
+    case DeclarationOrigin::UserAgent: return matchResult.userAgentDeclarations;
+    case DeclarationOrigin::User: return matchResult.userDeclarations;
+    case DeclarationOrigin::Author: return matchResult.authorDeclarations;
     }
     ASSERT_NOT_REACHED();
-    return m_result->authorDeclarations;
+    return matchResult.authorDeclarations;
 }
 
 void ElementRuleCollector::sortAndTransferMatchedRules(DeclarationOrigin declarationOrigin)
@@ -353,6 +401,16 @@ bool ElementRuleCollector::matchesAnyAuthorRules()
 
     return !m_matchedRules.isEmpty();
 }
+
+#if defined(WEBKIT_IOS6)
+bool ElementRuleCollector::matchesAnyAuthorRules(const RuleSet& authorStyle)
+{
+    m_authorStyle = &authorStyle;
+    m_matchedPseudoElements = { };
+    m_styleRelations.clear();
+    return matchesAnyAuthorRules();
+}
+#endif
 
 void ElementRuleCollector::matchUserAgentPartRules(DeclarationOrigin origin)
 {
@@ -557,7 +615,7 @@ inline bool ElementRuleCollector::ruleMatches(const RuleData& ruleData, unsigned
     // We know a sufficiently simple single part selector matches simply because we found it from the rule hash when filtering the RuleSet.
     // This is limited to HTML only so we don't need to check the namespace (because of tag name match).
     auto matchBasedOnRuleHash = ruleData.matchBasedOnRuleHash();
-    if (matchBasedOnRuleHash != MatchBasedOnRuleHash::None && element().isHTMLElement()) {
+    if (matchBasedOnRuleHash != MatchBasedOnRuleHash::None && m_isHTMLElement) {
         ASSERT_WITH_MESSAGE(!m_pseudoElementRequest, "If we match based on the rule hash while collecting for a particular pseudo element ID, we would add incorrect rules for that pseudo element ID. We should never end in ruleMatches() with a pseudo element if the ruleData cannot match any pseudo element.");
 
         switch (matchBasedOnRuleHash) {
@@ -580,9 +638,19 @@ inline bool ElementRuleCollector::ruleMatches(const RuleData& ruleData, unsigned
         return true;
     }
 
+#if defined(WEBKIT_IOS6)
+    if (ruleData.isSimpleCompound() && m_compoundFastPathEnabled && !m_pseudoElementRequest && !scopingRoot && styleScopeOrdinal == ScopeOrdinal::Element) {
+        auto& selector = ruleData.selector();
+        if (!m_selectorChecker.matchesSimpleCompound(selector, element()))
+            return false;
+        specificity = selector.computeSpecificity();
+        return true;
+    }
+#endif
+
 #if ENABLE(CSS_SELECTOR_JIT)
     auto& compiledSelector = ruleData.compiledSelector();
-    const bool compilerEnabled = element().document().settings().cssSelectorJITCompilerEnabled();
+    const bool compilerEnabled = m_cssSelectorJITEnabled;
 
     if (compilerEnabled) {
         if (compiledSelector.status == SelectorCompilationStatus::NotCompiled)
@@ -626,9 +694,12 @@ inline bool ElementRuleCollector::ruleMatches(const RuleData& ruleData, unsigned
 #endif // ENABLE(CSS_SELECTOR_JIT)
     {
         auto& selector = ruleData.selector();
-        // Slow path.
+#if defined(WEBKIT_IOS6)
+        selectorMatches = m_selectorChecker.match(selector, element(), context);
+#else
         SelectorChecker selectorChecker(element().document());
         selectorMatches = selectorChecker.match(selector, element(), context);
+#endif
         if (selectorMatches)
             specificity = selector.computeSpecificity();
     }
@@ -641,21 +712,30 @@ inline bool ElementRuleCollector::ruleMatches(const RuleData& ruleData, unsigned
 
 void ElementRuleCollector::collectMatchingRulesForListSlow(const RuleSet::RuleDataVector& rules, const MatchRequest& matchRequest)
 {
+    // All of these are fixed for the whole list but were re-read through two levels of indirection on
+    // every rule. This loop runs over every rule in every bucket that an element hashes into.
+    const bool hasPseudoElementRequest = !!m_pseudoElementRequest;
+    const auto* selectorFilter = m_selectorMatchingState ? &m_selectorMatchingState->selectorFilter : nullptr;
+    const bool hasContainerQueries = matchRequest.ruleSet.hasContainerQueries();
+    const bool hasScopeRules = matchRequest.ruleSet.hasScopeRules();
+    const bool shouldIncludeEmptyRules = m_shouldIncludeEmptyRules;
+    const bool stopsAtFirstMatch = m_mode == SelectorChecker::Mode::StyleInvalidation;
+
     for (auto& ruleData : rules) {
         if (!ruleData.isEnabled()) [[unlikely]]
             continue;
 
-        if (!ruleData.canMatchPseudoElement() && m_pseudoElementRequest)
+        if (!ruleData.canMatchPseudoElement() && hasPseudoElementRequest)
             continue;
 
-        if (m_selectorMatchingState && m_selectorMatchingState->selectorFilter.fastRejectSelector(ruleData.descendantSelectorIdentifierHashes()))
+        if (selectorFilter && selectorFilter->fastRejectSelector(ruleData.descendantSelectorIdentifierHashes()))
             continue;
 
-        if (matchRequest.ruleSet.hasContainerQueries() && !containerQueriesMatch(ruleData, matchRequest))
+        if (hasContainerQueries && !containerQueriesMatch(ruleData, matchRequest))
             continue;
 
         std::optional<Vector<ScopingRootWithDistance>> scopingRoots;
-        if (matchRequest.ruleSet.hasScopeRules()) {
+        if (hasScopeRules) {
             auto [result, roots] = scopeRulesMatch(ruleData, matchRequest);
             if (!result)
                 continue;
@@ -665,7 +745,7 @@ void ElementRuleCollector::collectMatchingRulesForListSlow(const RuleSet::RuleDa
         auto& rule = ruleData.styleRule();
 
         // If the rule has no properties to apply, then ignore it in the non-debug mode.
-        if (rule.properties().isEmpty() && !m_shouldIncludeEmptyRules)
+        if (rule.properties().isEmpty() && !shouldIncludeEmptyRules)
             continue;
 
         auto addRuleIfMatches = [&] (const ScopingRootWithDistance* scopingRootWithDistance = nullptr) {
@@ -678,14 +758,14 @@ void ElementRuleCollector::collectMatchingRulesForListSlow(const RuleSet::RuleDa
         if (scopingRoots) {
             for (auto& scopingRoot : *scopingRoots) {
                 addRuleIfMatches(&scopingRoot);
-                if (isFirstMatchModeAndHasMatchedAnyRules())
+                if (stopsAtFirstMatch && !m_matchedRules.isEmpty())
                     return;
             }
             continue;
         }
 
         addRuleIfMatches();
-        if (isFirstMatchModeAndHasMatchedAnyRules())
+        if (stopsAtFirstMatch && !m_matchedRules.isEmpty())
             return;
     }
 }
@@ -887,7 +967,7 @@ std::pair<bool, std::optional<Vector<ElementRuleCollector::ScopingRootWithDistan
     return { true, WTF::move(scopingRoots) };
 }
 
-static inline bool NODELETE compareRules(MatchedRule r1, MatchedRule r2)
+static inline bool NODELETE compareRules(const MatchedRule& r1, const MatchedRule& r2)
 {
     // For normal properties the earlier scope wins. This may be reversed by !important which is handled when resolving cascade.
     if (r1.styleScopeOrdinal != r2.styleScopeOrdinal)
@@ -903,7 +983,7 @@ static inline bool NODELETE compareRules(MatchedRule r1, MatchedRule r2)
     if (r1.scopingRootDistance != r2.scopingRootDistance)
         return r2.scopingRootDistance < r1.scopingRootDistance;
 
-    return r1.ruleData->position() < r2.ruleData->position();
+    return r1.position < r2.position;
 }
 
 void ElementRuleCollector::sortMatchedRules()
@@ -924,9 +1004,10 @@ void ElementRuleCollector::matchAllRules(bool matchAuthorAndUserStyles, bool inc
             // https://html.spec.whatwg.org/#presentational-hints
 
             // Presentation attributes in SVG elements tend to be unique and not restyled often. Avoid bloating the cache.
-            // FIXME: Refcount is an imperfect proxy for sharing within a single document.
+            // Use refcount as a proxy for style sharing: a style with one reference is almost certainly not shared.
             static constexpr auto matchedDeclarationsCacheSharingThreshold = 4;
-            bool allowFullCaching = !styledElement->isSVGElement() || presentationalHintStyle->refCount() > matchedDeclarationsCacheSharingThreshold;
+            bool allowFullCaching = !styledElement->isSVGElement()
+                || (!presentationalHintStyle->hasOneRef() && presentationalHintStyle->refCount() > matchedDeclarationsCacheSharingThreshold);
 
             auto isCacheable = allowFullCaching ? IsCacheable::Yes : IsCacheable::Partially;
             addElementStyleProperties(presentationalHintStyle, RuleSet::cascadeLayerPriorityForPresentationalHints, isCacheable);
@@ -984,16 +1065,17 @@ void ElementRuleCollector::addMatchedProperties(MatchedProperties&& matchedPrope
         // It might also be beneficial to overwrite the previous declaration (insteading of appending) if it affects the same exact properties.
         return;
     }
+    auto& matchResult = result();
     if (matchedProperties.isStartingStyle == IsStartingStyle::Yes)
-        m_result->hasStartingStyle = true;
+        matchResult.hasStartingStyle = true;
 
-    if (matchedProperties.isCacheable == IsCacheable::Partially && !m_result->isCompletelyNonCacheable) {
+    if (matchedProperties.isCacheable == IsCacheable::Partially && !matchResult.isCompletelyNonCacheable) {
         for (auto property : matchedProperties.properties.get())
-            m_result->nonCacheablePropertyIds.append(property.id());
+            matchResult.nonCacheablePropertyIds.append(property.id());
     }
     if (matchedProperties.isCacheable == IsCacheable::No) {
-        m_result->isCompletelyNonCacheable = true;
-        m_result->nonCacheablePropertyIds.clear();
+        matchResult.isCompletelyNonCacheable = true;
+        matchResult.nonCacheablePropertyIds.clear();
     }
 
     declarations.append(WTF::move(matchedProperties));
@@ -1001,9 +1083,9 @@ void ElementRuleCollector::addMatchedProperties(MatchedProperties&& matchedPrope
 
 void ElementRuleCollector::addAuthorKeyframeRules(const StyleRuleKeyframe& keyframe)
 {
-    ASSERT(m_result->authorDeclarations.isEmpty());
+    ASSERT(result().authorDeclarations.isEmpty());
     auto propertyAllowlist = m_pseudoElementRequest ? propertyAllowlistForPseudoElement(m_pseudoElementRequest->type()) : PropertyAllowlist::None;
-    m_result->authorDeclarations.append({ keyframe.properties(), SelectorChecker::MatchAll, propertyAllowlist });
+    result().authorDeclarations.append({ keyframe.properties(), SelectorChecker::MatchAll, propertyAllowlist });
 }
 
 }

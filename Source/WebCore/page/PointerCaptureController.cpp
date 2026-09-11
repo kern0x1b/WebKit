@@ -336,7 +336,11 @@ void PointerCaptureController::dispatchEventForTouchAtIndex(EventTarget& target,
 
 #if PLATFORM(IOS_FAMILY)
     if (pointerEvent->type() == eventNames().pointercancelEvent) {
-        cancelPointer(pointerEvent->pointerId(), IntPoint(platformTouchEvent.touchLocationInRootViewAtIndex(index)), pointerEvent.ptr());
+        // touchLocationInRootViewAtIndex(index) is Apple's modern accessor for
+        // the exact same position touchPoints()[index].pos() already holds on
+        // the portable PlatformTouchEvent this build uses without the internal
+        // SDK - see PlatformEventFactoryIOS.h.
+        cancelPointer(pointerEvent->pointerId(), IntPoint(platformTouchEvent.touchPoints().at(index).pos()), pointerEvent.ptr());
         return;
     }
 #endif
@@ -368,7 +372,15 @@ void PointerCaptureController::dispatchEventForTouchAtIndex(EventTarget& target,
     };
 
     bool shouldWaitForSyntheticClick = [&] {
-#if PLATFORM(IOS_FAMILY)
+        // isPotentialTap() is a real state flag - "this touch sequence hasn't
+        // moved far or long enough to rule out becoming a synthetic click yet" -
+        // not a renamed accessor for data the portable PlatformTouchEvent
+        // already carries, and nothing sets it without Apple's own tap-vs-drag
+        // classification machinery (WebKitAdditions/EventHandlerIOSTouch.cpp,
+        // which this SDK does not have). Narrowed to IOS_TOUCH_EVENTS rather
+        // than guessed at, so it takes the same false this quirk already
+        // resolves to on every non-iOS platform.
+#if PLATFORM(IOS_FAMILY) && ENABLE(IOS_TOUCH_EVENTS)
         if (platformTouchEvent.isPotentialTap())
             return protect(currentTarget->document())->quirks().shouldDispatchPointerOutAndLeaveAfterHandlingSyntheticClick();
 #endif

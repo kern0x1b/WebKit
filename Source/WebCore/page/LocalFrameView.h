@@ -150,6 +150,10 @@ public:
 #if PLATFORM(IOS_FAMILY)
     bool useCustomFixedPositionLayoutRect() const;
     IntRect customFixedPositionLayoutRect() const { return m_customFixedPositionLayoutRect; }
+#if defined(WEBKIT_IOS6)
+    LayoutRect fixedPositionRectAtLastLayout() const { return m_fixedPositionRectAtLastLayout; }
+    void setFixedPositionRectAtLastLayout(const LayoutRect& rect) { m_fixedPositionRectAtLastLayout = rect; }
+#endif
     WEBCORE_EXPORT void setCustomFixedPositionLayoutRect(const IntRect&);
     bool updateFixedPositionLayoutRect();
 
@@ -854,7 +858,9 @@ private:
 
     void updateScrollGeometryContentSize();
 
-    void applyRecursivelyWithVisibleRect(NOESCAPE const Function<void(LocalFrameView& frameView, const IntRect& visibleRect)>&);
+    // A WTF::Function always heap-allocates its wrapper, even for a captureless lambda, and this
+    // runs on every scroll frame. Every caller is in LocalFrameView.cpp, where the definition is.
+    template<typename ApplyFunction> void applyRecursivelyWithVisibleRect(NOESCAPE const ApplyFunction&);
     void resumeVisibleImageAnimations(const IntRect& visibleRect);
 #if ENABLE(ACCESSIBILITY_ANIMATION_CONTROL)
     void updatePlayStateForAllAnimations(const IntRect& visibleRect);
@@ -1054,6 +1060,9 @@ private:
     bool m_useCustomFixedPositionLayoutRect { false };
 
     IntRect m_customFixedPositionLayoutRect;
+#if defined(WEBKIT_IOS6)
+    LayoutRect m_fixedPositionRectAtLastLayout;
+#endif
     std::optional<IntSize> m_customSizeForResizeEvent;
 #endif
 

@@ -21,62 +21,62 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
 // THE POSSIBILITY OF SUCH DAMAGE.
 
-JSApplePayAMSUIRequest.cpp
-JSApplePayAutomaticReloadPaymentRequest.cpp
-JSApplePayCancelEvent.cpp
-JSApplePayContactField.cpp
-JSApplePayCouponCodeChangedEvent.cpp
-JSApplePayCouponCodeDetails.cpp
-JSApplePayCouponCodeUpdate.cpp
-JSApplePayDateComponents.cpp
-JSApplePayDateComponentsRange.cpp
-JSApplePayDeferredPaymentRequest.cpp
-JSApplePayDisbursementRequest.cpp
-JSApplePayDetailsUpdateBase.cpp
-JSApplePayError.cpp
-JSApplePayErrorCode.cpp
-JSApplePayErrorContactField.cpp
-JSApplePayFeature.cpp
-JSApplePayInstallmentConfiguration.cpp
-JSApplePayInstallmentItem.cpp
-JSApplePayInstallmentItemType.cpp
-JSApplePayInstallmentRetailChannel.cpp
-JSApplePayLaterAvailability.cpp
-JSApplePayLineItem.cpp
-JSApplePayMerchantCapability.cpp
-JSApplePayModifier.cpp
-JSApplePayPayment.cpp
-JSApplePayPaymentAuthorizationResult.cpp
-JSApplePayPaymentAuthorizedEvent.cpp
-JSApplePayPaymentCompleteDetails.cpp
-JSApplePayPaymentContact.cpp
-JSApplePayPaymentMethod.cpp
-JSApplePayPaymentMethodSelectedEvent.cpp
-JSApplePayPaymentMethodType.cpp
-JSApplePayPaymentMethodUpdate.cpp
-JSApplePayPaymentOrderDetails.cpp
-JSApplePayPaymentPass.cpp
-JSApplePayPaymentRequest.cpp
-JSApplePayPaymentTiming.cpp
-JSApplePayPaymentTokenContext.cpp
-JSApplePayRecurringPaymentDateUnit.cpp
-JSApplePayRecurringPaymentRequest.cpp
-JSApplePayRequest.cpp
-JSApplePayRequestBase.cpp
-JSApplePaySession.cpp
-JSApplePaySessionError.cpp
-JSApplePaySetup.cpp
-JSApplePaySetupConfiguration.cpp
-JSApplePaySetupFeature.cpp
-JSApplePaySetupFeatureState.cpp
-JSApplePaySetupFeatureType.cpp
-JSApplePayShippingContactEditingMode.cpp
-JSApplePayShippingContactSelectedEvent.cpp
-JSApplePayShippingContactUpdate.cpp
-JSApplePayShippingMethod.cpp
-JSApplePayShippingMethodSelectedEvent.cpp
-JSApplePayShippingMethodUpdate.cpp
-JSApplePayValidateMerchantEvent.cpp
+// ios6: JSApplePayAMSUIRequest.cpp
+// ios6: JSApplePayAutomaticReloadPaymentRequest.cpp
+// ios6: JSApplePayCancelEvent.cpp
+// ios6: JSApplePayContactField.cpp
+// ios6: JSApplePayCouponCodeChangedEvent.cpp
+// ios6: JSApplePayCouponCodeDetails.cpp
+// ios6: JSApplePayCouponCodeUpdate.cpp
+// ios6: JSApplePayDateComponents.cpp
+// ios6: JSApplePayDateComponentsRange.cpp
+// ios6: JSApplePayDeferredPaymentRequest.cpp
+// ios6: JSApplePayDisbursementRequest.cpp
+// ios6: JSApplePayDetailsUpdateBase.cpp
+// ios6: JSApplePayError.cpp
+// ios6: JSApplePayErrorCode.cpp
+// ios6: JSApplePayErrorContactField.cpp
+// ios6: JSApplePayFeature.cpp
+// ios6: JSApplePayInstallmentConfiguration.cpp
+// ios6: JSApplePayInstallmentItem.cpp
+// ios6: JSApplePayInstallmentItemType.cpp
+// ios6: JSApplePayInstallmentRetailChannel.cpp
+// ios6: JSApplePayLaterAvailability.cpp
+// ios6: JSApplePayLineItem.cpp
+// ios6: JSApplePayMerchantCapability.cpp
+// ios6: JSApplePayModifier.cpp
+// ios6: JSApplePayPayment.cpp
+// ios6: JSApplePayPaymentAuthorizationResult.cpp
+// ios6: JSApplePayPaymentAuthorizedEvent.cpp
+// ios6: JSApplePayPaymentCompleteDetails.cpp
+// ios6: JSApplePayPaymentContact.cpp
+// ios6: JSApplePayPaymentMethod.cpp
+// ios6: JSApplePayPaymentMethodSelectedEvent.cpp
+// ios6: JSApplePayPaymentMethodType.cpp
+// ios6: JSApplePayPaymentMethodUpdate.cpp
+// ios6: JSApplePayPaymentOrderDetails.cpp
+// ios6: JSApplePayPaymentPass.cpp
+// ios6: JSApplePayPaymentRequest.cpp
+// ios6: JSApplePayPaymentTiming.cpp
+// ios6: JSApplePayPaymentTokenContext.cpp
+// ios6: JSApplePayRecurringPaymentDateUnit.cpp
+// ios6: JSApplePayRecurringPaymentRequest.cpp
+// ios6: JSApplePayRequest.cpp
+// ios6: JSApplePayRequestBase.cpp
+// ios6: JSApplePaySession.cpp
+// ios6: JSApplePaySessionError.cpp
+// ios6: JSApplePaySetup.cpp
+// ios6: JSApplePaySetupConfiguration.cpp
+// ios6: JSApplePaySetupFeature.cpp
+// ios6: JSApplePaySetupFeatureState.cpp
+// ios6: JSApplePaySetupFeatureType.cpp
+// ios6: JSApplePayShippingContactEditingMode.cpp
+// ios6: JSApplePayShippingContactSelectedEvent.cpp
+// ios6: JSApplePayShippingContactUpdate.cpp
+// ios6: JSApplePayShippingMethod.cpp
+// ios6: JSApplePayShippingMethodSelectedEvent.cpp
+// ios6: JSApplePayShippingMethodUpdate.cpp
+// ios6: JSApplePayValidateMerchantEvent.cpp
 JSSpeechSynthesisErrorCode.cpp
 JSSpeechSynthesisErrorEvent.cpp
 JSSpeechSynthesisErrorEventInit.cpp
@@ -86,37 +86,37 @@ Modules/ShapeDetection/Implementation/Cocoa/FaceDetectorImplementation.mm @nonAR
 Modules/ShapeDetection/Implementation/Cocoa/TextDetectorImplementation.mm @nonARC
 Modules/ShapeDetection/Implementation/Cocoa/VisionUtilities.mm @nonARC
 Modules/airplay/WebMediaSessionManager.mm @nonARC
-Modules/applepay/ApplePayCouponCodeChangedEvent.cpp
-Modules/applepay/ApplePayCancelEvent.cpp
-Modules/applepay/ApplePayContactField.cpp
-Modules/applepay/ApplePayInstallmentConfigurationWebCore.cpp
-Modules/applepay/ApplePayLogoSystemImage.mm @nonARC
-Modules/applepay/ApplePayMerchantCapability.cpp
-Modules/applepay/ApplePayPaymentAuthorizationResult.cpp
-Modules/applepay/ApplePayPaymentAuthorizedEvent.cpp
-Modules/applepay/ApplePayPaymentMethodSelectedEvent.cpp
-Modules/applepay/ApplePayRequestBase.cpp
-Modules/applepay/ApplePaySession.cpp
-Modules/applepay/ApplePaySessionPaymentRequest.cpp
-Modules/applepay/ApplePaySetup.cpp
-Modules/applepay/ApplePaySetupFeature.mm @nonARC
-Modules/applepay/ApplePayShippingContactSelectedEvent.cpp
-Modules/applepay/ApplePayShippingMethodSelectedEvent.cpp
-Modules/applepay/ApplePayValidateMerchantEvent.cpp
-Modules/applepay/PaymentCoordinator.cpp
-Modules/applepay/PaymentCoordinatorClient.cpp
-Modules/applepay/PaymentInstallmentConfiguration.mm @nonARC
-Modules/applepay/PaymentRequestValidator.mm @nonARC
-Modules/applepay/PaymentSession.cpp
-Modules/applepay/cocoa/PaymentAPIVersionCocoa.mm @nonARC
-Modules/applepay/cocoa/PaymentCocoa.mm @nonARC
-Modules/applepay/cocoa/PaymentContactCocoa.mm @nonARC
-Modules/applepay/cocoa/PaymentMerchantSessionCocoa.mm @nonARC
-Modules/applepay/cocoa/PaymentMethodCocoa.mm @nonARC
-Modules/applepay/cocoa/PaymentSessionErrorCocoa.mm @nonARC
-Modules/applepay/cocoa/PaymentSummaryItemsCocoa.mm @nonARC
-Modules/applepay/paymentrequest/ApplePayPaymentHandler.cpp
-Modules/applepay-ams-ui/ApplePayAMSUIPaymentHandler.cpp
+// ios6: Modules/applepay/ApplePayCouponCodeChangedEvent.cpp
+// ios6: Modules/applepay/ApplePayCancelEvent.cpp
+// ios6: Modules/applepay/ApplePayContactField.cpp
+// ios6: Modules/applepay/ApplePayInstallmentConfigurationWebCore.cpp
+// ios6: Modules/applepay/ApplePayLogoSystemImage.mm @nonARC
+// ios6: Modules/applepay/ApplePayMerchantCapability.cpp
+// ios6: Modules/applepay/ApplePayPaymentAuthorizationResult.cpp
+// ios6: Modules/applepay/ApplePayPaymentAuthorizedEvent.cpp
+// ios6: Modules/applepay/ApplePayPaymentMethodSelectedEvent.cpp
+// ios6: Modules/applepay/ApplePayRequestBase.cpp
+// ios6: Modules/applepay/ApplePaySession.cpp
+// ios6: Modules/applepay/ApplePaySessionPaymentRequest.cpp
+// ios6: Modules/applepay/ApplePaySetup.cpp
+// ios6: Modules/applepay/ApplePaySetupFeature.mm @nonARC
+// ios6: Modules/applepay/ApplePayShippingContactSelectedEvent.cpp
+// ios6: Modules/applepay/ApplePayShippingMethodSelectedEvent.cpp
+// ios6: Modules/applepay/ApplePayValidateMerchantEvent.cpp
+// ios6: Modules/applepay/PaymentCoordinator.cpp
+// ios6: Modules/applepay/PaymentCoordinatorClient.cpp
+// ios6: Modules/applepay/PaymentInstallmentConfiguration.mm @nonARC
+// ios6: Modules/applepay/PaymentRequestValidator.mm @nonARC
+// ios6: Modules/applepay/PaymentSession.cpp
+// ios6: Modules/applepay/cocoa/PaymentAPIVersionCocoa.mm @nonARC
+// ios6: Modules/applepay/cocoa/PaymentCocoa.mm @nonARC
+// ios6: Modules/applepay/cocoa/PaymentContactCocoa.mm @nonARC
+// ios6: Modules/applepay/cocoa/PaymentMerchantSessionCocoa.mm @nonARC
+// ios6: Modules/applepay/cocoa/PaymentMethodCocoa.mm @nonARC
+// ios6: Modules/applepay/cocoa/PaymentSessionErrorCocoa.mm @nonARC
+// ios6: Modules/applepay/cocoa/PaymentSummaryItemsCocoa.mm @nonARC
+// ios6: Modules/applepay/paymentrequest/ApplePayPaymentHandler.cpp
+// ios6: Modules/applepay-ams-ui/ApplePayAMSUIPaymentHandler.cpp
 Modules/async-clipboard/ios/ClipboardImageReaderIOS.mm @nonARC
 Modules/async-clipboard/mac/ClipboardImageReaderMac.mm @nonARC
 Modules/compression/cocoa/CompressionStreamEncoderCocoa.mm @nonARC
@@ -126,10 +126,10 @@ Modules/notifications/NotificationOptionsPayloadCocoa.mm @nonARC
 Modules/notifications/NotificationPayloadCocoa.mm @nonARC
 Modules/push-api/cocoa/PushCryptoCocoa.cpp
 Modules/plugins/YouTubePluginReplacement.cpp
-Modules/speech/cocoa/SpeechRecognizerCocoa.mm @nonARC
-Modules/speech/cocoa/WebSpeechRecognizerTask.mm @nonARC
-Modules/speech/cocoa/WebSpeechRecognizerTaskMock.mm @nonARC
-Modules/system-preview/ARKitBadgeSystemImage.mm @nonARC
+// ios6: Modules/speech/cocoa/SpeechRecognizerCocoa.mm @nonARC
+// ios6: Modules/speech/cocoa/WebSpeechRecognizerTask.mm @nonARC
+// ios6: Modules/speech/cocoa/WebSpeechRecognizerTaskMock.mm @nonARC
+// ios6: Modules/system-preview/ARKitBadgeSystemImage.mm @nonARC
 Modules/webdatabase/cocoa/DatabaseManagerCocoa.mm @nonARC
 accessibility/cocoa/AXCoreObjectCocoa.mm @nonARC
 accessibility/cocoa/AXObjectCacheCocoa.mm @nonARC
@@ -152,34 +152,44 @@ bridge/objc/objc_class.mm @nonARC @no-unify-when(bundle<=8) @cost:5
 bridge/objc/objc_instance.mm @nonARC @no-unify-when(bundle<=8) @cost:4
 bridge/objc/objc_runtime.mm @nonARC @no-unify-when(bundle<=8) @cost:5
 bridge/objc/objc_utility.mm @nonARC @no-unify-when(bundle<=8) @cost:5
-crypto/cocoa/CommonCryptoDERUtilities.cpp
-crypto/cocoa/CryptoAlgorithmAESCBCCocoa.cpp
-crypto/cocoa/CryptoAlgorithmAESCFBCocoa.cpp
-crypto/cocoa/CryptoAlgorithmAESCTRCocoa.cpp
-crypto/cocoa/CryptoAlgorithmAESGCMCocoa.cpp
-crypto/cocoa/CryptoAlgorithmAESKWCocoa.cpp
-crypto/cocoa/CryptoAlgorithmECDHCocoa.cpp
-crypto/cocoa/CryptoAlgorithmECDSACocoa.cpp
-crypto/cocoa/CryptoAlgorithmEd25519Cocoa.cpp
-crypto/cocoa/CryptoAlgorithmHKDFCocoa.cpp
-crypto/cocoa/CryptoAlgorithmHMACCocoa.cpp
-crypto/cocoa/CryptoAlgorithmPBKDF2Cocoa.cpp
-crypto/cocoa/CryptoAlgorithmRSASSA_PKCS1_v1_5Cocoa.cpp
-crypto/cocoa/CryptoAlgorithmRSA_OAEPCocoa.cpp
-crypto/cocoa/CryptoAlgorithmRSA_PSSCocoa.cpp
-crypto/cocoa/CryptoAlgorithmRegistryCocoa.cpp
-crypto/cocoa/CryptoAlgorithmX25519Cocoa.cpp
-crypto/cocoa/CryptoKeyCocoa.cpp
-crypto/cocoa/CryptoKeyECCocoa.cpp
-crypto/cocoa/CryptoKeyOKPCocoa.cpp
-crypto/cocoa/CryptoKeyRSACocoa.cpp
-crypto/cocoa/CryptoUtilitiesCocoa.cpp
-crypto/cocoa/SerializedCryptoKeyWrapCocoa.mm @nonARC
+// ios6: The Cocoa Web Crypto backend performs its operations in CryptoKit, whose
+// ios6: Swift has no armv7 target. WebKit's own OpenSSL backend is built instead -
+// ios6: see platform/OpenSSL.cmake and USE_OPENSSL in Source/cmake/OptionsCocoa.cmake.
+// ios6: crypto/cocoa/CommonCryptoDERUtilities.cpp
+// ios6: crypto/cocoa/CryptoAlgorithmAESCBCCocoa.cpp
+// ios6: crypto/cocoa/CryptoAlgorithmAESCFBCocoa.cpp
+// ios6: crypto/cocoa/CryptoAlgorithmAESCTRCocoa.cpp
+// ios6: crypto/cocoa/CryptoAlgorithmAESGCMCocoa.cpp
+// ios6: crypto/cocoa/CryptoAlgorithmAESKWCocoa.cpp
+// ios6: crypto/cocoa/CryptoAlgorithmECDHCocoa.cpp
+// ios6: crypto/cocoa/CryptoAlgorithmECDSACocoa.cpp
+// ios6: crypto/cocoa/CryptoAlgorithmEd25519Cocoa.cpp
+// ios6: crypto/cocoa/CryptoAlgorithmHKDFCocoa.cpp
+// ios6: crypto/cocoa/CryptoAlgorithmHMACCocoa.cpp
+// ios6: crypto/cocoa/CryptoAlgorithmPBKDF2Cocoa.cpp
+// ios6: crypto/cocoa/CryptoAlgorithmRSASSA_PKCS1_v1_5Cocoa.cpp
+// ios6: crypto/cocoa/CryptoAlgorithmRSA_OAEPCocoa.cpp
+// ios6: crypto/cocoa/CryptoAlgorithmRSA_PSSCocoa.cpp
+// ios6: crypto/cocoa/CryptoAlgorithmRegistryCocoa.cpp
+// ios6: crypto/cocoa/CryptoAlgorithmX25519Cocoa.cpp
+// ios6: crypto/cocoa/CryptoKeyCocoa.cpp
+// ios6: crypto/cocoa/CryptoKeyECCocoa.cpp
+// ios6: crypto/cocoa/CryptoKeyOKPCocoa.cpp
+// ios6: crypto/cocoa/CryptoKeyRSACocoa.cpp
+// ios6: crypto/cocoa/CryptoUtilitiesCocoa.cpp
+// ios6: crypto/cocoa/SerializedCryptoKeyWrapCocoa.mm @nonARC
 crypto/CommonCryptoUtilities.cpp
 dom/DataTransferMac.mm @nonARC
-dom/ios/MouseEventIOS.cpp
-dom/ios/PointerEventIOS.cpp
 dom/ios/TouchEvents.cpp
+// MouseEventIOS.cpp/PointerEventIOS.cpp need WebKitAdditions/PlatformTouchEventIOS.h,
+// which this SDK does not have - see PlatformEventFactoryIOS.h. MouseEvent::create(const
+// PlatformTouchEvent&, ...) has no caller anywhere in this tree (WEBKIT_IOS6), so it is
+// dropped rather than ported. PointerEvent::create(const PlatformTouchEvent&, ...) is
+// real and needed (EventHandler.cpp's portable touch dispatcher reaches it), and
+// dom/glib/PointerEventGLib.cpp already implements the identical signatures against the
+// same portable PlatformTouchPoint/PlatformTouchEvent API this build uses everywhere else
+// - it has no GLib-specific code in it despite the directory name.
+dom/glib/PointerEventGLib.cpp
 dom/mac/ImageControlsMac.cpp
 editing/SelectionGeometryGatherer.cpp @header:RenderStyleGetters
 editing/SmartReplaceCF.cpp
@@ -287,12 +297,12 @@ platform/audio/ios/MediaDeviceRoute.mm @nonARC @no-unify
 platform/audio/ios/MediaDeviceRouteController.mm @nonARC
 platform/audio/ios/MediaSessionHelperIOS.mm @nonARC @no-unify
 platform/audio/ios/MediaSessionManagerIOS.mm @nonARC @no-unify
-platform/audio/ios/SpatialAudioPlaybackHelperIOS.mm @nonARC @no-unify
+// ios6: platform/audio/ios/SpatialAudioPlaybackHelperIOS.mm @nonARC @no-unify
 platform/audio/mac/AudioOutputUnitAdaptorMac.cpp
 platform/audio/mac/AudioHardwareListenerMac.cpp
 platform/audio/mac/AudioSessionMac.mm @nonARC
 platform/audio/mac/SharedRoutingArbitrator.mm @nonARC
-platform/audio/mac/SpatialAudioPlaybackHelperMac.cpp
+// ios6: platform/audio/mac/SpatialAudioPlaybackHelperMac.cpp
 platform/cf/KeyedDecoderCF.cpp
 platform/cf/KeyedEncoderCF.cpp
 platform/cf/MainThreadSharedTimerCF.cpp
@@ -314,7 +324,7 @@ platform/cocoa/LowPowerModeNotifier.mm @nonARC
 platform/cocoa/MIMETypeRegistryCocoa.mm @nonARC
 platform/cocoa/MediaUtilities.cpp
 platform/cocoa/MediaRemoteSoftLink.mm @nonARC
-platform/cocoa/NetworkExtensionContentFilter.mm @nonARC
+// ios6: platform/cocoa/NetworkExtensionContentFilter.mm @nonARC
 platform/cocoa/NSURLUtilities.mm @nonARC
 platform/cocoa/ParentalControlsContentFilter.mm @nonARC
 platform/cocoa/ParentalControlsURLFilter.mm @nonARC
@@ -357,49 +367,49 @@ platform/gamepad/mac/LogitechGamepad.cpp
 platform/gamepad/mac/MultiGamepadProvider.mm @nonARC
 platform/gamepad/mac/StadiaHIDGamepad.cpp
 platform/graphics/MediaPlaybackTargetPicker.cpp
-platform/graphics/avfoundation/AVTrackPrivateAVFObjCImpl.mm @nonARC @no-unify-when(bundle<=8)
-platform/graphics/avfoundation/AudioSourceProviderAVFObjC.mm @nonARC @no-unify-when(bundle<=8)
-platform/graphics/avfoundation/AudioVideoRendererAVFObjC.mm @nonARC
-platform/graphics/avfoundation/FormatDescriptionUtilities.cpp
-platform/graphics/avfoundation/ISOFairPlayStreamingPsshBox.cpp
-platform/graphics/avfoundation/InbandMetadataTextTrackPrivateAVF.cpp
-platform/graphics/avfoundation/InbandTextTrackPrivateAVF.cpp
-platform/graphics/avfoundation/LegacyCDMPrivateAVFObjC.mm @nonARC
-platform/graphics/avfoundation/MediaPlaybackTargetCocoa.mm @nonARC
-platform/graphics/avfoundation/MediaPlayerPrivateAVFoundation.cpp
-platform/graphics/avfoundation/MediaSelectionGroupAVFObjC.mm @nonARC
-platform/graphics/avfoundation/SampleBufferDisplayLayer.cpp
-platform/graphics/avfoundation/WebAVSampleBufferListener.mm @nonARC @no-unify-when(bundle<=8)
-platform/graphics/avfoundation/WebMediaSessionManagerMac.cpp
+// ios6: platform/graphics/avfoundation/AVTrackPrivateAVFObjCImpl.mm @nonARC @no-unify-when(bundle<=8)
+// ios6: platform/graphics/avfoundation/AudioSourceProviderAVFObjC.mm @nonARC @no-unify-when(bundle<=8)
+// ios6: platform/graphics/avfoundation/AudioVideoRendererAVFObjC.mm @nonARC
+// ios6: platform/graphics/avfoundation/FormatDescriptionUtilities.cpp
+// ios6: platform/graphics/avfoundation/ISOFairPlayStreamingPsshBox.cpp
+// ios6: platform/graphics/avfoundation/InbandMetadataTextTrackPrivateAVF.cpp
+// ios6: platform/graphics/avfoundation/InbandTextTrackPrivateAVF.cpp
+// ios6: platform/graphics/avfoundation/LegacyCDMPrivateAVFObjC.mm @nonARC
+// ios6: platform/graphics/avfoundation/MediaPlaybackTargetCocoa.mm @nonARC
+// ios6: platform/graphics/avfoundation/MediaPlayerPrivateAVFoundation.cpp
+// ios6: platform/graphics/avfoundation/MediaSelectionGroupAVFObjC.mm @nonARC
+// ios6: platform/graphics/avfoundation/SampleBufferDisplayLayer.cpp
+// ios6: platform/graphics/avfoundation/WebAVSampleBufferListener.mm @nonARC @no-unify-when(bundle<=8)
+// ios6: platform/graphics/avfoundation/WebMediaSessionManagerMac.cpp
 platform/graphics/avfoundation/objc/AVAssetMIMETypeCache.mm @nonARC
-platform/graphics/avfoundation/objc/AVAssetTrackUtilities.mm @nonARC @no-unify-when(bundle<=8)
-platform/graphics/avfoundation/objc/AVOutputDeviceMenuControllerTargetPicker.mm @nonARC @no-unify-when(bundle<=8)
-platform/graphics/avfoundation/objc/AVRoutePickerViewTargetPicker.mm @nonARC
-platform/graphics/avfoundation/objc/AVStreamDataParserMIMETypeCache.mm @nonARC
-platform/graphics/avfoundation/objc/AudioTrackPrivateAVFObjC.mm @nonARC
-platform/graphics/avfoundation/objc/AudioTrackPrivateMediaSourceAVFObjC.cpp
-platform/graphics/avfoundation/objc/CDMFairPlayStreamingAVFObjC.mm @nonARC
-platform/graphics/avfoundation/objc/CDMSessionAVContentKeySession.mm @nonARC
-platform/graphics/avfoundation/objc/CDMSessionAVFoundationObjC.mm @nonARC
-platform/graphics/avfoundation/objc/ContentKeyGroupFactoryAVFObjC.mm @nonARC
-platform/graphics/avfoundation/objc/ImageDecoderAVFObjC.mm @nonARC
-platform/graphics/avfoundation/objc/InbandTextTrackPrivateAVFObjC.mm @nonARC @no-unify-when(bundle<=8)
-platform/graphics/avfoundation/objc/InbandChapterTrackPrivateAVFObjC.mm @nonARC @no-unify-when(bundle<=8)
-platform/graphics/avfoundation/objc/LocalSampleBufferDisplayLayer.mm @nonARC @no-unify-when(bundle<=8)
-platform/graphics/avfoundation/objc/MediaPlaybackTargetPickerMac.mm @nonARC @no-unify-when(bundle<=8)
-platform/graphics/avfoundation/objc/MediaPlayerPrivateAVFoundationObjC.mm @nonARC @no-unify-when(bundle<=8) @cost:9
-platform/graphics/avfoundation/objc/MediaPlayerPrivateMediaSourceAVFObjC.mm @nonARC @no-unify-when(bundle<=8) @cost:8
-platform/graphics/avfoundation/objc/MediaPlayerPrivateMediaStreamAVFObjC.mm @nonARC @no-unify-when(bundle<=8) @cost:6
+// ios6: platform/graphics/avfoundation/objc/AVAssetTrackUtilities.mm @nonARC @no-unify-when(bundle<=8)
+// ios6: platform/graphics/avfoundation/objc/AVOutputDeviceMenuControllerTargetPicker.mm @nonARC @no-unify-when(bundle<=8)
+// ios6: platform/graphics/avfoundation/objc/AVRoutePickerViewTargetPicker.mm @nonARC
+// ios6: platform/graphics/avfoundation/objc/AVStreamDataParserMIMETypeCache.mm @nonARC
+// ios6: platform/graphics/avfoundation/objc/AudioTrackPrivateAVFObjC.mm @nonARC
+// ios6: platform/graphics/avfoundation/objc/AudioTrackPrivateMediaSourceAVFObjC.cpp
+// ios6: platform/graphics/avfoundation/objc/CDMFairPlayStreamingAVFObjC.mm @nonARC
+// ios6: platform/graphics/avfoundation/objc/CDMSessionAVContentKeySession.mm @nonARC
+// ios6: platform/graphics/avfoundation/objc/CDMSessionAVFoundationObjC.mm @nonARC
+// ios6: platform/graphics/avfoundation/objc/ContentKeyGroupFactoryAVFObjC.mm @nonARC
+// ios6: platform/graphics/avfoundation/objc/ImageDecoderAVFObjC.mm @nonARC
+// ios6: platform/graphics/avfoundation/objc/InbandTextTrackPrivateAVFObjC.mm @nonARC @no-unify-when(bundle<=8)
+// ios6: platform/graphics/avfoundation/objc/InbandChapterTrackPrivateAVFObjC.mm @nonARC @no-unify-when(bundle<=8)
+// ios6: platform/graphics/avfoundation/objc/LocalSampleBufferDisplayLayer.mm @nonARC @no-unify-when(bundle<=8)
+// ios6: platform/graphics/avfoundation/objc/MediaPlaybackTargetPickerMac.mm @nonARC @no-unify-when(bundle<=8)
+// ios6: platform/graphics/avfoundation/objc/MediaPlayerPrivateAVFoundationObjC.mm @nonARC @no-unify-when(bundle<=8) @cost:9
+// ios6: platform/graphics/avfoundation/objc/MediaPlayerPrivateMediaSourceAVFObjC.mm @nonARC @no-unify-when(bundle<=8) @cost:8
+// ios6: platform/graphics/avfoundation/objc/MediaPlayerPrivateMediaStreamAVFObjC.mm @nonARC @no-unify-when(bundle<=8) @cost:6
 platform/graphics/avfoundation/objc/MediaSampleAVFObjC.mm @nonARC
-platform/graphics/avfoundation/objc/MediaSourcePrivateAVFObjC.mm @nonARC
-platform/graphics/avfoundation/objc/SourceBufferPrivateAVFObjC.mm @nonARC @no-unify-when(bundle<=8) @cost:7
-platform/graphics/avfoundation/objc/SourceBufferParserAVFObjC.mm @nonARC @no-unify-when(bundle<=8) @cost:5
-platform/graphics/avfoundation/objc/TextTrackPrivateMediaSourceAVFObjC.cpp
-platform/graphics/avfoundation/objc/VideoLayerManagerObjC.mm @nonARC @no-unify-when(bundle<=8)
-platform/graphics/avfoundation/objc/VideoTrackPrivateAVFObjC.cpp
-platform/graphics/avfoundation/objc/VideoTrackPrivateMediaSourceAVFObjC.mm @nonARC
-platform/graphics/avfoundation/objc/WebAVContentKeyGroup.mm @nonARC @no-unify-when(bundle<=8)
-platform/graphics/avfoundation/objc/WebCoreAVFResourceLoader.mm @nonARC
+// ios6: platform/graphics/avfoundation/objc/MediaSourcePrivateAVFObjC.mm @nonARC
+// ios6: platform/graphics/avfoundation/objc/SourceBufferPrivateAVFObjC.mm @nonARC @no-unify-when(bundle<=8) @cost:7
+// ios6: platform/graphics/avfoundation/objc/SourceBufferParserAVFObjC.mm @nonARC @no-unify-when(bundle<=8) @cost:5
+// ios6: platform/graphics/avfoundation/objc/TextTrackPrivateMediaSourceAVFObjC.cpp
+// ios6: platform/graphics/avfoundation/objc/VideoLayerManagerObjC.mm @nonARC @no-unify-when(bundle<=8)
+// ios6: platform/graphics/avfoundation/objc/VideoTrackPrivateAVFObjC.cpp
+// ios6: platform/graphics/avfoundation/objc/VideoTrackPrivateMediaSourceAVFObjC.mm @nonARC
+// ios6: platform/graphics/avfoundation/objc/WebAVContentKeyGroup.mm @nonARC @no-unify-when(bundle<=8)
+// ios6: platform/graphics/avfoundation/objc/WebCoreAVFResourceLoader.mm @nonARC
 platform/graphics/ca/GraphicsLayerCA.cpp
 platform/graphics/ca/LayerPool.cpp
 platform/graphics/ca/PlatformCAAnimation.cpp
@@ -428,7 +438,7 @@ platform/graphics/cg/GradientCG.cpp
 platform/graphics/cg/GradientRendererCG.cpp
 platform/graphics/cg/GraphicsContextCG.cpp
 platform/graphics/cg/GraphicsContextGLCG.cpp
-platform/graphics/cg/IOSurfacePool.cpp
+// ios6: platform/graphics/cg/IOSurfacePool.cpp
 platform/graphics/cg/ImageBackingStoreCG.cpp
 platform/graphics/cg/ImageBufferCGBackend.cpp
 platform/graphics/cg/ImageBufferCGBitmapBackend.cpp
@@ -464,10 +474,10 @@ platform/graphics/cocoa/FontPlatformDataCocoa.mm @nonARC
 platform/graphics/cocoa/GraphicsContextCocoa.mm @nonARC
 platform/graphics/cocoa/H264UtilitiesCocoa.mm @nonARC
 platform/graphics/cocoa/HEVCUtilitiesCocoa.mm @nonARC
-platform/graphics/cocoa/IOSurface.mm @nonARC
+// ios6: platform/graphics/cocoa/IOSurface.mm @nonARC
 platform/graphics/cocoa/IOSurfaceDrawingBuffer.cpp
-platform/graphics/cocoa/IOSurfacePoolCocoa.mm @nonARC
-platform/graphics/cocoa/ISOBMFFPreParser.cpp
+// ios6: platform/graphics/cocoa/IOSurfacePoolCocoa.mm @nonARC
+// ios6: platform/graphics/cocoa/ISOBMFFPreParser.cpp
 platform/graphics/cocoa/ISOBMFFTrackInfoParser.cpp
 platform/graphics/cocoa/IconCocoa.mm @nonARC
 platform/graphics/cocoa/IntRectCocoa.mm @nonARC
@@ -480,8 +490,8 @@ platform/graphics/cocoa/PlatformTimeRangesCocoa.mm @nonARC @no-unify-when(bundle
 platform/graphics/cocoa/ShareableCVPixelBuffer.cpp
 platform/graphics/cocoa/ShareableCVPixelFormat.cpp
 platform/graphics/cocoa/ShareableGainMap.cpp
-platform/graphics/cocoa/SourceBufferParser.cpp
-platform/graphics/cocoa/SourceBufferParserWebM.cpp
+// ios6: platform/graphics/cocoa/SourceBufferParser.cpp
+// ios6: platform/graphics/cocoa/SourceBufferParserWebM.cpp
 platform/graphics/cocoa/SystemFontDatabaseCocoa.mm @nonARC
 platform/graphics/cocoa/SystemFontDatabaseCoreText.cpp
 platform/graphics/cocoa/TextTrackRepresentationCocoa.mm @nonARC
@@ -491,12 +501,12 @@ platform/graphics/cocoa/VP9UtilitiesCocoa.mm @nonARC @no-unify // Includes libwe
 platform/graphics/cocoa/VideoTargetFactory.mm @nonARC @no-unify-when(bundle<=8)
 platform/graphics/cocoa/WebActionDisablingCALayerDelegate.mm @nonARC
 platform/graphics/cocoa/WebCoreCALayerExtras.mm @nonARC
-platform/graphics/cocoa/WebCoreDecompressionSession.mm @nonARC
+// ios6: platform/graphics/cocoa/WebCoreDecompressionSession.mm @nonARC
 platform/graphics/cocoa/WebProcessGraphicsContextGLCocoa.mm @nonARC
-platform/graphics/cocoa/VideoMediaSampleRenderer.mm @nonARC
+// ios6: platform/graphics/cocoa/VideoMediaSampleRenderer.mm @nonARC
 platform/graphics/cocoa/VideoTrackPrivateWebM.cpp
 platform/graphics/cocoa/WebLayer.mm @nonARC
-platform/graphics/cocoa/controls/ApplePayButtonCocoa.mm @nonARC
+// ios6: platform/graphics/cocoa/controls/ApplePayButtonCocoa.mm @nonARC
 platform/graphics/cocoa/controls/ControlFactoryCocoa.mm @nonARC
 platform/graphics/coretext/ComplexTextControllerCoreText.mm @nonARC
 platform/graphics/coretext/DrawGlyphsRecorder.cpp
@@ -510,25 +520,25 @@ platform/graphics/cv/CVUtilities.mm @nonARC
 platform/graphics/cv/ImageTransferSessionVT.mm @nonARC
 platform/graphics/cv/PixelBufferConformerCV.cpp
 platform/graphics/cv/VideoFrameCV.mm @nonARC
-platform/graphics/coreimage/FEBlendCoreImageApplier.mm @nonARC
-platform/graphics/coreimage/FEColorMatrixCoreImageApplier.mm @nonARC
-platform/graphics/coreimage/FEComponentTransferCoreImageApplier.mm @nonARC
-platform/graphics/coreimage/FECompositeCoreImageApplier.mm @nonARC
-platform/graphics/coreimage/FEConvolveMatrixCoreImageApplier.mm @nonARC
-platform/graphics/coreimage/FEDisplacementMapCoreImageApplier.mm @nonARC
-platform/graphics/coreimage/FEDropShadowCoreImageApplier.mm @nonARC
-platform/graphics/coreimage/FEFloodCoreImageApplier.mm @nonARC
-platform/graphics/coreimage/FEGaussianBlurCoreImageApplier.mm @nonARC
-platform/graphics/coreimage/FEImageCoreImageApplier.mm @nonARC
-platform/graphics/coreimage/FELightingCoreImageApplier.mm @nonARC
-platform/graphics/coreimage/FEMergeCoreImageApplier.mm @nonARC
-platform/graphics/coreimage/FEMorphologyCoreImageApplier.mm @nonARC
-platform/graphics/coreimage/FEOffsetCoreImageApplier.mm @nonARC
-platform/graphics/coreimage/FETileCoreImageApplier.mm @nonARC
-platform/graphics/coreimage/FETurbulenceCoreImageApplier.mm @nonARC
-platform/graphics/coreimage/FilterImageCoreImage.mm @nonARC
-platform/graphics/coreimage/SourceAlphaCoreImageApplier.mm @nonARC
-platform/graphics/coreimage/SourceGraphicCoreImageApplier.mm @nonARC
+// ios6: platform/graphics/coreimage/FEBlendCoreImageApplier.mm @nonARC
+// ios6: platform/graphics/coreimage/FEColorMatrixCoreImageApplier.mm @nonARC
+// ios6: platform/graphics/coreimage/FEComponentTransferCoreImageApplier.mm @nonARC
+// ios6: platform/graphics/coreimage/FECompositeCoreImageApplier.mm @nonARC
+// ios6: platform/graphics/coreimage/FEConvolveMatrixCoreImageApplier.mm @nonARC
+// ios6: platform/graphics/coreimage/FEDisplacementMapCoreImageApplier.mm @nonARC
+// ios6: platform/graphics/coreimage/FEDropShadowCoreImageApplier.mm @nonARC
+// ios6: platform/graphics/coreimage/FEFloodCoreImageApplier.mm @nonARC
+// ios6: platform/graphics/coreimage/FEGaussianBlurCoreImageApplier.mm @nonARC
+// ios6: platform/graphics/coreimage/FEImageCoreImageApplier.mm @nonARC
+// ios6: platform/graphics/coreimage/FELightingCoreImageApplier.mm @nonARC
+// ios6: platform/graphics/coreimage/FEMergeCoreImageApplier.mm @nonARC
+// ios6: platform/graphics/coreimage/FEMorphologyCoreImageApplier.mm @nonARC
+// ios6: platform/graphics/coreimage/FEOffsetCoreImageApplier.mm @nonARC
+// ios6: platform/graphics/coreimage/FETileCoreImageApplier.mm @nonARC
+// ios6: platform/graphics/coreimage/FETurbulenceCoreImageApplier.mm @nonARC
+// ios6: platform/graphics/coreimage/FilterImageCoreImage.mm @nonARC
+// ios6: platform/graphics/coreimage/SourceAlphaCoreImageApplier.mm @nonARC
+// ios6: platform/graphics/coreimage/SourceGraphicCoreImageApplier.mm @nonARC
 platform/graphics/ios/DisplayRefreshMonitorIOS.mm @nonARC
 platform/graphics/ios/IconIOS.mm @nonARC
 platform/graphics/ios/controls/ControlFactoryIOS.mm @nonARC
@@ -568,6 +578,7 @@ platform/graphics/re/DynamicContentScalingResourceCache.mm @nonARC
 platform/image-decoders/avif/AVIFImageDecoder.cpp
 platform/image-decoders/avif/AVIFImageReader.cpp
 platform/image-decoders/jpegxl/JPEGXLImageDecoder.cpp
+platform/image-decoders/webp/WEBPImageDecoder.cpp
 platform/image-decoders/ScalableImageDecoder.cpp
 platform/image-decoders/ScalableImageDecoderFrame.cpp
 platform/ios/ColorIOS.mm @nonARC
@@ -619,6 +630,8 @@ platform/ios/wak/WAKView.mm @nonARC @no-unify
 platform/ios/wak/WAKWindow.mm @nonARC
 platform/ios/wak/WKGraphics.mm @nonARC
 platform/ios/wak/WKView.mm @nonARC
+platform/ios/wak/WKWindow.mm @nonARC
+platform/ios/wak/WAKCompatibilityIOS6.mm @nonARC
 platform/ios/wak/WebCoreThread.mm @nonARC
 platform/ios/wak/WebCoreThreadRun.cpp
 platform/ios/wak/WebCoreThreadSystemInterface.cpp
@@ -644,7 +657,7 @@ platform/mac/ScrollViewMac.mm @nonARC
 platform/mac/ScrollbarMac.mm @nonARC @no-unify-when(bundle<=8)
 platform/mac/ScrollbarsControllerMac.mm @nonARC @no-unify-when(bundle<=8) @cost:3
 platform/mac/ScrollbarThemeMac.mm @nonARC @no-unify-when(bundle<=8) @cost:3
-platform/mac/ScrollingEffectsController.mm @nonARC
+// ios6: platform/mac/ScrollingEffectsController.mm @nonARC
 platform/mac/ScrollingMomentumCalculatorMac.mm @nonARC
 platform/mac/SerializedPlatformDataCueMac.mm @nonARC
 platform/mac/SuddenTermination.mm @nonARC
@@ -662,37 +675,41 @@ platform/mac/WebPlaybackControlsManager.mm @nonARC
 platform/mac/WidgetMac.mm @nonARC
 platform/mediarecorder/MediaRecorderPrivateAVFImpl.cpp
 platform/mediarecorder/MediaRecorderPrivateEncoder.cpp
-platform/mediarecorder/cocoa/MediaRecorderPrivateWriterAVFObjC.mm @nonARC
-platform/mediarecorder/cocoa/MediaRecorderPrivateWriterWebM.cpp
-platform/mediastream/cocoa/AVCaptureDeviceManager.mm @nonARC @no-unify-when(bundle<=8)
-platform/mediastream/cocoa/AVVideoCaptureSource.mm @nonARC @no-unify-when(bundle<=8) @cost:3
-platform/mediastream/cocoa/AudioMediaStreamTrackRendererCocoa.cpp
-platform/mediastream/cocoa/AudioMediaStreamTrackRendererInternalUnit.cpp
-platform/mediastream/cocoa/AudioMediaStreamTrackRendererUnit.cpp
-platform/mediastream/cocoa/BaseAudioCaptureUnit.cpp
-platform/mediastream/cocoa/CoreAudioCaptureDevice.cpp
-platform/mediastream/cocoa/CoreAudioCaptureDeviceManager.cpp
-platform/mediastream/cocoa/CoreAudioCaptureSource.cpp
-platform/mediastream/cocoa/CoreAudioCaptureUnit.cpp
-platform/mediastream/cocoa/DisplayCaptureManagerCocoa.cpp
-platform/mediastream/cocoa/DisplayCaptureSourceCocoa.cpp
-platform/mediastream/cocoa/IncomingAudioMediaStreamTrackRendererUnit.cpp
-platform/mediastream/cocoa/MediaStreamTrackAudioSourceProviderCocoa.cpp
-platform/mediastream/cocoa/MockAudioCaptureUnit.mm @nonARC
-platform/mediastream/cocoa/MockRealtimeVideoSourceCocoa.mm @nonARC
-platform/mediastream/cocoa/RealtimeIncomingAudioSourceCocoa.cpp
-platform/mediastream/cocoa/RealtimeIncomingVideoSourceCocoa.mm @nonARC
-platform/mediastream/cocoa/RealtimeMediaSourceCenterCocoa.cpp
-platform/mediastream/cocoa/RealtimeMediaSourceCenterCocoa.mm @nonARC
-platform/mediastream/cocoa/RealtimeOutgoingAudioSourceCocoa.cpp
-platform/mediastream/cocoa/RealtimeOutgoingVideoSourceCocoa.cpp
-platform/mediastream/cocoa/ScreenCaptureKitCaptureSource.mm @nonARC
-platform/mediastream/cocoa/ScreenCaptureKitSharingSessionManager.mm @nonARC
-platform/mediastream/cocoa/WebAudioSourceProviderCocoa.mm @nonARC
-platform/mediastream/ios/AVAudioSessionCaptureDevice.mm @nonARC
-platform/mediastream/ios/AVAudioSessionCaptureDeviceManager.mm @nonARC @no-unify
-platform/mediastream/ios/CoreAudioCaptureSourceIOS.mm @nonARC
-platform/mediastream/libwebrtc/LibWebRTCProviderCocoa.cpp
+// REV-EXCLUDED platform/mediarecorder/cocoa/MediaRecorderPrivateWriterAVFObjC.mm @nonARC
+// REV-EXCLUDED platform/mediarecorder/cocoa/MediaRecorderPrivateWriterWebM.cpp
+// REV-EXCLUDED platform/mediastream/cocoa/AVCaptureDeviceManager.mm @nonARC @no-unify-when(bundle<=8)
+// REV-EXCLUDED platform/mediastream/cocoa/AVVideoCaptureSource.mm @nonARC @no-unify-when(bundle<=8) @cost:3
+// REV-EXCLUDED platform/mediastream/cocoa/AudioMediaStreamTrackRendererCocoa.cpp
+// REV-EXCLUDED platform/mediastream/cocoa/AudioMediaStreamTrackRendererInternalUnit.cpp
+// REV-EXCLUDED platform/mediastream/cocoa/AudioMediaStreamTrackRendererUnit.cpp
+// REV-EXCLUDED platform/mediastream/cocoa/BaseAudioCaptureUnit.cpp
+// REV-EXCLUDED platform/mediastream/cocoa/CoreAudioCaptureDevice.cpp
+// REV-EXCLUDED platform/mediastream/cocoa/CoreAudioCaptureDeviceManager.cpp
+// REV-EXCLUDED platform/mediastream/cocoa/CoreAudioCaptureSource.cpp
+// REV-EXCLUDED platform/mediastream/cocoa/CoreAudioCaptureUnit.cpp
+// REV-EXCLUDED platform/mediastream/cocoa/DisplayCaptureManagerCocoa.cpp
+// REV-EXCLUDED platform/mediastream/cocoa/DisplayCaptureSourceCocoa.cpp
+// REV-EXCLUDED platform/mediastream/cocoa/IncomingAudioMediaStreamTrackRendererUnit.cpp
+// REV-EXCLUDED platform/mediastream/cocoa/MediaStreamTrackAudioSourceProviderCocoa.cpp
+// REV-EXCLUDED platform/mediastream/cocoa/MockAudioCaptureUnit.mm @nonARC
+// REV-EXCLUDED platform/mediastream/cocoa/MockRealtimeVideoSourceCocoa.mm @nonARC
+// REV-EXCLUDED platform/mediastream/cocoa/RealtimeIncomingAudioSourceCocoa.cpp
+// REV-EXCLUDED platform/mediastream/cocoa/RealtimeIncomingVideoSourceCocoa.mm @nonARC
+// REV-EXCLUDED platform/mediastream/cocoa/RealtimeMediaSourceCenterCocoa.cpp
+// REV-EXCLUDED platform/mediastream/cocoa/RealtimeMediaSourceCenterCocoa.mm @nonARC
+// REV-EXCLUDED platform/mediastream/cocoa/RealtimeOutgoingAudioSourceCocoa.cpp
+// REV-EXCLUDED platform/mediastream/cocoa/RealtimeOutgoingVideoSourceCocoa.cpp
+// REV-EXCLUDED platform/mediastream/cocoa/ScreenCaptureKitCaptureSource.mm @nonARC
+// REV-EXCLUDED platform/mediastream/cocoa/ScreenCaptureKitSharingSessionManager.mm @nonARC
+// REV-EXCLUDED platform/mediastream/cocoa/WebAudioSourceProviderCocoa.mm @nonARC
+// REV-EXCLUDED platform/mediastream/ios/AVAudioSessionCaptureDevice.mm @nonARC
+// REV-EXCLUDED platform/mediastream/ios/AVAudioSessionCaptureDeviceManager.mm @nonARC @no-unify
+// REV-EXCLUDED platform/mediastream/ios/CoreAudioCaptureSourceIOS.mm @nonARC
+// REV-EXCLUDED platform/mediastream/libwebrtc/LibWebRTCProviderCocoa.cpp
+platform/mediastream/rev/RevCameraCaptureSource.mm @nonARC @no-unify
+platform/mediastream/rev/RevMediaPlayerMediaStream.mm @nonARC @no-unify
+platform/mediastream/rev/RevAudioCaptureSource.mm @nonARC @no-unify
+platform/graphics/avfoundation/rev/RevMediaPlayerAVF.mm @nonARC @no-unify
 platform/mock/MediaPlaybackTargetMock.cpp
 platform/mock/MediaPlaybackTargetPickerMock.cpp
 platform/mock/MockAudioDestinationCocoa.cpp
@@ -749,3 +766,134 @@ testing/cocoa/WebViewVisualIdentificationOverlay.mm @nonARC
 platform/graphics/angle/GraphicsContextGLANGLE.cpp @no-unify // ANGLE headers redefine GL types/macros that collide with system OpenGL.
 platform/graphics/cocoa/GraphicsContextGLCocoa.mm @nonARC @no-unify // ANGLE headers redefine GL types/macros that collide with system OpenGL.
 platform/graphics/cv/GraphicsContextGLCVCocoa.mm @nonARC @no-unify // ANGLE headers redefine GL types/macros that collide with system OpenGL.
+
+../WebKitLegacy/mac/DOM/DOM.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMAbstractView.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMAttr.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMBlob.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMCDATASection.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMCSS.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMCSSCharsetRule.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMCSSFontFaceRule.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMCSSImportRule.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMCSSMediaRule.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMCSSPageRule.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMCSSPrimitiveValue.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMCSSRule.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMCSSRuleList.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMCSSStyleDeclaration.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMCSSStyleRule.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMCSSStyleSheet.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMCSSUnknownRule.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMCSSValue.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMCSSValueList.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMCharacterData.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMComment.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMCounter.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMCustomXPathNSResolver.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMDocument.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMDocumentFragment.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMDocumentType.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMElement.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMEntity.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMEntityReference.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMEvent.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMEvents.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMFile.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMFileList.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMHTML.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMHTMLAnchorElement.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMHTMLAppletElement.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMHTMLAreaElement.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMHTMLBRElement.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMHTMLBaseElement.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMHTMLBaseFontElement.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMHTMLBodyElement.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMHTMLButtonElement.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMHTMLCanvasElement.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMHTMLCollection.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMHTMLDListElement.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMHTMLDirectoryElement.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMHTMLDivElement.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMHTMLDocument.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMHTMLElement.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMHTMLEmbedElement.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMHTMLFieldSetElement.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMHTMLFontElement.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMHTMLFormElement.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMHTMLFrameElement.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMHTMLFrameSetElement.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMHTMLHRElement.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMHTMLHeadElement.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMHTMLHeadingElement.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMHTMLHtmlElement.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMHTMLIFrameElement.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMHTMLImageElement.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMHTMLInputElement.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMHTMLLIElement.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMHTMLLabelElement.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMHTMLLegendElement.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMHTMLLinkElement.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMHTMLMapElement.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMHTMLMarqueeElement.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMHTMLMediaElement.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMHTMLMenuElement.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMHTMLMetaElement.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMHTMLModElement.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMHTMLOListElement.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMHTMLObjectElement.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMHTMLOptGroupElement.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMHTMLOptionElement.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMHTMLOptionsCollection.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMHTMLParagraphElement.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMHTMLParamElement.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMHTMLPreElement.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMHTMLQuoteElement.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMHTMLScriptElement.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMHTMLSelectElement.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMHTMLStyleElement.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMHTMLTableCaptionElement.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMHTMLTableCellElement.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMHTMLTableColElement.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMHTMLTableElement.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMHTMLTableRowElement.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMHTMLTableSectionElement.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMHTMLTextAreaElement.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMHTMLTitleElement.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMHTMLUListElement.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMHTMLVideoElement.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMImplementation.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMInternal.mm @nonARC @cost:4 @no-unify
+../WebKitLegacy/mac/DOM/DOMKeyboardEvent.mm @nonARC @cost:3 @no-unify
+../WebKitLegacy/mac/DOM/DOMMediaError.mm @nonARC @cost:3 @no-unify
+../WebKitLegacy/mac/DOM/DOMMediaList.mm @nonARC @cost:3 @no-unify
+../WebKitLegacy/mac/DOM/DOMMouseEvent.mm @nonARC @cost:3 @no-unify
+../WebKitLegacy/mac/DOM/DOMMutationEvent.mm @nonARC @cost:3 @no-unify
+../WebKitLegacy/mac/DOM/DOMNamedNodeMap.mm @nonARC @cost:3 @no-unify
+../WebKitLegacy/mac/DOM/DOMNode.mm @nonARC @cost:4 @no-unify
+../WebKitLegacy/mac/DOM/DOMNodeIterator.mm @nonARC @cost:3 @no-unify
+../WebKitLegacy/mac/DOM/DOMNodeList.mm @nonARC @cost:3 @no-unify
+../WebKitLegacy/mac/DOM/DOMObject.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMOverflowEvent.mm @nonARC @cost:3 @no-unify
+../WebKitLegacy/mac/DOM/DOMProcessingInstruction.mm @nonARC @cost:3 @no-unify
+../WebKitLegacy/mac/DOM/DOMProgressEvent.mm @nonARC @cost:3 @no-unify
+../WebKitLegacy/mac/DOM/DOMRGBColor.mm @nonARC @cost:3 @no-unify
+../WebKitLegacy/mac/DOM/DOMRange.mm @nonARC @cost:5 @no-unify
+../WebKitLegacy/mac/DOM/DOMRect.mm @nonARC @cost:3 @no-unify
+../WebKitLegacy/mac/DOM/DOMStyleSheet.mm @nonARC @cost:3 @no-unify
+../WebKitLegacy/mac/DOM/DOMStyleSheetList.mm @nonARC @cost:3 @no-unify
+../WebKitLegacy/mac/DOM/DOMText.mm @nonARC @cost:3 @no-unify
+../WebKitLegacy/mac/DOM/DOMTextEvent.mm @nonARC @cost:3 @no-unify
+../WebKitLegacy/mac/DOM/DOMTimeRanges.mm @nonARC @cost:3 @no-unify
+../WebKitLegacy/mac/DOM/DOMTokenList.mm @nonARC @cost:3 @no-unify
+../WebKitLegacy/mac/DOM/DOMTreeWalker.mm @nonARC @cost:3 @no-unify
+../WebKitLegacy/mac/DOM/DOMUIEvent.mm @nonARC @cost:3 @no-unify
+../WebKitLegacy/mac/DOM/DOMUIKitExtensions.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMUtility.mm @nonARC @cost:5 @no-unify
+../WebKitLegacy/mac/DOM/DOMWheelEvent.mm @nonARC @cost:3 @no-unify
+../WebKitLegacy/mac/DOM/DOMXPath.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/DOMXPathExpression.mm @nonARC @cost:3 @no-unify
+../WebKitLegacy/mac/DOM/DOMXPathResult.mm @nonARC @cost:3 @no-unify
+../WebKitLegacy/mac/DOM/ExceptionHandlers.mm @nonARC @no-unify
+../WebKitLegacy/mac/DOM/ObjCEventListener.mm @nonARC @cost:3 @no-unify
+../WebKitLegacy/mac/DOM/ObjCNodeFilterCondition.mm @nonARC @no-unify

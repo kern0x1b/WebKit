@@ -97,6 +97,7 @@ unsigned GlyphDisplayListCache::size() const
 template<typename LayoutRun>
 RefPtr<const DisplayList::DisplayList> GlyphDisplayListCache::getDisplayList(const LayoutRun& run, const FontCascade& font, GraphicsContext& context, const TextRun& textRun, const PaintInfo& paintInfo)
 {
+#if !defined(WEBKIT_IOS6)
     if (MemoryPressureHandler::singleton().isUnderMemoryPressure()) {
         if (!m_entries.isEmpty()) {
             LOG(MemoryPressure, "GlyphDisplayListCache::%s - Under memory pressure - size: %d", __FUNCTION__, size());
@@ -104,6 +105,7 @@ RefPtr<const DisplayList::DisplayList> GlyphDisplayListCache::getDisplayList(con
         }
         return nullptr;
     }
+#endif
 
     if (font.isLoadingCustomFonts() || !font.fonts())
         return nullptr;

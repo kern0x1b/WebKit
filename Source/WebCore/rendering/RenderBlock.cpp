@@ -196,7 +196,14 @@ public:
                 }
                 isNewEntry = descendants->appendOrMoveToLast(outOfFlowDescendant).isNewEntry;
             };
+#if defined(WEBKIT_IOS6)
+            if (descendants->contains(outOfFlowDescendant))
+                isNewEntry = false;
+            else
+                ensureLayoutDependentBoxPosition();
+#else
             ensureLayoutDependentBoxPosition();
+#endif
         }
 
         if (!isNewEntry) {
@@ -744,6 +751,11 @@ void RenderBlock::updateBlockChildDirtyBitsBeforeLayout(RelayoutChildren relayou
         auto& style = child.style();
         return style.height().isPercentOrCalculated() || style.minHeight().isPercentOrCalculated() || style.maxHeight().isPercentOrCalculated();
     };
+    // The FIXME above was implemented here - skipping the marking when this
+    // block cannot resolve a percentage anyway - and measured on the device to
+    // change nothing: the same five to nine thousand blocks were laid out. The
+    // dirt was coming from the grid code, not from here. Removed rather than
+    // carried unverified.
     if (relayoutChildren == RelayoutChildren::Yes || (childHasRelativeHeight() && !isRenderView()))
         child.setChildNeedsLayout(MarkingBehavior::MarkOnlyThis);
 
@@ -768,10 +780,17 @@ bool RenderBlock::canPerformSimplifiedLayout() const
         return false;
     if (auto wasSkippedDuringLastLayout = wasSkippedDuringLastLayoutDueToContentVisibility(); wasSkippedDuringLastLayout && *wasSkippedDuringLastLayout)
         return false;
-    if (layoutContext().isSkippedContentRootForLayout(*this) && (outOfFlowChildNeedsLayout() || canContainFixedPositionObjects()))
+    // isSkippedContentRootForLayout() starts with this same test, and both of the checks below
+    // used to run it. Asking once, and before reaching for the layout context, keeps the walk
+    // through node -> document -> render view -> frame view off the path of every block that is
+    // not a content-visibility root, which is all of them on a page that does not use it.
+    bool skippedContentRoot = isSkippedContentRoot(*this);
+    if (skippedContentRoot && layoutContext().isSkippedContentRootForLayout(*this) && (outOfFlowChildNeedsLayout() || canContainFixedPositionObjects()))
         return false;
-    if (isSkippedContentRoot(*this) && firstChild() && firstChild()->wasSkippedDuringLastLayoutDueToContentVisibility())
-        return false;
+    if (skippedContentRoot) {
+        if (SUPPRESS_UNCHECKED_LOCAL auto* first = firstChild(); first && first->wasSkippedDuringLastLayoutDueToContentVisibility())
+            return false;
+    }
     return outOfFlowChildNeedsLayout() || needsSimplifiedNormalFlowLayout();
 }
 

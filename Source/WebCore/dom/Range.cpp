@@ -916,34 +916,43 @@ String Range::debugDescription() const
 }
 #endif
 
-static inline void NODELETE boundaryNodeChildrenChanged(Locker<Lock>&, RangeBoundaryPoint& boundary, ContainerNode& container)
+static inline bool NODELETE boundaryNeedsChildrenChangedUpdate(const RangeBoundaryPoint& boundary, const ContainerNode& container)
 {
-    if (boundary.childBefore() && &boundary.container() == &container)
-        boundary.invalidateOffset();
+    return boundary.childBefore() && &boundary.container() == &container;
 }
 
 void Range::nodeChildrenChanged(ContainerNode& container)
 {
     ASSERT(&container.document() == m_ownerDocument.ptr());
-    Locker locker { m_boundaryPointLock };
-    boundaryNodeChildrenChanged(locker, m_start, container);
-    boundaryNodeChildrenChanged(locker, m_end, container);
     m_didChangeForHighlight = true;
-}
 
-static inline void boundaryNodeChildrenWillBeRemoved(Locker<Lock>&, RangeBoundaryPoint& boundary, ContainerNode& containerOfNodesToBeRemoved)
-{
-    if (containerOfNodesToBeRemoved.contains(&boundary.container()))
-        boundary.setToBeforeContents(containerOfNodesToBeRemoved);
+    bool startNeedsUpdate = boundaryNeedsChildrenChangedUpdate(m_start, container);
+    bool endNeedsUpdate = boundaryNeedsChildrenChangedUpdate(m_end, container);
+    if (!startNeedsUpdate && !endNeedsUpdate) [[likely]]
+        return;
+
+    Locker locker { m_boundaryPointLock };
+    if (startNeedsUpdate)
+        m_start.invalidateOffset();
+    if (endNeedsUpdate)
+        m_end.invalidateOffset();
 }
 
 void Range::nodeChildrenWillBeRemoved(ContainerNode& container)
 {
     ASSERT(&container.document() == m_ownerDocument.ptr());
-    Locker locker { m_boundaryPointLock };
-    boundaryNodeChildrenWillBeRemoved(locker, m_start, container);
-    boundaryNodeChildrenWillBeRemoved(locker, m_end, container);
     m_didChangeForHighlight = true;
+
+    bool startNeedsUpdate = container.contains(&m_start.container());
+    bool endNeedsUpdate = container.contains(&m_end.container());
+    if (!startNeedsUpdate && !endNeedsUpdate) [[likely]]
+        return;
+
+    Locker locker { m_boundaryPointLock };
+    if (startNeedsUpdate)
+        m_start.setToBeforeContents(container);
+    if (endNeedsUpdate)
+        m_end.setToBeforeContents(container);
 }
 
 static inline void boundaryNodeWillBeRemoved(Locker<Lock>&, RangeBoundaryPoint& boundary, Node& nodeToBeRemoved)
@@ -954,16 +963,29 @@ static inline void boundaryNodeWillBeRemoved(Locker<Lock>&, RangeBoundaryPoint& 
         boundary.setToBeforeNode(nodeToBeRemoved);
 }
 
+static inline bool NODELETE boundaryNeedsNodeWillBeRemovedUpdate(const RangeBoundaryPoint& boundary, const Node& nodeToBeRemoved)
+{
+    return boundary.childBefore() == &nodeToBeRemoved || nodeToBeRemoved.contains(&boundary.container());
+}
+
 void Range::nodeWillBeRemoved(Node& node)
 {
     ASSERT(&node.document() == m_ownerDocument.ptr());
     ASSERT(&node != m_ownerDocument.ptr());
     ASSERT(node.parentNode());
 
-    Locker locker { m_boundaryPointLock };
-    boundaryNodeWillBeRemoved(locker, m_start, node);
-    boundaryNodeWillBeRemoved(locker, m_end, node);
     m_didChangeForHighlight = true;
+
+    bool startNeedsUpdate = boundaryNeedsNodeWillBeRemovedUpdate(m_start, node);
+    bool endNeedsUpdate = boundaryNeedsNodeWillBeRemovedUpdate(m_end, node);
+    if (!startNeedsUpdate && !endNeedsUpdate) [[likely]]
+        return;
+
+    Locker locker { m_boundaryPointLock };
+    if (startNeedsUpdate)
+        boundaryNodeWillBeRemoved(locker, m_start, node);
+    if (endNeedsUpdate)
+        boundaryNodeWillBeRemoved(locker, m_end, node);
 }
 
 bool Range::parentlessNodeMovedToNewDocumentAffectsRange(Node& node)
@@ -976,6 +998,11 @@ void Range::updateRangeForParentlessNodeMovedToNewDocument(Node& node)
     protect(m_ownerDocument)->detachRange(*this);
     m_ownerDocument = node.document();
     protect(m_ownerDocument)->attachRange(*this);
+}
+
+static inline bool NODELETE boundaryNeedsTextChangeUpdate(const RangeBoundaryPoint& boundary, const Node& text, unsigned offset)
+{
+    return &boundary.container() == &text && offset < boundary.offset();
 }
 
 static inline void NODELETE boundaryTextInserted(Locker<Lock>&, RangeBoundaryPoint& boundary, Node& text, unsigned offset, unsigned length)
@@ -991,10 +1018,18 @@ static inline void NODELETE boundaryTextInserted(Locker<Lock>&, RangeBoundaryPoi
 void Range::textInserted(Node& text, unsigned offset, unsigned length)
 {
     ASSERT(&text.document() == m_ownerDocument.ptr());
-    Locker locker { m_boundaryPointLock };
-    boundaryTextInserted(locker, m_start, text, offset, length);
-    boundaryTextInserted(locker, m_end, text, offset, length);
     m_didChangeForHighlight = true;
+
+    bool startNeedsUpdate = boundaryNeedsTextChangeUpdate(m_start, text, offset);
+    bool endNeedsUpdate = boundaryNeedsTextChangeUpdate(m_end, text, offset);
+    if (!startNeedsUpdate && !endNeedsUpdate) [[likely]]
+        return;
+
+    Locker locker { m_boundaryPointLock };
+    if (startNeedsUpdate)
+        boundaryTextInserted(locker, m_start, text, offset, length);
+    if (endNeedsUpdate)
+        boundaryTextInserted(locker, m_end, text, offset, length);
 }
 
 static inline void NODELETE boundaryTextRemoved(Locker<Lock>&, RangeBoundaryPoint& boundary, Node& text, unsigned offset, unsigned length)
@@ -1013,10 +1048,18 @@ static inline void NODELETE boundaryTextRemoved(Locker<Lock>&, RangeBoundaryPoin
 void Range::textRemoved(Node& text, unsigned offset, unsigned length)
 {
     ASSERT(&text.document() == m_ownerDocument.ptr());
-    Locker locker { m_boundaryPointLock };
-    boundaryTextRemoved(locker, m_start, text, offset, length);
-    boundaryTextRemoved(locker, m_end, text, offset, length);
     m_didChangeForHighlight = true;
+
+    bool startNeedsUpdate = boundaryNeedsTextChangeUpdate(m_start, text, offset);
+    bool endNeedsUpdate = boundaryNeedsTextChangeUpdate(m_end, text, offset);
+    if (!startNeedsUpdate && !endNeedsUpdate) [[likely]]
+        return;
+
+    Locker locker { m_boundaryPointLock };
+    if (startNeedsUpdate)
+        boundaryTextRemoved(locker, m_start, text, offset, length);
+    if (endNeedsUpdate)
+        boundaryTextRemoved(locker, m_end, text, offset, length);
 }
 
 static inline void boundaryTextNodesMerged(Locker<Lock>&, RangeBoundaryPoint& boundary, NodeWithIndex& oldNode, unsigned offset)

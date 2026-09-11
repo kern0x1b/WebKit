@@ -840,22 +840,24 @@ void Element::synchronizeAllAttributes() const
         static_cast<const StyledElement*>(this)->synchronizeStyleAttributeInternal();
     }
     
-    if (auto* svgElement = dynamicDowncast<SVGElement>(*this))
-        const_cast<SVGElement&>(*svgElement).synchronizeAllAttributes();
+    if (isSVGElement()) [[unlikely]]
+        const_cast<SVGElement&>(*static_cast<const SVGElement*>(this)).synchronizeAllAttributes();
 }
 
 ALWAYS_INLINE void Element::synchronizeAttribute(const QualifiedName& name) const
 {
     if (!elementData())
         return;
-    if (name == styleAttr && elementData()->styleAttributeIsDirty()) [[unlikely]] {
+    // The dirty bit lives in the ElementData word already loaded above; comparing against the global
+    // styleAttr needs that global's address first, so let the bit test decide.
+    if (elementData()->styleAttributeIsDirty() && name == styleAttr) [[unlikely]] {
         ASSERT_WITH_SECURITY_IMPLICATION(isStyledElement());
         static_cast<const StyledElement*>(this)->synchronizeStyleAttributeInternal();
         return;
     }
 
-    if (auto* svgElement = dynamicDowncast<SVGElement>(*this))
-        const_cast<SVGElement&>(*svgElement).synchronizeAttribute(name);
+    if (isSVGElement()) [[unlikely]]
+        const_cast<SVGElement&>(*static_cast<const SVGElement*>(this)).synchronizeAttribute(name);
 }
 
 static ALWAYS_INLINE bool isStyleAttribute(const Element& element, const AtomString& attributeLocalName)
@@ -871,14 +873,14 @@ ALWAYS_INLINE void Element::synchronizeAttribute(const AtomString& localName) co
     // e.g when called from DOM API.
     if (!elementData())
         return;
-    if (elementData()->styleAttributeIsDirty() && isStyleAttribute(*this, localName)) {
+    if (elementData()->styleAttributeIsDirty() && isStyleAttribute(*this, localName)) [[unlikely]] {
         ASSERT_WITH_SECURITY_IMPLICATION(isStyledElement());
         static_cast<const StyledElement*>(this)->synchronizeStyleAttributeInternal();
         return;
     }
 
-    if (auto* svgElement = dynamicDowncast<SVGElement>(*this))
-        const_cast<SVGElement&>(*svgElement).synchronizeAttribute(QualifiedName(nullAtom(), localName, nullAtom()));
+    if (isSVGElement()) [[unlikely]]
+        const_cast<SVGElement&>(*static_cast<const SVGElement*>(this)).synchronizeAttribute(QualifiedName(nullAtom(), localName, nullAtom()));
 }
 
 const AtomString& Element::getAttribute(const QualifiedName& name) const
@@ -2452,12 +2454,12 @@ void Element::attributeChanged(const QualifiedName& name, const AtomString& oldV
             setUsesNullCustomElementRegistry();
         break;
     default: {
-        Ref document = this->document();
-        if (isElementReflectionAttribute(document->settings(), name) || isElementsArrayReflectionAttribute(name)) {
-            if (auto* map = explicitlySetAttrElementsMapIfExists())
+        if (auto* map = explicitlySetAttrElementsMapIfExists(); map && !map->isEmpty()) [[unlikely]] {
+            Ref document = this->document();
+            if (isElementReflectionAttribute(document->settings(), name) || isElementsArrayReflectionAttribute(name))
                 map->remove(name);
         }
-        if (CheckedPtr cache = document->existingAXObjectCache(); cache && AXObjectCache::isRelationAttribute(name))
+        if (SUPPRESS_UNCOUNTED_ARG CheckedPtr cache = document().existingAXObjectCache(); cache && AXObjectCache::isRelationAttribute(name))
             cache->trackRelationAttributeElement(*this);
         break;
     }
@@ -2969,7 +2971,7 @@ void Element::updateEffectiveTextDirectionIfNeeded()
         return;
     }
 
-    RefPtr parent = parentOrShadowHostElement();
+    SUPPRESS_UNCOUNTED_LOCAL auto* parent = parentOrShadowHostElement();
     if (!(parent && parent->usesEffectiveTextDirection()))
         return;
 
@@ -2998,10 +3000,10 @@ void Element::updateEffectiveLangStateFromParent()
     ASSERT(!hasLanguageAttribute());
     ASSERT(parentNode() != &document());
 
-    RefPtr parent = parentOrShadowHostElement();
+    SUPPRESS_UNCOUNTED_LOCAL auto* parent = parentOrShadowHostElement();
 
     if (!parent || parent == document().documentElement()) {
-        setEffectiveLangKnownToMatchDocumentElement(parent.get());
+        setEffectiveLangKnownToMatchDocumentElement(parent);
         if (hasRareData())
             elementRareData()->setEffectiveLang(nullAtom());
         return;
@@ -3134,10 +3136,19 @@ Node::NeedsPostConnectionSteps Element::insertionSteps(InsertionType insertionTy
                 topDocument->appendAutofocusCandidate(*this);
         }
 
-        if (hasAttributesWithoutUpdate()) {
+#if defined(WEBKIT_IOS6)
+        if (hasAttributesWithoutUpdate() && document().hasCachedFirstElementWithAttribute()) [[unlikely]] {
+            Ref document = this->document();
             for (auto& attribute : attributes())
-                document().attributeAddedToElement(attribute.name());
+                document->attributeAddedToElement(attribute.name());
         }
+#else
+        if (hasAttributesWithoutUpdate()) {
+            Ref document = this->document();
+            for (auto& attribute : attributes())
+                document->attributeAddedToElement(attribute.name());
+        }
+#endif
     }
 
     if (parentNode() == &parentOfInsertedTree) {
@@ -5806,42 +5817,55 @@ void Element::clearSpatialPortalController()
 
 void Element::willModifyAttribute(const QualifiedName& name, const AtomString& oldValue, const AtomString& newValue)
 {
-    if (name == HTMLNames::idAttr)
+    switch (name.nodeName()) {
+    case AttributeNames::idAttr:
         updateId(oldValue, newValue, NotifyObservers::No); // Will notify observers after the attribute is actually changed.
-    else if (name == HTMLNames::nameAttr)
+        break;
+    case AttributeNames::nameAttr:
         updateName(oldValue, newValue);
-    else if (name == HTMLNames::forAttr) {
+        break;
+    case AttributeNames::forAttr:
         if (auto* label = dynamicDowncast<HTMLLabelElement>(*this)) {
             if (treeScope().shouldCacheLabelsByForAttribute())
                 label->updateLabel(protect(treeScope()), oldValue, newValue);
         }
-    } else if (name == HTMLNames::hiddenAttr)
+        break;
+    case AttributeNames::hiddenAttr:
         setStateFlag(StateFlag::ShouldNotifyTextManipulationControllerIfDisplayed);
+        break;
+    default:
+        break;
+    }
 
     if (auto recipients = MutationObserverInterestGroup::createForAttributesMutation(*this, name))
         recipients->enqueueMutationRecord(MutationRecord::createAttributes(*this, name, oldValue));
 
-    InspectorInstrumentation::willModifyDOMAttr(protect(document()), *this, oldValue, newValue);
+    // Building the Ref argument is not free, and the instrumentation itself bails out on this same test.
+    if (InspectorInstrumentationPublic::hasFrontends()) [[unlikely]]
+        InspectorInstrumentation::willModifyDOMAttr(protect(document()), *this, oldValue, newValue);
 }
 
 void Element::didAddAttribute(const QualifiedName& name, const AtomString& value)
 {
     notifyAttributeChanged(name, nullAtom(), value);
-    InspectorInstrumentation::didModifyDOMAttr(protect(document()), *this, name.toAtomString(), value);
+    if (InspectorInstrumentationPublic::hasFrontends()) [[unlikely]]
+        InspectorInstrumentation::didModifyDOMAttr(protect(document()), *this, name.toAtomString(), value);
     dispatchSubtreeModifiedEvent();
 }
 
 void Element::didModifyAttribute(const QualifiedName& name, const AtomString& oldValue, const AtomString& newValue)
 {
     notifyAttributeChanged(name, oldValue, newValue);
-    InspectorInstrumentation::didModifyDOMAttr(protect(document()), *this, name.toAtomString(), newValue);
+    if (InspectorInstrumentationPublic::hasFrontends()) [[unlikely]]
+        InspectorInstrumentation::didModifyDOMAttr(protect(document()), *this, name.toAtomString(), newValue);
     // Do not dispatch a DOMSubtreeModified event here; see bug 81141.
 }
 
 void Element::didRemoveAttribute(const QualifiedName& name, const AtomString& oldValue)
 {
     notifyAttributeChanged(name, oldValue, nullAtom());
-    InspectorInstrumentation::didRemoveDOMAttr(protect(document()), *this, name.toAtomString());
+    if (InspectorInstrumentationPublic::hasFrontends()) [[unlikely]]
+        InspectorInstrumentation::didRemoveDOMAttr(protect(document()), *this, name.toAtomString());
     dispatchSubtreeModifiedEvent();
 }
 
@@ -6345,10 +6369,13 @@ Vector<Ref<WebAnimation>> Element::getAnimations(std::optional<GetAnimationsOpti
     // For the list of animations to be current, we need to account for any pending CSS changes,
     // such as updates to CSS Animations and CSS Transitions. This requires updating layout as
     // well since resolving layout-dependent media queries could yield animations.
-    // FIXME: We might be able to use Style::Extractor which is more optimized.
-    if (RefPtr owner = document->ownerElement())
-        protect(owner->document())->updateLayout();
-    document->updateStyleIfNeeded();
+    if (RefPtr owner = document->ownerElement()) {
+        RefPtr ownerView = owner->document().view();
+        if (!ownerView || ownerView->needsLayout()) [[unlikely]]
+            protect(owner->document())->updateLayout();
+    }
+    if (document->hasPendingStyleRecalc()) [[unlikely]]
+        document->updateStyleIfNeeded();
 
     Vector<Ref<WebAnimation>> animations;
     if (auto* effectStack = keyframeEffectStack({ })) {

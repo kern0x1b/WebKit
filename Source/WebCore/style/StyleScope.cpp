@@ -26,6 +26,7 @@
  */
 
 #include "config.h"
+#include <unistd.h>
 #include "StyleScope.h"
 
 #include "CSSCounterStyleRegistry.h"
@@ -83,6 +84,7 @@ WTF_MAKE_TZONE_ALLOCATED_IMPL(Scope);
 Scope::Scope(Document& document)
     : m_document(document)
     , m_pendingUpdateTimer(*this, &Scope::pendingUpdateTimerFired)
+    , m_pendingSheetRenderingDeadlineTimer(*this, &Scope::pendingSheetRenderingDeadlineTimerFired)
     , m_customPropertyRegistry(makeUniqueRef<CustomPropertyRegistry>(*this))
     , m_counterStyleRegistry(makeUniqueRef<CSSCounterStyleRegistry>())
 {
@@ -92,6 +94,7 @@ Scope::Scope(ShadowRoot& shadowRoot)
     : m_document(shadowRoot.documentScope())
     , m_shadowRoot(&shadowRoot)
     , m_pendingUpdateTimer(*this, &Scope::pendingUpdateTimerFired)
+    , m_pendingSheetRenderingDeadlineTimer(*this, &Scope::pendingSheetRenderingDeadlineTimerFired)
     , m_customPropertyRegistry(makeUniqueRef<CustomPropertyRegistry>(*this))
     , m_counterStyleRegistry(makeUniqueRef<CSSCounterStyleRegistry>())
 {
@@ -186,7 +189,6 @@ void Scope::releaseMemory()
         });
     }
 #endif
-    clearResolver();
 }
 
 Scope& Scope::forNode(Node& node)
@@ -235,9 +237,10 @@ void Scope::addPendingSheet(const Element& element)
 
     LOG_WITH_STREAM(StyleSheets, stream << "Scope " << this << " addPendingSheet() " << element << " isInHead " << isInHead);
 
-    if (isInHead)
+    if (isInHead) {
         m_elementsInHeadWithPendingSheets.add(element);
-    else
+        startPendingSheetRenderingDeadlineIfNeeded();
+    } else
         m_elementsInBodyWithPendingSheets.add(element);
 }
 
@@ -257,6 +260,7 @@ void Scope::addPendingSheet(const ProcessingInstruction& processingInstruction)
     ASSERT(!m_processingInstructionsWithPendingSheets.contains(processingInstruction));
 
     m_processingInstructionsWithPendingSheets.add(processingInstruction);
+    startPendingSheetRenderingDeadlineIfNeeded();
 }
 
 void Scope::removePendingSheet(const ProcessingInstruction& processingInstruction)
@@ -283,8 +287,45 @@ bool Scope::hasPendingSheetsInBody() const
     return !m_elementsInBodyWithPendingSheets.isEmptyIgnoringNullReferences();
 }
 
+bool Scope::blocksRenderingBeforeBody() const
+{
+    return hasPendingSheetsBeforeBody() && !m_didExceedPendingSheetRenderingDeadline;
+}
+
+void Scope::startPendingSheetRenderingDeadlineIfNeeded()
+{
+    // Only the document scope's sheets gate render tree construction for the whole document.
+    if (m_shadowRoot)
+        return;
+
+    if (m_didExceedPendingSheetRenderingDeadline || m_pendingSheetRenderingDeadlineTimer.isActive())
+        return;
+
+    auto timeout = m_document->settings().pendingStylesheetRenderingTimeout();
+    if (timeout < 0)
+        return;
+
+    m_pendingSheetRenderingDeadlineTimer.startOneShot(1_s * timeout);
+}
+
+void Scope::pendingSheetRenderingDeadlineTimerFired()
+{
+    if (!hasPendingSheetsBeforeBody())
+        return;
+
+    m_didExceedPendingSheetRenderingDeadline = true;
+
+    // Every element skipped by TreeResolver::resolveElement while the block was in effect was left
+    // without style; a full rebuild is how updateStyleIfNeededIgnoringPendingStylesheets() recovers
+    // from the same state.
+    m_document->scheduleFullStyleRebuild();
+}
+
 void Scope::didRemovePendingStylesheet()
 {
+    if (!hasPendingSheetsBeforeBody())
+        m_pendingSheetRenderingDeadlineTimer.stop();
+
     if (hasPendingSheets())
         return;
 
@@ -529,6 +570,7 @@ Scope::StyleSheetChange Scope::analyzeStyleSheetChange(const Vector<Ref<CSSStyle
 
 static void filterEnabledNonemptyCSSStyleSheets(Vector<Ref<CSSStyleSheet>>& result, const Vector<Ref<StyleSheet>>& sheets)
 {
+    result.reserveCapacity(result.size() + sheets.size());
     for (auto& sheet : sheets) {
         RefPtr styleSheet = dynamicDowncast<CSSStyleSheet>(sheet.get());
         if (!styleSheet)
@@ -545,6 +587,37 @@ static void filterEnabledNonemptyCSSStyleSheets(Vector<Ref<CSSStyleSheet>>& resu
 
 void Scope::updateActiveStyleSheets(UpdateType updateType)
 {
+#if defined(WEBKIT_IOS6)
+    static int reportRebuilds = -1;
+    if (reportRebuilds < 0)
+        reportRebuilds = access("/tmp/native-style-rebuilds", F_OK) == 0 ? 1 : 0;
+    struct RebuildTimer {
+        bool report;
+        MonotonicTime startedAt;
+        UpdateType type;
+        RebuildTimer(bool r, UpdateType t) : report(r), startedAt(r ? MonotonicTime::now() : MonotonicTime()), type(t) { }
+        ~RebuildTimer()
+        {
+            if (!report)
+                return;
+            static FILE* log;
+            static unsigned count;
+            static double total;
+            if (!log) {
+                log = fopen("/tmp/native-style-rebuilds.log", "w");
+                if (log)
+                    setvbuf(log, nullptr, _IOLBF, 0);
+            }
+            double ms = (MonotonicTime::now() - startedAt).milliseconds();
+            count++;
+            total += ms;
+            if (log)
+                fprintf(log, "rebuild %u: %.1f ms, type %d, %.0f ms total\n",
+                    count, ms, (int)type, total);
+        }
+    } rebuildTimer(reportRebuilds == 1, updateType);
+#endif
+
     RELEASE_ASSERT(!m_isUpdatingStyleResolver);
     ASSERT(!m_pendingUpdate);
 
@@ -673,6 +746,7 @@ bool Scope::activeStyleSheetsContains(const CSSStyleSheet& sheet) const
         return false;
 
     if (m_weakCopyOfActiveStyleSheetListForFastLookup.isEmpty()) {
+        m_weakCopyOfActiveStyleSheetListForFastLookup.reserveInitialCapacity(m_activeStyleSheets.size());
         for (auto& activeStyleSheet : m_activeStyleSheets)
             m_weakCopyOfActiveStyleSheetListForFastLookup.add(activeStyleSheet.get());
     }

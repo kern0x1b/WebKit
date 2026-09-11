@@ -128,22 +128,36 @@ MicrotaskQueue& WindowEventLoop::microtaskQueue()
 
 void WindowEventLoop::scheduleIdlePeriod()
 {
+    m_maybeHasPendingIdleCallbacks = true;
     m_idleTimer.startOneShot(0_s);
 }
 
 void WindowEventLoop::opportunisticallyRunIdleCallbacks(std::optional<MonotonicTime> deadline)
 {
-    if (shouldEndIdlePeriod())
-        return; // No need to schedule m_idleTimer since there is a task. didReachTimeToRun() will call this function.
+#if defined(WEBKIT_IOS6)
+    if (!m_maybeHasPendingIdleCallbacks)
+        return;
+#endif
 
+    // Both checks are pure reads and either of them ends the function, so the
+    // cheaper one that almost always fires goes first: requestIdleCallback is
+    // rare, and this runs after every turn of the event loop. The old order paid
+    // for a scan of the task queue and of the microtask queue first.
     auto hasPendingIdleCallbacks = findMatchingAssociatedContext([&](ScriptExecutionContext& context) {
         if (auto* document = dynamicDowncast<Document>(context))
             return document->hasPendingIdleCallback();
         return false;
     });
 
-    if (!hasPendingIdleCallbacks)
+    if (!hasPendingIdleCallbacks) {
+#if defined(WEBKIT_IOS6)
+        m_maybeHasPendingIdleCallbacks = false;
+#endif
         return;
+    }
+
+    if (shouldEndIdlePeriod())
+        return; // No need to schedule m_idleTimer since there is a task. didReachTimeToRun() will call this function.
 
     auto now = MonotonicTime::now();
     if (auto scheduledWork = nextScheduledWorkTime()) {
@@ -235,6 +249,15 @@ void WindowEventLoop::didReachTimeToRun()
     Ref protectedThis { *this }; // Executing tasks may remove the last reference to this WindowEventLoop.
     auto deadline = ApproximateTime::now() + ThreadTimers::maxDurationOfFiringTimers;
     run(commonVM(), deadline);
+#if defined(WEBKIT_IOS6)
+    if (m_timer.isActive() && !ios6HasQueuedTasks()) {
+        SUPPRESS_UNCOUNTED_LOCAL auto& queue = microtaskQueue();
+        if (queue.ios6HasNoQueuedWork()) {
+            m_timer.stop();
+            queue.setIsScheduledToRun(false);
+        }
+    }
+#endif
     opportunisticallyRunIdleCallbacks(deadline.approximate<MonotonicTime>());
 }
 

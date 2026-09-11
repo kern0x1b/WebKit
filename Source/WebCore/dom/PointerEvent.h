@@ -33,7 +33,7 @@
 #include <wtf/Platform.h>
 #include <wtf/text/WTFString.h>
 
-#if ENABLE(TOUCH_EVENTS) && PLATFORM(IOS_FAMILY)
+#if ENABLE(TOUCH_EVENTS) && PLATFORM(IOS_FAMILY) && USE(APPLE_INTERNAL_SDK)
 // FIXME: Properly support using WKA in modules.
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wnon-modular-include-in-module"
@@ -41,8 +41,12 @@
 #pragma clang diagnostic pop
 #endif
 
-#if ENABLE(TOUCH_EVENTS) && (PLATFORM(WPE) || PLATFORM(GTK))
-#include "PlatformTouchEvent.h"
+// Without the internal SDK, an iOS build takes the same portable header GTK
+// and WPE already do - see PlatformEventFactoryIOS.h for the full reasoning.
+// Angle brackets rather than GTK/WPE's original quoted form: see MouseEvent.h,
+// right next to this same pattern, for why it has to be the framework form.
+#if ENABLE(TOUCH_EVENTS) && (PLATFORM(WPE) || PLATFORM(GTK) || (PLATFORM(IOS_FAMILY) && !USE(APPLE_INTERNAL_SDK)))
+#include <WebCore/PlatformTouchEvent.h>
 #endif
 
 namespace WebCore {
@@ -105,7 +109,7 @@ public:
     static Ref<PointerEvent> create(const AtomString& type, const PlatformTouchEvent&, const Vector<Ref<PointerEvent>>& coalescedEvents, const Vector<Ref<PointerEvent>>& predictedEvents, unsigned touchIndex, bool isPrimary, Ref<WindowProxy>&&, const DoublePoint& touchDelta = { });
 #endif
 
-#if ENABLE(TOUCH_EVENTS) && (PLATFORM(WPE) || PLATFORM(GTK))
+#if ENABLE(TOUCH_EVENTS) && (PLATFORM(WPE) || PLATFORM(GTK) || (PLATFORM(IOS_FAMILY) && !USE(APPLE_INTERNAL_SDK)))
     static unsigned pointerIdForTouchPoint(const PlatformTouchPoint&);
 #endif
 

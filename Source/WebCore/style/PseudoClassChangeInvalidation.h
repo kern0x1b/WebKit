@@ -33,6 +33,8 @@
 namespace WebCore {
 namespace Style {
 
+class ScopeRuleSets;
+
 class PseudoClassChangeInvalidation {
 public:
     PseudoClassChangeInvalidation(Element&, CSSSelector::PseudoClass, bool value, InvalidationScope = InvalidationScope::All);
@@ -52,6 +54,12 @@ private:
 
     const bool m_isEnabled;
     Element& m_element;
+
+#if defined(WEBKIT_IOS6)
+    const ScopeRuleSets* m_ownRuleSets { nullptr };
+    const ScopeRuleSets* m_shadowRuleSets { nullptr };
+    bool m_didResolveRuleSets { false };
+#endif
 
     Invalidator::MatchElementRuleSets m_beforeChangeRuleSets;
     Invalidator::MatchElementRuleSets m_afterChangeRuleSets;

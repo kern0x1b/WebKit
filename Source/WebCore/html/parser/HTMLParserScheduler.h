@@ -113,6 +113,10 @@ public:
 private:
     explicit HTMLParserScheduler(HTMLDocumentParser&);
 
+    // Yielding more often was measured on the device and is much worse here: a
+    // 50 ms budget with a 512 token check doubled the time to domInteractive on a
+    // markup-heavy page (4.2 s -> 8.3 s). The runloop turns cost more than the
+    // long parse holds. Keep the upstream values.
     static const unsigned numberOfTokensBeforeCheckingForYield = 4096; // Performance optimization
 
     void continueNextChunkTimerFired();

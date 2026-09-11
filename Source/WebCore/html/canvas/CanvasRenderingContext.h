@@ -134,6 +134,10 @@ public:
     bool isInPreparationForDisplayOrFlush() const { return m_isInPreparationForDisplayOrFlush; }
 
     void updateMemoryCost(size_t newMemoryCost) const;
+#if defined(WEBKIT_IOS6)
+    static size_t maxActiveCanvasPixelMemory();
+    static bool canAllocateCanvasPixelMemory(size_t);
+#endif
     size_t NODELETE memoryCost() const;
 #if ENABLE(RESOURCE_USAGE)
     size_t NODELETE externalMemoryCost() const;

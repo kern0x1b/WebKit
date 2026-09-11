@@ -56,12 +56,41 @@ static ClassChangeVector computeClassChanges(const SpaceSplitString& oldClasses,
 {
     unsigned oldSize = oldClasses.size();
 
+#if defined(WEBKIT_IOS6)
+    if (oldClasses == newClasses)
+        return { };
+#endif
+
     if (!oldSize)
         return collectClasses(newClasses, ClassChangeType::Add);
     if (newClasses.isEmpty())
         return collectClasses(oldClasses, ClassChangeType::Remove);
 
     ClassChangeVector changedClasses;
+
+#if defined(WEBKIT_IOS6)
+    if (oldSize <= 64) [[likely]] {
+        uint64_t remainingClassBits = 0;
+        for (auto& newClass : newClasses) {
+            bool foundFromBoth = false;
+            for (unsigned i = 0; i < oldSize; ++i) {
+                if (newClass == oldClasses[i]) {
+                    remainingClassBits |= (static_cast<uint64_t>(1) << i);
+                    foundFromBoth = true;
+                }
+            }
+            if (foundFromBoth)
+                continue;
+            changedClasses.append({ newClass.impl(), ClassChangeType::Add });
+        }
+        for (unsigned i = 0; i < oldSize; ++i) {
+            if (remainingClassBits & (static_cast<uint64_t>(1) << i))
+                continue;
+            changedClasses.append({ oldClasses[i].impl(), ClassChangeType::Remove });
+        }
+        return changedClasses;
+    }
+#endif
 
     BitVector remainingClassBits;
     remainingClassBits.ensureSize(oldSize);
@@ -91,6 +120,11 @@ static ClassChangeVector computeClassChanges(const SpaceSplitString& oldClasses,
 void ClassChangeInvalidation::computeInvalidation(const SpaceSplitString& oldClasses, const SpaceSplitString& newClasses)
 {
     auto classChanges = computeClassChanges(oldClasses, newClasses);
+
+#if defined(WEBKIT_IOS6)
+    if (classChanges.isEmpty())
+        return;
+#endif
 
     bool shouldInvalidateCurrent = false;
     bool mayAffectStyleInShadowTree = false;

@@ -124,6 +124,10 @@ public:
 
     bool match(const CSSSelector&, const Element&, CheckingContext&) const;
 
+#if defined(WEBKIT_IOS6)
+    bool matchesSimpleCompound(const CSSSelector&, const Element&) const;
+#endif
+
     bool matchHostPseudoClass(const CSSSelector&, const Element&, CheckingContext&) const;
 
     static bool isCommonPseudoClassSelector(const CSSSelector*);

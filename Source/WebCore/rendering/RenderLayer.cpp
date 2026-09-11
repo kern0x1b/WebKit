@@ -948,7 +948,9 @@ void RenderLayer::collectLayers(std::unique_ptr<Vector<RenderLayer*>>& positiveZ
 
     bool isStacking = isStackingContext();
     bool layerOrDescendantsAreVisible = m_hasVisibleContent || m_alwaysIncludedInZOrderLists || m_hasVisibleDescendant || m_hasAlwaysIncludedInZOrderListsDescendants;
-    layerOrDescendantsAreVisible |= page().hasEverSetVisibilityAdjustment();
+    // page() is renderer -> document -> page; the bits above answer for almost every layer.
+    if (!layerOrDescendantsAreVisible)
+        layerOrDescendantsAreVisible = page().hasEverSetVisibilityAdjustment();
     // Normal flow layers are just painted by their enclosing layers, so they don't get put in zorder lists.
     if (!isNormalFlowOnly()) {
         if (layerOrDescendantsAreVisible) {
@@ -1085,10 +1087,11 @@ OptionSet<RenderLayer::UpdateLayerPositionsFlag> RenderLayer::flagsForUpdateLaye
         if (parent->hasFixedContainingBlockAncestor() || (!parent->isRenderViewLayer() && parent->renderer().canContainFixedPositionObjects()))
             flags.add(SeenFixedContainingBlockLayer);
 
-        if (parent->hasTransformedAncestor() || parent->transform())
+        auto* parentTransform = parent->transform();
+        if (parent->hasTransformedAncestor() || parentTransform)
             flags.add(SeenTransformedLayer);
 
-        if (parent->has3DTransformedAncestor() || (parent->transform() && !parent->transform()->isAffine()))
+        if (parent->has3DTransformedAncestor() || (parentTransform && !parentTransform->isAffine()))
             flags.add(Seen3DTransformedLayer);
 
         if (parent->behavesAsFixed() || (parent->renderer().isFixedPositioned() && !parent->hasFixedContainingBlockAncestor()))
@@ -1586,6 +1589,12 @@ void RenderLayer::recursiveUpdateLayerPositionsAfterScroll(OptionSet<UpdateLayer
     if (!m_hasVisibleDescendant && !m_hasVisibleContent)
         return;
 
+#if defined(WEBKIT_IOS6)
+    if (!flags.containsAny({ HasChangedAncestor, HasSeenViewportConstrainedAncestor, IsOverflowScroll })
+        && !m_hasViewportConstrainedDescendant && !isViewportConstrained())
+        return;
+#endif
+
     bool positionChanged = updateLayerPosition();
     if (positionChanged)
         flags.add(HasChangedAncestor);
@@ -1833,12 +1842,10 @@ RenderLayer* RenderLayer::enclosingOverflowClipLayer(IncludeSelfOrNot includeSel
     return nullptr;
 }
 
-// FIXME: This is terrible. Bring back a cached bit for this someday. This crawl is going to slow down all
-// painting of content inside paginated layers.
 bool RenderLayer::hasCompositedLayerInEnclosingPaginationChain() const
 {
     // No enclosing layer means no compositing in the chain.
-    if (!m_enclosingPaginationLayer)
+    if (!m_enclosingPaginationLayer) [[likely]]
         return false;
     
     // If the enclosing layer is composited, we don't have to check anything in between us and that
@@ -1856,10 +1863,19 @@ bool RenderLayer::hasCompositedLayerInEnclosingPaginationChain() const
     if (isComposited())
         return true;
     
-    // For normal flow layers, we can recur up the layer tree.
-    if (isNormalFlowOnly())
-        return parent()->hasCompositedLayerInEnclosingPaginationChain();
+    // For normal flow layers, iteratively traverse up the layer tree to avoid recursion overhead.
+    const RenderLayer* current = this;
+    while (current && current->isNormalFlowOnly()) {
+        current = current->parent();
+        if (!current || current == m_enclosingPaginationLayer.get())
+            return false;
+        if (current->isComposited())
+            return true;
+    }
     
+    if (current && current != this)
+        return current->hasCompositedLayerInEnclosingPaginationChain();
+
     // Otherwise we have to go up the containing block chain. Find the first enclosing
     // containing block layer ancestor, and check that.
     for (const auto* containingBlock = renderer().containingBlock(); containingBlock && !is<RenderView>(*containingBlock); containingBlock = containingBlock->containingBlock()) {
@@ -2577,6 +2593,10 @@ RenderLayer* RenderLayer::clippingRootForPainting() const
     if (paintsIntoProvidedBacking())
         return backingProviderLayer();
 
+    // The setting cannot change while we walk, and reaching it is renderer -> document -> settings
+    // on every step of every walk. calculateLayerBounds() does one of these walks per layer.
+    const bool backfaceVisibilityInteroperability = renderer().settings().css3DTransformBackfaceVisibilityInteroperabilityEnabled();
+
     const RenderLayer* current = this;
     while (current) {
         if (current->isRenderViewLayer())
@@ -2587,7 +2607,7 @@ RenderLayer* RenderLayer::clippingRootForPainting() const
         if (current->transform() || compositedWithOwnBackingStore(*current))
             return const_cast<RenderLayer*>(current);
 
-        if (renderer().settings().css3DTransformBackfaceVisibilityInteroperabilityEnabled() && current->participatesInPreserve3D() && current->renderer().style().backfaceVisibility() == BackfaceVisibility::Hidden)
+        if (backfaceVisibilityInteroperability && current->participatesInPreserve3D() && current->renderer().style().backfaceVisibility() == BackfaceVisibility::Hidden)
             return const_cast<RenderLayer*>(current);
 
         if (current->paintsIntoProvidedBacking())
@@ -2805,22 +2825,25 @@ static inline const RenderLayer* accumulateOffsetTowardsAncestor(const RenderLay
     const auto& renderer = layer->renderer();
     auto position = renderer.style().position();
 
-    // FIXME: Positioning of out-of-flow(fixed, absolute) elements collected in a RenderFragmentedFlow
-    // may need to be revisited in a future patch.
-    // If the fixed renderer is inside a RenderFragmentedFlow, we should not compute location using localToAbsolute,
-    // since localToAbsolute maps the coordinates from named flow to regions coordinates and regions can be
-    // positioned in a completely different place in the viewport (RenderView).
-    if (position == PositionType::Fixed && (!ancestorLayer || ancestorLayer == renderer.view().layer())) {
-        // If the fixed layer's container is the root, just add in the offset of the view. We can obtain this by calling
-        // localToAbsolute() on the RenderView.
-        location.moveBy(LayoutPoint(renderer.localToAbsolute({ }, MapCoordinatesMode::IsFixed)));
-        return ancestorLayer;
-    }
-
-    // For the fixed positioned elements inside a render flow thread, we should also skip the code path below
-    // Otherwise, for the case of ancestorLayer == rootLayer and fixed positioned element child of a transformed
-    // element in render flow thread, we will hit the fixed positioned container before hitting the ancestor layer.
+    // Three separate blocks below asked the same question; the answer is no for nearly every
+    // layer, and this runs once per level of every coordinate conversion.
     if (position == PositionType::Fixed) {
+        // FIXME: Positioning of out-of-flow(fixed, absolute) elements collected in a RenderFragmentedFlow
+        // may need to be revisited in a future patch.
+        // If the fixed renderer is inside a RenderFragmentedFlow, we should not compute location using localToAbsolute,
+        // since localToAbsolute maps the coordinates from named flow to regions coordinates and regions can be
+        // positioned in a completely different place in the viewport (RenderView).
+        if (!ancestorLayer || ancestorLayer == renderer.view().layer()) {
+            // If the fixed layer's container is the root, just add in the offset of the view. We can obtain this by calling
+            // localToAbsolute() on the RenderView.
+            location.moveBy(LayoutPoint(renderer.localToAbsolute({ }, MapCoordinatesMode::IsFixed)));
+            return ancestorLayer;
+        }
+
+        // For the fixed positioned elements inside a render flow thread, we should also skip the code path below
+        // Otherwise, for the case of ancestorLayer == rootLayer and fixed positioned element child of a transformed
+        // element in render flow thread, we will hit the fixed positioned container before hitting the ancestor layer.
+
         // For a fixed layers, we need to walk up to the root to see if there's a fixed position container
         // (e.g. a transformed layer). It's an error to call offsetFromAncestor() across a layer with a transform,
         // so we should always find the ancestor at or before we find the fixed position container, if
@@ -2850,9 +2873,7 @@ static inline const RenderLayer* accumulateOffsetTowardsAncestor(const RenderLay
             location.move(fixedContainerCoords - ancestorCoords);
             return foundAncestor ? ancestorLayer : fixedPositionContainerLayer;
         }
-    }
 
-    if (position == PositionType::Fixed) {
         ASSERT(ancestorLayer);
         if (ancestorLayer == renderer.view().layer()) {
             // Add location in flow thread coordinates.
@@ -3236,13 +3257,22 @@ void RenderLayer::paint(GraphicsContext& context, const LayoutRect& damageRect, 
 void RenderLayer::clipToRect(GraphicsContext& context, GraphicsContextStateSaver& stateSaver, RegionContextStateSaver& regionContextStateSaver, const LayerPaintingInfo& paintingInfo, OptionSet<PaintBehavior> paintBehavior, const ClipRect& clipRect, BorderRadiusClippingRule rule)
 {
     bool needsClipping = !clipRect.isInfinite() && clipRect.rect() != paintingInfo.paintDirtyRect;
+
+    FloatRect snappedClipRect;
+    if (needsClipping) {
+        LayoutRect adjustedClipRect = clipRect.rect();
+        adjustedClipRect.move(paintingInfo.subpixelOffset);
+        snappedClipRect = snapRectToDevicePixelsIfNeeded(adjustedClipRect, renderer());
+#if defined(WEBKIT_IOS6)
+        if (!paintingInfo.regionContext && !context.paintingDisabled() && snappedClipRect.contains(FloatRect { context.clipBounds() }))
+            needsClipping = false;
+#endif
+    }
+
     if (needsClipping || clipRect.affectedByRadius())
         stateSaver.save();
 
     if (needsClipping) {
-        LayoutRect adjustedClipRect = clipRect.rect();
-        adjustedClipRect.move(paintingInfo.subpixelOffset);
-        auto snappedClipRect = snapRectToDevicePixelsIfNeeded(adjustedClipRect, renderer());
         context.clip(snappedClipRect);
         regionContextStateSaver.pushClip(enclosingIntRect(snappedClipRect));
     }
@@ -4356,16 +4386,21 @@ void RenderLayer::paintForegroundForFragmentsWithPhase(PaintPhase phase, const L
     bool shouldClip = layerFragments.size() > 1;
 
     for (const auto& fragment : layerFragments) {
-        if (!fragment.shouldPaintContent || fragment.dirtyForegroundRect().isEmpty())
+        if (!fragment.shouldPaintContent)
+            continue;
+        // dirtyForegroundRect() intersects two clip rects on every call and this phase runs five
+        // times per layer.
+        auto dirtyForegroundRect = fragment.dirtyForegroundRect();
+        if (dirtyForegroundRect.isEmpty())
             continue;
 
         GraphicsContextStateSaver stateSaver(context, false);
         RegionContextStateSaver regionContextStateSaver(localPaintingInfo.regionContext);
 
         if (shouldClip)
-            clipToRect(context, stateSaver, regionContextStateSaver, localPaintingInfo, paintBehavior, fragment.dirtyForegroundRect());
+            clipToRect(context, stateSaver, regionContextStateSaver, localPaintingInfo, paintBehavior, dirtyForegroundRect);
 
-        PaintInfo paintInfo(context, fragment.dirtyForegroundRect().rect(), phase, paintBehavior, subtreePaintRootForRenderer, nullptr, nullptr, &localPaintingInfo.rootLayer->renderer(), this, localPaintingInfo.requireSecurityOriginAccessForWidgets);
+        PaintInfo paintInfo(context, dirtyForegroundRect.rect(), phase, paintBehavior, subtreePaintRootForRenderer, nullptr, nullptr, &localPaintingInfo.rootLayer->renderer(), this, localPaintingInfo.requireSecurityOriginAccessForWidgets);
         if (phase == PaintPhase::Foreground)
             paintInfo.overlapTestRequests = localPaintingInfo.overlapTestRequests;
         renderer().paint(paintInfo, paintOffsetForRenderer(fragment, localPaintingInfo));
@@ -5180,8 +5215,10 @@ ClipRects* RenderLayer::clipRects(const ClipRectsContext& context) const
 
 bool RenderLayer::clipCrossesPaintingBoundary() const
 {
-    return parent()->enclosingPaginationLayer(IncludeCompositedPaginatedLayers) != enclosingPaginationLayer(IncludeCompositedPaginatedLayers)
-        || parent()->enclosingCompositingLayerForRepaint().layer != enclosingCompositingLayerForRepaint().layer;
+    auto* parentLayer = parent();
+    if (parentLayer->enclosingPaginationLayer(IncludeCompositedPaginatedLayers) != enclosingPaginationLayer(IncludeCompositedPaginatedLayers))
+        return true;
+    return parentLayer->enclosingCompositingLayerForRepaint().layer != enclosingCompositingLayerForRepaint().layer;
 }
 
 void RenderLayer::calculateClipRects(const ClipRectsContext& clipRectsContext, ClipRects& clipRects) const
@@ -5501,21 +5538,8 @@ LayoutRect RenderLayer::localBoundingBox(OptionSet<CalculateLayerBoundsFlag> fla
     // (3) Floats.  When a layer has overhanging floats that it paints, we need to make sure to include these overhanging floats
     // as part of our bounding box.  We do this because we are the responsible layer for both hit testing and painting those
     // floats.
-    LayoutRect result;
-    if (CheckedPtr renderInline = dynamicDowncast<RenderInline>(renderer()); renderInline && renderer().isInline())
-        result = renderInline->linesVisualOverflowBoundingBox();
-    else if (CheckedPtr modelObject = dynamicDowncast<RenderSVGModelObject>(renderer()))
-        result = modelObject->visualOverflowRectEquivalent();
-    else if (CheckedPtr tableRow = dynamicDowncast<RenderTableRow>(renderer())) {
-        // Our bounding box is just the union of all of our cells' border/overflow rects.
-        for (RenderTableCell* cell = tableRow->firstCell(); cell; cell = cell->nextCell()) {
-            LayoutRect bbox = cell->borderBoxRect();
-            result.unite(bbox);
-            LayoutRect overflowRect = tableRow->visualOverflowRect();
-            if (bbox != overflowRect)
-                result.unite(overflowRect);
-        }
-    } else {
+    auto boxBoundingBox = [&] {
+        LayoutRect result;
         RenderBox* box = renderBox();
         ASSERT(box);
         if (!(flags & DontConstrainForMask) && box->hasMask()) {
@@ -5535,7 +5559,32 @@ LayoutRect RenderLayer::localBoundingBox(OptionSet<CalculateLayerBoundsFlag> fla
             result.setWidth(std::max(result.width(), frameView->contentsWidth() - result.x()));
             result.setHeight(std::max(result.height(), frameView->contentsHeight() - result.y()));
         }
-    }
+        return result;
+    };
+
+    // Nearly every layer owns a plain box, and a plain box can be none of the three special cases:
+    // RenderTableRow is the only box among them, and neither RenderInline nor RenderSVGModelObject
+    // is one. So one type test here stands in for three.
+    if (renderer().isRenderBox() && !renderer().isRenderTableRow())
+        return boxBoundingBox();
+
+    LayoutRect result;
+    if (CheckedPtr renderInline = dynamicDowncast<RenderInline>(renderer()); renderInline && renderer().isInline())
+        result = renderInline->linesVisualOverflowBoundingBox();
+    else if (CheckedPtr modelObject = dynamicDowncast<RenderSVGModelObject>(renderer()))
+        result = modelObject->visualOverflowRectEquivalent();
+    else if (CheckedPtr tableRow = dynamicDowncast<RenderTableRow>(renderer())) {
+        // Our bounding box is just the union of all of our cells' border/overflow rects.
+        for (RenderTableCell* cell = tableRow->firstCell(); cell; cell = cell->nextCell()) {
+            LayoutRect bbox = cell->borderBoxRect();
+            result.unite(bbox);
+            LayoutRect overflowRect = tableRow->visualOverflowRect();
+            if (bbox != overflowRect)
+                result.unite(overflowRect);
+        }
+    } else
+        result = boxBoundingBox();
+
     return result;
 }
 

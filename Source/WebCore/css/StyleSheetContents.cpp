@@ -399,6 +399,26 @@ const AtomString& StyleSheetContents::namespaceURIFromPrefix(const AtomString& p
 
 bool StyleSheetContents::parseAuthorStyleSheet(const CachedCSSStyleSheet* cachedStyleSheet, const SecurityOrigin* securityOrigin)
 {
+#if defined(WEBKIT_IOS6)
+    static const bool logSheets = getenv("WEBKIT_IOS6_STYLE_LOG");
+    if (logSheets) [[unlikely]] {
+        static unsigned sheets;
+        static double totalMilliseconds;
+        MonotonicTime started = MonotonicTime::now();
+        bool result = parseAuthorStyleSheetInternal(cachedStyleSheet, securityOrigin);
+        double milliseconds = (MonotonicTime::now() - started).milliseconds();
+        sheets++;
+        totalMilliseconds += milliseconds;
+        WTFLogAlways("[sheet] %u: %.0f ms, %.0f ms in total, ended %.0f, %s", sheets, milliseconds, totalMilliseconds,
+            WallTime::now().secondsSinceEpoch().milliseconds(), originalURL().utf8().data());
+        return result;
+    }
+    return parseAuthorStyleSheetInternal(cachedStyleSheet, securityOrigin);
+}
+
+bool StyleSheetContents::parseAuthorStyleSheetInternal(const CachedCSSStyleSheet* cachedStyleSheet, const SecurityOrigin* securityOrigin)
+{
+#endif
     bool isSameOriginRequest = securityOrigin && securityOrigin->canRequest(baseURL(), OriginAccessPatternsForWebProcess::singleton());
     CachedCSSStyleSheet::MIMETypeCheckHint mimeTypeCheckHint = isStrictParserMode(m_parserContext.mode) || !isSameOriginRequest ? CachedCSSStyleSheet::MIMETypeCheckHint::Strict : CachedCSSStyleSheet::MIMETypeCheckHint::Lax;
     bool hasValidMIMEType = true;

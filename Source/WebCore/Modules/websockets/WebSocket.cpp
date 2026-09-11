@@ -287,8 +287,26 @@ ExceptionOr<void> WebSocket::connect(const String& url, const Vector<String>& pr
     if (RefPtr provider = context->socketProvider())
         m_channel = ThreadableWebSocketChannel::create(context.get(), *this, *provider);
 
-    // Every ScriptExecutionContext should have a SocketProvider.
-    RELEASE_ASSERT(m_channel);
+    // A port without a socket provider fails the connection, it does not end the
+    // process.
+    //
+    // This assertion assumes every context has a provider that can produce a
+    // channel. WebKitLegacy built with CMake has one that returns nullptr:
+    // upstream moved the socket implementation into the network process and left
+    // no in-process channel behind. So the assertion is not guarding against a
+    // programming error here - it fires on the first site that opens a socket,
+    // which for a signed-in Threads is immediately, and takes the whole browser
+    // with it.
+    //
+    // Failing asynchronously is what the specification asks for when a
+    // connection cannot be established: the page gets an error event and then a
+    // close, and a site that treats a socket as an optimisation carries on
+    // polling. Which is what happens now instead of a crash.
+    if (!m_channel) {
+        m_state = CLOSED;
+        failAsynchronously();
+        return { };
+    }
 
     // FIXME: There is a disagreement about restriction of subprotocols between WebSocket API and hybi-10 protocol
     // draft. The former simply says "only characters in the range U+0021 to U+007E are allowed," while the latter

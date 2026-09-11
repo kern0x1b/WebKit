@@ -56,6 +56,19 @@ static inline bool NODELETE isRenderingMaskImage(const RenderObject& object)
     return object.view().frameView().paintBehavior().contains(PaintBehavior::RenderingSVGClipOrMask);
 }
 
+#if defined(WEBKIT_IOS6)
+static inline bool NODELETE svgRenderingContextNeedsNoPreparation(const RenderElement& renderer, const Style::ComputedStyle& style)
+{
+    return !renderer.hasCachedSVGResource()
+        && style.opacity().isOpaque()
+        && style.blendMode() == BlendMode::Normal
+        && style.isolation() == Isolation::Auto
+        && !style.hasPositionedMask()
+        && !WTF::holdsAlternative<Style::BasicShapePath>(style.clipPath())
+        && !WTF::holdsAlternative<Style::BoxPath>(style.clipPath());
+}
+#endif
+
 SVGRenderingContext::SVGRenderingContext(SVGRenderingContext&& other)
     : m_renderer { other.m_renderer }
     , m_paintInfo { other.m_paintInfo }
@@ -110,6 +123,13 @@ void SVGRenderingContext::prepareToRenderSVGContent(RenderElement& renderer, Pai
 
     auto& style = m_renderer->style();
 
+#if defined(WEBKIT_IOS6)
+    if (svgRenderingContextNeedsNoPreparation(renderer, style)) {
+        m_renderingFlags |= RenderingPrepared;
+        return;
+    }
+#endif
+
     // Setup transparency layers before setting up SVG resources!
     bool isRenderingMask = isRenderingMaskImage(*m_renderer);
     // RenderLayer takes care of root opacity.
@@ -123,7 +143,9 @@ void SVGRenderingContext::prepareToRenderSVGContent(RenderElement& renderer, Pai
             isolateMaskForBlending = graphicsElement->shouldIsolateBlending();
     }
 
-    if (!(renderer.document().settings().layerBasedSVGEngineEnabled() && is<RenderSVGText>(renderer))) {
+    bool layerBasedSVGEngineEnabled = renderer.document().settings().layerBasedSVGEngineEnabled();
+
+    if (!(layerBasedSVGEngineEnabled && is<RenderSVGText>(renderer))) {
         if (opacity < 1 || hasBlendMode || isolateMaskForBlending || hasIsolation) {
             FloatRect repaintRect = m_renderer->repaintRectInLocalCoordinates();
             m_paintInfo->context().clip(repaintRect);
@@ -140,13 +162,14 @@ void SVGRenderingContext::prepareToRenderSVGContent(RenderElement& renderer, Pai
         }
     }
 
-    bool hasSimpleClip = WTF::holdsAlternative<Style::BasicShapePath>(style.clipPath()) || WTF::holdsAlternative<Style::BoxPath>(style.clipPath());
+    auto& clipPath = style.clipPath();
+    bool hasSimpleClip = WTF::holdsAlternative<Style::BasicShapePath>(clipPath) || WTF::holdsAlternative<Style::BoxPath>(clipPath);
     if (hasSimpleClip && !is<LegacyRenderSVGRoot>(renderer))
         SVGRenderSupport::clipContextToCSSClippingArea(m_paintInfo->context(), renderer);
 
     // FIXME: Text painting under LBSE reaches this code path, since all text painting code is shared between legacy / LBSE.
     SVGResources* resources = nullptr;
-    if (!renderer.document().settings().layerBasedSVGEngineEnabled())
+    if (!layerBasedSVGEngineEnabled)
         resources = SVGResourcesCache::cachedResourcesForRenderer(*m_renderer);
 
     if (!resources) {

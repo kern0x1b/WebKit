@@ -377,6 +377,18 @@ auto TreeResolver::resolveElement(Element& element, const Style::ComputedStyle* 
     }
 
     auto resolveAndAddPseudoElementStyle = [&](const PseudoElementIdentifier& pseudoElementIdentifier) {
+#if defined(WEBKIT_IOS6)
+        switch (pseudoElementIdentifier.type) {
+        case PseudoElementType::FirstLine:
+        case PseudoElementType::FirstLetter:
+            break;
+        default:
+            if (!update.style->hasPseudoStyle(pseudoElementIdentifier.type)
+                && (!existingStyle || !existingStyle->hasPseudoElementStyles()))
+                return OptionSet<Change> { };
+            break;
+        }
+#endif
         const Style::ComputedStyle* existingPseudoStyle = existingStyle ? existingStyle->pseudoElementStyle(pseudoElementIdentifier) : nullptr;
         auto pseudoElementUpdate = resolvePseudoElement(element, pseudoElementIdentifier, update, parent().isInDisplayNoneTree, existingPseudoStyle);
 
@@ -1290,31 +1302,19 @@ void TreeResolver::resolveComposedTree()
 
         if (RefPtr text = dynamicDowncast<Text>(node)) {
             auto containsOnlyASCIIWhitespace = text->containsOnlyASCIIWhitespace();
-            auto isDisplayContentsParent = parent.style.display() == DisplayType::Contents;
-            auto inheritedDisplayContentsStyle = isDisplayContentsParent ? createInheritedDisplayContentsStyleIfNeeded(parent.style, parentBoxStyle()) : nullptr;
-
             auto needsTextUpdate = [&] {
-                if ((text->hasInvalidRenderer() && parent.changes != Change::Renderer) || inheritedDisplayContentsStyle)
+                if ((text->hasInvalidRenderer() && parent.changes != Change::Renderer) || parent.style.display() == DisplayType::Contents)
                     return true;
-
-                auto* textRenderer = text->renderer();
-                if (isDisplayContentsParent) {
-                    if (textRenderer)
-                        return textRenderer->hasInlineWrapperForDisplayContents();
-                    if (!containsOnlyASCIIWhitespace)
-                        return true;
-                }
-
-                if (!textRenderer && containsOnlyASCIIWhitespace && parent.style.preserveNewline()) {
+                if (!text->renderer() && containsOnlyASCIIWhitespace && parent.style.preserveNewline()) {
                     // FIXME: This really needs to be done only when parent.style.preserveNewline() changes value.
                     return true;
                 }
                 return false;
             };
-
             if (needsTextUpdate()) {
                 TextUpdate textUpdate;
-                textUpdate.inheritedDisplayContentsStyle = WTF::move(inheritedDisplayContentsStyle);
+                textUpdate.inheritedDisplayContentsStyle = createInheritedDisplayContentsStyleIfNeeded(parent.style, parentBoxStyle());
+
                 m_update->addText(*text, protect(parent.element), WTF::move(textUpdate));
             }
 
@@ -1510,7 +1510,7 @@ std::unique_ptr<Update> TreeResolver::resolve()
     if (!documentElement->childNeedsStyleRecalc() && !documentElement->needsStyleRecalc())
         return WTF::move(m_update);
 
-    m_didSeePendingStylesheet = m_document->styleScope().hasPendingSheetsBeforeBody();
+    m_didSeePendingStylesheet = m_document->styleScope().blocksRenderingBeforeBody();
 
     if (!m_update)
         m_update = makeUnique<Update>(m_document);

@@ -91,7 +91,12 @@ static bool NODELETE shouldDirtyAllStyle(const Vector<Ref<StyleSheetContents>>& 
 
 Invalidator::Invalidator(const Vector<Ref<StyleSheetContents>>& sheets, const MQ::MediaQueryEvaluator& mediaQueryEvaluator)
     : m_ownedRuleSet(RuleSet::create())
+#if defined(WEBKIT_IOS6)
+    , m_ownedRuleSetVector({ { m_ownedRuleSet } })
+    , m_ruleSets(m_ownedRuleSetVector)
+#else
     , m_ruleSets({ { m_ownedRuleSet } })
+#endif
     , m_dirtiesAllStyle(shouldDirtyAllStyle(sheets))
 {
     if (m_dirtiesAllStyle)
@@ -174,6 +179,18 @@ Invalidator::CheckDescendants Invalidator::invalidateIfNeeded(Element& element, 
     case Validity::Valid:
     case Validity::AnimationInvalid:
     case Validity::InlineStyleInvalid: {
+#if defined(WEBKIT_IOS6)
+        if (!m_ruleSets.isEmpty()) {
+            ElementRuleCollector ruleCollector(element, *m_ruleSets[0].ruleSet, selectorMatchingState, SelectorChecker::Mode::StyleInvalidation);
+            for (auto& ruleSet : m_ruleSets) {
+                auto matches = ruleCollector.matchesAnyAuthorRules(*ruleSet.ruleSet);
+                if (ruleSet.isNegation == IsNegation::No ? matches : !matches) {
+                    element.invalidateStyle();
+                    break;
+                }
+            }
+        }
+#else
         for (auto& ruleSet : m_ruleSets) {
             ElementRuleCollector ruleCollector(element, *ruleSet.ruleSet, selectorMatchingState, SelectorChecker::Mode::StyleInvalidation);
 
@@ -183,6 +200,7 @@ Invalidator::CheckDescendants Invalidator::invalidateIfNeeded(Element& element, 
                 break;
             }
         }
+#endif
 
         return CheckDescendants::Yes;
     }
@@ -602,6 +620,13 @@ void Invalidator::invalidateUserAgentParts(ShadowRoot& shadowRoot)
 
 void Invalidator::invalidateInShadowTreeIfNeeded(Element& element)
 {
+    // Every branch below is gated on one of these, and this runs for every element of the traversal.
+    if (!m_ruleInformation.hasUserAgentPartRules
+        && !m_ruleInformation.hasHostPseudoClassRulesMatchingInShadowTree
+        && !m_ruleInformation.hasCuePseudoElementRules
+        && !m_ruleInformation.hasPartPseudoElementRules)
+        return;
+
     RefPtr shadowRoot = element.shadowRoot();
     if (!shadowRoot)
         return;

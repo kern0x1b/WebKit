@@ -72,6 +72,9 @@ private:
     ResizeObservation(Element&, ResizeObserverBoxOptions);
 
     std::optional<BoxSizes> computeObservedSizes() const;
+#if defined(WEBKIT_IOS6)
+    std::optional<LayoutSize> computeObservedLogicalSizeForObservedBox() const;
+#endif
     LayoutPoint computeTargetLocation() const;
 
     WeakPtr<Element, WeakPtrImplWithEventTargetData> m_target;

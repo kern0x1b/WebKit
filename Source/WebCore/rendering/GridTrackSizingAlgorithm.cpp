@@ -40,6 +40,7 @@
 #include "StylePrimitiveNumericTypes+Evaluation.h"
 #include "StylePrimitiveNumericTypes+EvaluationMinimum.h"
 #include "StyleSelfAlignmentData.h"
+#include <algorithm>
 #include <ranges>
 #include <wtf/Range.h>
 #include <wtf/StdMap.h>
@@ -49,6 +50,19 @@
 #include <wtf/text/ParsingUtilities.h>
 
 namespace WebCore {
+
+static inline bool gridTrackSizingSortedIndicesIntersect(const Vector<unsigned>& sortedTrackIndices, unsigned startLine, unsigned endLine)
+{
+    auto* begin = sortedTrackIndices.begin();
+    auto* end = sortedTrackIndices.end();
+    auto* first = std::lower_bound(begin, end, startLine);
+    return first != end && *first < endLine;
+}
+
+static inline bool gridTrackSizingSortedIndicesContain(const Vector<unsigned>& sortedTrackIndices, unsigned trackIndex)
+{
+    return gridTrackSizingSortedIndicesIntersect(sortedTrackIndices, trackIndex, trackIndex + 1);
+}
 
 class ScopedGridAreaContentLogicalHeight {
 public:
@@ -1058,6 +1072,11 @@ LayoutUnit GridTrackSizingAlgorithmStrategy::logicalHeightForGridItem(RenderBox&
             return true;
         return false;
     };
+    // Keeping the overriding size instead of clearing it - so the item is not
+    // dirtied here at all - was tried and measured: the self-dirtied count per
+    // pass halved from 578 to 288, the total walk did not move (4500 blocks
+    // against 4351, 1360 ms either way), and the page rendered grey with empty
+    // boxes. The measurement it does here is load-bearing.
     if (hasOverridingContainingBlockContentSizeForGridItem() && shouldClearOverridingContainingBlockContentSizeForGridItem(gridItem, Style::GridTrackSizingDirection::Rows)) {
         setOverridingContainingBlockContentSizeForGridItem(*renderGrid(), gridItem, gridItemBlockDirection, std::nullopt);
         gridItem.setNeedsLayout(MarkingBehavior::MarkOnlyThis);
@@ -1073,8 +1092,13 @@ LayoutUnit GridTrackSizingAlgorithmStrategy::logicalHeightForGridItem(RenderBox&
     gridItem.layoutIfNeeded();
 
     auto gridItemLogicalHeight = gridItem.logicalHeight() + GridLayoutFunctions::marginLogicalSizeForGridItem(*renderGrid(), gridItemBlockDirection, gridItem) + m_algorithm.baselineOffsetForGridItem(gridItem, direction());
+#if defined(WEBKIT_IOS6)
+    if (intrinsicLogicalHeightsForRowSizingFirstPass && sizingState() == GridTrackSizingAlgorithm::SizingState::RowSizingFirstIteration && renderGrid()->canCacheIntrinsicLogicalHeightForRowSizingFirstPass(gridItem))
+        intrinsicLogicalHeightsForRowSizingFirstPass->setSizeForGridItem(gridItem, gridItemLogicalHeight);
+#else
     if (intrinsicLogicalHeightsForRowSizingFirstPass && sizingState() == GridTrackSizingAlgorithm::SizingState::RowSizingFirstIteration)
         intrinsicLogicalHeightsForRowSizingFirstPass->setSizeForGridItem(gridItem, gridItemLogicalHeight);
+#endif
 
     return gridItemLogicalHeight;
 }
@@ -1819,9 +1843,7 @@ void GridTrackSizingAlgorithm::aggregateGridItemsForIntrinsicSizing(Vector<GridI
     auto& allTracks = tracks(m_direction);
 
     traverseSubgridTreeForIntrinsicSizing([&](RenderBox& gridItem, GridSpan gridItemSpan) {
-        bool spansContentSizedTracks = std::ranges::any_of(m_contentSizedTracksIndex, [startLine = gridItemSpan.startLine(), endLine = gridItemSpan.endLine()](auto trackIndex) {
-            return trackIndex >= startLine && trackIndex < endLine;
-        });
+        bool spansContentSizedTracks = gridTrackSizingSortedIndicesIntersect(m_contentSizedTracksIndex, gridItemSpan.startLine(), gridItemSpan.endLine());
         if (!spansContentSizedTracks)
             return;
 
@@ -1873,9 +1895,7 @@ void GridTrackSizingAlgorithm::computeDefiniteAndIndefiniteItemsForMasonry(StdMa
     };
 
     auto isTrackContentSized = [&](unsigned trackIndex) {
-        return std::ranges::any_of(m_contentSizedTracksIndex, [trackIndex](auto index) {
-            return index == trackIndex;
-        });
+        return gridTrackSizingSortedIndicesContain(m_contentSizedTracksIndex, trackIndex);
     };
 
     traverseSubgridTreeForIntrinsicSizing([&](RenderBox& gridItem, GridSpan gridItemSpan) {
@@ -1910,9 +1930,7 @@ void GridTrackSizingAlgorithm::computeDefiniteAndIndefiniteItemsForMasonry(StdMa
         // Indefinite items contribute to all content-sized tracks (aggregated by span
         // length), so they skip this check.
         if (!isIndefinite) {
-            bool spansContentSizedTracks = std::ranges::any_of(m_contentSizedTracksIndex, [startLine = gridItemSpan.startLine(), endLine = gridItemSpan.endLine()](auto trackIndex) {
-                return trackIndex >= startLine && trackIndex < endLine;
-            });
+            bool spansContentSizedTracks = gridTrackSizingSortedIndicesIntersect(m_contentSizedTracksIndex, gridItemSpan.startLine(), gridItemSpan.endLine());
             if (!spansContentSizedTracks)
                 return;
         }
@@ -2091,6 +2109,20 @@ void GridTrackSizingAlgorithm::setup(Style::GridTrackSizingDirection direction, 
     setAvailableSpace(direction, availableSpace ? std::max(0_lu, *availableSpace) : availableSpace);
 
     m_sizingOperation = sizingOperation;
+#if defined(WEBKIT_IOS6)
+    switch (m_sizingOperation) {
+    case SizingOperation::IntrinsicSizeComputation:
+        if (!m_ios6IndefiniteSizeStrategy)
+            m_ios6IndefiniteSizeStrategy = makeUnique<IndefiniteSizeStrategy>(*this);
+        m_strategy = m_ios6IndefiniteSizeStrategy.get();
+        break;
+    case SizingOperation::TrackSizing:
+        if (!m_ios6DefiniteSizeStrategy)
+            m_ios6DefiniteSizeStrategy = makeUnique<DefiniteSizeStrategy>(*this);
+        m_strategy = m_ios6DefiniteSizeStrategy.get();
+        break;
+    }
+#else
     switch (m_sizingOperation) {
     case SizingOperation::IntrinsicSizeComputation:
         m_strategy = makeUnique<IndefiniteSizeStrategy>(*this);
@@ -2099,6 +2131,7 @@ void GridTrackSizingAlgorithm::setup(Style::GridTrackSizingDirection direction, 
         m_strategy = makeUnique<DefiniteSizeStrategy>(*this);
         break;
     }
+#endif
 
     m_contentSizedTracksIndex.shrink(0);
     m_flexibleSizedTracksIndex.shrink(0);
@@ -2110,9 +2143,26 @@ void GridTrackSizingAlgorithm::setup(Style::GridTrackSizingDirection direction, 
     } else
         setFreeSpace(direction, std::nullopt);
 
+#if defined(WEBKIT_IOS6)
+    auto& directionTracks = tracks(direction);
+    while (directionTracks.size() > numTracks)
+        retireTrack(directionTracks.takeLast());
+    for (auto& track : directionTracks)
+        track->resetForSizingRun();
+    if (directionTracks.size() < numTracks) {
+        directionTracks.reserveCapacity(numTracks);
+        while (directionTracks.size() < numTracks) {
+            if (m_ios6RetiredTracks.isEmpty())
+                directionTracks.append(makeUniqueRef<GridTrack>());
+            else
+                directionTracks.append(m_ios6RetiredTracks.takeLast());
+        }
+    }
+#else
     tracks(direction) = Vector<UniqueRef<GridTrack>>(numTracks, [](size_t) {
         return makeUniqueRef<GridTrack>();
     });
+#endif
 
     m_needsSetup = false;
     m_hasPercentSizedRowsIndefiniteHeight = false;
@@ -2252,8 +2302,13 @@ void GridTrackSizingAlgorithm::reset()
 {
     ASSERT(wasSetup());
     m_sizingState = SizingState::ColumnSizingFirstIteration;
+#if defined(WEBKIT_IOS6)
+    retireTracks(m_columns);
+    retireTracks(m_rows);
+#else
     m_columns.shrink(0);
     m_rows.shrink(0);
+#endif
     m_contentSizedTracksIndex.shrink(0);
     m_flexibleSizedTracksIndex.shrink(0);
     m_autoSizedTracksForStretchIndex.shrink(0);

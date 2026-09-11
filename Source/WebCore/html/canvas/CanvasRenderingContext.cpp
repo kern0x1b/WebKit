@@ -24,6 +24,8 @@
  */
 
 #include "config.h"
+#include <wtf/CheckedArithmetic.h>
+#include <wtf/RAMSize.h>
 #include "CanvasRenderingContext.h"
 
 #include "CachedImage.h"
@@ -216,10 +218,32 @@ void CanvasRenderingContext::checkOrigin(const CSSStyleImageValue&)
     m_canvas->setOriginTainted();
 }
 
+#if defined(WEBKIT_IOS6)
+static std::atomic<size_t> s_activeCanvasPixelMemory { 0 };
+
+size_t CanvasRenderingContext::maxActiveCanvasPixelMemory()
+{
+    return WTF::ramSizeDisregardingJetsamLimit() / 4;
+}
+
+bool CanvasRenderingContext::canAllocateCanvasPixelMemory(size_t cost)
+{
+    CheckedSize requested = s_activeCanvasPixelMemory.load(std::memory_order_relaxed);
+    requested += cost;
+    return !requested.hasOverflowed() && requested <= maxActiveCanvasPixelMemory();
+}
+#endif
+
 void CanvasRenderingContext::updateMemoryCost(size_t newMemoryCost) const
 {
     size_t oldMemoryCost = m_memoryCost.load(std::memory_order_relaxed);
     m_memoryCost.store(newMemoryCost, std::memory_order_relaxed);
+#if defined(WEBKIT_IOS6)
+    if (newMemoryCost >= oldMemoryCost)
+        s_activeCanvasPixelMemory.fetch_add(newMemoryCost - oldMemoryCost, std::memory_order_relaxed);
+    else
+        s_activeCanvasPixelMemory.fetch_sub(oldMemoryCost - newMemoryCost, std::memory_order_relaxed);
+#endif
     if (newMemoryCost) {
         if (RefPtr scriptExecutionContext = protect(canvasBase())->scriptExecutionContext()) {
             JSC::JSLockHolder lock(scriptExecutionContext->vm());

@@ -48,6 +48,7 @@
 #include "SharedBuffer.h"
 #include "StyleComputedStyle+GettersInlines.h"
 #include "SubresourceLoader.h"
+#include <stdlib.h>
 #include <wtf/NeverDestroyed.h>
 #include <wtf/StdLibExtras.h>
 
@@ -61,6 +62,10 @@
 
 #if ENABLE(MULTI_REPRESENTATION_HEIC)
 #include "MultiRepresentationHEICMetrics.h"
+#endif
+
+#if defined(WEBKIT_IOS6) && PLATFORM(COCOA)
+#include "DiskCacheMonitorCocoa.h"
 #endif
 
 namespace WebCore {
@@ -509,6 +514,9 @@ inline void CachedImage::clearImage()
     m_lastUpdateImageDataTime = { };
     m_updateImageDataCount = 0;
     m_allowsOrientationOverride = true;
+#if defined(WEBKIT_IOS6)
+    m_intrinsicSizeIsAvailable = false;
+#endif
 }
 
 void CachedImage::updateBufferInternal(const FragmentedSharedBuffer& data)
@@ -529,6 +537,11 @@ void CachedImage::updateBufferInternal(const FragmentedSharedBuffer& data)
     // will be delayed until info (like size or specific image frames) are queried which
     // usually happens when the observers are repainted.
     encodedDataStatus = updateImageData(false);
+
+#if defined(WEBKIT_IOS6)
+    if (encodedDataStatus >= EncodedDataStatus::SizeAvailable)
+        m_intrinsicSizeIsAvailable = true;
+#endif
 
     if (encodedDataStatus > EncodedDataStatus::Error && encodedDataStatus < EncodedDataStatus::SizeAvailable)
         return;
@@ -551,6 +564,20 @@ bool CachedImage::shouldDeferUpdateImageData() const
 {
     static constexpr std::array<double, 5> updateImageDataBackoffIntervals { 0, 1, 3, 6, 15 };
     unsigned interval = m_updateImageDataCount;
+
+#if defined(WEBKIT_IOS6)
+    if (m_intrinsicSizeIsAvailable) {
+        static const double progressiveInterval = [] -> double {
+            if (const char* override = getenv("WEBKIT_IOS6_PROGRESSIVE_IMAGE_INTERVAL"))
+                return atof(override);
+            return 0;
+        }();
+
+        if (progressiveInterval <= 0)
+            return true;
+        return (MonotonicTime::now() - m_lastUpdateImageDataTime).seconds() < progressiveInterval;
+    }
+#endif
 
     // The first time through, the chunk time will be 0 and the image will get an update.
     return (MonotonicTime::now() - m_lastUpdateImageDataTime).seconds() < updateImageDataBackoffIntervals[interval];
@@ -614,9 +641,30 @@ void CachedImage::finishLoading(const FragmentedSharedBuffer* data, const Networ
     setLoading(false);
     setAllowsOrientationOverride(isCORSSameOrigin() || protect(m_image)->sourceURL().protocolIsData());
 
+#if defined(WEBKIT_IOS6)
+    fileBackEncodedDataIfWorthwhile();
+#endif
+
     notifyObservers();
     CachedResource::finishLoading(data, metrics);
 }
+
+#if defined(WEBKIT_IOS6)
+void CachedImage::fileBackEncodedDataIfWorthwhile()
+{
+    static constexpr size_t leastWorthMapping = 16 * 1024;
+
+    if (!m_data || m_data->size() < leastWorthMapping)
+        return;
+
+    for (auto& entry : *m_data) {
+        if (entry.segment->containsMappedFileData())
+            return;
+    }
+
+    fileBackEncodedImageData(resourceRequest(), sessionID(), m_data->makeContiguous());
+}
+#endif
 
 void CachedImage::didReplaceSharedBufferContents()
 {
