@@ -196,6 +196,17 @@ if JSVALUE64
     end
     const LowestOfHighBits = constexpr JSValue::LowestOfHighBits
 else
+    const TagOther        = 0
+    const TagBool         = 0
+    const TagUndefined    = 0
+    const ValueEmpty      = 0
+    const ValueFalse      = 0
+    const ValueTrue       = 0
+    const ValueUndefined  = 0
+    const ValueNull       = 0
+    const TagNumber       = 0
+    const NotCellMask     = 0
+    const LowestOfHighBits = 0
     const Int32Tag = constexpr JSValue::Int32Tag
     const BooleanTag = constexpr JSValue::BooleanTag
     const NullTag = constexpr JSValue::NullTag
