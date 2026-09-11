@@ -52,6 +52,7 @@ BACKENDS =
 WORKING_BACKENDS =
     [
      "X86_64",
+     "ARMv7",
      "ARM64",
      "ARM64E",
      "RISCV64",
@@ -73,6 +74,7 @@ def canonicalizeBackendNames(backendNames)
     backendNames.each {
         | backendName |
         backendName = backendName.upcase
+        backendName.sub!(/ARMV7([KS]?)(.*)/) { | _ | 'ARMv7' + $1.downcase + $2 }
         backendName = "ARM64" if backendName == "ARM64_32"
         newBackendNames << backendName
     }
