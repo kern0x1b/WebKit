@@ -447,24 +447,6 @@ end
 # - The metadata (PM / pointer to metadata) must be stored in a callee-save register.
 # - C calls are still given the Instruction* rather than the PC index.
 #   This requires an add before the call, and a sub after.
-const PC = t4 # When changing this, make sure LLIntPC is up to date in LLIntPCRanges.h
-if ARM64 or ARM64E or RISCV64
-    const metadataTable = csr6
-    const PB = csr7
-    const numberTag = csr8
-    const notCellMask = csr9
-elsif X86_64
-    const metadataTable = csr1
-    const PB = csr2
-    const numberTag = csr3
-    const notCellMask = csr4
-elsif C_LOOP or ARMv7
-    const PB = csr0
-    const numberTag = csr1
-    const notCellMask = csr2
-    const metadataTable = csr3
-end
-
 if GIGACAGE_ENABLED
     const GigacagePrimitiveBasePtrOffset = constexpr Gigacage::offsetOfPrimitiveGigacageBasePtr
 end
