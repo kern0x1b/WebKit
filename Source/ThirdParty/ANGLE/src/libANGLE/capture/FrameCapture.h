@@ -10,11 +10,8 @@
 #ifndef LIBANGLE_FRAME_CAPTURE_H_
 #define LIBANGLE_FRAME_CAPTURE_H_
 
-#ifdef UNSAFE_BUFFERS_BUILD
-#    pragma allow_unsafe_buffers
-#endif
-
 #include <fstream>
+#include "common/unsafe_buffers.h"
 #include "sys/stat.h"
 
 #include "common/PackedEnums.h"
@@ -501,6 +498,7 @@ using TextureLevelDataMap = std::map<gl::TextureID, TextureLevels>;
 struct SurfaceParams
 {
     gl::Extents extents;
+    EGLint type = EGL_NONE;
     egl::ColorSpace colorSpace;
 };
 
@@ -824,7 +822,7 @@ class FrameCaptureShared final : angle::NonCopyable
         for (size_t i = 0; i < numObjs; ++i)
         {
             mResourceTrackerCL.mCLParamIDToIndexVector[paramCaptureKey->uniqueID].push_back(
-                (this->*getCLObjIndexFunc)(&objs[i]));
+                (this->*getCLObjIndexFunc)(&ANGLE_UNSAFE_TODO(objs[i])));
         }
     }
 
@@ -975,6 +973,17 @@ class FrameCaptureShared final : angle::NonCopyable
 
     angle::SimpleMutex &getFrameCaptureMutex() { return mFrameCaptureMutex; }
 
+    void markGLSyncEmitted(gl::SyncID syncID) { mEmittedGLSyncIDs.insert(syncID.value); }
+    void markEGLSyncEmitted(egl::SyncID syncID) { mEmittedEGLSyncIDs.insert(syncID.value); }
+    bool isGLSyncEmitted(gl::SyncID syncID) const
+    {
+        return mEmittedGLSyncIDs.find(syncID.value) != mEmittedGLSyncIDs.end();
+    }
+    bool isEGLSyncEmitted(egl::SyncID syncID) const
+    {
+        return mEmittedEGLSyncIDs.find(syncID.value) != mEmittedEGLSyncIDs.end();
+    }
+
     void setDeferredLinkProgram(gl::ShaderProgramID programID)
     {
         mDeferredLinkPrograms.emplace(programID);
@@ -1093,6 +1102,11 @@ class FrameCaptureShared final : angle::NonCopyable
     bool mCallCaptured           = false;
     bool mStartFrameCallCaptured = false;
 
+    // Track Sync IDs emitted in the trace to allow skipping of external sync objects
+    // to prevent corrupttion of Sync state tracking
+    std::unordered_set<GLuint> mEmittedGLSyncIDs;
+    std::unordered_set<GLuint> mEmittedEGLSyncIDs;
+
     // When true, it removes unnecessary calls going into
     // replay files that occur before mCaptureStartFrame
     bool removeUnneededOpenCLCalls = false;
@@ -1173,9 +1187,8 @@ void CaptureGLCallToFrameCapture(CaptureFuncT captureFunc,
     }
     FrameCaptureShared *frameCaptureShared = context->getShareGroup()->getFrameCaptureShared();
 
-    // EGL calls are protected by the global context mutex but only a subset of GL calls
-    // are so protected. Ensure FrameCaptureShared access thread safety by using a
-    // frame-capture only mutex.
+    // Most but not all GL calls take the ContextMutex so we ensure thread-safe FrameCaptureShared
+    // access by always taking the frame-capture mutex
     std::lock_guard<angle::SimpleMutex> lock(frameCaptureShared->getFrameCaptureMutex());
 
     if (!frameCaptureShared->isCapturing())
@@ -1227,10 +1240,15 @@ void CaptureEGLCallToFrameCapture(CaptureFuncT captureFunc,
             return;
         }
     }
+
+    // Take standard per-context EGL entry point lock
     std::lock_guard<egl::ContextMutex> lock(context->getContextMutex());
 
     angle::FrameCaptureShared *frameCaptureShared =
         context->getShareGroup()->getFrameCaptureShared();
+    // Also take the the frame-capture mutex to cover the GL capture path
+    std::lock_guard<angle::SimpleMutex> fcLock(frameCaptureShared->getFrameCaptureMutex());
+
     if (!frameCaptureShared->isCapturing())
     {
         return;

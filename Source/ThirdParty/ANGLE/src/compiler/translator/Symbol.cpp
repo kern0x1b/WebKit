@@ -6,15 +6,12 @@
 // Symbol.cpp: Symbols representing variables, functions, structures and interface blocks.
 //
 
-#ifdef UNSAFE_BUFFERS_BUILD
-#    pragma allow_unsafe_buffers
-#endif
-
 #if defined(_MSC_VER)
 #    pragma warning(disable : 4718)
 #endif
 
 #include "compiler/translator/Symbol.h"
+#include "common/unsafe_buffers.h"
 
 #include "compiler/translator/ImmutableStringBuilder.h"
 #include "compiler/translator/SymbolTable.h"
@@ -125,30 +122,11 @@ TStructure::TStructure(TSymbolTable *symbolTable,
                        const ImmutableString &name,
                        const TFieldList *fields,
                        SymbolType symbolType)
-    : TSymbol(symbolTable, name, symbolType, SymbolClass::Struct), TFieldListCollection(fields)
+    : TSymbol(symbolTable, name, symbolType, SymbolClass::Struct),
+      TFieldListCollection(fields),
+      mAtGlobalScope(false),
+      mImplementingInterfaceBlock(false)
 {}
-
-void TStructure::createSamplerSymbols(const char *namePrefix,
-                                      const TString &apiNamePrefix,
-                                      TVector<const TVariable *> *outputSymbols,
-                                      TMap<const TVariable *, TString> *outputSymbolsToAPINames,
-                                      TSymbolTable *symbolTable) const
-{
-    ASSERT(containsSamplers());
-    for (const auto *field : *mFields)
-    {
-        const TType *fieldType = field->type();
-        if (IsSampler(fieldType->getBasicType()) || fieldType->isStructureContainingSamplers())
-        {
-            std::stringstream fieldName = sh::InitializeStream<std::stringstream>();
-            fieldName << namePrefix << "_" << field->name();
-            TString fieldApiName = apiNamePrefix + ".";
-            fieldApiName += field->name().data();
-            fieldType->createSamplerSymbols(ImmutableString(fieldName.str()), fieldApiName,
-                                            outputSymbols, outputSymbolsToAPINames, symbolTable);
-        }
-    }
-}
 
 void TStructure::setName(const ImmutableString &name)
 {
@@ -236,7 +214,7 @@ ImmutableString TFunction::buildMangledName() const
 
     for (size_t i = 0u; i < mParamCount; ++i)
     {
-        newName += mParameters[i]->getType().getMangledName();
+        newName += ANGLE_UNSAFE_TODO(mParameters[i])->getType().getMangledName();
     }
     return ImmutableString(newName);
 }

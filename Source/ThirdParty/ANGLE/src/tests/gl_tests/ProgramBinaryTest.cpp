@@ -1105,7 +1105,6 @@ TEST_P(ProgramBinaryTest, SRGBDecodeWithSamplerAndTexelFetchTest)
     // http://anglebug.com/42263564
     ANGLE_SKIP_TEST_IF(IsOpenGL() && IsIntel() && IsWindows());
     ANGLE_SKIP_TEST_IF(IsOpenGL() && IsAMD() && IsWindows());
-    ANGLE_SKIP_TEST_IF(IsOpenGL() && (IsNVIDIA() || IsARM64()) && IsMac());
     ANGLE_SKIP_TEST_IF(IsOpenGLES() && IsNexus5X());
 
     constexpr char kVS[] =
@@ -1817,8 +1816,6 @@ ANGLE_INSTANTIATE_TEST(ProgramBinariesAcrossPlatforms,
                        //                     | this config  | this config  | result
                        PlatformsWithLinkResult(ES2_D3D11(),   ES2_D3D11(),   true ), // Loading + reloading binary should work
                        PlatformsWithLinkResult(ES3_D3D11(),   ES3_D3D11(),   true ), // Loading + reloading binary should work
-                       PlatformsWithLinkResult(ES2_D3D11(),   ES2_D3D9(),    false), // Switching from D3D11 to D3D9 shouldn't work
-                       PlatformsWithLinkResult(ES2_D3D9(),    ES2_D3D11(),   false), // Switching from D3D9 to D3D11 shouldn't work
                        PlatformsWithLinkResult(ES2_D3D11(),   ES3_D3D11(),   false), // Switching to newer client version shouldn't work
                        PlatformsWithLinkResult(ES2_VULKAN(),  ES2_VULKAN(),  true ), // Loading + reloading binary should work
                        PlatformsWithLinkResult(ES3_VULKAN(),  ES3_VULKAN(),  true ), // Loading + reloading binary should work

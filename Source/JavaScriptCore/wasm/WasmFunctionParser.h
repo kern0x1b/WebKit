@@ -247,7 +247,9 @@ private:
     [[nodiscard]] PartialResult parseUnreachableExpression();
     [[nodiscard]] PartialResult unifyControl(ArgumentList&, unsigned level);
     [[nodiscard]] PartialResult checkLocalInitialized(uint32_t);
-    [[nodiscard]] PartialResult checkExpressionStack(const ControlType&, bool forceSignature = false);
+    [[nodiscard]] PartialResult checkArgumentsAndWiden(const BlockSignature&);
+    [[nodiscard]] PartialResult checkResultsAndWiden(const BlockSignature&);
+    [[nodiscard]] PartialResult endBlockAndCheckResultTypes(ControlEntry&);
 
     enum BranchConditionalityTag {
         Unconditional,
@@ -650,12 +652,9 @@ auto FunctionParser<Context>::binaryCompareCase(OpType op, BinaryOperationHandle
             BlockSignature inlineSignature;
             WASM_PARSER_FAIL_IF(!parseBlockSignatureAndNotifySIMDUseIfNeeded(inlineSignature), "can't get if's signature"_s);
 
-            const uint32_t sliceSize = m_expressionStack.size() - m_currentStackBegin;
             const uint32_t argumentCount = inlineSignature.argumentCount();
-            WASM_VALIDATOR_FAIL_IF(sliceSize < argumentCount, "Too few arguments on stack for if block. If expects ", argumentCount, ", but only ", sliceSize, " were present. If block has signature: ", inlineSignature);
+            WASM_FAIL_IF_HELPER_FAILS(checkArgumentsAndWiden(inlineSignature));
             const uint32_t parentStackHeight = m_expressionStack.size() - argumentCount;
-            for (unsigned i = 0; i < argumentCount; ++i)
-                WASM_VALIDATOR_FAIL_IF(!isSubtype(m_expressionStack[parentStackHeight + i].type(), inlineSignature.argumentType(i)), "Loop expects the argument at index", i, " to be ", inlineSignature.argumentType(i), " but argument has type ", m_expressionStack[parentStackHeight + i].type());
 
             auto args = m_expressionStack.mutableSpan().last(argumentCount);
             ControlType control;
@@ -720,12 +719,9 @@ auto FunctionParser<Context>::unaryCompareCase(OpType op, UnaryOperationHandler 
             BlockSignature inlineSignature;
             WASM_PARSER_FAIL_IF(!parseBlockSignatureAndNotifySIMDUseIfNeeded(inlineSignature), "can't get if's signature"_s);
 
-            const uint32_t sliceSize = m_expressionStack.size() - m_currentStackBegin;
             const uint32_t argumentCount = inlineSignature.argumentCount();
-            WASM_VALIDATOR_FAIL_IF(sliceSize < argumentCount, "Too few arguments on stack for if block. If expects ", argumentCount, ", but only ", sliceSize, " were present. If block has signature: ", inlineSignature);
+            WASM_FAIL_IF_HELPER_FAILS(checkArgumentsAndWiden(inlineSignature));
             const uint32_t parentStackHeight = m_expressionStack.size() - argumentCount;
-            for (unsigned i = 0; i < argumentCount; ++i)
-                WASM_VALIDATOR_FAIL_IF(!isSubtype(m_expressionStack[parentStackHeight + i].type(), inlineSignature.argumentType(i)), "Loop expects the argument at index", i, " to be ", inlineSignature.argumentType(i), " but argument has type ", m_expressionStack[parentStackHeight + i].type());
 
             auto args = m_expressionStack.mutableSpan().last(argumentCount);
             ControlType control;
@@ -1932,19 +1928,58 @@ auto FunctionParser<Context>::checkLocalInitialized(uint32_t index) -> PartialRe
 }
 
 template<typename Context>
-auto FunctionParser<Context>::checkExpressionStack(const ControlType& controlData, bool forceSignature) -> PartialResult
+auto FunctionParser<Context>::checkArgumentsAndWiden(const BlockSignature& blockSignature) -> PartialResult
 {
-    const auto& blockSignature = controlData.signature();
+    const uint32_t argumentCount = blockSignature.argumentCount();
+    const uint32_t sliceSize = m_expressionStack.size() - m_currentStackBegin;
+    WASM_VALIDATOR_FAIL_IF(sliceSize < argumentCount, "Too few values on stack for block. Block expects "_s, argumentCount, ", but only "_s, sliceSize, " were present. Block has signature: "_s, blockSignature);
+    const uint32_t offset = m_expressionStack.size() - argumentCount;
+    for (unsigned i = 0; i < argumentCount; ++i) {
+        auto& slot = m_expressionStack[offset + i];
+        const auto expectedType = blockSignature.argumentType(i);
+        WASM_VALIDATOR_FAIL_IF(!isSubtype(slot.type(), expectedType), "Block expects the argument at index "_s, i, " to be "_s, expectedType, " but argument has type "_s, slot.type());
+        // Widen the operand to the block's declared parameter type, per the spec's
+        // push_ctrl(op, in, out) doing push_vals(in): the block body must be validated
+        // against its declared parameter types, not the narrower subtype that flowed in.
+        // https://webassembly.github.io/spec/core/bikeshed/#validation-of-opcode-sequences
+        slot.setType(expectedType);
+    }
+
+    return { };
+}
+
+template<typename Context>
+auto FunctionParser<Context>::checkResultsAndWiden(const BlockSignature& blockSignature) -> PartialResult
+{
     const uint32_t sliceSize = m_expressionStack.size() - m_currentStackBegin;
     WASM_VALIDATOR_FAIL_IF(blockSignature.returnCount() != sliceSize, " block with type: "_s, blockSignature, " returns: "_s, blockSignature.returnCount(), " but stack has: "_s, sliceSize, " values"_s);
     for (unsigned i = 0; i < blockSignature.returnCount(); ++i) {
-        const auto actualType = m_expressionStack[m_currentStackBegin + i].type();
+        auto& slot = m_expressionStack[m_currentStackBegin + i];
         const auto expectedType = blockSignature.returnType(i);
-        WASM_VALIDATOR_FAIL_IF(!isSubtype(actualType, expectedType), "control flow returns with unexpected type. "_s, actualType, " is not a "_s, expectedType);
-        if (forceSignature)
-            m_expressionStack[m_currentStackBegin + i].setType(expectedType);
+        WASM_VALIDATOR_FAIL_IF(!isSubtype(slot.type(), expectedType), "control flow returns with unexpected type. "_s, slot.type(), " is not a "_s, expectedType);
+        // Widen the operand to the block's declared result type, per the spec's
+        // end doing push_vals(frame.end_types): results leave the block as the
+        // declared type, not the narrower subtype that reached the end.
+        // https://webassembly.github.io/spec/core/bikeshed/#validation-of-opcode-sequences
+        slot.setType(expectedType);
     }
 
+    return { };
+}
+
+template<typename Context>
+auto FunctionParser<Context>::endBlockAndCheckResultTypes(ControlEntry& entry) -> PartialResult
+{
+    // Widen each result to the block signature type before ending the block.
+    // FIXME: mutating the expression stack for the block result is effectful, but there's no
+    // better API yet. See https://bugs.webkit.org/show_bug.cgi?id=164353
+    WASM_FAIL_IF_HELPER_FAILS(checkResultsAndWiden(entry.controlData.signature()));
+    const uint32_t parentBegin = parentEntryBegin();
+    auto enclosedStack = m_expressionStack.mutableSpan().subspan(parentBegin);
+    // We should avoid adding other callsites of endBlock. Since a new block is a sign of a
+    // merge point and it would be a security bug to fail to widen the types.
+    WASM_TRY_ADD_TO_CONTEXT(endBlock(entry, enclosedStack));
+    m_currentStackBegin = parentBegin;
     return { };
 }
 
@@ -2081,21 +2116,21 @@ template<typename Context>
 auto FunctionParser<Context>::parseExpression() -> PartialResult
 {
     switch (m_currentOpcode) {
-#define CREATE_CASE(name, id, b3op, inc, lhsType, rhsType, returnType) case OpType::name: return binaryCase(OpType::name, &Context::add##name, Types::returnType, Types::lhsType, Types::rhsType);
+    #define CREATE_CASE(name, id, b3op, inc, lhsType, rhsType, returnType) case OpType::name: return binaryCase(OpType::name, &Context::add##name, Types::returnType, Types::lhsType, Types::rhsType);
         FOR_EACH_WASM_NON_COMPARE_BINARY_OP(CREATE_CASE)
-#undef CREATE_CASE
+    #undef CREATE_CASE
 
-#define CREATE_CASE(name, id, b3op, inc, lhsType, rhsType, returnType) case OpType::name: return binaryCompareCase(OpType::name, &Context::add##name, Types::returnType, Types::lhsType, Types::rhsType);
+    #define CREATE_CASE(name, id, b3op, inc, lhsType, rhsType, returnType) case OpType::name: return binaryCompareCase(OpType::name, &Context::add##name, Types::returnType, Types::lhsType, Types::rhsType);
         FOR_EACH_WASM_COMPARE_BINARY_OP(CREATE_CASE)
-#undef CREATE_CASE
+    #undef CREATE_CASE
 
-#define CREATE_CASE(name, id, b3op, inc, operandType, returnType) case OpType::name: return unaryCase(OpType::name, &Context::add##name, Types::returnType, Types::operandType);
+    #define CREATE_CASE(name, id, b3op, inc, operandType, returnType) case OpType::name: return unaryCase(OpType::name, &Context::add##name, Types::returnType, Types::operandType);
         FOR_EACH_WASM_NON_COMPARE_UNARY_OP(CREATE_CASE)
-#undef CREATE_CASE
+    #undef CREATE_CASE
 
-#define CREATE_CASE(name, id, b3op, inc, operandType, returnType) case OpType::name: return unaryCompareCase(OpType::name, &Context::add##name, Types::returnType, Types::operandType);
+    #define CREATE_CASE(name, id, b3op, inc, operandType, returnType) case OpType::name: return unaryCompareCase(OpType::name, &Context::add##name, Types::returnType, Types::operandType);
         FOR_EACH_WASM_COMPARE_UNARY_OP(CREATE_CASE)
-#undef CREATE_CASE
+    #undef CREATE_CASE
 
     case Select: {
         TypedExpression condition;
@@ -2141,13 +2176,13 @@ auto FunctionParser<Context>::parseExpression() -> PartialResult
         return { };
     }
 
-#define CREATE_CASE(name, id, b3op, inc, memoryType) case OpType::name: return load(Types::memoryType);
-FOR_EACH_WASM_MEMORY_LOAD_OP(CREATE_CASE)
-#undef CREATE_CASE
+    #define CREATE_CASE(name, id, b3op, inc, memoryType) case OpType::name: return load(Types::memoryType);
+    FOR_EACH_WASM_MEMORY_LOAD_OP(CREATE_CASE)
+    #undef CREATE_CASE
 
-#define CREATE_CASE(name, id, b3op, inc, memoryType) case OpType::name: return store(Types::memoryType);
-FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
-#undef CREATE_CASE
+    #define CREATE_CASE(name, id, b3op, inc, memoryType) case OpType::name: return store(Types::memoryType);
+    FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
+    #undef CREATE_CASE
 
     case F32Const: {
         uint32_t constant;
@@ -2414,9 +2449,9 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
             break;
         }
 
-#define CREATE_CASE(name, id, b3op, inc, operandType, returnType) case Ext1OpType::name: return truncSaturated(op, Types::returnType, Types::operandType);
+    #define CREATE_CASE(name, id, b3op, inc, operandType, returnType) case Ext1OpType::name: return truncSaturated(op, Types::returnType, Types::operandType);
         FOR_EACH_WASM_TRUNC_SATURATED_OP(CREATE_CASE)
-#undef CREATE_CASE
+    #undef CREATE_CASE
 
         case Ext1OpType::I64Add128:
         case Ext1OpType::I64Sub128: {
@@ -3085,21 +3120,21 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
         m_context.willParseExtendedOpcode();
 
         ExtAtomicOpType op = static_cast<ExtAtomicOpType>(m_currentExtOp);
-#if ENABLE(WEBASSEMBLY_OMGJIT)
+    #if ENABLE(WEBASSEMBLY_OMGJIT)
         if (Options::dumpWasmOpcodeStatistics()) [[unlikely]]
             WasmOpcodeCounter::singleton().increment(op);
-#endif
+    #endif
 
         switch (op) {
-#define CREATE_CASE(name, id, b3op, inc, memoryType) case ExtAtomicOpType::name: return atomicLoad(op, Types::memoryType);
+    #define CREATE_CASE(name, id, b3op, inc, memoryType) case ExtAtomicOpType::name: return atomicLoad(op, Types::memoryType);
         FOR_EACH_WASM_EXT_ATOMIC_LOAD_OP(CREATE_CASE)
-#undef CREATE_CASE
-#define CREATE_CASE(name, id, b3op, inc, memoryType) case ExtAtomicOpType::name: return atomicStore(op, Types::memoryType);
+    #undef CREATE_CASE
+    #define CREATE_CASE(name, id, b3op, inc, memoryType) case ExtAtomicOpType::name: return atomicStore(op, Types::memoryType);
         FOR_EACH_WASM_EXT_ATOMIC_STORE_OP(CREATE_CASE)
-#undef CREATE_CASE
-#define CREATE_CASE(name, id, b3op, inc, memoryType) case ExtAtomicOpType::name: return atomicBinaryRMW(op, Types::memoryType);
+    #undef CREATE_CASE
+    #define CREATE_CASE(name, id, b3op, inc, memoryType) case ExtAtomicOpType::name: return atomicBinaryRMW(op, Types::memoryType);
         FOR_EACH_WASM_EXT_ATOMIC_BINARY_RMW_OP(CREATE_CASE)
-#undef CREATE_CASE
+    #undef CREATE_CASE
         case ExtAtomicOpType::MemoryAtomicWait64:
             return atomicWait(op, Types::I64);
         case ExtAtomicOpType::MemoryAtomicWait32:
@@ -3502,15 +3537,8 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
         BlockSignature inlineSignature;
         WASM_PARSER_FAIL_IF(!parseBlockSignatureAndNotifySIMDUseIfNeeded(inlineSignature), "can't get block's signature"_s);
 
-        const uint32_t sliceSize = m_expressionStack.size() - m_currentStackBegin;
         const uint32_t argumentCount = inlineSignature.argumentCount();
-
-        WASM_VALIDATOR_FAIL_IF(sliceSize < argumentCount, "Too few values on stack for block. Block expects ", argumentCount, ", but only ", sliceSize, " were present. Block has inlineSignature: ", inlineSignature);
-        const uint32_t parentStackHeight = m_expressionStack.size() - argumentCount;
-        for (unsigned i = 0; i < argumentCount; ++i) {
-            Type type = m_expressionStack[parentStackHeight + i].type();
-            WASM_VALIDATOR_FAIL_IF(!isSubtype(type, inlineSignature.argumentType(i)), "Block expects the argument at index", i, " to be ", inlineSignature.argumentType(i), " but argument has type ", type);
-        }
+        WASM_FAIL_IF_HELPER_FAILS(checkArgumentsAndWiden(inlineSignature));
 
         auto args = m_expressionStack.mutableSpan().last(argumentCount);
         ControlType block;
@@ -3523,15 +3551,9 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
         BlockSignature inlineSignature;
         WASM_PARSER_FAIL_IF(!parseBlockSignatureAndNotifySIMDUseIfNeeded(inlineSignature), "can't get loop's signature"_s);
 
-        const uint32_t sliceSize = m_expressionStack.size() - m_currentStackBegin;
         const uint32_t argumentCount = inlineSignature.argumentCount();
-
-        WASM_VALIDATOR_FAIL_IF(sliceSize < argumentCount, "Too few values on stack for loop block. Loop expects ", argumentCount, ", but only ", sliceSize, " were present. Loop has inlineSignature: ", inlineSignature);
+        WASM_FAIL_IF_HELPER_FAILS(checkArgumentsAndWiden(inlineSignature));
         const uint32_t parentStackHeight = m_expressionStack.size() - argumentCount;
-        for (unsigned i = 0; i < argumentCount; ++i) {
-            Type type = m_expressionStack[parentStackHeight + i].type();
-            WASM_VALIDATOR_FAIL_IF(!isSubtype(type, inlineSignature.argumentType(i)), "Loop expects the argument at index", i, " to be ", inlineSignature.argumentType(i), " but argument has type ", type);
-        }
 
         auto args = m_expressionStack.mutableSpan().last(argumentCount);
         ControlType loop;
@@ -3550,13 +3572,9 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
         WASM_TRY_POP_EXPRESSION_STACK_INTO(condition, "if condition"_s);
 
         WASM_VALIDATOR_FAIL_IF(!condition.type().isI32(), "if condition must be i32, got ", condition.type());
-        const uint32_t sliceSize = m_expressionStack.size() - m_currentStackBegin;
         const uint32_t argumentCount = inlineSignature.argumentCount();
-
-        WASM_VALIDATOR_FAIL_IF(sliceSize < argumentCount, "Too few arguments on stack for if block. If expects ", argumentCount, ", but only ", sliceSize, " were present. If block has signature: ", inlineSignature);
+        WASM_FAIL_IF_HELPER_FAILS(checkArgumentsAndWiden(inlineSignature));
         const uint32_t parentStackHeight = m_expressionStack.size() - argumentCount;
-        for (unsigned i = 0; i < argumentCount; ++i)
-            WASM_VALIDATOR_FAIL_IF(!isSubtype(m_expressionStack[parentStackHeight + i].type(), inlineSignature.argumentType(i)), "Loop expects the argument at index", i, " to be ", inlineSignature.argumentType(i), " but argument has type ", m_expressionStack[parentStackHeight + i].type());
 
         auto args = m_expressionStack.mutableSpan().last(argumentCount);
         ControlType control;
@@ -3577,7 +3595,7 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
         ControlEntry& controlEntry = m_controlStack.last();
 
         WASM_VALIDATOR_FAIL_IF(!ControlType::isIf(controlEntry.controlData), "else block isn't associated to an if");
-        WASM_FAIL_IF_HELPER_FAILS(checkExpressionStack(controlEntry.controlData));
+        WASM_FAIL_IF_HELPER_FAILS(checkResultsAndWiden(controlEntry.controlData.signature()));
         auto ifBranchResults = m_expressionStack.mutableSpan().subspan(m_currentStackBegin);
         WASM_TRY_ADD_TO_CONTEXT(addElse(controlEntry.controlData, ifBranchResults));
         m_expressionStack.shrink(m_currentStackBegin);
@@ -3591,13 +3609,9 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
         BlockSignature inlineSignature;
         WASM_PARSER_FAIL_IF(!parseBlockSignatureAndNotifySIMDUseIfNeeded(inlineSignature), "can't get try's signature"_s);
 
-        const uint32_t sliceSize = m_expressionStack.size() - m_currentStackBegin;
         const uint32_t argumentCount = inlineSignature.argumentCount();
-
-        WASM_VALIDATOR_FAIL_IF(sliceSize < argumentCount, "Too few arguments on stack for try block. Try expects ", argumentCount, ", but only ", sliceSize, " were present. Try block has signature: ", inlineSignature);
+        WASM_FAIL_IF_HELPER_FAILS(checkArgumentsAndWiden(inlineSignature));
         const uint32_t parentStackHeight = m_expressionStack.size() - argumentCount;
-        for (unsigned i = 0; i < argumentCount; ++i)
-            WASM_VALIDATOR_FAIL_IF(!isSubtype(m_expressionStack[parentStackHeight + i].type(), inlineSignature.argumentType(i)), "Try expects the argument at index", i, " to be ", inlineSignature.argumentType(i), " but argument has type ", m_expressionStack[parentStackHeight + i].type());
 
         auto args = m_expressionStack.mutableSpan().last(argumentCount);
         ControlType control;
@@ -3618,7 +3632,7 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
 
         ControlEntry& controlEntry = m_controlStack.last();
         WASM_VALIDATOR_FAIL_IF(!isTryOrCatch(controlEntry.controlData), "catch block isn't associated to a try");
-        WASM_FAIL_IF_HELPER_FAILS(checkExpressionStack(controlEntry.controlData));
+        WASM_FAIL_IF_HELPER_FAILS(checkResultsAndWiden(controlEntry.controlData.signature()));
 
         ResultList results;
         auto preCatchStack = m_expressionStack.mutableSpan().subspan(m_currentStackBegin);
@@ -3644,7 +3658,7 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
         ControlEntry& controlEntry = m_controlStack.last();
 
         WASM_VALIDATOR_FAIL_IF(!isTryOrCatch(controlEntry.controlData), "catch block isn't associated to a try");
-        WASM_FAIL_IF_HELPER_FAILS(checkExpressionStack(controlEntry.controlData));
+        WASM_FAIL_IF_HELPER_FAILS(checkResultsAndWiden(controlEntry.controlData.signature()));
 
         auto preCatchStack = m_expressionStack.mutableSpan().subspan(m_currentStackBegin);
         WASM_TRY_ADD_TO_CONTEXT(addCatchAll(preCatchStack, controlEntry.controlData));
@@ -3660,14 +3674,8 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
         BlockSignature inlineSignature;
         WASM_PARSER_FAIL_IF(!parseBlockSignatureAndNotifySIMDUseIfNeeded(inlineSignature), "can't get try_table's signature"_s);
 
-        const uint32_t sliceSize = m_expressionStack.size() - m_currentStackBegin;
         const uint32_t argumentCount = inlineSignature.argumentCount();
-        WASM_VALIDATOR_FAIL_IF(sliceSize < argumentCount, "Too few values on stack for block. Block expects ", argumentCount, ", but only ", sliceSize, " were present. Block has inlineSignature: ", inlineSignature);
-        const uint32_t parentStackHeight = m_expressionStack.size() - argumentCount;
-        for (unsigned i = 0; i < argumentCount; ++i) {
-            Type type = m_expressionStack[parentStackHeight + i].type();
-            WASM_VALIDATOR_FAIL_IF(!isSubtype(type, inlineSignature.argumentType(i)), "Block expects the argument at index", i, " to be ", inlineSignature.argumentType(i), " but argument has type ", type);
-        }
+        WASM_FAIL_IF_HELPER_FAILS(checkArgumentsAndWiden(inlineSignature));
 
         uint32_t numberOfCatches;
         Vector<CatchHandler> targets;
@@ -3752,13 +3760,8 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
         WASM_VALIDATOR_FAIL_IF(!ControlType::isTry(targetData) && !ControlType::isTopLevel(targetData), "delegate target isn't a try or the top level block");
 
         WASM_TRY_ADD_TO_CONTEXT(addDelegate(targetData, controlEntry.controlData));
-        WASM_FAIL_IF_HELPER_FAILS(checkExpressionStack(controlEntry.controlData));
-
-        const uint32_t parentBegin = parentEntryBegin();
-        auto enclosedStack = m_expressionStack.mutableSpan().subspan(parentBegin);
-        WASM_TRY_ADD_TO_CONTEXT(endBlock(controlEntry, enclosedStack));
-
-        m_currentStackBegin = parentBegin;
+        // Unlike the sibling catch/catch_all arms, delegate ends the try block, so it widens results.
+        WASM_FAIL_IF_HELPER_FAILS(endBlockAndCheckResultTypes(controlEntry));
         resetLocalInitStackToHeight(controlEntry.localInitStackHeight);
         return { };
     }
@@ -3887,25 +3890,13 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
     case End: {
         ControlEntry data = m_controlStack.takeLast();
         if (ControlType::isIf(data.controlData)) {
-            WASM_FAIL_IF_HELPER_FAILS(checkExpressionStack(data.controlData));
+            WASM_FAIL_IF_HELPER_FAILS(checkResultsAndWiden(data.controlData.signature()));
             auto ifBranchResults = m_expressionStack.mutableSpan().subspan(m_currentStackBegin);
             WASM_TRY_ADD_TO_CONTEXT(addElse(data.controlData, ifBranchResults));
             m_expressionStack.shrink(m_currentStackBegin);
             m_expressionStack.append(data.elseBlockStack.span());
         }
-        // When ending an 'if'/'else', including a synthetic 'else' added right above,
-        // the spec requires the output type of 'if' to be the type from the signature.
-        const bool shouldForceSignature = ControlType::isElse(data.controlData);
-        // FIXME: endBlock may modify the expressionStack slice for the result of the block.
-        // That's a little too effectful but we don't have a better API right now.
-        // see: https://bugs.webkit.org/show_bug.cgi?id=164353
-        WASM_FAIL_IF_HELPER_FAILS(checkExpressionStack(data.controlData, shouldForceSignature));
-
-        const uint32_t parentBegin = parentEntryBegin();
-        auto enclosedStack = m_expressionStack.mutableSpan().subspan(parentBegin);
-        WASM_TRY_ADD_TO_CONTEXT(endBlock(data, enclosedStack));
-
-        m_currentStackBegin = parentBegin;
+        WASM_FAIL_IF_HELPER_FAILS(endBlockAndCheckResultTypes(data));
         if (!ControlType::isTopLevel(data.controlData))
             resetLocalInitStackToHeight(data.localInitStackHeight);
         return { };
@@ -3963,37 +3954,37 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
 
         return { };
     }
-#if ENABLE(B3_JIT)
-    case ExtSIMD: {
-        WASM_PARSER_FAIL_IF(!Options::useWasmSIMD(), "wasm-simd is not enabled"_s);
-        m_context.notifyFunctionUsesSIMD();
-        WASM_PARSER_FAIL_IF(!parseVarUInt32(m_currentExtOp), "can't parse wasm extended opcode"_s);
-        m_context.willParseExtendedOpcode();
+    #if ENABLE(B3_JIT)
+        case ExtSIMD: {
+            WASM_PARSER_FAIL_IF(!Options::useWasmSIMD(), "wasm-simd is not enabled"_s);
+            m_context.notifyFunctionUsesSIMD();
+            WASM_PARSER_FAIL_IF(!parseVarUInt32(m_currentExtOp), "can't parse wasm extended opcode"_s);
+            m_context.willParseExtendedOpcode();
 
-        constexpr bool isReachable = true;
+            constexpr bool isReachable = true;
 
-        ExtSIMDOpType op = static_cast<ExtSIMDOpType>(m_currentExtOp);
-        if (Options::dumpWasmOpcodeStatistics()) [[unlikely]]
-            WasmOpcodeCounter::singleton().increment(op);
+            ExtSIMDOpType op = static_cast<ExtSIMDOpType>(m_currentExtOp);
+            if (Options::dumpWasmOpcodeStatistics()) [[unlikely]]
+                WasmOpcodeCounter::singleton().increment(op);
 
-        switch (op) {
-        #define CREATE_SIMD_CASE(name, _, laneOp, lane, signMode) case ExtSIMDOpType::name: return simd<isReachable>(SIMDLaneOperation::laneOp, lane, signMode);
-        FOR_EACH_WASM_EXT_SIMD_GENERAL_OP(CREATE_SIMD_CASE)
-        #undef CREATE_SIMD_CASE
-        #define CREATE_SIMD_CASE(name, _, laneOp, lane, signMode, relArg) case ExtSIMDOpType::name: return simd<isReachable>(SIMDLaneOperation::laneOp, lane, signMode, relArg);
-        FOR_EACH_WASM_EXT_SIMD_REL_OP(CREATE_SIMD_CASE)
-        #undef CREATE_SIMD_CASE
-        default:
-            WASM_PARSER_FAIL_IF(true, "invalid extended simd op "_s, m_currentExtOp);
-            break;
+            switch (op) {
+            #define CREATE_SIMD_CASE(name, _, laneOp, lane, signMode) case ExtSIMDOpType::name: return simd<isReachable>(SIMDLaneOperation::laneOp, lane, signMode);
+            FOR_EACH_WASM_EXT_SIMD_GENERAL_OP(CREATE_SIMD_CASE)
+            #undef CREATE_SIMD_CASE
+            #define CREATE_SIMD_CASE(name, _, laneOp, lane, signMode, relArg) case ExtSIMDOpType::name: return simd<isReachable>(SIMDLaneOperation::laneOp, lane, signMode, relArg);
+            FOR_EACH_WASM_EXT_SIMD_REL_OP(CREATE_SIMD_CASE)
+            #undef CREATE_SIMD_CASE
+            default:
+                WASM_PARSER_FAIL_IF(true, "invalid extended simd op "_s, m_currentExtOp);
+                break;
+            }
+            return { };
         }
-        return { };
-    }
-#else
-    case ExtSIMD:
-        WASM_PARSER_FAIL_IF(true, "wasm-simd is not supported"_s);
-        return { };
-#endif
+    #else
+        case ExtSIMD:
+            WASM_PARSER_FAIL_IF(true, "wasm-simd is not supported"_s);
+            return { };
+    #endif
     }
 
     ASSERT_NOT_REACHED();
@@ -4101,12 +4092,7 @@ auto FunctionParser<Context>::parseUnreachableExpression() -> PartialResult
                 WASM_TRY_ADD_TO_CONTEXT(addElseToUnreachable(data.controlData));
                 m_expressionStack.shrink(m_currentStackBegin);
                 m_expressionStack.append(data.elseBlockStack.span());
-                WASM_FAIL_IF_HELPER_FAILS(checkExpressionStack(data.controlData));
-
-                // Reachable End handling: the combined enclosedStack now lives in
-                // m_expressionStack[parentBegin..end].
-                auto enclosedStack = m_expressionStack.mutableSpan().subspan(parentBegin);
-                WASM_TRY_ADD_TO_CONTEXT(endBlock(data, enclosedStack));
+                WASM_FAIL_IF_HELPER_FAILS(endBlockAndCheckResultTypes(data));
             } else {
                 m_expressionStack.shrink(m_currentStackBegin);
                 const auto& sig = data.controlData.signature();

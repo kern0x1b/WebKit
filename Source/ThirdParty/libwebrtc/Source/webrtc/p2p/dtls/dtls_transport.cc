@@ -292,6 +292,17 @@ DtlsTransportInternalImpl::~DtlsTransportInternalImpl() {
   if (dtls_in_stun_) {
     CompleteDtlsInStun(/*success=*/false);
   }
+  if (ice_transport_) {
+    ice_transport()->ResetDtlsStunPiggybackCallbacks();
+    ice_transport()->DeregisterReceivedPacketCallback(this);
+#if WEBRTC_WEBKIT_BUILD
+    ice_transport()->UnsubscribeReceivingState(this);
+    ice_transport()->UnsubscribeWritableState(this);
+    ice_transport()->UnsubscribeReadyToSend(this);
+    ice_transport()->UnsubscribeNetworkRouteChanged(this);
+    ice_transport()->UnsubscribeSentPacket(this);
+#endif
+  }
 }
 
 void DtlsTransportInternalImpl::CompleteDtlsInStun(bool success) {

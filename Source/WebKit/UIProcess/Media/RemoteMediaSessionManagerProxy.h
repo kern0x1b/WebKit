@@ -37,6 +37,7 @@
 #include <wtf/Ref.h>
 #include <wtf/RefPtr.h>
 #include <wtf/TZoneMalloc.h>
+#include <wtf/ThreadSafeWeakPtr.h>
 #include <wtf/WeakPtr.h>
 
 #if PLATFORM(IOS_FAMILY)
@@ -149,7 +150,7 @@ private:
     HashMap<WebCore::ProcessQualified<WebCore::MediaSessionIdentifier>, Ref<RemoteMediaSessionProxy>> m_sessionProxies;
 
 #if PLATFORM(COCOA)
-    RefPtr<RemoteMediaSessionManagerAudioHardwareListener> m_audioHardwareListenerProxy;
+    ThreadSafeWeakPtr<RemoteMediaSessionManagerAudioHardwareListener> m_audioHardwareListenerProxy;
 #endif
 
 #if USE(AUDIO_SESSION)

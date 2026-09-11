@@ -8,6 +8,7 @@
 
 #include "include/core/SkTypes.h"
 #include "include/gpu/graphite/Recorder.h"
+#include "src/core/SkSafetyChecks.h"
 #include "src/core/SkTraceEvent.h"
 #include "src/gpu/graphite/DrawPass.h"
 #include "src/gpu/graphite/DrawWriter.h"
@@ -28,6 +29,7 @@ std::pair<DrawParams*, Layer*> DrawList::recordDraw(
         SkEnumBitMask<DstUsage> dstUsage,
         BarrierType barrierBeforeDraws,
         PipelineDataGatherer* gatherer,
+        StorageContext* storageContext,
         const StrokeStyle* stroke,
         Layer*) {
 
@@ -49,16 +51,23 @@ std::pair<DrawParams*, Layer*> DrawList::recordDraw(
     // Create a sort key for every render step in this draw
     for (int stepIndex = 0; stepIndex < draw.renderer()->numRenderSteps(); ++stepIndex) {
         const RenderStep* const step = draw.renderer()->steps()[stepIndex];
-        gatherer->markOffsetAndAlign(step->performsShading(), step->uniformAlignment());
+        const bool performsShading = step->performsShading() && paintID.isValid();
+
+        if (storageContext && step->storageUniformStride() > 0) {
+            storageContext->recordAlignment(step->storageUniformStride(),
+                                            step->storageUniformAlignment());
+        }
+
+        gatherer->markOffsetAndAlign(performsShading, step->uniformAlignment());
 
         GraphicsPipelineCache::Index pipelineIndex = fPipelineCache.insert(
-                { step->renderStepID(), step->performsShading() ?
+                { step->renderStepID(), performsShading ?
                                         paintID : UniquePaintParamsID::Invalid()});
 
         step->writeUniformsAndTextures(draw.drawParams(), gatherer);
 
         auto [combinedUniforms, combinedTextures] =
-                gatherer->endCombinedData(step->performsShading());
+                gatherer->endCombinedData(performsShading);
 
         UniformDataCache::Index uniformIndex = combinedUniforms ?
                 fUniformDataCache.insert(combinedUniforms) : UniformDataCache::kInvalidIndex;
@@ -88,6 +97,7 @@ std::pair<DrawParams*, Layer*> DrawList::recordDraw(
 }
 
 std::unique_ptr<DrawPass> DrawList::snapDrawPass(Recorder* recorder,
+                                                 StorageContext* storageContext,
                                                  sk_sp<TextureProxy> target,
                                                  const SkImageInfo& targetInfo,
                                                  DstReadStrategy dstReadStrategy) {
@@ -120,8 +130,9 @@ std::unique_ptr<DrawPass> DrawList::snapDrawPass(Recorder* recorder,
 
     // The DrawList is converted directly into the DrawPass' data structures, but once the DrawPass
     // is returned from Make(), it is considered immutable.
-    std::unique_ptr<DrawPass> drawPass(new DrawPass(target, {fLoadOp, StoreOp::kStore}, fClearColor,
-                                                    recorder->priv().refStorageBufferManager()));
+    std::unique_ptr<DrawPass> drawPass(new DrawPass(target,
+                                                    {fLoadOp, StoreOp::kStore},
+                                                    fClearColor));
 
     DrawBufferManager* bufferMgr = recorder->priv().drawBufferManager();
     DrawWriter drawWriter(&drawPass->fCommandList, bufferMgr);
@@ -136,6 +147,11 @@ std::unique_ptr<DrawPass> DrawList::snapDrawPass(Recorder* recorder,
     const Caps* caps = recorder->priv().caps();
     const bool useStorageBuffers = caps->storageBufferSupport();
     UniformTracker uniformTracker(useStorageBuffers);
+
+    if (useStorageBuffers) {
+        SkASSERT(storageContext);
+        storageContext->finalizePrecachedStorageData();
+    }
 
     // TODO(b/372953722): Remove this forced binding command behavior once dst copies are always
     // bound separately from the rest of the textures.
@@ -218,7 +234,7 @@ std::unique_ptr<DrawPass> DrawList::snapDrawPass(Recorder* recorder,
         }
 
         uint32_t uniformSsboIndex = useStorageBuffers ? uniformTracker.ssboIndex() : 0;
-        renderStep.writeVertices(&drawWriter, draw.drawParams(), uniformSsboIndex);
+        renderStep.writeVertices(&drawWriter, storageContext, draw.drawParams(), uniformSsboIndex);
 
         if (bufferMgr->hasMappingFailed()) {
             SKIA_LOG_W("Failed to write necessary vertex/instance data for DrawPass, dropping!");
@@ -231,6 +247,16 @@ std::unique_ptr<DrawPass> DrawList::snapDrawPass(Recorder* recorder,
     }
     // Finish recording draw calls for any collected data still pending at end of the loop
     drawWriter.flush();
+
+    if (useStorageBuffers) {
+        SkASSERT(storageContext);
+        drawPass->fStorageBufferInfo = storageContext->finalize(bufferMgr);
+        if (!storageContext->isEmpty() && !drawPass->fStorageBufferInfo) SK_UNLIKELY {
+            SKIA_LOG_W("Failed to write Storage Data for Draw pass, dropping!");
+            this->reset(LoadOp::kLoad);
+            return nullptr;
+        }
+    }
 
     drawPass->fBounds = fPassBounds.roundOut().asSkIRect();
     drawPass->fPipelineDescs   = fPipelineCache.detach();
@@ -248,6 +274,7 @@ std::unique_ptr<DrawPass> DrawList::snapDrawPass(Recorder* recorder,
 }
 
 void DrawList::reset(LoadOp op, SkColor4f clearColor) {
+    SK_SCOPED_DISABLE_PARTITION_ALLOC_SAFETY_CHECKS;
     fDraws.reset();
     fSortKeys.clear();
     DrawListBase::reset(op, clearColor);

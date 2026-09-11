@@ -1316,12 +1316,6 @@ TEST_P(BlitFramebufferANGLETest, BlitStencil)
 {
     ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_ANGLE_framebuffer_blit"));
 
-    // http://anglebug.com/40096473
-    ANGLE_SKIP_TEST_IF(IsIntel() && IsD3D9());
-
-    // http://anglebug.com/42263934
-    ANGLE_SKIP_TEST_IF(IsAMD() && IsD3D9());
-
     BlitStencilTestHelper(false /* mesaFlipY */);
 }
 
@@ -1330,12 +1324,6 @@ TEST_P(BlitFramebufferANGLETest, BlitStencilWithMesaYFlip)
 {
     ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_ANGLE_framebuffer_blit") ||
                        !IsGLExtensionEnabled("GL_MESA_framebuffer_flip_y"));
-
-    // http://anglebug.com/40096473
-    ANGLE_SKIP_TEST_IF(IsIntel() && IsD3D9());
-
-    // http://anglebug.com/42263934
-    ANGLE_SKIP_TEST_IF(IsAMD() && IsD3D9());
 
     BlitStencilTestHelper(true /* mesaFlipY */);
 }
@@ -1887,9 +1875,6 @@ class BlitFramebufferTestES31 : public BlitFramebufferTest
 // Tests resolving a multisample depth buffer.
 TEST_P(BlitFramebufferTest, MultisampleDepth)
 {
-    // TODO(oetuaho@nvidia.com): http://crbug.com/837717
-    ANGLE_SKIP_TEST_IF(IsOpenGL() && IsMac());
-
     GLRenderbuffer renderbuf;
     glBindRenderbuffer(GL_RENDERBUFFER, renderbuf);
     glRenderbufferStorageMultisample(GL_RENDERBUFFER, 2, GL_DEPTH_COMPONENT24, 256, 256);
@@ -2310,9 +2295,6 @@ TEST_P(BlitFramebufferTest, ScissoredMultisampleStencil)
 // identical formats so that the path that uses vkCmdBlitImage is taken.
 TEST_P(BlitFramebufferTest, NonZeroBaseSource)
 {
-    // http://anglebug.com/40644751
-    ANGLE_SKIP_TEST_IF(IsOpenGL() && IsIntel() && IsMac());
-
     ANGLE_GL_PROGRAM(drawRed, essl3_shaders::vs::Simple(), essl3_shaders::fs::Red());
 
     // Create a framebuffer for source data.  It usea a non-zero base.
@@ -2402,9 +2384,6 @@ TEST_P(BlitFramebufferTest, NonZeroBaseDestination)
 // Test blitting from a stencil buffer with non-zero base.
 TEST_P(BlitFramebufferTest, NonZeroBaseSourceStencil)
 {
-    // http://anglebug.com/40644751
-    ANGLE_SKIP_TEST_IF(IsOpenGL() && IsIntel() && IsMac());
-
     ANGLE_GL_PROGRAM(drawRed, essl3_shaders::vs::Simple(), essl3_shaders::fs::Red());
 
     // Create a framebuffer with an attachment that has non-zero base
@@ -2466,9 +2445,6 @@ TEST_P(BlitFramebufferTest, NonZeroBaseSourceStencil)
 // Test blitting to a stencil buffer with non-zero base.
 TEST_P(BlitFramebufferTest, NonZeroBaseDestinationStencil)
 {
-    // http://anglebug.com/40644751
-    ANGLE_SKIP_TEST_IF(IsOpenGL() && IsIntel() && IsMac());
-
     // http://anglebug.com/42263576
     ANGLE_SKIP_TEST_IF(IsOpenGL() && IsIntel() && IsWindows());
 
@@ -2536,9 +2512,6 @@ TEST_P(BlitFramebufferTest, NonZeroBaseDestinationStencilStretch)
 {
     // http://anglebug.com/40644750
     ANGLE_SKIP_TEST_IF(IsOpenGL() && IsIntel() && IsWindows());
-
-    // http://anglebug.com/40644751
-    ANGLE_SKIP_TEST_IF(IsOpenGL() && IsIntel() && IsMac());
 
     ANGLE_GL_PROGRAM(drawRed, essl3_shaders::vs::Simple(), essl3_shaders::fs::Red());
 

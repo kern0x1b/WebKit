@@ -1544,4 +1544,79 @@ DEF_TEST(GrPathUtils_bug451448218, r) {
     }
 }
 
+DEF_TEST(GrTriangulator_EdgeDistNullPointer, r) {
+    GrTriangulator::Vertex top(SkPoint::Make(0.0f, 0.0f), 0);
+    GrTriangulator::Vertex bottom(SkPoint::Make(0.0f, 10.0f), 0);
+    GrTriangulator::Edge edge(&top, &bottom, 1, GrTriangulator::EdgeType::kInner);
+    edge.fTop = nullptr;
+    edge.fBottom = nullptr;
+    GrTriangulator::Vertex v(SkPoint::Make(1.0f, 2.0f), 0);
+    // Calling isLeftOf/isRightOf on an edge with null fTop/fBottom should not crash.
+    bool left = edge.isLeftOf(v);
+    bool right = edge.isRightOf(v);
+    REPORTER_ASSERT(r, left);
+    REPORTER_ASSERT(r, !right);
+}
+
+class TestTriangulator : public GrTriangulator {
+public:
+    TestTriangulator(const SkPath& path, SkArenaAlloc* alloc) : GrTriangulator(path, alloc) {}
+    using GrTriangulator::mergeVertices;
+    using GrTriangulator::setTop;
+    using GrTriangulator::setBottom;
+    using GrTriangulator::mergeCollinearEdges;
+    using GrTriangulator::makeConnectingEdge;
+};
+
+DEF_TEST(GrTriangulator_MergeVerticesCorruptEdges, r) {
+    SkArenaAlloc alloc(GrTriangulator::kArenaDefaultChunkSize);
+    SkPath path;
+    TestTriangulator triangulator(path, &alloc);
+    GrTriangulator::Comparator c(GrTriangulator::Comparator::Direction::kVertical);
+
+    GrTriangulator::Vertex src(SkPoint::Make(0.0f, 0.0f), 255);
+    GrTriangulator::Vertex dst(SkPoint::Make(0.0f, 0.0f), 255);
+    GrTriangulator::Vertex other(SkPoint::Make(10.0f, 10.0f), 255);
+
+    // Corrupted edge above src with fBottom == nullptr
+    GrTriangulator::Edge edgeAbove(&other, nullptr, 1, GrTriangulator::EdgeType::kInner);
+    src.fFirstEdgeAbove = src.fLastEdgeAbove = &edgeAbove;
+
+    // Corrupted edge below src with fTop == nullptr
+    GrTriangulator::Edge edgeBelow(nullptr, &other, 1, GrTriangulator::EdgeType::kInner);
+    src.fFirstEdgeBelow = src.fLastEdgeBelow = &edgeBelow;
+
+    GrTriangulator::VertexList mesh;
+    mesh.append(&src);
+    mesh.append(&dst);
+    mesh.append(&other);
+
+    // mergeVertices must not hang (infinite loop) on corrupted edges lacking fBottom or fTop
+    triangulator.mergeVertices(&src, &dst, &mesh, c);
+
+    REPORTER_ASSERT(r, src.fFirstEdgeAbove == nullptr);
+    REPORTER_ASSERT(r, src.fFirstEdgeBelow == nullptr);
+    REPORTER_ASSERT(r, dst.fSynthetic);
+}
+
+DEF_TEST(GrTriangulator_CorruptEdgeFailFast, r) {
+    SkArenaAlloc alloc(GrTriangulator::kArenaDefaultChunkSize);
+    SkPath path;
+    TestTriangulator triangulator(path, &alloc);
+    GrTriangulator::Comparator c(GrTriangulator::Comparator::Direction::kVertical);
+
+    GrTriangulator::Vertex v(SkPoint::Make(5.0f, 5.0f), 255);
+    GrTriangulator::Edge corruptEdge(nullptr, nullptr, 1, GrTriangulator::EdgeType::kInner);
+
+    // Calling setTop / setBottom / mergeCollinearEdges with a corrupt edge should fail fast
+    // without crashing or attempting disconnect()
+    bool resTop = triangulator.setTop(&corruptEdge, &v, nullptr, nullptr, c);
+    bool resBottom = triangulator.setBottom(&corruptEdge, &v, nullptr, nullptr, c);
+    bool resMerge = triangulator.mergeCollinearEdges(&corruptEdge, nullptr, nullptr, c);
+
+    REPORTER_ASSERT(r, !resTop);
+    REPORTER_ASSERT(r, !resBottom);
+    REPORTER_ASSERT(r, !resMerge);
+}
+
 #endif // SK_ENABLE_OPTIMIZE_SIZE

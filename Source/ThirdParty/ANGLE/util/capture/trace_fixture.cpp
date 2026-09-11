@@ -117,10 +117,10 @@ void UpdateUniformLocation(GLuint program, const char *name, GLint location, GLi
         programLocations.resize(location + count, 0);
     }
     GLuint mappedProgramID = gShaderProgramMap[program];
+    GLint baseUniformLocation = glGetUniformLocation(mappedProgramID, name);
     for (GLint arrayIndex = 0; arrayIndex < count; ++arrayIndex)
     {
-        programLocations[location + arrayIndex] =
-            glGetUniformLocation(mappedProgramID, name) + arrayIndex;
+        programLocations[location + arrayIndex] = baseUniformLocation + arrayIndex;
     }
     gUniformLocations[program] = programLocations.data();
 }
@@ -496,6 +496,17 @@ void UpdateClientArrayPointer(int arrayIndex, const void *data, uint64_t size)
 {
     memcpy(gClientArrays[arrayIndex], data, static_cast<size_t>(size));
 }
+
+void UpdateClientArrayPointerWithOffset(int arrayIndex,
+                                        const void *data,
+                                        uint64_t size,
+                                        uint64_t offset)
+{
+    uintptr_t dest =
+        reinterpret_cast<uintptr_t>(gClientArrays[arrayIndex]) + static_cast<size_t>(offset);
+    memcpy(reinterpret_cast<uint8_t *>(dest), data, static_cast<size_t>(size));
+}
+
 BufferHandleMap gMappedBufferData;
 
 void UpdateClientBufferData(GLuint bufferID, const void *source, GLsizei size)
@@ -669,6 +680,41 @@ void FenceSync(GLenum condition, GLbitfield flags, uintptr_t fenceSync)
 void FenceSync2(GLenum condition, GLbitfield flags, uintptr_t fenceSync)
 {
     gSyncMap2[fenceSync] = glFenceSync(condition, flags);
+}
+
+GLenum ClientWaitSync(GLsync sync, GLbitfield flags, GLuint64 timeout, GLenum capturedReturnValue)
+{
+    if (capturedReturnValue == GL_ALREADY_SIGNALED || capturedReturnValue == GL_CONDITION_SATISFIED)
+    {
+        GLenum result        = GL_TIMEOUT_EXPIRED;
+        GLuint64 waitTimeout = 100000000;  // 100ms
+        int attempts         = 0;
+        while (result != GL_ALREADY_SIGNALED && result != GL_CONDITION_SATISFIED)
+        {
+            result = glClientWaitSync(sync, flags, waitTimeout);
+            attempts++;
+            if (attempts > 100)
+            {
+                printf(
+                    "ClientWaitSync: Waiting for sync object %p to be signaled is taking too long "
+                    "(attempts: %d)\n",
+                    (void *)sync, attempts);
+                attempts = 0;
+            }
+            if (result == GL_WAIT_FAILED)
+            {
+                printf(
+                    "ClientWaitSync: glClientWaitSync returned GL_WAIT_FAILED for sync object %p\n",
+                    (void *)sync);
+                break;
+            }
+        }
+        return result;
+    }
+    else
+    {
+        return glClientWaitSync(sync, flags, timeout);
+    }
 }
 
 GLuint CreateEGLImageResource(GLsizei width, GLsizei height)

@@ -82,6 +82,8 @@ DE_DECLARE_COMMAND_LINE_OPT(RunMode, tcu::RunMode);
 DE_DECLARE_COMMAND_LINE_OPT(ExportFilenamePattern, std::string);
 DE_DECLARE_COMMAND_LINE_OPT(MustpassSpec, std::string);
 DE_DECLARE_COMMAND_LINE_OPT(WatchDog, bool);
+DE_DECLARE_COMMAND_LINE_OPT(WatchDogTotalTime, int);
+DE_DECLARE_COMMAND_LINE_OPT(WatchDogIntervalTime, int);
 DE_DECLARE_COMMAND_LINE_OPT(CrashHandler, bool);
 DE_DECLARE_COMMAND_LINE_OPT(BaseSeed, int);
 DE_DECLARE_COMMAND_LINE_OPT(TestIterationCount, int);
@@ -143,10 +145,10 @@ DE_DECLARE_COMMAND_LINE_OPT(PipelineCompilerArgs, std::string);
 DE_DECLARE_COMMAND_LINE_OPT(PipelineCompilerOutputFile, std::string);
 DE_DECLARE_COMMAND_LINE_OPT(PipelineCompilerLogFile, std::string);
 DE_DECLARE_COMMAND_LINE_OPT(PipelineCompilerFilePrefix, std::string);
+DE_DECLARE_COMMAND_LINE_OPT(IPCPort, int);
 DE_DECLARE_COMMAND_LINE_OPT(VkLibraryPath, std::string);
 DE_DECLARE_COMMAND_LINE_OPT(ApplicationParametersInputFile, std::string);
 DE_DECLARE_COMMAND_LINE_OPT(QuietStdout, bool);
-DE_DECLARE_COMMAND_LINE_OPT(ComputeOnly, bool);
 DE_DECLARE_COMMAND_LINE_OPT(VideoLogPrint, bool);
 DE_DECLARE_COMMAND_LINE_OPT(VideoDecodeOutputDump, VideoDecodeOutput);
 DE_DECLARE_COMMAND_LINE_OPT(VideoEncodeOutputDump, VideoEncodeOutput);
@@ -236,6 +238,10 @@ void registerOptions(de::cmdline::Parser &parser)
                                 "(used with --deqp-runmode=gen-mustpass)",
                                 "")
         << Option<WatchDog>(nullptr, "deqp-watchdog", "Enable test watchdog", s_enableNames, "disable")
+        << Option<WatchDogTotalTime>(nullptr, "deqp-watchdog-total-time-limit", "Total test case time limit in seconds",
+                                     "300")
+        << Option<WatchDogIntervalTime>(nullptr, "deqp-watchdog-interval-time-limit",
+                                        "Per iteration time limit in seconds", "30")
         << Option<CrashHandler>(nullptr, "deqp-crashhandler", "Enable crash handling", s_enableNames, "disable")
         << Option<BaseSeed>(nullptr, "deqp-base-seed", "Base seed for test cases that use randomization", "0")
         << Option<TestIterationCount>(nullptr, "deqp-test-iteration-count",
@@ -351,13 +357,14 @@ void registerOptions(de::cmdline::Parser &parser)
         << Option<PipelineCompilerFilePrefix>(
                nullptr, "deqp-pipeline-prefix",
                "Prefix for input pipeline compiler files (Vulkan SC only, do not use manually)", "")
+        << Option<IPCPort>(nullptr, "deqp-ipc-port",
+                           "TCP port used for main process<->subprocess IPC (Vulkan SC only, do not use manually; the "
+                           "main process picks a free port automatically and passes it to the subprocess)",
+                           "0")
         << Option<VkLibraryPath>(nullptr, "deqp-vk-library-path",
                                  "Path to Vulkan library (e.g. loader library vulkan-1.dll)", "")
         << Option<ApplicationParametersInputFile>(nullptr, "deqp-app-params-input-file",
                                                   "File that provides a default set of application parameters")
-        << Option<ComputeOnly>(nullptr, "deqp-compute-only",
-                               "Perform tests for devices implementing compute-only functionality", s_enableNames,
-                               "disable")
         << Option<VideoLogPrint>(nullptr, "deqp-vk-video-log-print", "Print log messages of vulkan video tests",
                                  s_enableNames, "disable")
         << Option<VideoDecodeOutputDump>(nullptr, "deqp-vk-video-decode-dump",
@@ -1262,6 +1269,14 @@ bool CommandLine::isWatchDogEnabled(void) const
 {
     return m_cmdLine.getOption<opt::WatchDog>();
 }
+int CommandLine::getWatchDogTotalTime(void) const
+{
+    return m_cmdLine.getOption<opt::WatchDogTotalTime>();
+}
+int CommandLine::getWatchDogIntervalTime(void) const
+{
+    return m_cmdLine.getOption<opt::WatchDogIntervalTime>();
+}
 bool CommandLine::isCrashHandlingEnabled(void) const
 {
     return m_cmdLine.getOption<opt::CrashHandler>();
@@ -1418,10 +1433,6 @@ int CommandLine::getPipelineDefaultSize(void) const
 {
     return m_cmdLine.getOption<opt::PipelineDefaultSize>();
 }
-bool CommandLine::isComputeOnly(void) const
-{
-    return m_cmdLine.getOption<opt::ComputeOnly>();
-}
 bool CommandLine::isVendorSpecific() const
 {
     return m_cmdLine.getOption<opt::VendorSpecific>();
@@ -1544,6 +1555,11 @@ const char *CommandLine::getPipelineCompilerFilePrefix(void) const
         return m_cmdLine.getOption<opt::PipelineCompilerFilePrefix>().c_str();
     else
         return nullptr;
+}
+
+int CommandLine::getIPCPort(void) const
+{
+    return m_cmdLine.getOption<opt::IPCPort>();
 }
 
 bool CommandLine::getVideoLogPrint(void) const

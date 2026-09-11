@@ -1324,6 +1324,7 @@ void testShuffleDoesntTrashCalleeSaves();
 void testDemotePatchpointTerminal();
 void testReportUsedRegistersLateUseFollowedByEarlyDefDoesNotMarkUseAsDead();
 void testInfiniteLoopDoesntCauseBadHoisting();
+void testBackwardsDominatorsWithMultipleBackEdges();
 void testDivImmArgFloat(float, float);
 void testDivImmsFloat(float, float);
 void testModArgDouble(double);
@@ -1530,6 +1531,7 @@ void testCCmpNegatedAnd32(int32_t, int32_t);
 void testCCmpNegatedOr32(int32_t, int32_t);
 void testCCmpMixedWidth32And64(int32_t, int64_t, int32_t);
 void testCCmpMixedWidth64And32(int64_t, int32_t);
+void testCCmpChainRollback(int32_t, int32_t, int32_t, int32_t, int32_t, int32_t);
 
 // ARM64 fccmp tests (floating-point conditional compare)
 void testFCCmpAndDouble(double, double, double, double);

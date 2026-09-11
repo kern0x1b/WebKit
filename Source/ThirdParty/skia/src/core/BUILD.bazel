@@ -177,10 +177,12 @@ SEMI_PUBLIC_HEADERS = [
     "SkRuntimeEffectPriv.h",
     "SkSLTypeShared.h",
     "SkSafeMath.h",
+    "SkSafetyChecks.h",
     "SkSamplingPriv.h",
     "SkScalerContext.h",
     "SkScan.h",
     "SkScopeExit.h",
+    "SkSharedContext.h",
     "SkSharedMutex.h",
     "SkSpanPriv.h",
     "SkSpecialImage.h",
@@ -248,7 +250,6 @@ PRIVATE_HEADERS = [
     "SkAlphaRuns.h",
     "SkAnalyticEdge.h",
     "SkAutoBlitterChoose.h",
-    "SkBigPicture.h",
     "SkBlitMask.h",
     "SkBlitRow.h",
     "SkBlitter.h",
@@ -294,6 +295,7 @@ skia_filegroup(
     name = "core_srcs",
     srcs = [
         # Implementation of public and private headers
+        "RasterContext.cpp",
         "SkAAClip.cpp",
         "SkATrace.cpp",
         "SkAlphaRuns.cpp",
@@ -304,7 +306,6 @@ skia_filegroup(
         "SkBBHFactory.cpp",
         "SkBase64.cpp",
         "SkBezierCurves.cpp",
-        "SkBigPicture.cpp",
         "SkBitmap.cpp",
         "SkBitmapCache.cpp",
         "SkBitmapDevice.cpp",
@@ -347,6 +348,7 @@ skia_filegroup(
         "SkColorTable.cpp",
         "SkCompressedDataUtils.cpp",
         "SkContainers.cpp",
+        "SkContext.cpp",
         "SkContourMeasure.cpp",
         "SkConvertPixels.cpp",
         "SkCpu.cpp",
@@ -483,6 +485,7 @@ skia_filegroup(
         "SkScan_Hairline.cpp",
         "SkScan_Path.cpp",
         "SkSemaphore.cpp",
+        "SkSharedContext.cpp",
         "SkSharedMutex.cpp",
         "SkSpecialImage.cpp",
         "SkSpinlock.cpp",
@@ -560,6 +563,11 @@ bool_flag(
     default = False,
 )
 
+bool_flag(
+    name = "skia_enable_threadlocal_strikecache",
+    default = False,
+)
+
 skia_cc_library(
     name = "core",
     srcs = [
@@ -588,6 +596,10 @@ skia_cc_library(
         "//include/sksl:core_hdrs",
         "//include/utils:core_hdrs",
     ],
+    defines = select({
+        ":skia_enable_threadlocal_strikecache_true": ["SK_ENABLE_THREADLOCAL_STRIKECACHE"],
+        ":skia_enable_threadlocal_strikecache_false": [],
+    }),
     features = ["layering_check"],
     textual_hdrs = [
         "//src/opts:textual_hdrs",
@@ -627,6 +639,7 @@ skia_cc_library(
     deps = [
         ":core",
         "//modules/skcms",
+        "//src/partition_alloc:raw_ptr",
     ],
 )
 

@@ -6,11 +6,8 @@
 
 // BlitGL.cpp: Implements the BlitGL class, a helper for blitting textures
 
-#ifdef UNSAFE_BUFFERS_BUILD
-#    pragma allow_unsafe_buffers
-#endif
-
 #include "libANGLE/renderer/gl/BlitGL.h"
+#include "common/unsafe_buffers.h"
 
 #include "common/FixedVector.h"
 #include "common/utilities.h"
@@ -278,7 +275,7 @@ BlitGL::BlitGL(const FunctionsGL *functions,
 {
     for (size_t i = 0; i < ArraySize(mScratchTextures); i++)
     {
-        mScratchTextures[i] = 0;
+        ANGLE_UNSAFE_TODO(mScratchTextures[i]) = 0;
     }
 
     ASSERT(mFunctions);
@@ -295,10 +292,10 @@ BlitGL::~BlitGL()
 
     for (size_t i = 0; i < ArraySize(mScratchTextures); i++)
     {
-        if (mScratchTextures[i] != 0)
+        if (ANGLE_UNSAFE_TODO(mScratchTextures[i]) != 0)
         {
-            mStateManager->deleteTexture(mScratchTextures[i]);
-            mScratchTextures[i] = 0;
+            mStateManager->deleteTexture(ANGLE_UNSAFE_TODO(mScratchTextures[i]));
+            ANGLE_UNSAFE_TODO(mScratchTextures[i]) = 0;
         }
     }
 
@@ -308,12 +305,12 @@ BlitGL::~BlitGL()
         mScratchFBO = 0;
     }
 
-    if (mOwnsVAOState)
+    if (mOwnsVAO)
     {
         mStateManager->deleteVertexArray(mVAO);
-        SafeDelete(mVAOState);
-        mVAO = 0;
     }
+    mVAO      = 0;
+    mVAOState = nullptr;
 }
 
 angle::Result BlitGL::copyImageToLUMAWorkaroundTexture(const gl::Context *context,
@@ -845,7 +842,7 @@ angle::Result BlitGL::copySubTextureCPUReadback(const gl::Context *context,
                          context->getScratchBuffer(sourceBufferSize + destBufferSize, &buffer));
 
     uint8_t *sourceMemory = buffer->data();
-    uint8_t *destMemory   = buffer->data() + sourceBufferSize;
+    uint8_t *destMemory   = ANGLE_UNSAFE_TODO(buffer->data() + sourceBufferSize);
 
     GLenum readPixelsFormat        = GL_NONE;
     PixelReadFunction readFunction = nullptr;
@@ -865,9 +862,10 @@ angle::Result BlitGL::copySubTextureCPUReadback(const gl::Context *context,
     pack.alignment = 1;
     ANGLE_TRY(mStateManager->setPixelPackState(context, pack));
     ANGLE_TRY(mStateManager->setPixelPackBuffer(context, nullptr));
-    ANGLE_GL_TRY(context, mFunctions->readPixels(readPixelsArea.x, readPixelsArea.y,
-                                                 readPixelsArea.width, readPixelsArea.height,
-                                                 readPixelsFormat, GL_UNSIGNED_BYTE, sourceMemory));
+    ANGLE_GL_TRY_ALWAYS_CHECK(
+        context, mFunctions->readPixels(readPixelsArea.x, readPixelsArea.y, readPixelsArea.width,
+                                        readPixelsArea.height, readPixelsFormat, GL_UNSIGNED_BYTE,
+                                        sourceMemory));
 
     angle::FormatID destFormatID =
         angle::Format::InternalFormatToID(destInternalFormatInfo.sizedInternalFormat);
@@ -1057,89 +1055,6 @@ angle::Result BlitGL::clearRenderableTexture(const gl::Context *context,
     return angle::Result::Continue;
 }
 
-angle::Result BlitGL::clearAttachment(const gl::Context *context,
-                                      GLenum attachment,
-                                      GLenum sizedInternalFormat)
-{
-    const bool isAtLeastES3 = context->getClientVersion() >= gl::ES_3_0;
-    switch (attachment)
-    {
-        case GL_COLOR_ATTACHMENT0:
-        {
-            const gl::InternalFormat &internalFormatInfo =
-                gl::GetSizedInternalFormatInfo(sizedInternalFormat);
-            if (isAtLeastES3)
-            {
-                switch (internalFormatInfo.componentType)
-                {
-                    case GL_UNSIGNED_NORMALIZED:
-                    case GL_SIGNED_NORMALIZED:
-                    case GL_FLOAT:
-                    {
-                        constexpr GLfloat clearValue[] = {0, 0, 0, 0};
-                        ANGLE_GL_TRY(context, mFunctions->clearBufferfv(GL_COLOR, 0, clearValue));
-                    }
-                    break;
-
-                    case GL_INT:
-                    {
-                        constexpr GLint clearValue[] = {0, 0, 0, 0};
-                        ANGLE_GL_TRY(context, mFunctions->clearBufferiv(GL_COLOR, 0, clearValue));
-                    }
-                    break;
-
-                    case GL_UNSIGNED_INT:
-                    {
-                        constexpr GLuint clearValue[] = {0, 0, 0, 0};
-                        ANGLE_GL_TRY(context, mFunctions->clearBufferuiv(GL_COLOR, 0, clearValue));
-                    }
-                    break;
-
-                    default:
-                        UNREACHABLE();
-                        break;
-                }
-            }
-            else
-            {
-                ANGLE_GL_TRY(context, mFunctions->clear(GL_COLOR_BUFFER_BIT));
-            }
-        }
-        break;
-        case GL_DEPTH_ATTACHMENT:
-        {
-            if (isAtLeastES3)
-            {
-                constexpr GLfloat clearValue[] = {1.0f, 0, 0, 0};
-                ANGLE_GL_TRY(context, mFunctions->clearBufferfv(GL_DEPTH, 0, clearValue));
-            }
-            else
-            {
-                ANGLE_GL_TRY(context, mFunctions->clear(GL_DEPTH_BUFFER_BIT));
-            }
-        }
-        break;
-        case GL_STENCIL_ATTACHMENT:
-        {
-            if (isAtLeastES3)
-            {
-                constexpr GLint clearValue[] = {0, 0, 0, 0};
-                ANGLE_GL_TRY(context, mFunctions->clearBufferiv(GL_STENCIL, 0, clearValue));
-            }
-            else
-            {
-                ANGLE_GL_TRY(context, mFunctions->clear(GL_STENCIL_BUFFER_BIT));
-            }
-        }
-        break;
-        default:
-            UNREACHABLE();
-            break;
-    }
-
-    return angle::Result::Continue;
-}
-
 angle::Result BlitGL::clearRenderbuffer(const gl::Context *context,
                                         RenderbufferGL *source,
                                         GLenum sizedInternalFormat)
@@ -1160,7 +1075,36 @@ angle::Result BlitGL::clearRenderbuffer(const gl::Context *context,
         ANGLE_GL_TRY(context,
                      mFunctions->framebufferRenderbuffer(
                          GL_FRAMEBUFFER, bindTarget, GL_RENDERBUFFER, source->getRenderbufferID()));
-        ANGLE_TRY(clearAttachment(context, bindTarget, sizedInternalFormat));
+    }
+    const gl::InternalFormat &internalFormatInfo =
+        gl::GetSizedInternalFormatInfo(sizedInternalFormat);
+    if ((clearMask & GL_COLOR_BUFFER_BIT) != 0 && internalFormatInfo.isInt())
+    {
+        ASSERT(clearMask == GL_COLOR_BUFFER_BIT);
+        switch (internalFormatInfo.componentType)
+        {
+            case GL_INT:
+            {
+                constexpr GLint clearValue[] = {0, 0, 0, 0};
+                ANGLE_GL_TRY(context, mFunctions->clearBufferiv(GL_COLOR, 0, clearValue));
+            }
+            break;
+
+            case GL_UNSIGNED_INT:
+            {
+                constexpr GLuint clearValue[] = {0, 0, 0, 0};
+                ANGLE_GL_TRY(context, mFunctions->clearBufferuiv(GL_COLOR, 0, clearValue));
+            }
+            break;
+
+            default:
+                UNREACHABLE();
+                break;
+        }
+    }
+    else
+    {
+        ANGLE_GL_TRY(context, mFunctions->clear(clearMask));
     }
 
     // Unbind
@@ -1225,7 +1169,7 @@ angle::Result BlitGL::clearFramebuffer(const gl::Context *context,
     if ((clearMask & GL_COLOR_BUFFER_BIT) &&
         (uninitializedColorAttachments != source->getState().getColorAttachmentsMask() ||
          uninitializedColorAttachments != source->getState().getEnabledDrawBuffers() ||
-         hasIntegerColorAttachments))
+         hasIntegerColorAttachments || source->hasEmulatedAlphaChannelTextureAttachment()))
     {
         for (size_t colorAttachmentIdx : uninitializedColorAttachments)
         {
@@ -1236,13 +1180,15 @@ angle::Result BlitGL::clearFramebuffer(const gl::Context *context,
                 continue;
             }
 
+            const bool emulatedAlpha = IsEmulatedAlphaChannelTextureAttachment(attachment);
+
             switch (attachment->getComponentType())
             {
                 case GL_UNSIGNED_NORMALIZED:
                 case GL_SIGNED_NORMALIZED:
                 case GL_FLOAT:
                 {
-                    constexpr GLfloat clearValue[] = {0, 0, 0, 0};
+                    const GLfloat clearValue[] = {0.0f, 0.0f, 0.0f, emulatedAlpha ? 1.0f : 0.0f};
                     ANGLE_GL_TRY(context,
                                  mFunctions->clearBufferfv(
                                      GL_COLOR, static_cast<GLint>(colorAttachmentIdx), clearValue));
@@ -1251,7 +1197,7 @@ angle::Result BlitGL::clearFramebuffer(const gl::Context *context,
 
                 case GL_INT:
                 {
-                    constexpr GLint clearValue[] = {0, 0, 0, 0};
+                    const GLint clearValue[] = {0, 0, 0, emulatedAlpha ? 1 : 0};
                     ANGLE_GL_TRY(context,
                                  mFunctions->clearBufferiv(
                                      GL_COLOR, static_cast<GLint>(colorAttachmentIdx), clearValue));
@@ -1260,7 +1206,7 @@ angle::Result BlitGL::clearFramebuffer(const gl::Context *context,
 
                 case GL_UNSIGNED_INT:
                 {
-                    constexpr GLuint clearValue[] = {0, 0, 0, 0};
+                    const GLuint clearValue[] = {0, 0, 0, emulatedAlpha ? 1u : 0u};
                     ANGLE_GL_TRY(context,
                                  mFunctions->clearBufferuiv(
                                      GL_COLOR, static_cast<GLint>(colorAttachmentIdx), clearValue));
@@ -1419,7 +1365,7 @@ angle::Result BlitGL::initializeResources(const gl::Context *context)
 
     for (size_t i = 0; i < ArraySize(mScratchTextures); i++)
     {
-        ANGLE_GL_TRY(context, mFunctions->genTextures(1, &mScratchTextures[i]));
+        ANGLE_UNSAFE_TODO(ANGLE_GL_TRY(context, mFunctions->genTextures(1, &mScratchTextures[i])));
     }
 
     ANGLE_GL_TRY(context, mFunctions->genFramebuffers(1, &mScratchFBO));
@@ -1436,21 +1382,19 @@ angle::Result BlitGL::initializeResources(const gl::Context *context)
     ANGLE_GL_TRY_ALWAYS_CHECK(context, mFunctions->bufferData(GL_ARRAY_BUFFER, sizeof(float) * 6,
                                                               vertexData, GL_STATIC_DRAW));
 
-    VertexArrayStateGL *defaultVAOState = mStateManager->getDefaultVAOState();
     if (!mFeatures.syncAllVertexArraysToDefault.enabled)
     {
         ANGLE_GL_TRY(context, mFunctions->genVertexArrays(1, &mVAO));
-        mVAOState     = new VertexArrayStateGL(defaultVAOState->attributes.size(),
-                                               defaultVAOState->bindings.size());
-        mOwnsVAOState = true;
+        mOwnsVAO  = true;
+        mVAOState = mStateManager->getOrCreateVAOState(mVAO);
         ANGLE_TRY(setVAOState(context));
         ANGLE_TRY(initializeVAOState(context));
     }
     else
     {
         mVAO          = mStateManager->getDefaultVAO();
-        mVAOState     = defaultVAOState;
-        mOwnsVAOState = false;
+        mOwnsVAO      = false;
+        mVAOState     = mStateManager->getOrCreateVAOState(mVAO);
     }
 
     constexpr GLenum potentialSRGBMipmapGenerationFormats[] = {
@@ -1532,7 +1476,7 @@ angle::Result BlitGL::setScratchTextureParameter(const gl::Context *context,
 
 angle::Result BlitGL::setVAOState(const gl::Context *context)
 {
-    mStateManager->bindVertexArray(mVAO, mVAOState);
+    mStateManager->bindVertexArray(mVAO);
     if (mFeatures.syncAllVertexArraysToDefault.enabled)
     {
         ANGLE_TRY(initializeVAOState(context));

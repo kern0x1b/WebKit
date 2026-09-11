@@ -54,7 +54,6 @@ add_library(Skia STATIC
     src/core/SkAutoPixmapStorage.cpp
     src/core/SkBBHFactory.cpp
     src/core/SkBezierCurves.cpp
-    src/core/SkBigPicture.cpp
     src/core/SkBitmap.cpp
     src/core/SkBitmapCache.cpp
     src/core/SkBitmapDevice.cpp
@@ -785,6 +784,7 @@ add_library(Skia STATIC
     src/utils/SkDashPath.cpp
     src/utils/SkFloatToDecimal.cpp
     src/utils/SkJSONWriter.cpp
+    src/utils/SkLogHandler.cpp
     src/utils/SkMatrix22.cpp
     src/utils/SkNWayCanvas.cpp
     src/utils/SkParse.cpp

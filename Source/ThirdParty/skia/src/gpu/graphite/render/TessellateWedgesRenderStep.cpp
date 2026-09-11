@@ -96,7 +96,8 @@ TessellateWedgesRenderStep::TessellateWedgesRenderStep(Layout layout,
                      depthStencilSettings,
                      /*staticAttrs=*/{{{"resolveLevel_and_idx",
                                        VertexAttribType::kFloat2, SkSLType::kFloat2}}},
-                     /*appendAttrs=*/kAttributes[infinitySupport])
+                     /*appendAttrs=*/kAttributes[infinitySupport],
+                     /*storageUniforms=*/{})
         , fInfinitySupport(infinitySupport) {
     SkASSERT(this->appendDataStride() ==
              PatchStride(infinitySupport ? kAttribs : kAttribsWithCurveType));
@@ -121,7 +122,7 @@ TessellateWedgesRenderStep::TessellateWedgesRenderStep(Layout layout,
 
 TessellateWedgesRenderStep::~TessellateWedgesRenderStep() {}
 
-std::string TessellateWedgesRenderStep::vertexSkSL() const {
+std::string TessellateWedgesRenderStep::vertexSkSL(const RootNodesInfo&) const {
     return SkSL::String::printf(
             "float2 localCoord;\n"
             "if (resolveLevel_and_idx.x < 0) {\n"
@@ -142,8 +143,9 @@ std::string TessellateWedgesRenderStep::vertexSkSL() const {
 }
 
 void TessellateWedgesRenderStep::writeVertices(DrawWriter* dw,
-                                               const DrawParams& params,
-                                               uint32_t ssboIndex) const {
+                                                StorageContext* /*storageContext*/,
+                                                const DrawParams& params,
+                                                uint32_t ssboIndex) const {
     SkPath path = params.geometry().shape().asPath(); // TODO: Iterate the Shape directly
 
     int patchReserveCount = FixedCountWedges::PreallocCount(path.countVerbs());

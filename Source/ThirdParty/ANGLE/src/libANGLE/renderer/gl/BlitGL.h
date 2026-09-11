@@ -146,10 +146,6 @@ class BlitGL : angle::NonCopyable
                                          const gl::ImageIndex &imageIndex,
                                          bool *clearSucceededOut);
 
-    angle::Result clearAttachment(const gl::Context *context,
-                                  GLenum attachment,
-                                  GLenum sizedInternalFormat);
-
     angle::Result clearRenderbuffer(const gl::Context *context,
                                     RenderbufferGL *source,
                                     GLenum sizedInternalFormat);
@@ -218,8 +214,8 @@ class BlitGL : angle::NonCopyable
     GLuint mScratchFBO         = 0;
 
     GLuint mVAO                   = 0;
+    bool mOwnsVAO                 = false;
     VertexArrayStateGL *mVAOState = nullptr;
-    bool mOwnsVAOState            = false;
 
     const GLuint mTexcoordAttribLocation = 0;
     GLuint mVertexBuffer                 = 0;

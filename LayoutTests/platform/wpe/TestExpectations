@@ -196,7 +196,6 @@ imported/w3c/web-platform-tests/html/canvas/offscreen/manual/wide-gamut-canvas/2
 imported/w3c/web-platform-tests/mimesniff/media/media-sniff.window.html [ Failure ]
 imported/w3c/web-platform-tests/storage/storagemanager-estimate.https.any.html [ Failure ]
 imported/w3c/web-platform-tests/storage/storagemanager-estimate.https.any.worker.html [ Failure ]
-imported/w3c/web-platform-tests/xhr/send-authentication-basic-setrequestheader-existing-session.htm [ Failure ]
 imported/w3c/web-platform-tests/xhr/xmlhttprequest-timeout-worker-overridesexpires.html [ Skip ]
 
 # Ping attribute
@@ -384,11 +383,7 @@ webkit.org/b/212351 fast/events/mouse-cursor-update-during-raf.html [ Failure ]
 webkit.org/b/256457 imported/w3c/web-platform-tests/css/css-fonts/variations/variable-opsz-size-adjust.html [ ImageOnlyFailure ]
 
 # Test failing since async overflow scrolling was activated in WPE.
-webkit.org/b/224596 css3/filters/clipping-overflow-scroll-with-pixel-moving-effect-on-parent.html [ ImageOnlyFailure ]
 webkit.org/b/315291 [ Release ] css3/filters/composited-during-animation.html [ Pass Timeout ]
-webkit.org/b/224596 css3/filters/clipping-overflow-scroll-with-pixel-moving-effect-on.html [ ImageOnlyFailure ]
-webkit.org/b/224596 fast/scrolling/rtl-scrollbars-overflow-dir-rtl.html [ ImageOnlyFailure ]
-webkit.org/b/224596 fast/scrolling/rtl-scrollbars-overflow-padding.html [ ImageOnlyFailure ]
 webkit.org/b/224596 imported/w3c/web-platform-tests/css/css-grid/grid-model/grid-container-scrollbar-vertical-lr-001.html [ ImageOnlyFailure ]
 webkit.org/b/224596 imported/w3c/web-platform-tests/css/css-grid/grid-model/grid-container-scrollbar-vertical-rl-001.html [ ImageOnlyFailure ]
 webkit.org/b/298634 fast/repaint/vertical-overflow-child.html [ Skip ]
@@ -620,8 +615,6 @@ Bug(WPE) security/contentSecurityPolicy/image-with-blob-url-allowed-by-img-src-s
 Bug(WPE) security/contentSecurityPolicy/image-with-blob-url-blocked-by-img-src-star.html [ Skip ]
 Bug(WPE) security/contentSecurityPolicy/video-with-blob-url-allowed-by-media-src-star.html [ Skip ]
 
-webkit.org/b/316984 tiled-drawing/scrolling/non-fast-region/fixed-div-in-scrollable-page.html [ Failure ]
-webkit.org/b/316984 tiled-drawing/scrolling/non-fast-region/wheel-handler-in-overflow-scroll.html [ Failure ]
 
 # WPT: css
 # ========
@@ -670,7 +663,6 @@ webkit.org/b/173419 fast/events/wheel/wheelevent-basic.html [ Failure Timeout ]
 webkit.org/b/173419 fast/events/wheel/wheelevent-in-horizontal-scrollbar-in-rtl.html [ Failure ]
 webkit.org/b/173419 fast/events/wheel/wheelevent-in-vertical-scrollbar-in-rtl.html [ Failure ]
 
-webkit.org/b/212202 fast/scrolling/sync-scroll-overscroll-behavior-unscrollable-iframe.html [ Failure ]
 
 Bug(WPE) fast/dom/HTMLDocument/hasFocus.html [ Failure ]
 Bug(WPE) fast/dom/Range/getClientRects.html [ Failure ]
@@ -766,8 +758,6 @@ webkit.org/b/212148 http/tests/navigation/page-cache-mediakeysession.html [ Fail
 
 webkit.org/b/212150 http/tests/misc/bubble-drag-events.html [ Failure ]
 
-webkit.org/b/212200 fast/spatial-navigation/snav-input.html [ Failure ]
-webkit.org/b/212200 fast/spatial-navigation/snav-textarea.html [ Failure ]
 webkit.org/b/212200 fast/spatial-navigation/snav-unit-overflow-and-scroll-in-direction.html [ Failure ]
 
 webkit.org/b/212023 fast/scrolling/scroll-select-list.html [ ImageOnlyFailure ]
@@ -873,13 +863,7 @@ webkit.org/b/273396 imported/w3c/web-platform-tests/css/css-masking/clip-path/cl
 webkit.org/b/273396 imported/w3c/web-platform-tests/css/css-masking/clip-path/clip-path-round-zero-size.html [ ImageOnlyFailure ]
 
 compositing/geometry/composited-in-columns.html [ Failure ]
-compositing/geometry/limit-layer-bounds-transformed-overflow.html [ Failure ]
-compositing/layer-creation/overflow-scroll-overlap.html [ Failure ]
 compositing/layer-creation/overlap-animation-container.html [ Failure ]
-compositing/layer-creation/scroll-partial-update.html [ Failure ]
-compositing/overflow/content-gains-scrollbars.html [ Failure ]
-compositing/overflow/overflow-scrollbar-layer-positions.html [ Failure ]
-compositing/overflow/overflow-scrollbar-layers.html [ Failure ]
 compositing/rtl/rtl-overflow-scrolling.html [ Failure ]
 compositing/tile-coverage-subpixel-empty-rect.html [ Failure ]
 compositing/tiling/tiled-layers-limit-contents-scale.html [ Failure ]
@@ -1049,12 +1033,9 @@ webkit.org/b/287572 imported/w3c/web-platform-tests/webvtt/rendering/cues-with-v
 webkit.org/b/287572 imported/w3c/web-platform-tests/webvtt/rendering/cues-with-video/processing-model/selectors/default_styles/bold_object_default_font-style.html [ ImageOnlyFailure ]
 webkit.org/b/287572 imported/w3c/web-platform-tests/webvtt/rendering/cues-with-video/processing-model/selectors/default_styles/italic_object_default_font-style.html [ ImageOnlyFailure ]
 webkit.org/b/287572 imported/w3c/web-platform-tests/webvtt/rendering/cues-with-video/processing-model/selectors/default_styles/underline_object_default_font-style.html [ ImageOnlyFailure ]
-webkit.org/b/287572 scrollbars/scrollbar-parts-opacity.html [ ImageOnlyFailure ]
 webkit.org/b/287572 svg/animations/animateMotion-accumulate-2a.svg [ ImageOnlyFailure ]
 webkit.org/b/287572 svg/animations/animateMotion-accumulate-2b.svg [ ImageOnlyFailure ]
 webkit.org/b/287572 svg/canvas/canvas-global-alpha-svg.html [ ImageOnlyFailure ]
-webkit.org/b/287572 svg/compositing/outermost-svg-directly-composited-transformed-group-child.html [ ImageOnlyFailure ]
-webkit.org/b/287572 svg/compositing/outermost-svg-with-border-overflow-visible.html [ ImageOnlyFailure ]
 webkit.org/b/131347 svg/compositing/hidpi-legacy-svg-compositing-sibling-no-shift.html [ ImageOnlyFailure Pass ]
 webkit.org/b/287572 svg/filters/filter-on-root-tile-boundary.html [ ImageOnlyFailure ]
 
@@ -1104,7 +1085,6 @@ webkit.org/b/305512 imported/w3c/web-platform-tests/focus/focus-large-element-in
 http/tests/media/hls/hls-audio-description-track-kind.html [ Skip ]
 
 webkit.org/b/306384 fast/lists/overlapping-nested-list-markers.html [ ImageOnlyFailure ]
-webkit.org/b/306384 imported/blink/compositing/overflow/selection-gaps.html [ ImageOnlyFailure ]
 webkit.org/b/306384 imported/w3c/web-platform-tests/css/css-position/sticky/position-sticky-rendering.html [ ImageOnlyFailure ]
 webkit.org/b/306384 imported/w3c/web-platform-tests/css/css-scroll-snap/scroll-target-margin-002.html [ ImageOnlyFailure ]
 webkit.org/b/306384 imported/w3c/web-platform-tests/css/css-scroll-snap/scroll-target-margin-004.html [ ImageOnlyFailure ]
@@ -1191,7 +1171,6 @@ webkit.org/b/310413 [ arm64 ] compositing/backing/animate-into-view.html [ Failu
 
 webkit.org/b/309382 [ arm64 ] fast/canvas/2d.text.draw.fill.maxWidth.gradient.html [ Failure Pass ]
 
-webkit.org/b/319953 [ arm64 ] imported/w3c/web-platform-tests/pointerevents/pointerevent_touch-action-mouse.html [ Failure ]
 
 webkit.org/b/310415 fast/canvas/canvas-createPattern-fillRect-shadow.html [ Failure Pass ]
 
@@ -1264,6 +1243,7 @@ webkit.org/b/316418 imported/w3c/web-platform-tests/html/semantics/popovers/popo
 webkit.org/b/316419 imported/w3c/web-platform-tests/html/semantics/embedded-content/media-elements/src_object_blob.html [ Pass Failure ]
 webkit.org/b/316422 css3/text-decoration/text-decoration-line-spelling-error-2.html [ Pass ImageOnlyFailure ]
 webkit.org/b/316426 imported/w3c/web-platform-tests/html/semantics/embedded-content/media-elements/networkState_during_loadstart.html [ Pass Failure ]
+imported/w3c/web-platform-tests/html/semantics/embedded-content/media-elements/loading-the-media-resource/resource-selection-source-media-env-change.html [ Pass Failure ]
 
 webkit.org/b/316582 [ arm64 ] imported/w3c/web-platform-tests/wasm/core/simd/simd_f32x4_pmin_pmax.wast.js.html [ Pass Failure Timeout ]
 webkit.org/b/316583 [ arm64 ] css3/filters/filter-animation-from-none-multi-hw.html [ Pass Failure ]
@@ -1275,7 +1255,6 @@ webkit.org/b/316586 [ arm64 ] http/tests/cache/cache-control-immutable-http.html
 webkit.org/b/316572 [ x86_64 ] webaudio/require-transient-activation.html [ Pass Crash ]
 webkit.org/b/316574 fast/parser/entities-in-html.html [ Pass Timeout ]
 
-webkit.org/b/316709 scrollbars/scrollbar-drag-thumb-with-large-content.html [ Failure ]
 
 webkit.org/b/309744 [ arm64 ] fast/events/monotonic-event-time.html [ Pass Failure ]
 webkit.org/b/311654 imported/w3c/web-platform-tests/event-timing/gap-keydown-keyup.html [ Pass Failure ]
@@ -1296,7 +1275,6 @@ webkit.org/b/317967 [ x86_64 ] fast/scrolling/scroll-animator-overlay-scrollbars
 webkit.org/b/317970 [ x86_64 ] imported/w3c/web-platform-tests/css/css-anchor-position/scroll-to-anchored-fixed-000.html [ ImageOnlyFailure Pass ]
 webkit.org/b/317972 [ x86_64 ] streams/pipeTo-unhandled-promise.html [ Crash Pass ]
 webkit.org/b/305514 [ x86_64 ] fast/images/imagebitmap-memory.html [ ImageOnlyFailure Pass Timeout ]
-webkit.org/b/317973 [ arm64 ] fast/visual-viewport/client-rects-relative-to-layout-viewport-zoomed.html [ Failure ]
 webkit.org/b/317974 [ arm64 ] imported/w3c/web-platform-tests/largest-contentful-paint/cross-origin-image.sub.html [ Failure Pass ]
 webkit.org/b/317975 [ arm64 ] fast/dom/HTMLImageElement/sizes/image-sizes-js-innerhtml.html [ Failure Pass ]
 webkit.org/b/317976 [ arm64 ] imported/w3c/web-platform-tests/largest-contentful-paint/observe-svg-data-uri-image.html [ Failure Pass ]
@@ -1337,3 +1315,7 @@ webkit.org/b/319325 [ arm64 ] fast/body-propagation/background-color/010.html [ 
 webkit.org/b/319326 [ arm64 ] imported/w3c/web-platform-tests/media-source/mediasource-config-change-webm-av-framesize.html [ Failure Pass ]
 
 compositing/clipping/cached-cliprect-with-compositing-boundary.html [ ImageOnlyFailure ]
+
+# Gardening 2026-09-08
+webkit.org/b/323696 fast/history/site-isolation/history-back-initial-vs-final-url.html [ Failure Pass ]
+webkit.org/b/323696 platform/glib/damage/video.html [ Failure Pass ]

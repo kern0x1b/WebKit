@@ -640,6 +640,7 @@ WebPage::WebPage(PageIdentifier pageID, WebPageCreationParameters&& parameters)
     , m_webPageTesting(WebPageTesting::create(*this))
     , m_mainFrame(WebFrame::create(*this, parameters.mainFrameIdentifier))
     , m_pageGroup(WebProcess::singleton().webPageGroup(WTF::move(parameters.pageGroupData)))
+    , m_userAgent(WTF::move(parameters.userAgent))
 #if ENABLE(TILED_CA_DRAWING_AREA)
     , m_drawingAreaType(parameters.drawingAreaType)
 #endif
@@ -1174,8 +1175,6 @@ WebPage::WebPage(PageIdentifier pageID, WebPageCreationParameters&& parameters)
 #if HAVE(NSREFRESHCONTROLLER)
     setHasRefreshController(parameters.hasRefreshController);
 #endif
-
-    m_userAgent = WTF::move(parameters.userAgent);
 
     setMediaVolume(parameters.mediaVolume);
 
@@ -2877,12 +2876,27 @@ String WebPage::dumpHistoryForTesting(const String& directory)
 
     CheckedRef list = m_page->backForward();
 
-    StringBuilder builder;
-    int begin = -list->backCount();
-    if (list->itemAtIndex(begin)->url() == aboutBlankURL())
+    // A page with no current item has nothing to dump. That is the state a window.open() page is
+    // in before its initial load commits, and WebKitTestRunner dumps every page it knows about.
+    if (!list->currentItem())
+        return { };
+
+    // itemAtIndex() takes an offset relative to the current item, so the range of valid offsets is
+    // [-backCount(), forwardCount()] inclusive. It is a synchronous round trip to the UI process,
+    // while backCount() and forwardCount() are served from a cache in this process, so the bounds
+    // and the items are sampled at different times and an item can be absent at an offset the
+    // bounds include. Skip those rather than crashing.
+    int begin = -static_cast<int>(list->backCount());
+    int end = static_cast<int>(list->forwardCount());
+
+    if (RefPtr item = list->itemAtIndex(begin); item && item->url() == aboutBlankURL())
         ++begin;
-    for (int i = begin; i <= static_cast<int>(list->forwardCount()); ++i)
-        dumpHistoryItem(*list->itemAtIndex(i), 8, !i, builder, directory);
+
+    StringBuilder builder;
+    for (int i = begin; i <= end; ++i) {
+        if (RefPtr item = list->itemAtIndex(i))
+            dumpHistoryItem(*item, 8, !i, builder, directory);
+    }
     return builder.toString();
 }
 

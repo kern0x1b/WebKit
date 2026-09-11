@@ -102,6 +102,24 @@ TEST_P(EGLDisplayTest, InitializeMultipleTimesInDifferentThreads)
     }
 }
 
+// Test that calling eglTerminate() in parallel in multiple threads works
+TEST_P(EGLDisplayTest, TerminateMultipleTimesInDifferentThreads)
+{
+    EGLDisplay display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
+    EXPECT_EGL_TRUE(eglInitialize(display, nullptr, nullptr) != EGL_FALSE);
+
+    std::array<std::thread, 10> threads;
+    for (std::thread &thread : threads)
+    {
+        thread = std::thread([&]() { EXPECT_EGL_TRUE(eglTerminate(display) != EGL_FALSE); });
+    }
+
+    for (std::thread &thread : threads)
+    {
+        thread.join();
+    }
+}
+
 // Tests that an EGLDisplay can be re-initialized.
 TEST_P(EGLDisplayTest, InitializeTerminateInitialize)
 {
@@ -214,7 +232,6 @@ TEST_P(EGLDisplayTestES3, GetPlatformDisplayAndroidValidation)
 }
 
 ANGLE_INSTANTIATE_TEST(EGLDisplayTest,
-                       WithNoFixture(ES2_D3D9()),
                        WithNoFixture(ES2_D3D11()),
                        WithNoFixture(ES2_METAL()),
                        WithNoFixture(ES2_OPENGL()),

@@ -882,9 +882,6 @@ imported/w3c/web-platform-tests/css/css-flexbox/select-element-multiple.html [ P
 imported/w3c/web-platform-tests/css/css-backgrounds/background-size-043.html [ Pass ]
 imported/w3c/web-platform-tests/css/css-backgrounds/background-size-044.html [ Pass ]
 
-imported/w3c/web-platform-tests/css/css-animations/nested-scale-animations.html [ Pass ]
-imported/w3c/web-platform-tests/css/css-animations/transform-animation-under-large-scale.html [ Pass ]
-imported/w3c/web-platform-tests/css/css-transforms/3d-scene-with-iframe-001.html [ Pass ]
 imported/w3c/web-platform-tests/css/css-transforms/transform3d-matrix3d-001.html [ Pass ]
 imported/w3c/web-platform-tests/css/filter-effects/css-filters-animation-combined-001.html [ Pass ]
 
@@ -1314,7 +1311,6 @@ imported/w3c/web-platform-tests/css/compositing/mix-blend-mode/mix-blend-mode-ro
 webkit.org/b/314309 imported/w3c/web-platform-tests/css/filter-effects/backdrop-filter-edge-behavior.html [ ImageOnlyFailure ]
 webkit.org/b/314310 imported/w3c/web-platform-tests/css/filter-effects/drop-shadow-currentcolor-dynamic-003.html [ ImageOnlyFailure ]
 webkit.org/b/314312 media/media-sources-selection.html [ ImageOnlyFailure ]
-webkit.org/b/314313 platform/glib/fast/layers/fractional-transforms.html [ ImageOnlyFailure ]
 
 #////////////////////////////////////////////////////////////////////////////////////////
 # End of Compositing tests
@@ -2663,6 +2659,9 @@ http/tests/webgl/1.0.x/conformance/textures/misc/origin-clean-conformance-offscr
 
 webgl/webgl-draft-extensions-flag-default.html [ Skip ]
 webgl/webgl-draft-extensions-flag-on.html [ Skip ]
+
+# ANGLE disables base vertex/base instance on Linux.
+webkit.org/b/319507 fast/canvas/webgl/draw-elements-base-vertex-out-of-bounds.html [ Skip ]
 
 # WEBGL2 failures
 webkit.org/b/251107 webgl/2.0.y/conformance2/extensions/ext-render-snorm.html [ Failure ]
@@ -5141,7 +5140,6 @@ webkit.org/b/292843 fast/dom/Window/open-window-min-size.html [ Failure ]
 webkit.org/b/316573 fast/parser/empty-text-resource.html [ Pass Timeout ]
 webkit.org/b/316575 [ x86_64 ] http/tests/IndexedDB/collect-IDB-objects.https.html [ Pass Crash ]
 
-webkit.org/b/317006 ipc/indexed-colorspace-null-inner-crash.html [ Crash ]
 webkit.org/b/317007 fast/replaced/replaced-percentage-size-in-aspect-ratio-shrink-to-fit.html [ ImageOnlyFailure ]
 webkit.org/b/317008 imported/w3c/web-platform-tests/html/semantics/embedded-content/the-img-element/sizes/sizes-auto-resize-observer-removes-auto.html [ Pass Failure ]
 webkit.org/b/317011 imported/w3c/web-platform-tests/css/css-shapes/shape-outside/shape-image/shape-image-018.html [ Pass Timeout ]
@@ -5174,12 +5172,11 @@ webkit.org/b/317607 http/tests/media/track/track-removal-clears-pending-list.htm
 webkit.org/b/319954 [ x86_64 ] imported/w3c/web-platform-tests/css/css-text/white-space/white-space-trim-inline-block.html [ ImageOnlyFailure ]
 webkit.org/b/319954 [ arm64 ] imported/w3c/web-platform-tests/css/css-text/white-space/white-space-trim-inline-block.html [ Pass ImageOnlyFailure ]
 
-webkit.org/b/317966 [ x86_64 ] http/tests/web-locks/web-lock-in-serviceworker.html [ Crash Failure Pass ]
+webkit.org/b/317966 http/tests/web-locks/web-lock-in-serviceworker.html [ Crash Failure Pass ]
 webkit.org/b/317968 [ x86_64 ] imported/w3c/web-platform-tests/navigation-timing/nav2-test-redirect-server.html [ Pass Failure ]
 
 webkit.org/b/318434 ipc/send-gpu-GetShareableBitmap-RemoteRenderingBackend.html [ Crash Pass ]
 
-webkit.org/b/318634 ipc/loadping-firstpartyforcookies-message-check.html [ Failure ]
 
 webkit.org/b/319043 http/wpt/navigation-api/traverse-subframe-remote-sibling.sub.html [ Crash ]
 webkit.org/b/319044 imported/w3c/web-platform-tests/html/rendering/widgets/shadow-dom.html [ Failure ]

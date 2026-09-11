@@ -139,6 +139,11 @@ public:
     const TextureProxyView& target() const;
     bool isTexturable() const;
 
+    // TODO (b/540923063): Remove this once flushPendingWork has been moved prior to key extraction.
+    // After that, gradient data inserted into the storage context will no longer be invalidated
+    // a flush. Then the DC can call resetStorageCache itself naturally inside flushPendingWork.
+    void resetStorageCache();
+
     // Can succeed if target is readable but not sampleable. Assumes 'subset' is contained in bounds
     sk_sp<Image> makeImageCopy(const SkIRect& subset, Budgeted, Mipmapped, SkBackingFit);
 
@@ -241,7 +246,7 @@ public:
                    sk_sp<SkBlender>, const SkPaint&) override;
 
     void drawDrawable(SkCanvas*, SkDrawable*, const SkMatrix*) override {}
-    void drawMesh(const SkMesh&, sk_sp<SkBlender>, const SkPaint&) override {}
+    void drawMesh(const SkMesh&, sk_sp<SkBlender>, const SkPaint&) override;
 
     // Special images and layers
     sk_sp<SkSurface> makeSurface(const SkImageInfo&, const SkSurfaceProps&) override;

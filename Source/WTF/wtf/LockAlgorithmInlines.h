@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2015-2019 Apple Inc. All rights reserved.
+ * Copyright (C) 2026 Igalia S.L.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -29,8 +30,8 @@
 #include <wtf/LockAlgorithm.h>
 #include <wtf/ParkingLot.h>
 #include <wtf/Platform.h>
+#include <wtf/SpinBackoff.h>
 #include <wtf/Threading.h>
-#include <wtf/simde/simde.h>
 
 // It's a good idea to avoid including this header in too many places, so that it's possible to change
 // the lock algorithm slow path without recompiling the world. Right now this should be included in two
@@ -45,21 +46,10 @@ void LockAlgorithm<LockType, isHeldBit, hasParkedBit, Hooks>::lockSlow(Atomic<Lo
     static constexpr unsigned spinLimit = 16;
     static constexpr unsigned nopCount = 8;
     static constexpr unsigned yieldInterval = 8;
-#elif CPU(ARM64) && OS(MACOS)
-    static constexpr unsigned spinLimit = 80;
-    static constexpr unsigned nopCount = 8;
-    static constexpr unsigned yieldInterval = 16;
-#elif CPU(ARM64) && OS(IOS_FAMILY)
-    static constexpr unsigned spinLimit = 40;
-    static constexpr unsigned nopCount = 16;
-    static constexpr unsigned yieldInterval = 4;
-#else
-    static constexpr unsigned spinLimit = 40;
-    static constexpr unsigned nopCount = 0;
-    static constexpr unsigned yieldInterval = 1;
-#endif
-    
     unsigned spinCount = 0;
+#else
+    SpinBackoff backoff;
+#endif
     
     for (;;) {
 #if defined(WEBKIT_IOS6)
@@ -81,6 +71,7 @@ void LockAlgorithm<LockType, isHeldBit, hasParkedBit, Hooks>::lockSlow(Atomic<Lo
         }
 
         // If there is nobody parked and we haven't spun too much, we can just try to spin around.
+#if defined(WEBKIT_IOS6)
         if (!(currentValue & hasParkedBit) && spinCount < spinLimit) {
             spinCount++;
             // It's important that we check this after incrementing,
@@ -89,15 +80,14 @@ void LockAlgorithm<LockType, isHeldBit, hasParkedBit, Hooks>::lockSlow(Atomic<Lo
             // without having depressed our own priority beforehand.
             if (!(spinCount % yieldInterval))
                 Thread::yield();
-            for (unsigned i = 0; i < nopCount; i++) {
-#if defined(WEBKIT_IOS6)
+            for (unsigned i = 0; i < nopCount; i++)
                 __asm__ volatile("yield");
-#else
-                simde_mm_pause();
-#endif
-            }
             continue;
         }
+#else
+        if (!(currentValue & hasParkedBit) && !backoff.shouldParkAfterSpinOnce())
+            continue;
+#endif
 
         // Need to park. We do this by setting the parked bit first, and then parking. We spin around
         // if the parked bit wasn't set and we failed at setting it.

@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2015-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2026 Igalia S.L.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -30,6 +31,7 @@
 #include <condition_variable>
 #include <cstdlib>
 #include <mutex>
+#include <wtf/SpinBackoff.h>
 #include <wtf/Threading.h>
 
 namespace WTF {
@@ -81,13 +83,12 @@ static const unsigned wordLockYieldInterval = wordLockPolicy("WEBKIT_WORDLOCK_YI
 
 NEVER_INLINE void WordLock::lockSlow()
 {
-    unsigned spinCount = 0;
+    SpinBackoff backoff;
 
 #if defined(WEBKIT_IOS6)
+    unsigned spinCount = 0;
     const unsigned spinLimit = wordLockSpinLimit;
     unsigned spinsSinceYield = 0;
-#else
-    const unsigned spinLimit = 40;
 #endif
 
     for (;;) {
@@ -109,20 +110,21 @@ NEVER_INLINE void WordLock::lockSlow()
         }
 
         // If there is no queue and we haven't spun too much, we can just try to spin around again.
+#if defined(WEBKIT_IOS6)
         if (!(currentWordValue & ~queueHeadMask) && spinCount < spinLimit) {
             spinCount++;
-#if defined(WEBKIT_IOS6)
             if (++spinsSinceYield >= wordLockYieldInterval) {
                 spinsSinceYield = 0;
                 Thread::yield();
             }
             for (unsigned i = 0; i < wordLockNopCount; ++i)
                 __asm__ volatile("yield");
-#else
-            Thread::yield();
-#endif
             continue;
         }
+#else
+        if (!(currentWordValue & ~queueHeadMask) && !backoff.shouldParkAfterSpinOnce())
+            continue;
+#endif
 
         // Need to put ourselves on the queue. Create the queue if one does not exist. This requries
         // owning the queue for a little bit. The lock that controls the queue is itself a spinlock.
@@ -137,7 +139,7 @@ NEVER_INLINE void WordLock::lockSlow()
         if ((currentWordValue & isQueueLockedBit)
             || !(currentWordValue & isLockedBit)
             || !m_word.compareExchangeWeak(currentWordValue, currentWordValue | isQueueLockedBit)) {
-            Thread::yield();
+            backoff.spinOnce();
             continue;
         }
         
@@ -202,6 +204,7 @@ NEVER_INLINE void WordLock::unlockSlow()
     // Acquire the queue lock, or release the lock. This loop handles both lock release in case the
     // fast path's weak CAS spuriously failed and it handles queue lock acquisition if there is
     // actually something interesting on the queue.
+    SpinBackoff backoff;
     for (;;) {
         uintptr_t currentWordValue = m_word.load();
 
@@ -213,13 +216,12 @@ NEVER_INLINE void WordLock::unlockSlow()
                 // unlocked and we're done!
                 return;
             }
-            // Loop around and try again.
-            Thread::yield();
+            backoff.spinOnce();
             continue;
         }
         
         if (currentWordValue & isQueueLockedBit) {
-            Thread::yield();
+            backoff.spinOnce();
             continue;
         }
 

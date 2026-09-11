@@ -12,24 +12,37 @@
 #include "include/core/SkPicture.h"
 #include "include/core/SkRefCnt.h"
 
+#include "include/private/SkNoncopyable.h"
+#include "include/private/SkTemplates.h"
+
 #include <atomic>
 #include <cstdint>
 
-class SkBigPicture;
 class SkReadBuffer;
 class SkStream;
 class SkWriteBuffer;
 struct SkPictInfo;
+class SkRecord;
+class SkBBoxHierarchy;
 
 class SkPicturePriv {
 public:
+    static sk_sp<SkPicture> MakePicture(const SkRect& cull,
+                                        sk_sp<const SkRecord> record,
+                                        std::unique_ptr<const SkSnapshotArray> drawablePicts,
+                                        sk_sp<const SkBBoxHierarchy> bbh,
+                                        size_t approxBytesUsedBySubPictures);
+
+    static sk_sp<SkPicture> MakeEmptyPicture();
+
     /**
-     *  Recreate a picture that was serialized into a buffer. If the creation requires bitmap
-     *  decoding, the decoder must be set on the SkReadBuffer parameter by calling
-     *  SkReadBuffer::setBitmapDecoder() before calling SkPicture::MakeFromBuffer().
+     *  Recreate a picture that was serialized into a buffer. If the creation
+     * requires bitmap decoding, the decoder must be set on the SkReadBuffer
+     * parameter by calling SkReadBuffer::setBitmapDecoder() before calling
+     * SkPicture::MakeFromBuffer().
      *  @param buffer Serialized picture data.
-     *  @return A new SkPicture representing the serialized data, or NULL if the buffer is
-     *          invalid.
+     *  @return A new SkPicture representing the serialized data, or NULL if
+     * the buffer is invalid.
      */
     static constexpr int kDefaultRecursionLimit = 100;
     static sk_sp<SkPicture> MakeFromBuffer(SkReadBuffer& buffer);
@@ -39,9 +52,8 @@ public:
      */
     static void Flatten(const sk_sp<const SkPicture> , SkWriteBuffer& buffer);
 
-    // Returns NULL if this is not an SkBigPicture.
-    static const SkBigPicture* AsSkBigPicture(const sk_sp<const SkPicture>& picture) {
-        return picture->asSkBigPicture();
+    static const SkRecord* GetRecord(const SkPicture* pic) {
+        return pic ? pic->fRecord.get() : nullptr;
     }
 
     static uint64_t MakeSharedID(uint32_t pictureID) {
@@ -50,7 +62,9 @@ public:
     }
 
     static void AddedToCache(const SkPicture* pic) {
-        pic->fAddedToCache.store(true);
+        if (pic) {
+            pic->fAddedToCache.store(true);
+        }
     }
 
     // V35: Store SkRect (rather then width & height) in header
@@ -127,6 +141,7 @@ public:
     // v107: Combine SkColorShader and SkColorShader4
     // v108: Serialize stable keys of runtime effects
     // v109: Extend SkWorkingColorSpaceShader to have alpha type + output control
+    // v110: Add restrictOutputToInputBounds to SkImageFilters::RuntimeShader
 
     enum Version {
         kPictureShaderFilterParam_Version   = 82,
@@ -157,6 +172,7 @@ public:
         kCombineColorShaders                = 107,
         kSerializeStableKeys                = 108,
         kWorkingColorSpaceOutput            = 109,
+        kRuntimeImageFilterRestrictedOutput = 110,
 
         // Only SKPs within the min/current picture version range (inclusive) can be read.
         //
@@ -181,10 +197,28 @@ public:
         //
         // Contact the Infra Gardener if the above steps do not work for you.
         kMin_Version     = kPictureShaderFilterParam_Version,
-        kCurrent_Version = kWorkingColorSpaceOutput
+        kCurrent_Version = kRuntimeImageFilterRestrictedOutput
     };
 };
 
 bool SkPicture_StreamIsSKP(SkStream*, SkPictInfo*);
 
+class SkSnapshotArray : ::SkNoncopyable {
+public:
+    SkSnapshotArray(const SkPicture* pics[], int count) : fPics(pics), fCount(count) {
+        for (int i = 0; i < fCount; i++) SkASSERT(pics[i]);
+    }
+    ~SkSnapshotArray() {
+        for (int i = 0; i < fCount; i++) {
+            fPics[i]->unref();
+        }
+    }
+
+    const SkPicture* const* begin() const { return fPics; }
+    int count() const { return fCount; }
+
+private:
+    skia_private::AutoTMalloc<const SkPicture*> fPics;
+    int fCount;
+};
 #endif

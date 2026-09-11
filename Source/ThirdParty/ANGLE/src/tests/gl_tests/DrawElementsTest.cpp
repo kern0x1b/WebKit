@@ -967,6 +967,103 @@ void main()
     ASSERT_GL_NO_ERROR();
 }
 
+// Test a large flat-shaded GL_TRIANGLES draw with primitive restart markers at the
+// beginning of the index buffer. Previously, the Metal backend would size the
+// rewritten index buffer for the primitive-aligned count while writing at absolute
+// per-range offsets, so the last write for the shifted range landed past the allocation.
+// Uses distinct vertices for every quad so the final quad specifically validates that the
+// rewritten provoking vertex indices at the end of the buffer are rendered correctly.
+TEST_P(DrawElementsTest, FlatTrianglesLargePrimitiveRestartAtBegin)
+{
+    constexpr char kFlatVS[] = R"(#version 300 es
+in vec4 a_position;
+in float a_mark;
+flat out float v_mark;
+void main()
+{
+    v_mark = a_mark;
+    gl_Position = a_position;
+})";
+    constexpr char kFlatFS[] = R"(#version 300 es
+precision highp float;
+flat in float v_mark;
+out vec4 fragColor;
+void main()
+{
+    fragColor = v_mark >= 0.5 ? vec4(0.0, 1.0, 0.0, 1.0) : vec4(1.0, 0.0, 0.0, 1.0);
+})";
+    ANGLE_GL_PROGRAM(program, kFlatVS, kFlatFS);
+    glUseProgram(program);
+
+    constexpr GLsizei kQuads = 5000;
+    std::vector<Vector3> vertices(kQuads * 4, Vector3(0.0f, 0.0f, 0.0f));
+    std::vector<GLfloat> marks(kQuads * 4, 0.0f);
+
+    // Quad kQuads - 1 covers the full screen and has provoking marks set to 1.0 (green).
+    size_t lastQuadBase        = (kQuads - 1) * 4;
+    vertices[lastQuadBase + 0] = Vector3(-1.0f, -1.0f, 0.0f);
+    vertices[lastQuadBase + 1] = Vector3(1.0f, -1.0f, 0.0f);
+    vertices[lastQuadBase + 2] = Vector3(-1.0f, 1.0f, 0.0f);
+    vertices[lastQuadBase + 3] = Vector3(1.0f, 1.0f, 0.0f);
+
+    // Last vertex convention, triangles {0,1,2, 2,1,3}: 2 and 3 are provoking.
+    marks[lastQuadBase + 2] = 1.0f;
+    marks[lastQuadBase + 3] = 1.0f;
+
+    GLBuffer vertexBuffer;
+    glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices[0]) * vertices.size(), vertices.data(),
+                 GL_STATIC_DRAW);
+    GLint posLocation = glGetAttribLocation(program, "a_position");
+    ASSERT_NE(-1, posLocation);
+    glEnableVertexAttribArray(posLocation);
+    glVertexAttribPointer(posLocation, 3, GL_FLOAT, GL_FALSE, 0, 0);
+
+    GLBuffer markBuffer;
+    glBindBuffer(GL_ARRAY_BUFFER, markBuffer);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(marks[0]) * marks.size(), marks.data(), GL_STATIC_DRAW);
+    GLint markLocation = glGetAttribLocation(program, "a_mark");
+    ASSERT_NE(-1, markLocation);
+    glEnableVertexAttribArray(markLocation);
+    glVertexAttribPointer(markLocation, 1, GL_FLOAT, GL_FALSE, 0, 0);
+
+    // Two restart markers followed by quads with distinct vertex indices. The index count is
+    // large enough to exceed backend staging buffer limits and count % 3 == 2 so primitive
+    // alignment differs from the raw count.
+    constexpr GLuint kRestart   = 0xFFFFFFFFu;
+    std::vector<GLuint> indices = {kRestart, kRestart};
+    indices.reserve(2 + static_cast<size_t>(kQuads) * 6);
+    for (GLuint q = 0; q < static_cast<GLuint>(kQuads); ++q)
+    {
+        GLuint base = q * 4;
+        indices.push_back(base + 0);
+        indices.push_back(base + 1);
+        indices.push_back(base + 2);
+        indices.push_back(base + 2);
+        indices.push_back(base + 1);
+        indices.push_back(base + 3);
+    }
+    ASSERT_EQ(2u, indices.size() % 3);
+
+    GLBuffer elementBuffer;
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, elementBuffer);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices[0]) * indices.size(), indices.data(),
+                 GL_STATIC_DRAW);
+    ASSERT_GL_NO_ERROR();
+
+    glEnable(GL_PRIMITIVE_RESTART_FIXED_INDEX);
+    glClearColor(1.f, 0.f, 0.f, 1.f);
+    glClear(GL_COLOR_BUFFER_BIT);
+    glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(indices.size()), GL_UNSIGNED_INT, nullptr);
+    ASSERT_GL_NO_ERROR();
+
+    EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::green);
+    EXPECT_PIXEL_COLOR_EQ(getWindowWidth() - 1, 0, GLColor::green);
+    EXPECT_PIXEL_COLOR_EQ(0, getWindowHeight() - 1, GLColor::green);
+    EXPECT_PIXEL_COLOR_EQ(getWindowWidth() - 1, getWindowHeight() - 1, GLColor::green);
+    ASSERT_GL_NO_ERROR();
+}
+
 // Tests various draw element parameter, vertex buffer contents variants.
 // Does not yet test using GL_BYTE 0xFF, GL_SHORT 0xFFFF with primitive restart off.
 TEST_P(DrawElementsVariantsTest, Draw)
@@ -1397,6 +1494,71 @@ TEST_P(DrawElementsTest, LargeIndexBufferSubData)
     // If the bug is present, the indices at the end were copied from the start (which point to
     // red). If fixed, they point to green.
     EXPECT_PIXEL_COLOR_EQ(getWindowWidth() / 2, getWindowHeight() / 2, GLColor::green);
+}
+
+// Test that drawElements*BaseVertex* includes baseVertex in the vertex-buffer bounds check, so an
+// out-of-range baseVertex is rejected instead of fetching vertices past the end of the buffer.
+TEST_P(WebGLDrawElementsTest3, DrawElementsBaseVertexBaseInstanceValidatesBaseVertex)
+{
+    ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled("GL_ANGLE_base_vertex_base_instance"));
+
+    ANGLE_GL_PROGRAM(program, essl3_shaders::vs::Simple(), essl3_shaders::fs::Red());
+    glUseProgram(program);
+    GLint positionLoc = glGetAttribLocation(program, essl3_shaders::PositionAttrib());
+    glEnableVertexAttribArray(positionLoc);
+
+    // Viewport-covering triangle drawn with indices [0,1,2], so baseVertex shifts the fetch window.
+    constexpr GLfloat kVertices[] = {-1.0f, -1.0f, 3.0f, -1.0f, -1.0f, 3.0f};
+    GLBuffer vertexBuffer;
+    glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(kVertices), kVertices, GL_STATIC_DRAW);
+    glVertexAttribPointer(positionLoc, 2, GL_FLOAT, GL_FALSE, 0, nullptr);
+
+    constexpr GLushort kIndices[] = {0, 1, 2};
+    GLBuffer indexBuffer;
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBuffer);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(kIndices), kIndices, GL_STATIC_DRAW);
+
+    // In-range baseVertex draws and fills the viewport red.
+    glDrawElementsInstancedBaseVertexBaseInstanceANGLE(GL_TRIANGLES, 3, GL_UNSIGNED_SHORT, nullptr,
+                                                       1, 0, 0);
+    EXPECT_GL_NO_ERROR();
+    EXPECT_PIXEL_COLOR_EQ(getWindowWidth() / 2, getWindowHeight() / 2, GLColor::red);
+
+    // baseVertex past the end (9999) or underflowing (-1) must be rejected instead of fetching out
+    // of bounds. Only backends without robust buffer access (Metal) perform this validation.
+    if (isMetalRenderer())
+    {
+        glDrawElementsInstancedBaseVertexBaseInstanceANGLE(GL_TRIANGLES, 3, GL_UNSIGNED_SHORT,
+                                                           nullptr, 1, 9999, 0);
+        EXPECT_GL_ERROR(GL_INVALID_OPERATION);
+
+        glDrawElementsInstancedBaseVertexBaseInstanceANGLE(GL_TRIANGLES, 3, GL_UNSIGNED_SHORT,
+                                                           nullptr, 1, -1, 0);
+        EXPECT_GL_ERROR(GL_INVALID_OPERATION);
+
+        // Off-by-one: baseVertex 1 makes the max effective index equal the vertex count (3), which
+        // is out of bounds and must be rejected.
+        glDrawElementsInstancedBaseVertexBaseInstanceANGLE(GL_TRIANGLES, 3, GL_UNSIGNED_SHORT,
+                                                           nullptr, 1, 1, 0);
+        EXPECT_GL_ERROR(GL_INVALID_OPERATION);
+
+        // The multi-draw variant shares the same validator (and forwards baseVertices per draw), so
+        // it must reject an out-of-range baseVertex too.
+        if (EnsureGLExtensionEnabled("GL_ANGLE_multi_draw"))
+        {
+            const GLsizei counts[]         = {3};
+            const void *const indices[]    = {nullptr};
+            const GLsizei instanceCounts[] = {1};
+            const GLint baseVertices[]     = {9999};
+            const GLuint baseInstances[]   = {0};
+            glMultiDrawElementsInstancedBaseVertexBaseInstanceANGLE(GL_TRIANGLES, counts,
+                                                                    GL_UNSIGNED_SHORT, indices,
+                                                                    instanceCounts, baseVertices,
+                                                                    baseInstances, 1);
+            EXPECT_GL_ERROR(GL_INVALID_OPERATION);
+        }
+    }
 }
 
 GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(DrawElementsTest);

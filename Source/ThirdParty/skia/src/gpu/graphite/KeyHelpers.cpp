@@ -21,6 +21,7 @@
 #include "src/core/SkColorSpacePriv.h"
 #include "src/core/SkDebugUtils.h"
 #include "src/core/SkHalf.h"
+#include "src/core/SkMeshPriv.h"
 #include "src/core/SkRuntimeBlender.h"
 #include "src/core/SkRuntimeEffectPriv.h"
 #include "src/core/SkYUVMath.h"
@@ -293,17 +294,17 @@ void add_conical_gradient_uniform_data(const KeyContext& keyContext,
 //
 // Returns a negative offset to signal failure, in which case the paint key must be poisoned
 // to drop the draw.
-static int write_color_and_offset_bufdata(int numStops,
-                                           const SkPMColor4f* colors,
-                                           const float* offsets,
-                                           const SkGradientBaseShader* shader,
-                                           StorageBufferManager* storageBufferManager) {
-    auto [dstData, bufferOffset] = storageBufferManager->allocateGradientData(numStops, shader);
+static int write_color_and_offset_bufdata(StorageContext* storageContext,
+                                          int numStops,
+                                          const SkPMColor4f* colors,
+                                          const float* offsets,
+                                          const SkGradientBaseShader* shader) {
+
+    auto [dstData, bufferOffset] = storageContext->allocateGradientData(numStops, shader);
     if (dstData) {
         SkASSERT(bufferOffset >= 0);
-        // Data doesn't already exist so we need to write it.
-        // Writes all offset data, then color data. This way when binary searching through the
-        // offsets, there is better cache locality.
+        // Data doesn't already exist so we need to write it. Writes all offset data, then color
+        // data. This way when binary searching through the offsets, there is better cache locality.
         for (int i = 0, colorIdx = numStops; i < numStops; i++, colorIdx+=4) {
             float offset = offsets ? offsets[i] : SkIntToFloat(i) / (numStops - 1);
             SkASSERT(offset >= 0.0f && offset <= 1.0f);
@@ -395,11 +396,13 @@ void GradientShaderBlocks::AddBlock(const KeyContext& keyContext, const Gradient
     if (gradData.fNumStops > GradientData::kNumInternalStorageStops && keyContext.recorder()) {
         bool hasStorage;
         if (gradData.fUseStorageBuffer) {
-            bufferOffset = write_color_and_offset_bufdata(gradData.fNumStops,
+            SkASSERT(keyContext.drawContext() && keyContext.drawContext()->storageContext());
+            StorageContext* storageContext = keyContext.drawContext()->storageContext();
+            bufferOffset = write_color_and_offset_bufdata(storageContext,
+                                                          gradData.fNumStops,
                                                           gradData.fSrcColors,
                                                           gradData.fSrcOffsets,
-                                                          gradData.fSrcShader,
-                                                          keyContext.storageBufferManager());
+                                                          gradData.fSrcShader);
             hasStorage = bufferOffset >= 0;
         } else {
             keyContext.pipelineDataGatherer()->add(gradData.fColorsAndOffsetsProxy,
@@ -611,6 +614,13 @@ void ImageShaderBlock::AddBlock(const KeyContext& keyContext, const ImageData& i
             : imgData.fImmutableSamplerInfo;
     auto tileModeWithSubstitution = doTilingInHw ? imgData.fTileModes :
                                     std::make_pair(SkTileMode::kClamp, SkTileMode::kClamp);
+
+    // If we're a read only texture, we should have no mipmapping and kNearest sampling.
+    SkASSERT(!imgData.fTextureProxy ||
+             !caps->isReadable(imgData.fTextureProxy->textureInfo()) ||
+             caps->isTexturable(imgData.fTextureProxy->textureInfo()) ||
+             imgData.fSampling == SkSamplingOptions(SkFilterMode::kNearest, SkMipmapMode::kNone));
+
     SamplerDesc samplerDesc{imgData.fSampling, tileModeWithSubstitution, info};
     keyContext.pipelineDataGatherer()->add(imgData.fTextureProxy, samplerDesc);
     add_sampler_data_to_key(keyContext, samplerDesc);
@@ -1424,7 +1434,8 @@ void AddAnalyticClip(const KeyContext& keyContext, const NonMSAAClip& clip) {
 
 //--------------------------------------------------------------------------------------------------
 
-void AddPrimitiveColor(const KeyContext& keyContext, bool skipColorXform) {
+void AddPrimitiveColor(const KeyContext& keyContext, bool skipColorXform,
+                       SkColorSpace* primitiveColorSpace, SkAlphaType primitiveAlphaType) {
     /**
      * When skipColorXform is true, we assume the primitive color is already in the dst color space.
     */
@@ -1434,10 +1445,12 @@ void AddPrimitiveColor(const KeyContext& keyContext, bool skipColorXform) {
     }
 
     /**
-     * If skipColorXform is false (most cases), the primitive color is assumed to be in sRGB.
+     * If skipColorXform is false (most cases), the primitive color is assumed to be in sRGB unless
+     * an explicit primitive color space is provided.
     */
-    ColorSpaceTransformBlock::ColorSpaceTransformData toDst(sk_srgb_singleton(),
-                                                            kPremul_SkAlphaType,
+    SkColorSpace* srcCS = primitiveColorSpace ? primitiveColorSpace : sk_srgb_singleton();
+    ColorSpaceTransformBlock::ColorSpaceTransformData toDst(srcCS,
+                                                            primitiveAlphaType,
                                                             keyContext.dstColorInfo().colorSpace(),
                                                             keyContext.dstColorInfo().alphaType());
 
@@ -1996,7 +2009,8 @@ static void add_yuv_image_to_key(const KeyContext& keyContext,
         // however we want to filter at a fixed point for each logical image pixel to simulate
         // nearest neighbor. In the shader we detect that the UV filtermode doesn't match the Y
         // filtermode, and snap to Y pixel centers.
-        if (imgData.fSampling.filter == SkFilterMode::kNearest) {
+        if (imgData.fSampling.filter == SkFilterMode::kNearest &&
+            keyContext.caps()->isTexturable(view.proxy()->textureInfo())) {
             imgData.fSamplingUV = SkSamplingOptions(SkFilterMode::kLinear,
                                                     imgData.fSampling.mipmap);
             // Consider a logical image pixel at the edge of the subset. When computing the logical
@@ -2524,9 +2538,9 @@ static void add_gradient_to_key(const KeyContext& keyContext,
 
     sk_sp<TextureProxy> proxy;
 
-    bool useStorageBuffer = keyContext.caps()->gradientBufferSupport();
+    bool gradUsesStorage = keyContext.caps()->storageBufferSupport();
     if (colorCount > GradientShaderBlocks::GradientData::kNumInternalStorageStops
-            && !useStorageBuffer) {
+            && !gradUsesStorage) {
         if (shader->cachedBitmap().empty()) {
             SkBitmap colorsAndOffsetsBitmap =
                     skgpu::CreateGradientColorAndOffsetBitmap(colorCount, colors, positions);
@@ -2560,7 +2574,7 @@ static void add_gradient_to_key(const KeyContext& keyContext,
                                             positions,
                                             shader,
                                             std::move(proxy),
-                                            useStorageBuffer,
+                                            gradUsesStorage,
                                             shader->getInterpolation());
 
     make_interpolated_to_dst(keyContext,
@@ -2725,5 +2739,46 @@ void AddDitherBlock(const KeyContext& keyContext, SkColorType ct) {
     DitherShaderBlock::AddBlock(keyContext, data);
 }
 
+void MeshShaderBlock::AddBlock(const KeyContext& keyContext,
+                               const SkMeshSpecification* spec,
+                               SkSpan<const SkRuntimeEffect::ChildPtr> children) {
+    int meshSnippetID = keyContext.dict()->findOrCreateMeshSnippet(spec);
+    keyContext.rtEffectDict()->set(meshSnippetID, sk_ref_sp(spec));
+
+    keyContext.paintParamsKeyBuilder()->beginBlock(meshSnippetID);
+
+    SkSpan<const SkRuntimeEffect::Child> childInfo = spec->children();
+    SkASSERT(children.size() == childInfo.size());
+
+    for (size_t index = 0; index < children.size(); ++index) {
+        const SkRuntimeEffect::ChildPtr& child = children[index];
+        KeyContext childContext = keyContext.forMeshSpecChild();
+
+        using ChildType = SkRuntimeEffect::ChildType;
+
+        std::optional<ChildType> type = child.type();
+        if (type == ChildType::kShader) {
+            AddToKey(childContext, child.shader());
+        } else if (type == ChildType::kColorFilter) {
+            AddToKey(childContext, child.colorFilter());
+        } else if (type == ChildType::kBlender) {
+            AddToKey(childContext, child.blender());
+        } else {
+            switch (childInfo[index].type) {
+                case ChildType::kShader:
+                    SolidColorShaderBlock::AddBlock(childContext, SK_PMColor4fTRANSPARENT);
+                    break;
+                case ChildType::kColorFilter:
+                    keyContext.paintParamsKeyBuilder()->addBlock(BuiltInCodeSnippetID::kPriorOutput);
+                    break;
+                case ChildType::kBlender:
+                    AddFixedBlendMode(childContext, SkBlendMode::kSrcOver);
+                    break;
+            }
+        }
+    }
+
+    keyContext.paintParamsKeyBuilder()->endBlock();
+}
 
 } // namespace skgpu::graphite

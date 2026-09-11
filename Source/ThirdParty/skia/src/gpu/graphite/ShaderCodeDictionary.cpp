@@ -11,6 +11,7 @@
 #include "include/effects/SkRuntimeEffect.h"
 #include "include/private/SkLog.h"
 #include "src/core/SkColorSpaceXformSteps.h"
+#include "src/core/SkMeshPriv.h"
 #include "src/core/SkRuntimeEffectPriv.h"
 #include "src/gpu/BlendFormula.h"
 #include "src/gpu/graphite/Caps.h"
@@ -146,9 +147,9 @@ void append_uniforms(TArray<std::string>* list,
         list->push_back(get_mangled_sampler_name(entry->fTexturesAndSamplers[i], node->keyIndex()));
     }
 
-    // Append gradient buffer.
-    if (node->requiredFlags() & SnippetRequirementFlags::kGradientBuffer) {
-        list->push_back(ShaderInfo::kGradientBufferName);
+    // Append storage buffer.
+    if (node->requiredFlags() & SnippetRequirementFlags::kStorageBuffer) {
+        list->push_back(ShaderInfo::kStorageBufferName);
     }
 
     // Append child output names.
@@ -671,6 +672,10 @@ private:
     SkDEBUGCODE(const SkRuntimeEffect* fEffect;)
 };
 
+std::string NoopPreamble(const ShaderInfo& shaderInfo, const ShaderNode* node) {
+    return "";
+}
+
 std::string GenerateRuntimeShaderPreamble(const ShaderInfo& shaderInfo,
                                           const ShaderNode* node) {
     // Find this runtime effect in the shader-code or runtime-effect dictionary.
@@ -899,6 +904,52 @@ int ShaderCodeDictionary::findOrCreateRuntimeEffectSnippet(const SkRuntimeEffect
     return newCodeSnippetID;
 }
 
+int ShaderCodeDictionary::findOrCreateMeshSnippet(const SkMeshSpecification* spec) {
+    SkAutoSpinlock lock{fSpinLock};
+
+    // Use the combination of SkMeshSpecification hash, attribute stride, and uniform stride
+    // as our key. In the event of a hash collision, due to differing shader code, color space, or
+    // alpha type, we will still have the correct uniform size and attribute stride to prevent
+    // unexpected memory sizes for allocated buffers.
+    MeshSpecKey key;
+    key.fHash = SkMeshSpecificationPriv::Hash(*spec);
+    key.fAttributeStride = static_cast<uint32_t>(spec->stride());
+    key.fUniformSize = static_cast<uint32_t>(spec->uniformSize());
+
+    int32_t* existingCodeSnippetID = fMeshMap.find(key);
+    if (existingCodeSnippetID) {
+        return *existingCodeSnippetID;
+    }
+
+    ShaderSnippet snippet = this->convertMeshShader(spec);
+    fUserDefinedCodeSnippets.push_back(std::move(snippet));
+    int newCodeSnippetID = kUnknownRuntimeEffectIDStart + fUserDefinedCodeSnippets.size() - 1;
+
+    fMeshMap.set(key, newCodeSnippetID);
+    return newCodeSnippetID;
+}
+
+ShaderSnippet ShaderCodeDictionary::convertMeshShader(const SkMeshSpecification* spec) {
+    int numChildren = SkTo<int>(spec->children().size());
+
+     // We emit uniforms for mesh geometry manually at the end of the uniform list where
+     // RenderStep uniforms would normally be written. This allows the MeshRenderStep to
+     // be responsible for writing the uniform data, since it is where render step
+     // uniforms normally reside.
+     //
+     // We also provide a Noop preamble so any children runtime effects that the user's
+     // fragment main function relies on are emitted before we emit their main function.
+     // Then after emitting all other preambles, we emit the user's main function at the
+     // very end since only the MeshRenderStep relies on it.
+    return ShaderSnippet("MeshShader",
+                         /*staticFn=*/nullptr,
+                         SnippetRequirementFlags::kNone,
+                         /*uniforms=*/{},
+                         /*texturesAndSamplers=*/{},
+                         NoopPreamble,
+                         numChildren);
+}
+
 void ShaderCodeDictionary::registerUserDefinedKnownRuntimeEffects(
         SkSpan<sk_sp<SkRuntimeEffect>> userDefinedKnownRuntimeEffects) {
     // This is a formality to guard 'fRuntimeEffectMap'. This method should only be called by
@@ -1051,7 +1102,7 @@ ShaderCodeDictionary::ShaderCodeDictionary(
     fBuiltInCodeSnippets[(int) BuiltInCodeSnippetID::kLinearGradientShaderBuffer] = {
             /*name=*/"LinearGradientBuffer",
             /*staticFn=*/"sk_linear_grad_buf_shader",
-            SnippetRequirementFlags::kLocalCoords | SnippetRequirementFlags::kGradientBuffer,
+            SnippetRequirementFlags::kLocalCoords | SnippetRequirementFlags::kStorageBuffer,
             /*uniforms=*/{{{ "numStops",     SkSLType::kInt },
                            { "bufferOffset", SkSLType::kInt },
                            { "tilemode",     SkSLType::kInt },
@@ -1091,7 +1142,7 @@ ShaderCodeDictionary::ShaderCodeDictionary(
     fBuiltInCodeSnippets[(int) BuiltInCodeSnippetID::kRadialGradientShaderBuffer] = {
             /*name=*/"RadialGradientBuffer",
             /*staticFn=*/"sk_radial_grad_buf_shader",
-            SnippetRequirementFlags::kLocalCoords | SnippetRequirementFlags::kGradientBuffer,
+            SnippetRequirementFlags::kLocalCoords | SnippetRequirementFlags::kStorageBuffer,
             /*uniforms=*/{{{ "numStops",     SkSLType::kInt },
                            { "bufferOffset", SkSLType::kInt },
                            { "tilemode",     SkSLType::kInt },
@@ -1137,7 +1188,7 @@ ShaderCodeDictionary::ShaderCodeDictionary(
     fBuiltInCodeSnippets[(int) BuiltInCodeSnippetID::kSweepGradientShaderBuffer] = {
             /*name=*/"SweepGradientBuffer",
             /*staticFn=*/"sk_sweep_grad_buf_shader",
-            SnippetRequirementFlags::kLocalCoords | SnippetRequirementFlags::kGradientBuffer,
+            SnippetRequirementFlags::kLocalCoords | SnippetRequirementFlags::kStorageBuffer,
             /*uniforms=*/{{{ "bias",         SkSLType::kFloat },
                            { "scale",        SkSLType::kFloat },
                            { "numStops",     SkSLType::kInt },
@@ -1191,7 +1242,7 @@ ShaderCodeDictionary::ShaderCodeDictionary(
     fBuiltInCodeSnippets[(int) BuiltInCodeSnippetID::kConicalGradientShaderBuffer] = {
             /*name=*/"ConicalGradientBuffer",
             /*staticFn=*/"sk_conical_grad_buf_shader",
-            SnippetRequirementFlags::kLocalCoords | SnippetRequirementFlags::kGradientBuffer,
+            SnippetRequirementFlags::kLocalCoords | SnippetRequirementFlags::kStorageBuffer,
             /*uniforms=*/{{{ "radius0",      SkSLType::kFloat },
                            { "dRadius",      SkSLType::kFloat },
                            { "a",            SkSLType::kFloat },

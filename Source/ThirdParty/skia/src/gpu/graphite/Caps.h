@@ -84,10 +84,10 @@ struct ResourceBindingRequirements {
     int fUniformsSetIdx               = kUnassigned;
     int fTextureSamplerSetIdx         = kUnassigned;
     int fInputAttachmentSetIdx        = kUnassigned;
-    /* Define uniform buffer bindings */
+    /* Define uniform and storage buffer bindings */
     int fIntrinsicBufferBinding       = kUnassigned;
     int fCombinedUniformBufferBinding = kUnassigned;
-    int fGradientBufferBinding        = kUnassigned;
+    int fStorageBufferBinding         = kUnassigned;
 };
 
 class Caps {
@@ -159,7 +159,11 @@ public:
                                              Protected,
                                              Renderable) const;
 
+    TextureInfo getDefaultReadableTextureInfo(SkColorType,
+                                              Protected = Protected::kNo) const;
+
     TextureInfo getTextureInfoForSampledCopy(const TextureInfo&,  Mipmapped) const;
+    TextureInfo getTextureInfoForReadableCopy(const TextureInfo&) const;
 
     TextureInfo getDefaultCompressedTextureInfo(SkTextureCompressionType,
                                                 Mipmapped,
@@ -176,10 +180,11 @@ public:
     // sampled targets to show MSAA isn't supported.
     SampleCount getCompatibleMSAASampleCount(const TextureInfo&) const;
 
-    // If true, the texture can be sampled within a shader (possibly with MSAA, although by default
-    // we consider multisampled textures not to be sampleable because that requires backend-specific
-    // shader code not exposed in SkSL).
+    // If true, the texture can be sampled within a shader with linear filtering.
     bool isTexturable(const TextureInfo&, bool allowMSAA=false) const;
+    // If true, the texture can be read within a shader (via nearest sampling, texel fetch,
+    // or as a readonly proxy for storage buffers).
+    bool isReadable(const TextureInfo&, bool allowMSAA=false) const;
     // If true, the texture can be rasterized and/or resolved to (possibly with MSAA)
     bool isRenderable(const TextureInfo&) const;
     // If true, the texture can be rasterized using multisample-render-to-single-sample features.
@@ -285,17 +290,12 @@ public:
     bool allowCpuSync() const { return fAllowCpuSync; }
 
     /* Returns whether storage buffers are supported and to be preferred over uniform buffers. */
-    bool storageBufferSupport() const { return fStorageBufferSupport; }
-
-    /**
-     * The gradient buffer is an unsized float array so it is only optimal memory-wise to use it if
-     * the storage buffer memory layout is std430 or in metal, which is also the only supported
-     * way the data is packed.
-     */
-    bool gradientBufferSupport() const {
-        return fStorageBufferSupport &&
-               (fResourceBindingReqs.fStorageBufferLayout == Layout::kStd430 ||
-                fResourceBindingReqs.fStorageBufferLayout == Layout::kMetal);
+    bool storageBufferSupport() const {
+        SkASSERT(!fStorageBufferSupport ||
+                 fResourceBindingReqs.fStorageBufferLayout == Layout::kStd430 ||
+                 fResourceBindingReqs.fStorageBufferLayout == Layout::kStd430_F16 ||
+                 fResourceBindingReqs.fStorageBufferLayout == Layout::kMetal);
+        return fStorageBufferSupport;
     }
 
     /* Returns whether a draw buffer can be mapped. */

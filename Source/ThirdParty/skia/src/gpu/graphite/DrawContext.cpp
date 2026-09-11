@@ -183,8 +183,8 @@ std::pair<DrawParams*, Layer*> DrawContext::recordDraw(
     }
 
     return fPendingDraws->recordDraw(renderer, localToDevice, geometry, clip, ordering, paintID,
-                                     dstUsage,  barrierBeforeDraws, gatherer, stroke,
-                                     lastInsertion);
+                                     dstUsage, barrierBeforeDraws, gatherer, &fStorageContext,
+                                     stroke, lastInsertion);
 }
 
 bool DrawContext::recordUpload(Recorder* recorder,
@@ -259,6 +259,7 @@ void DrawContext::flush(Recorder* recorder) {
     // subpasses are implemented, they will either be collected alongside fPendingDraws or added
     // to the RenderPassTask separately.
     std::unique_ptr<DrawPass> pass = fPendingDraws->snapDrawPass(recorder,
+                                                                 &fStorageContext,
                                                                  fTarget.refProxy(),
                                                                  this->imageInfo(),
                                                                  drawPassDstReadStrategy);
