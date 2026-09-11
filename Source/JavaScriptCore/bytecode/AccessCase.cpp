@@ -1412,7 +1412,7 @@ void AccessCase::dump(PrintStream& out) const
     out.print("}"_s);
 }
 
-bool AccessCase::isStillLive(VM& vm) const
+bool AccessCase::reconcileWeakReferencesAtGCEnd(VM& vm) const
 {
     bool isValid = true;
     forEachDependentCell(vm, [&](JSCell* cell) {

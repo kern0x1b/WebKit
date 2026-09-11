@@ -479,7 +479,6 @@ void JITCompiler::noticeOSREntry(BasicBlock& basicBlock, JITCompiler::Label bloc
     entry.m_bytecodeIndex = basicBlock.bytecodeBegin;
     entry.m_machineCode = linkBuffer.locationOf<OSREntryPtrTag>(blockHead);
 
-    ASSERT(basicBlock.intersectionOfPastValuesAtHead.size() == basicBlock.variablesAtHead.size());
     FixedOperands<AbstractValue> expectedValues(basicBlock.intersectionOfPastValuesAtHead);
     Vector<OSREntryReshuffling> reshufflings;
 
@@ -519,7 +518,7 @@ void JITCompiler::noticeOSREntry(BasicBlock& basicBlock, JITCompiler::Label bloc
         }
     }
         
-    entry.m_expectedValues = OSREntryExpectedValues(expectedValues);
+    entry.m_expectedValues = WTF::move(expectedValues);
     entry.m_reshufflings = WTF::move(reshufflings);
     m_osrEntry.append(WTF::move(entry));
 }

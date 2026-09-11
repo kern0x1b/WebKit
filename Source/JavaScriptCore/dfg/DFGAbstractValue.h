@@ -55,7 +55,7 @@ struct AbstractValue {
         : m_type(SpecNone)
         , m_arrayModes(0)
     {
-#if !defined(NDEBUG)
+#if USE(JSVALUE64) && !defined(NDEBUG)
         // The WTF Traits for AbstractValue allow the initialization of values with bzero().
         // We verify the correctness of this assumption here.
         static bool needsDefaultConstructorCheck = true;
@@ -447,7 +447,8 @@ struct AbstractValue {
     // complex than the normal Epoch, because it knows how to track clobberStructures() and
     // observeInvalidationPoint() precisely using integer math.
     //
-    // One reason why it's here is to steal the 32-bit hole between m_arrayModes and m_value.
+    // One reason why it's here is to steal the 32-bit hole between m_arrayModes and m_value on
+    // 64-bit systems.
     AbstractValueClobberEpoch m_effectEpoch;
     
     // This is a proven constraint on the possible values that this value can
@@ -494,7 +495,7 @@ private:
     void filterValueByType();
     void NODELETE filterArrayModesByType();
 
-#if !defined(NDEBUG)
+#if USE(JSVALUE64) && !defined(NDEBUG)
     JS_EXPORT_PRIVATE void ensureCanInitializeWithZeros();
 #endif
     
@@ -505,6 +506,7 @@ private:
 
 } } // namespace JSC::DFG
 
+#if USE(JSVALUE64)
 namespace WTF {
 template <>
 struct VectorTraits<JSC::DFG::AbstractValue> : VectorTraitsBase<false, JSC::DFG::AbstractValue> {
@@ -516,5 +518,6 @@ struct HashTraits<JSC::DFG::AbstractValue> : GenericHashTraits<JSC::DFG::Abstrac
     static constexpr bool emptyValueIsZero = true;
 };
 };
+#endif // USE(JSVALUE64)
 
 #endif // ENABLE(DFG_JIT)

@@ -30,6 +30,7 @@
 #if ENABLE(WEBASSEMBLY)
 
 #include <JavaScriptCore/WasmCallingConvention.h>
+#include <wtf/Expected.h>
 #include <wtf/TrailingArray.h>
 #include <wtf/text/WTFString.h>
 
@@ -94,7 +95,9 @@ public:
         Megamorphic = 0b1000,
     };
     static constexpr EncodedJSValue calleeMask = Polymorphic | Megamorphic;
+#if USE(JSVALUE64)
     static_assert(!(JSValue::NativeCalleeTag & calleeMask));
+#endif
 
     static constexpr size_t maxPolymorphicCallees = 4;
 
@@ -155,7 +158,11 @@ private:
     PolymorphicCallee* makePolymorphic();
 
     uint32_t m_count { 0 };
+#if USE(JSVALUE64)
     EncodedJSValue m_boxedCallee { Monomorphic };
+#else
+    EncodedJSValue m_boxedCallee { Megamorphic };
+#endif
 };
 
 } // namespace JSC::Wasm

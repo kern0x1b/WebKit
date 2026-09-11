@@ -110,6 +110,8 @@ ALWAYS_INLINE bool Value::mustExecute() const
     case SExt8: \
     case SExt16: \
     case Trunc: \
+    case TruncHigh: \
+    case Stitch: \
     case SExt8To64: \
     case SExt16To64: \
     case SExt32: \
@@ -418,12 +420,16 @@ inline bool Value::isInt(int64_t value) const
 
 inline bool Value::hasIntPtr() const
 {
-    return hasInt64();
+    if (is64Bit())
+        return hasInt64();
+    return hasInt32();
 }
 
 inline intptr_t Value::asIntPtr() const
 {
-    return asInt64();
+    if (is64Bit())
+        return asInt64();
+    return asInt32();
 }
 
 inline bool Value::isIntPtr(intptr_t value) const

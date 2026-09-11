@@ -1,6 +1,5 @@
 /*
  * Copyright (C) 2015-2019 Apple Inc. All rights reserved.
- * Copyright (C) 2026 Igalia S.L.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -1631,7 +1630,7 @@ public:
         case CallArg:
             return isValidAddrForm(opcode, offset(), width);
         case Index:
-            return isValidIndexForm(scale(), offset(), width);
+            return isValidIndexForm(opcode, scale(), offset(), width);
         case PreIndex:
         case PostIndex:
             return isValidIncrementIndexForm(offset());

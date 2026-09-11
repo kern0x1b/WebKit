@@ -25,7 +25,7 @@
 
 #pragma once
 
-#if ENABLE(JIT)
+#if ENABLE(JIT) && USE(JSVALUE64)
 
 #include "JITOperations.h"
 
@@ -40,4 +40,4 @@ JSC_DECLARE_JIT_OPERATION(operationPutToScopeForLOL, void, (CallFrame*, unsigned
 
 } } // namespace JSC::LOL
 
-#endif // ENABLE(JIT)
+#endif // ENABLE(JIT) && USE(JSVALUE64)

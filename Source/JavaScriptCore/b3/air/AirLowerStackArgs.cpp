@@ -39,15 +39,15 @@ void lowerStackArgs(Code& code)
 {
     PhaseScope phaseScope(code, "lowerStackArgs"_s);
     
-    // Now we need to deduce how much argument area we need. We always reserve the conservative
-    // register bytes for Bank::FP because CallArgs do not record which bank they are.
-    unsigned conservativeCallArgBytes = code.usesSIMD() ? conservativeRegisterBytes(Bank::FP) : conservativeRegisterBytesWithoutVectors(Bank::FP);
+    // Now we need to deduce how much argument area we need.
     for (BasicBlock* block : code) {
         for (Inst& inst : *block) {
             for (Arg& arg : inst.args()) {
                 if (arg.isCallArg()) {
                     ASSERT(arg.offset() >= 0);
-                    code.requestCallArgAreaSizeInBytes(arg.offset() + conservativeCallArgBytes);
+                    // We always check the conservative register bytes for Bank::FP because
+                    // CallArgs do not store which bank they are.
+                    code.requestCallArgAreaSizeInBytes(arg.offset() + (code.usesSIMD() ? conservativeRegisterBytes(Bank::FP) : conservativeRegisterBytesWithoutVectors(Bank::FP)));
                 }
             }
         }
@@ -98,6 +98,10 @@ void lowerStackArgs(Code& code)
                 insertionSet.insert(insertionIndex, Move, inst.origin, largeOffset, tmp);
                 insertionSet.insert(insertionIndex, Add64, inst.origin, Air::Tmp(MacroAssembler::stackPointerRegister), tmp);
                 result = Arg::addr(tmp, 0);
+                return result;
+#elif CPU(ARM)
+                // We solve this in AirAllocateRegistersAndStackAndGenerateCode.cpp.
+                UNUSED_PARAM(insertionIndex);
                 return result;
 #elif CPU(X86_64)
                 UNUSED_PARAM(insertionIndex);
@@ -182,19 +186,6 @@ void lowerStackArgs(Code& code)
                 // Fall through to handle remainder of the original or modified inst, including potential ZDef handling.
             }
 
-            // The scan below only ever acts on Stack and CallArg operands, and after register
-            // allocation most instructions have neither. Checking that does not need the Arg roles,
-            // and iterating args() directly can only over-approximate what forEachArg reports.
-            bool mayHaveStackArg = false;
-            for (Arg& arg : inst.args()) {
-                if (arg.isStack() || arg.isCallArg()) {
-                    mayHaveStackArg = true;
-                    break;
-                }
-            }
-            if (!mayHaveStackArg)
-                continue;
-
             inst.forEachArg(
                 [&] (Arg& arg, Arg::Role role, Bank, Width width) {
                     switch (arg.kind()) {
@@ -216,7 +207,7 @@ void lowerStackArgs(Code& code)
                             Air::Opcode storeOpcode = Move32;
                             Air::Arg::Kind operandKind = Arg::ZeroReg;
                             Air::Arg operand = Arg::zeroReg();
-#elif CPU(X86_64)
+#elif CPU(X86_64) || CPU(ARM)
                             Air::Opcode storeOpcode = Move32;
                             Air::Arg::Kind operandKind = Arg::Imm;
                             Air::Arg operand = Arg::imm(0);

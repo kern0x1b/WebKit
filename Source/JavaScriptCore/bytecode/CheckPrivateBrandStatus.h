@@ -98,7 +98,8 @@ private:
 
     static CheckPrivateBrandStatus computeForBaseline(CodeBlock*, ICStatusMap&, BytecodeIndex, ExitFlag);
 #if ENABLE(JIT)
-    static CheckPrivateBrandStatus computeForPropertyInlineCacheWithoutExitSiteFeedback(const ConcurrentJSLocker&, CodeBlock* profiledBlock, PropertyInlineCache*);
+    static CheckPrivateBrandStatus computeForPropertyInlineCacheWithoutExitSiteFeedback(
+        const ConcurrentJSLocker&, CodeBlock* profiledBlock, PropertyInlineCache*);
 #endif
 
     Vector<CheckPrivateBrandVariant, 1> m_variants;

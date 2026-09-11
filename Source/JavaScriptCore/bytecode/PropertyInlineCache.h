@@ -32,6 +32,7 @@
 #include "JITStubRoutine.h"
 #include "MacroAssembler.h"
 #include "Options.h"
+#include "PropertyInlineCacheClearingWatchpoint.h"
 #include "PropertyInlineCacheSummary.h"
 #include "RegisterSet.h"
 #include "Structure.h"
@@ -146,6 +147,8 @@ public:
     void deref();
     void aboutToDie();
 
+    void NODELETE initializePredefinedRegisters();
+
     DECLARE_VISIT_AGGREGATE;
 
     // Check if the stub has weak references that are dead. If it does, then it resets itself,
@@ -241,14 +244,122 @@ public:
 private:
     AccessGenerationResult upgradeForPolyProtoIfNecessary(const GCSafeConcurrentJSLocker&, VM&, CodeBlock*, const Vector<AccessCase*, 16>&, AccessCase&);
 
-    ALWAYS_INLINE bool considerRepatchingCacheImpl(VM&, CodeBlock*, Structure*, CacheableIdentifier);
+    ALWAYS_INLINE bool considerRepatchingCacheImpl(VM& vm, CodeBlock* codeBlock, Structure* structure, CacheableIdentifier impl)
+    {
+        AssertNoGC assertNoGC;
+
+
+        // This method is called from the Optimize variants of IC slow paths. The first part of this
+        // method tries to determine if the Optimize variant should really behave like the
+        // non-Optimize variant and leave the IC untouched.
+        //
+        // If we determine that we should do something to the IC then the next order of business is
+        // to determine if this Structure would impact the IC at all. We know that it won't, if we
+        // have already buffered something on its behalf. That's what the m_bufferedStructures set is
+        // for.
+
+        everConsidered = true;
+        if (!countdown) {
+            // Check if we have been doing repatching too frequently. If so, then we should cool off
+            // for a while.
+            WTF::incrementWithSaturation(repatchCount);
+            if (repatchCount > Options::repatchCountForCoolDown()) {
+                // We've been repatching too much, so don't do it now.
+                repatchCount = 0;
+                // The amount of time we require for cool-down depends on the number of times we've
+                // had to cool down in the past. The relationship is exponential. The max value we
+                // allow here is 2^256 - 2, since the slow paths may increment the count to indicate
+                // that they'd like to temporarily skip patching just this once.
+                countdown = WTF::leftShiftWithSaturation(
+                    static_cast<uint8_t>(Options::initialCoolDownCount()),
+                    numberOfCoolDowns,
+                    static_cast<uint8_t>(std::numeric_limits<uint8_t>::max() - 1));
+                WTF::incrementWithSaturation(numberOfCoolDowns);
+
+                // We may still have had something buffered. Trigger generation now.
+                bufferingCountdown = 0;
+                return true;
+            }
+
+            // We don't want to return false due to buffering indefinitely.
+            if (!bufferingCountdown) {
+                // Note that when this returns true, it's possible that we will not even get an
+                // AccessCase because this may cause Repatch.cpp to simply do an in-place
+                // repatching.
+                return true;
+            }
+
+            bufferingCountdown--;
+
+            if (!structure)
+                return true;
+
+            // Now protect the IC buffering. We want to proceed only if this is a structure that
+            // we don't already have a case buffered for. Note that if this returns true but the
+            // bufferingCountdown is not zero then we will buffer the access case for later without
+            // immediately generating code for it.
+            //
+            // NOTE: This will behave oddly for InstanceOf if the user varies the prototype but not
+            // the base's structure. That seems unlikely for the canonical use of instanceof, where
+            // the prototype is fixed.
+            bool isNewlyAdded = false;
+            StructureID structureID = structure->id();
+            {
+                Locker locker { m_bufferedStructuresLock };
+                if (std::holds_alternative<std::monostate>(m_bufferedStructures)) {
+                    if (m_identifier)
+                        m_bufferedStructures = Vector<StructureID>();
+                    else
+                        m_bufferedStructures = Vector<std::tuple<StructureID, CacheableIdentifier>>();
+                }
+                WTF::switchOn(m_bufferedStructures,
+                    [&](std::monostate) { },
+                    [&](Vector<StructureID>& structures) {
+                        for (auto bufferedStructureID : structures) {
+                            if (bufferedStructureID == structureID)
+                                return;
+                        }
+                        structures.append(structureID);
+                        isNewlyAdded = true;
+                    },
+                    [&](Vector<std::tuple<StructureID, CacheableIdentifier>>& structures) {
+                        ASSERT(!m_identifier);
+                        for (auto& [bufferedStructureID, bufferedCacheableIdentifier] : structures) {
+                            if (bufferedStructureID == structureID && bufferedCacheableIdentifier == impl)
+                                return;
+                        }
+                        structures.append(std::tuple { structureID, impl });
+                        isNewlyAdded = true;
+                    });
+            }
+            if (isNewlyAdded)
+                vm.writeBarrier(codeBlock);
+            return isNewlyAdded;
+        }
+        countdown--;
+        return false;
+    }
 
     void setCacheType(const ConcurrentJSLockerBase&, CacheType);
+
+    void clearBufferedStructures()
+    {
+        Locker locker { m_bufferedStructuresLock };
+        WTF::switchOn(m_bufferedStructures,
+            [&](std::monostate) { },
+            [&](Vector<StructureID>& structures) {
+                structures.shrink(0);
+            },
+            [&](Vector<std::tuple<StructureID, CacheableIdentifier>>& structures) {
+                structures.shrink(0);
+            });
+    }
 
 protected:
     PropertyInlineCache(PropertyInlineCacheType icType, AccessType accessType, CodeOrigin codeOrigin)
         : codeOrigin(codeOrigin)
         , accessType(accessType)
+        , bufferingCountdown(Options::initialRepatchBufferingCountdown())
         , m_icType(icType)
     {
     }
@@ -268,6 +379,7 @@ public:
     static constexpr ptrdiff_t offsetOfDoneLocation() { return OBJECT_OFFSETOF(PropertyInlineCache, doneLocation); }
     static constexpr ptrdiff_t offsetOfCountdown() { return OBJECT_OFFSETOF(PropertyInlineCache, countdown); }
     static constexpr ptrdiff_t offsetOfCallSiteIndex() { return OBJECT_OFFSETOF(PropertyInlineCache, callSiteIndex); }
+    static constexpr ptrdiff_t offsetOfSlowPathStartLocation() { return OBJECT_OFFSETOF(PropertyInlineCache, slowPathStartLocation); }
     static constexpr ptrdiff_t offsetOfHandler() { return OBJECT_OFFSETOF(PropertyInlineCache, m_handler); }
     static constexpr ptrdiff_t offsetOfGlobalObject() { return OBJECT_OFFSETOF(PropertyInlineCache, m_globalObject); }
 
@@ -314,6 +426,7 @@ public:
     JSCell* m_inlineHolder { nullptr };
     CacheableIdentifier m_identifier;
     CodeLocationLabel<JSInternalPtrTag> doneLocation;
+    CodeLocationLabel<JITStubRoutinePtrTag> slowPathStartLocation;
 
     JSGlobalObject* m_globalObject { nullptr };
 private:
@@ -356,6 +469,10 @@ public:
     uint8_t countdown { 1 };
     uint8_t repatchCount { 0 };
     uint8_t numberOfCoolDowns { 0 };
+    uint8_t bufferingCountdown;
+private:
+    Lock m_bufferedStructuresLock;
+public:
     bool resetByGC : 1 { false };
     bool tookSlowPath : 1 { false };
     bool everConsidered : 1 { false };
@@ -568,47 +685,20 @@ public:
 class RepatchingPropertyInlineCache final : public PropertyInlineCache {
     WTF_MAKE_NONCOPYABLE(RepatchingPropertyInlineCache);
 public:
-    RepatchingPropertyInlineCache();
-    RepatchingPropertyInlineCache(AccessType, CodeOrigin);
-    ~RepatchingPropertyInlineCache();
+    RepatchingPropertyInlineCache()
+        : PropertyInlineCache(PropertyInlineCacheType::Repatching)
+    { }
 
-    ALWAYS_INLINE bool considerBufferingStructure(VM&, CodeBlock*, Structure*, CacheableIdentifier);
-    template<typename Visitor> void visitBufferedStructures(Visitor&);
-    void pruneDeadBufferedStructures(VM&);
-
-    void clearBufferedStructures()
-    {
-        Locker locker { m_bufferedStructuresLock };
-        WTF::switchOn(m_bufferedStructures,
-            [&](std::monostate) { },
-            [&](Vector<StructureID>& structures) {
-                structures.shrink(0);
-            },
-            [&](Vector<std::tuple<StructureID, CacheableIdentifier>>& structures) {
-                structures.shrink(0);
-            });
-    }
+    RepatchingPropertyInlineCache(AccessType accessType, CodeOrigin codeOrigin)
+        : PropertyInlineCache(PropertyInlineCacheType::Repatching, accessType, codeOrigin)
+    { }
 
     // This is either the start of the inline IC for *byId caches, or the location of patchable jump for 'instanceof' caches.
     CodeLocationLabel<JITStubRoutinePtrTag> startLocation;
-    CodeLocationLabel<JITStubRoutinePtrTag> slowPathStartLocation;
     CodeLocationCall<JSInternalPtrTag> m_slowPathCallLocation;
     std::unique_ptr<PolymorphicAccess> m_stub;
 
-private:
-    // Represents those structures that already have buffered AccessCases in the PolymorphicAccess.
-    // Note that it's always safe to clear this. If we clear it prematurely, then if we see the same
-    // structure again during this buffering countdown, we will create an AccessCase object for it.
-    // That's not so bad - we'll get rid of the redundant ones once we regenerate.
-    Variant<std::monostate, Vector<StructureID>, Vector<std::tuple<StructureID, CacheableIdentifier>>> m_bufferedStructures WTF_GUARDED_BY_LOCK(m_bufferedStructuresLock);
-public:
-
     ScalarRegisterSet m_usedRegisters;
-    Registers m_registers;
-    uint8_t bufferingCountdown;
-private:
-    Lock m_bufferedStructuresLock;
-public:
 
     uint32_t inlineCodeSize() const
     {
@@ -618,115 +708,23 @@ public:
     }
 };
 
-ALWAYS_INLINE bool PropertyInlineCache::considerRepatchingCacheImpl(VM& vm, CodeBlock* codeBlock, Structure* structure, CacheableIdentifier impl)
-{
-    AssertNoGC assertNoGC;
-
-    // This method is called from the Optimize variants of IC slow paths. The first part of this
-    // method tries to determine if the Optimize variant should really behave like the
-    // non-Optimize variant and leave the IC untouched.
-    //
-    // If we determine that we should do something to the IC then the next order of business is
-    // to determine if this Structure would impact the IC at all. We know that it won't, if we
-    // have already buffered something on its behalf. That's what the m_bufferedStructures set is
-    // for.
-
-    everConsidered = true;
-    if (!countdown) {
-        auto* repatchingIC = dynamicDowncast<RepatchingPropertyInlineCache>(*this);
-        // Check if we have been doing repatching too frequently. If so, then we should cool off
-        // for a while.
-        WTF::incrementWithSaturation(repatchCount);
-        if (repatchCount > Options::repatchCountForCoolDown()) {
-            // We've been repatching too much, so don't do it now.
-            repatchCount = 0;
-            // The amount of time we require for cool-down depends on the number of times we've
-            // had to cool down in the past. The relationship is exponential. The max value we
-            // allow here is 2^256 - 2, since the slow paths may increment the count to indicate
-            // that they'd like to temporarily skip patching just this once.
-            countdown = WTF::leftShiftWithSaturation(
-                static_cast<uint8_t>(Options::initialCoolDownCount()),
-                numberOfCoolDowns,
-                static_cast<uint8_t>(std::numeric_limits<uint8_t>::max() - 1));
-            WTF::incrementWithSaturation(numberOfCoolDowns);
-
-            // We may still have had something buffered. Trigger generation now.
-            if (repatchingIC)
-                repatchingIC->bufferingCountdown = 0;
-            return true;
-        }
-
-        if (repatchingIC)
-            return repatchingIC->considerBufferingStructure(vm, codeBlock, structure, impl);
-        return true;
-    }
-    countdown--;
-    return false;
-}
-
-ALWAYS_INLINE bool RepatchingPropertyInlineCache::considerBufferingStructure(VM& vm, CodeBlock* codeBlock, Structure* structure, CacheableIdentifier impl)
-{
-    // We don't want to return false due to buffering indefinitely.
-    if (!bufferingCountdown) {
-        // Note that when this returns true, it's possible that we will not even get an
-        // AccessCase because this may cause Repatch.cpp to simply do an in-place
-        // repatching.
-        return true;
-    }
-
-    bufferingCountdown--;
-
-    if (!structure)
-        return true;
-
-    // Now protect the IC buffering. We want to proceed only if this is a structure that
-    // we don't already have a case buffered for. Note that if this returns true but the
-    // bufferingCountdown is not zero then we will buffer the access case for later without
-    // immediately generating code for it.
-    //
-    // NOTE: This will behave oddly for InstanceOf if the user varies the prototype but not
-    // the base's structure. That seems unlikely for the canonical use of instanceof, where
-    // the prototype is fixed.
-    bool isNewlyAdded = false;
-    StructureID structureID = structure->id();
-    {
-        Locker locker { m_bufferedStructuresLock };
-        if (std::holds_alternative<std::monostate>(m_bufferedStructures)) {
-            if (m_identifier)
-                m_bufferedStructures = Vector<StructureID>();
-            else
-                m_bufferedStructures = Vector<std::tuple<StructureID, CacheableIdentifier>>();
-        }
-        WTF::switchOn(m_bufferedStructures,
-            [&](std::monostate) { },
-            [&](Vector<StructureID>& structures) {
-                for (auto bufferedStructureID : structures) {
-                    if (bufferedStructureID == structureID)
-                        return;
-                }
-                structures.append(structureID);
-                isNewlyAdded = true;
-            },
-            [&](Vector<std::tuple<StructureID, CacheableIdentifier>>& structures) {
-                ASSERT(!m_identifier);
-                for (auto& [bufferedStructureID, bufferedCacheableIdentifier] : structures) {
-                    if (bufferedStructureID == structureID && bufferedCacheableIdentifier == impl)
-                        return;
-                }
-                structures.append(std::tuple { structureID, impl });
-                isNewlyAdded = true;
-            });
-    }
-    if (isNewlyAdded)
-        vm.writeBarrier(codeBlock);
-    return isNewlyAdded;
-}
-
 inline ScalarRegisterSet PropertyInlineCache::usedRegisters() const
 {
     if (auto* repatching = dynamicDowncast<RepatchingPropertyInlineCache>(*this))
         return repatching->m_usedRegisters;
     return RegisterSet::stubUnavailableRegisters().toScalarRegisterSet();
+}
+
+inline void PropertyInlineCache::setUsedRegisters(ScalarRegisterSet value)
+{
+    ASSERT(is<RepatchingPropertyInlineCache>(*this));
+    downcast<RepatchingPropertyInlineCache>(*this).m_usedRegisters = value;
+}
+
+inline void PropertyInlineCache::removeUsedRegister(GPRReg reg)
+{
+    ASSERT(is<RepatchingPropertyInlineCache>(*this));
+    downcast<RepatchingPropertyInlineCache>(*this).m_usedRegisters.remove(reg);
 }
 
 inline auto appropriateGetByIdOptimizeFunction(AccessType type) -> decltype(&operationGetByIdOptimize)
@@ -833,6 +831,7 @@ struct UnlinkedPropertyInlineCache {
     bool canBeMegamorphic : 1 { false };
     CacheableIdentifier m_identifier; // This only comes from already marked one. Thus, we do not mark it via GC.
     CodeLocationLabel<JSInternalPtrTag> doneLocation;
+    CodeLocationLabel<JITStubRoutinePtrTag> slowPathStartLocation;
 };
 
 struct BaselineUnlinkedPropertyInlineCache : JSC::UnlinkedPropertyInlineCache {

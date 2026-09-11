@@ -40,7 +40,7 @@ public:
     JITAddGenerator() { }
 
     JITAddGenerator(SnippetOperand leftOperand, SnippetOperand rightOperand,
-        GPRReg result, GPRReg left, GPRReg right,
+        JSValueRegs result, JSValueRegs left, JSValueRegs right,
         FPRReg leftFPR, FPRReg rightFPR, GPRReg scratchGPR)
         : m_leftOperand(leftOperand)
         , m_rightOperand(rightOperand)
@@ -63,9 +63,9 @@ public:
 private:
     SnippetOperand m_leftOperand;
     SnippetOperand m_rightOperand;
-    GPRReg m_result { InvalidGPRReg };
-    GPRReg m_left { InvalidGPRReg };
-    GPRReg m_right { InvalidGPRReg };
+    JSValueRegs m_result;
+    JSValueRegs m_left;
+    JSValueRegs m_right;
     FPRReg m_leftFPR;
     FPRReg m_rightFPR;
     GPRReg m_scratchGPR;

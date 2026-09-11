@@ -151,7 +151,8 @@ PutByStatus PutByStatus::computeFor(CodeBlock* profiledBlock, ICStatusMap& map, 
         return PutByStatus(LikelyTakesSlowPath);
     
     PropertyInlineCache* propertyCache = map.get(CodeOrigin(bytecodeIndex)).propertyCache;
-    PutByStatus result = computeForPropertyInlineCache(locker, profiledBlock, propertyCache, callExitSiteData, CodeOrigin(bytecodeIndex));
+    PutByStatus result = computeForPropertyInlineCache
+(locker, profiledBlock, propertyCache, callExitSiteData, CodeOrigin(bytecodeIndex));
     if (!result)
         return computeFromLLInt(profiledBlock, bytecodeIndex);
     
@@ -164,12 +165,15 @@ PutByStatus PutByStatus::computeFor(CodeBlock* profiledBlock, ICStatusMap& map, 
 #endif // ENABLE(JIT)
 }
 
-PutByStatus PutByStatus::computeForPropertyInlineCache(const ConcurrentJSLocker& locker, CodeBlock* baselineBlock, PropertyInlineCache* propertyCache, CodeOrigin codeOrigin)
+PutByStatus PutByStatus::computeForPropertyInlineCache
+(const ConcurrentJSLocker& locker, CodeBlock* baselineBlock, PropertyInlineCache* propertyCache, CodeOrigin codeOrigin)
 {
-    return computeForPropertyInlineCache(locker, baselineBlock, propertyCache, CallLinkStatus::computeExitSiteData(baselineBlock, codeOrigin.bytecodeIndex()), codeOrigin);
+    return computeForPropertyInlineCache
+(locker, baselineBlock, propertyCache, CallLinkStatus::computeExitSiteData(baselineBlock, codeOrigin.bytecodeIndex()), codeOrigin);
 }
 
-PutByStatus PutByStatus::computeForPropertyInlineCache(const ConcurrentJSLocker& locker, CodeBlock* profiledBlock, PropertyInlineCache* propertyCache, CallLinkStatus::ExitSiteData callExitSiteData, CodeOrigin)
+PutByStatus PutByStatus::computeForPropertyInlineCache
+(const ConcurrentJSLocker& locker, CodeBlock* profiledBlock, PropertyInlineCache* propertyCache, CallLinkStatus::ExitSiteData callExitSiteData, CodeOrigin)
 {
     PropertyInlineCacheSummary summary = PropertyInlineCache::summary(locker, profiledBlock->vm(), propertyCache);
     if (!isInlineable(summary))
@@ -348,7 +352,8 @@ PutByStatus PutByStatus::computeFor(CodeBlock* baselineBlock, ICStatusMap& basel
             PutByStatus result;
             {
                 ConcurrentJSLocker locker(context->optimizedCodeBlock->m_lock);
-                result = computeForPropertyInlineCache(locker, context->optimizedCodeBlock, status.propertyCache, callExitSiteData, codeOrigin);
+                result = computeForPropertyInlineCache
+(locker, context->optimizedCodeBlock, status.propertyCache, callExitSiteData, codeOrigin);
             }
             if (result.isSet())
                 return bless(result);
@@ -468,14 +473,6 @@ PutByStatus PutByStatus::computeFor(JSGlobalObject* globalObject, const Structur
     
     result.shrinkToFit();
     return result;
-}
-
-PutByStatus PutByStatus::computeFor(CodeBlock* profiledBlock, BytecodeIndex bytecodeIndex, JSGlobalObject* globalObject, const StructureSet& set, CacheableIdentifier identifier, bool isDirect, PrivateFieldPutKind privateFieldPutKind)
-{
-    if (hasBadCacheExitSite(profiledBlock, bytecodeIndex))
-        return PutByStatus(LikelyTakesSlowPath);
-
-    return computeFor(globalObject, set, identifier, isDirect, privateFieldPutKind);
 }
 #endif
 

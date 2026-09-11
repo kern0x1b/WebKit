@@ -448,11 +448,9 @@ public:
         out.print("<", m_tmp, ", ", WTF::RawHex(m_priority), ">");
     }
 
-    // The packed priority is built so that a numerically greater value is more urgent, which is the
-    // order PriorityQueue serves.
-    friend bool NODELETE operator<(const TmpPriority& left, const TmpPriority& right)
+    static bool NODELETE isHigherPriority(const TmpPriority& left, const TmpPriority& right)
     {
-        return left.m_priority < right.m_priority;
+        return left.m_priority > right.m_priority;
     }
 
 private:
@@ -850,44 +848,9 @@ public:
         , m_spillSlotTable(FillWith { }, 1, nullptr) // Sacrifice index 0.
         , m_regRanges(Reg::maxIndex() + 1)
         , m_insertionSets(code.size())
+        , m_useCounts(m_code)
+        , m_tmpWidth(m_code)
     {
-        TmpWidth::Analyzer tmpWidthAnalyzer(m_tmpWidth);
-        UseCounts::Analyzer useCountsAnalyzer(m_useCounts);
-        analyzeCode(m_code, tmpWidthAnalyzer, useCountsAnalyzer);
-
-        if (Options::airValidateGreedRegAlloc()) [[unlikely]]
-            validateFusedAnalyses();
-    }
-
-    void validateFusedAnalyses()
-    {
-        TmpWidth referenceWidth(m_code);
-        UseCounts referenceUseCounts(m_code);
-
-        auto checkWidths = [&](Tmp tmp) {
-            RELEASE_ASSERT(m_tmpWidth.useWidth(tmp) == referenceWidth.useWidth(tmp));
-            RELEASE_ASSERT(m_tmpWidth.defWidth(tmp) == referenceWidth.defWidth(tmp));
-        };
-        m_code.forEachTmp(checkWidths);
-        RegisterSet::allRegisters().forEach([&](Reg reg) {
-            checkWidths(Tmp(reg));
-        });
-
-        for (unsigned i = 0; i < AbsoluteTmpMapper<GP>::absoluteIndex(m_code.numTmps(GP)); ++i) {
-            RELEASE_ASSERT(m_useCounts.numWarmUsesAndDefs<GP>(i) == referenceUseCounts.numWarmUsesAndDefs<GP>(i));
-            RELEASE_ASSERT(m_useCounts.isConstDef<GP>(i) == referenceUseCounts.isConstDef<GP>(i));
-            if (m_useCounts.isConstDef<GP>(i))
-                RELEASE_ASSERT(m_useCounts.constant<GP>(i) == referenceUseCounts.constant<GP>(i));
-        }
-        for (unsigned i = 0; i < AbsoluteTmpMapper<FP>::absoluteIndex(m_code.numTmps(FP)); ++i) {
-            RELEASE_ASSERT(m_useCounts.numWarmUsesAndDefs<FP>(i) == referenceUseCounts.numWarmUsesAndDefs<FP>(i));
-            RELEASE_ASSERT(m_useCounts.isConstDef<FP>(i) == referenceUseCounts.isConstDef<FP>(i));
-            if (m_useCounts.isConstDef<FP>(i)) {
-                RELEASE_ASSERT(m_useCounts.constant<FP>(i).u64x2[0] == referenceUseCounts.constant<FP>(i).u64x2[0]);
-                RELEASE_ASSERT(m_useCounts.constant<FP>(i).u64x2[1] == referenceUseCounts.constant<FP>(i).u64x2[1]);
-                RELEASE_ASSERT(m_useCounts.constantWidth<FP>(i) == referenceUseCounts.constantWidth<FP>(i));
-            }
-        }
     }
 
     void run()
@@ -1300,6 +1263,7 @@ private:
         CompilerTimingScope timingScope("Air"_s, "GreedyRegAlloc::buildLiveRanges"_s);
         UnifiedTmpLiveness liveness(m_code);
         TmpMap<Point> activeEnds(m_code);
+        TmpMap<Point> liveAtTailMarkers(m_code, std::numeric_limits<Point>::max());
 #if ASSERT_ENABLED
         UnifiedTmpLiveness::LiveAtHead assertOnlyLiveAtHead = liveness.liveAtHead();
 #endif
@@ -1392,9 +1356,9 @@ private:
         // First pass: collect coalescable pairs and the cannot-spill-in-place set.
         for (BasicBlock* block : m_code) {
             for (Inst& inst : block->insts()) {
-                for (Arg& arg : inst.args()) {
+                inst.forEachArg([&](Arg& arg, Arg::Role, Bank, Width) {
                     if (arg.isTmp() && inst.admitsStack(arg))
-                        continue;
+                        return;
 
                     // Arg cannot be spilled in-place.
                     arg.forEachTmpFast([&](Tmp& tmp) {
@@ -1403,7 +1367,7 @@ private:
                         else
                             cannotSpillInPlaceFP.add(tmp);
                     });
-                }
+                });
                 if (mayBeCoalescable(inst)) {
                     ASSERT(inst.args().size() == 2);
                     if (inst.args()[0].isReg() || inst.args()[1].isReg()) {
@@ -1450,28 +1414,21 @@ private:
                 dataLog("  positionOfTail = ", positionOfTail, "\n");
             }
 
+            for (Tmp tmp : liveness.liveAtTail(block)) {
+                markUse(tmp, positionOfTail);
+                liveAtTailMarkers[tmp] = positionOfTail;
+            }
             if (blockAfter) {
-                // On entry activeEnds is open for exactly the Tmps live at the head of blockAfter,
-                // so the only Tmps whose state changes at this boundary are the two differences
-                // between that set and the set live at this block's tail.
-
-                // If tmp was live at the head of the next block but not live at the
-                // tail of the current block, close the interval.
                 Point blockAfterPositionOfHead = this->positionOfHead(blockAfter);
-                liveness.forEachLiveAtHeadNotLiveAtTail(blockAfter, block,
-                    [&](Tmp tmp) {
+                for (Tmp tmp : liveness.liveAtHead(blockAfter)) {
+                    ASSERT(activeEnds[tmp]);
+                    // If tmp was live at the head of the next block but not live at the
+                    // tail of the current block, close the interval.
+                    if (liveAtTailMarkers[tmp] > positionOfTail) {
                         if (activeEnds[tmp]) [[likely]]
                             markDef(tmp, blockAfterPositionOfHead);
-                    });
-                liveness.forEachLiveAtTailNotLiveAtHead(block, blockAfter,
-                    [&](Tmp tmp) {
-                        markUse(tmp, positionOfTail);
-                    });
-            } else {
-                liveness.forEachLiveAtTail(block,
-                    [&](Tmp tmp) {
-                        markUse(tmp, positionOfTail);
-                    });
+                    }
+                }
             }
             assertPinnedRegsAreLive();
 
@@ -1544,10 +1501,8 @@ private:
         }
         if (blockAfter) {
             Point firstBlockPositionOfHead = this->positionOfHead(blockAfter);
-            liveness.forEachLiveAtHead(blockAfter,
-                [&](Tmp tmp) {
-                    markDef(tmp, firstBlockPositionOfHead);
-                });
+            for (Tmp tmp : liveness.liveAtHead(blockAfter))
+                markDef(tmp, firstBlockPositionOfHead);
         }
         assertPinnedRegsAreLive();
         // Pinned registers are never killed, so markDef never completes their live-range. Do it now.
@@ -2139,7 +2094,7 @@ private:
     }
 
     // Phase 3: Replace member Tmps with representative in all instructions.
-    // Delete self-Moves and adjust useDefCost for removed moves.
+    // Nop self-Moves and adjust useDefCost for removed moves.
     template<Bank bank>
     void rewriteCoalescedTmps(const Vector<AffinityGroup<bank>>& groups, const TmpGroupMap<bank>& tmpToGroup)
     {
@@ -2753,28 +2708,12 @@ private:
         if (tmpData.liveRange.size() < splitMinRangeSize)
             return false; // Not enough instructions to be worthwhile
 
-        struct ClobberSite {
-            Point point;
-            BasicBlock* block;
-            bool usesOrDefsTmp;
-        };
-        Vector<ClobberSite, 16> clobberSites;
-        // A call clobbers every caller-saved register at a single point, so the same instruction is
-        // reached once per candidate register below. What is computed here depends only on the
-        // point, thus caching here.
-        auto clobberSiteAt = [&](Point point) -> ClobberSite {
-            auto iterator = std::ranges::lower_bound(clobberSites, point, { }, &ClobberSite::point);
-            if (iterator != clobberSites.end() && iterator->point == point)
-                return *iterator;
-            BasicBlock* block = findBlockContainingPoint(point);
-            Inst& inst = block->at(this->instIndex(positionOfHead(block), point));
-            bool usesOrDefsTmp = false;
+        auto instUsesOrDefsTmp = [](Inst& inst, Tmp tmp) {
+            bool result = false;
             inst.forEachTmpFast([&](Tmp useOrDef) {
-                usesOrDefsTmp |= useOrDef == tmp;
+                result |= useOrDef == tmp;
             });
-            ClobberSite site { point, block, usesOrDefsTmp };
-            clobberSites.insert(iterator - clobberSites.begin(), site);
-            return site;
+            return result;
         };
         ASSERT(tmpData.spillCost() != unspillableCost); // Should have evicted.
 
@@ -2789,8 +2728,10 @@ private:
             m_regRanges[r].forEachConflict(tmpData.liveRange, width,
                 [&](auto& conflict) -> IterationStatus {
                     if (conflict.tmp.isReg() && conflict.interval.distance() == 1) {
-                        ClobberSite site = clobberSiteAt(conflict.interval.begin());
-                        if (site.usesOrDefsTmp) {
+                        BasicBlock* block = findBlockContainingPoint(conflict.interval.begin());
+                        unsigned instIndex = this->instIndex(positionOfHead(block), conflict.interval.begin());
+                        Inst& inst = block->at(instIndex);
+                        if (instUsesOrDefsTmp(inst, tmp)) {
                             // If the inst that clobbers regs also use/def the tmp trying to be split, then
                             // can't split the tmp around this clobber.
                             // FIXME: could allow uses, but then we'd have to make split tmp conflict with any
@@ -2799,7 +2740,7 @@ private:
                             return IterationStatus::Done;
                         }
                         // Times 2 for 'MOV tmp, gapTmp' and 'MOV gapTmp, tmp'
-                        splitCost += UseDefCost(adjustedBlockFrequency(site.block) * 2);
+                        splitCost += UseDefCost(adjustedBlockFrequency(block) * 2);
                         if (splitCost >= minSplitCost)
                             return IterationStatus::Done; // Not the best or already over limit, exit early.
                         return IterationStatus::Continue;
@@ -2863,28 +2804,6 @@ private:
     // Note that the use/def lists are computed only once and not kept up to date.
     // So after a Tmp is split or spilled that Tmp's use/def list may include instructions that now
     // reference the new split tmp or spill slot rather than the Tmp itself.
-    // Only the Tmps matter when indexing use/def sites, not their roles, so the role-free walk is
-    // used. This asserts the two walks really do enumerate the same Tmps for every opcode form.
-    static void validateFastTmpEnumeration(Inst& inst)
-    {
-        auto collect = [](auto&& walk) {
-            Vector<int, 8> values;
-            walk([&](Tmp& tmp) { values.append(tmp.internalValue()); });
-            std::ranges::sort(values);
-            Vector<int, 8> unique;
-            for (int value : values) {
-                if (unique.isEmpty() || unique.last() != value)
-                    unique.append(value);
-            }
-            return unique;
-        };
-        auto fast = collect([&](auto&& functor) { inst.forEachTmpFast(functor); });
-        auto viaArgs = collect([&](auto&& functor) {
-            inst.forEachArg([&](Arg& arg, Arg::Role, Bank, Width) { arg.forEachTmpFast(functor); });
-        });
-        RELEASE_ASSERT(fast == viaArgs, fast.size(), viaArgs.size());
-    }
-
     void ensureUseDefLists()
     {
         if (m_hasUseDefLists)
@@ -2895,11 +2814,11 @@ private:
         for (BasicBlock* block : m_code) {
             Point instPoint = this->positionOfHead(block);
             for (Inst& inst : block->insts()) {
-                inst.forEachTmpFast([&](Tmp& tmp) {
-                    m_useDefLists[tmp].add(instPoint);
+                inst.forEachArg([&](Arg& arg, Arg::Role, Bank, Width) {
+                    arg.forEachTmpFast([&](Tmp& tmp) {
+                        m_useDefLists[tmp].add(instPoint);
+                    });
                 });
-                if (Options::airValidateGreedRegAlloc()) [[unlikely]]
-                    validateFastTmpEnumeration(inst);
                 instPoint += PointOffsets::PointsPerInst;
             }
         }
@@ -3130,24 +3049,6 @@ private:
             Point positionOfHead = this->positionOfHead(block);
             for (unsigned instIndex = 0; instIndex < block->size(); ++instIndex) {
                 Inst& inst = block->at(instIndex);
-
-                // Everything below is reached only through an Arg that is a spilled Tmp of this
-                // bank, and deciding whether the instruction mentions one does not need the Arg roles.
-                bool mayMentionSpilledTmp = false;
-                inst.forEachTmpFast([&](Tmp& tmp) {
-                    if (!mayMentionSpilledTmp && tmp.bank() == bank && spillSlot<bank>(tmp))
-                        mayMentionSpilledTmp = true;
-                });
-                if (!mayMentionSpilledTmp) {
-                    if (Options::airValidateGreedRegAlloc()) [[unlikely]] {
-                        inst.forEachArg([&](Arg& arg, Arg::Role, Bank argBank, Width) {
-                            if (arg.isTmp() && argBank == bank)
-                                RELEASE_ASSERT(!spillSlot<bank>(arg.tmp()));
-                        });
-                    }
-                    continue;
-                }
-
                 unsigned indexOfEarly = positionOfEarly(positionOfHead, instIndex);
 
                 bool useMove32IfDidSpill = false;
@@ -3274,12 +3175,11 @@ private:
                     // WTF::Liveness and Air::LivenessAdapter do not handle a late-def/use followed by early-def
                     // correctly. While this register allocator does handle it correctly (since it models distinct
                     // late and early points between instructions (i.e. intervalForSpill() won't overlap for different
-                    // scratch Tmps)), insert a Padding inst so that subsequent liveness analysis correctly computes
-                    // lifetime interference when there are back-to-back Move spill-spill-scratch instructions
-                    // (scratch is early-def, late-use).
+                    // scratch Tmps)), insert a Nop so that subsequent liveness analysis correctly compute lifetime interference
+                    // when there are back-to-back Move spill-spill-scratch instructions (scratch is early-def, late-use).
                     // See https://bugs.webkit.org/show_bug.cgi?id=163548#c2 for more info.
                     // FIXME: reconsider this, https://bugs.webkit.org/show_bug.cgi?id=288122
-                    m_insertionSets[block].insert(instIndex, SpillMoveFrom, Padding, inst.origin);
+                    m_insertionSets[block].insert(instIndex, SpillMoveFrom, Nop, inst.origin);
                     continue;
                 }
 
@@ -3625,7 +3525,7 @@ private:
         // We can coalesce a Move32 so long as either of the following holds:
         // - The input is already zero-filled.
         // - The output only cares about the low 32 bits.
-        if (inst.kind.opcode == Move32 && m_tmpWidth.defWidth(inst.args()[0].tmp()) > Width32)
+        if (inst.kind.opcode == Move32 && !is32Bit() && m_tmpWidth.defWidth(inst.args()[0].tmp()) > Width32)
             return false;
         return true;
     }
@@ -3697,7 +3597,7 @@ private:
     Vector<StackSlot*> m_spillSlotTable;
     IndexMap<Reg, RegisterRange> m_regRanges;
     GenerationalSet<uint8_t, SaVector> m_visited;
-    PriorityQueue<TmpPriority> m_queue;
+    PriorityQueue<TmpPriority, TmpPriority::isHigherPriority> m_queue;
     IndexMap<BasicBlock*, PhaseInsertionSet> m_insertionSets;
     BlockWorklist m_fastBlocks;
     UseCounts m_useCounts;

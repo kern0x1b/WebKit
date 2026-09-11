@@ -30,6 +30,7 @@
 #include "AccessCase.h"
 #include "CallLinkInfo.h"
 #include "JITStubRoutine.h"
+#include "PropertyInlineCacheClearingWatchpoint.h"
 #include <wtf/RefCounted.h>
 
 namespace JSC {
@@ -39,7 +40,6 @@ class InlineCacheCompiler;
 class InlineCacheHandlerWithJSCall;
 class PolymorphicAccessJITStubRoutine;
 class PropertyInlineCache;
-class PropertyInlineCacheClearingWatchpoint;
 
 enum class CacheType : int8_t {
     Unset,
@@ -60,8 +60,6 @@ class JSC_CACHE_LINE_ALIGNED InlineCacheHandler : public RefCounted<InlineCacheH
 public:
     static Ref<InlineCacheHandler> create(Ref<InlineCacheHandler>&&, CodeBlock*, PropertyInlineCache&, Ref<PolymorphicAccessJITStubRoutine>&&, std::unique_ptr<PropertyInlineCacheClearingWatchpoint>&&, unsigned callLinkInfoCount);
     static Ref<InlineCacheHandler> createPreCompiled(Ref<InlineCacheHandler>&&, CodeBlock*, PropertyInlineCache&, Ref<PolymorphicAccessJITStubRoutine>&&, std::unique_ptr<PropertyInlineCacheClearingWatchpoint>&&, AccessCase&, CacheType);
-
-    ~InlineCacheHandler();
 
     void operator delete(InlineCacheHandler*, std::destroying_delete_t);
 
@@ -172,7 +170,7 @@ protected:
     std::unique_ptr<PropertyInlineCacheClearingWatchpoint> m_watchpoint;
 };
 
-#if !ASSERT_ENABLED && !ASAN_ENABLED && CPU(ARM64)
+#if !ASSERT_ENABLED && !ASAN_ENABLED && CPU(ARM64) && CPU(ADDRESS64)
 static_assert(InlineCacheHandler::offsetOfUid() == 40, "InlineCacheHandler hot field layout drifted.");
 #endif
 

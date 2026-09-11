@@ -64,7 +64,7 @@ public:
     ~Plan();
 
     size_t codeSize() const final;
-    void reconcileWeakReferencesAtGCEnd() final;
+    void finalizeInGC() final;
     CompilationResult finalize() override;
 
     void notifyReady() final;

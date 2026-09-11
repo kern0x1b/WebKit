@@ -96,7 +96,7 @@ public:
     
 private:
     Lock m_lock;
-    ThunkMap<SlowPathCallKey> m_slowPathCallThunks WTF_GUARDED_BY_LOCK(m_lock);
+    ThunkMap<SlowPathCallKey> m_slowPathCallThunks;
 };
 
 } } // namespace JSC::FTL

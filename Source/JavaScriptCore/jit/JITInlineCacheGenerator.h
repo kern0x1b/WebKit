@@ -50,7 +50,6 @@ class CallSiteIndex;
 class CodeBlock;
 class JIT;
 class PropertyInlineCache;
-class RepatchingPropertyInlineCache;
 struct UnlinkedPropertyInlineCache;
 struct BaselineUnlinkedPropertyInlineCache;
 
@@ -76,6 +75,11 @@ public:
 
     CCallHelpers::Label slowPathBegin() const { return m_slowPathBegin; }
 
+    void reportBaselineDataICSlowPathBegin(CCallHelpers::Label slowPathBegin)
+    {
+        m_slowPathBegin = slowPathBegin;
+    }
+
     void NODELETE finalize(
         LinkBuffer& fastPathLinkBuffer, LinkBuffer& slowPathLinkBuffer,
         CodeLocationLabel<JITStubRoutinePtrTag> start);
@@ -90,19 +94,18 @@ public:
         if constexpr (std::is_same_v<std::decay_t<PropertyInlineCache>, BaselineUnlinkedPropertyInlineCache>) {
             propertyCache.bytecodeIndex = codeOrigin.bytecodeIndex();
             UNUSED_PARAM(callSiteIndex);
+            UNUSED_PARAM(usedRegisters);
+            UNUSED_PARAM(codeBlock);
         } else {
             propertyCache.codeOrigin = codeOrigin;
             propertyCache.callSiteIndex = callSiteIndex;
+            propertyCache.setUsedRegisters(usedRegisters.toScalarRegisterSet());
         }
         if constexpr (std::is_same_v<std::decay_t<PropertyInlineCache>, JSC::PropertyInlineCache>) {
-            downcast<RepatchingPropertyInlineCache>(propertyCache).m_usedRegisters = usedRegisters.toScalarRegisterSet();
             if (codeOrigin.inlineCallFrame())
                 propertyCache.m_globalObject = baselineCodeBlockForInlineCallFrame(codeOrigin.inlineCallFrame())->globalObject();
             else
                 propertyCache.m_globalObject = codeBlock->globalObject();
-        } else {
-            UNUSED_PARAM(codeBlock);
-            UNUSED_PARAM(usedRegisters);
         }
     }
 

@@ -39,8 +39,8 @@ struct NodeOrigin {
     NodeOrigin() { }
     
     NodeOrigin(CodeOrigin semantic, CodeOrigin forExit, bool exitOK)
-        : semantic(WTF::move(semantic))
-        , forExit(WTF::move(forExit))
+        : semantic(semantic)
+        , forExit(forExit)
         , exitOK(exitOK)
     {
     }
@@ -56,8 +56,9 @@ struct NodeOrigin {
         if (!isSet())
             return NodeOrigin();
         
-        NodeOrigin result(semantic.isSet() ? WTF::move(semantic) : this->semantic, forExit, exitOK);
-        result.wasHoisted = wasHoisted;
+        NodeOrigin result = *this;
+        if (semantic.isSet())
+            result.semantic = semantic;
         return result;
     }
 
@@ -66,8 +67,10 @@ struct NodeOrigin {
         if (!isSet())
             return NodeOrigin();
         
-        NodeOrigin result(semantic, forExit.isSet() ? WTF::move(forExit) : this->forExit, exitOK);
-        result.wasHoisted = wasHoisted;
+        NodeOrigin result = *this;
+        if (forExit.isSet())
+            result.forExit = forExit;
+        result.exitOK = exitOK;
         return result;
     }
 

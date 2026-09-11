@@ -45,7 +45,7 @@ bool eliminateDeadCode(Code& code)
     IndexSet<StackSlot*> liveStackSlots;
     bool changed { false };
     
-    auto isArgLive = [&](const Arg& arg) -> bool {
+    auto isArgLive = [&] (const Arg& arg) -> bool {
         switch (arg.kind()) {
         case Arg::Tmp:
             if (arg.isReg())
@@ -60,7 +60,7 @@ bool eliminateDeadCode(Code& code)
         }
     };
 
-    auto isInstLiveByDefs = [&](Inst& inst) -> bool {
+    auto isInstLiveByDefs = [&] (Inst& inst) -> bool {
         // This instruction should be presumed dead, if its Args are all dead.
         bool storesToLive = false;
         inst.forEachArg(
@@ -74,11 +74,11 @@ bool eliminateDeadCode(Code& code)
         return storesToLive;
     };
 
-    auto isInstLive = [&](Inst& inst) -> bool {
+    auto isInstLive = [&] (Inst& inst) -> bool {
         return inst.hasNonArgEffects() || isInstLiveByDefs(inst);
     };
 
-    auto markArgsLive = [&](Inst& inst) {
+    auto markArgsLive = [&] (Inst& inst) {
         for (Arg& arg : inst.args()) {
             if (arg.isStack() && !arg.stackSlot()->isLocked())
                 changed |= liveStackSlots.add(arg.stackSlot());
@@ -90,53 +90,47 @@ bool eliminateDeadCode(Code& code)
         }
     };
 
-    Vector<Inst*> backingStore;
+    Vector<Inst*> possiblyDead;
 
-    for (unsigned blockIndex = code.size(); blockIndex--;) {
-        BasicBlock* block = code[blockIndex];
-        if (!block)
-            continue;
-        for (unsigned instIndex = block->size(); instIndex--;) {
-            Inst& inst = block->at(instIndex);
+    for (BasicBlock* block : code) {
+        for (Inst& inst : *block) {
             if (!isInstLive(inst))
-                backingStore.append(&inst);
+                possiblyDead.append(&inst);
             else
                 markArgsLive(inst);
         }
     }
 
-    auto deadCandidatesInBackwardOrder = backingStore.mutableSpan();
-
-    // Inst in deadCandidatesInBackwardOrder already have hasNonArgEffects() == false, invariant
+    // Inst in possiblyDead already have hasNonArgEffects() == false, invariant
     // under live-set growth, so the fixpoint skips that re-check.
-    auto handleInst = [&](Inst& inst) -> bool {
+    auto handleInst = [&] (Inst& inst) -> bool {
         if (!isInstLiveByDefs(inst))
             return false;
         markArgsLive(inst);
         return true;
     };
 
-    auto runBackward = [&] -> bool {
+    auto runForward = [&] () -> bool {
         changed = false;
-        auto [begin, end] = std::ranges::remove_if(deadCandidatesInBackwardOrder,
+        possiblyDead.removeAllMatching(
             [&] (Inst* inst) -> bool {
                 bool result = handleInst(*inst);
                 changed |= result;
                 return result;
             });
-        deadCandidatesInBackwardOrder = deadCandidatesInBackwardOrder.first(begin - deadCandidatesInBackwardOrder.begin());
         return changed;
     };
 
-    auto runForward = [&] -> bool {
+    auto runBackward = [&] () -> bool {
         changed = false;
-        auto [begin, end] = std::ranges::remove_if(deadCandidatesInBackwardOrder | std::views::reverse,
-            [&] (Inst* inst) -> bool {
-                bool result = handleInst(*inst);
-                changed |= result;
-                return result;
-            });
-        deadCandidatesInBackwardOrder = deadCandidatesInBackwardOrder.last(deadCandidatesInBackwardOrder.end() - begin.base());
+        for (unsigned i = possiblyDead.size(); i--;) {
+            bool result = handleInst(*possiblyDead[i]);
+            if (result) {
+                possiblyDead[i] = possiblyDead.last();
+                possiblyDead.removeLast();
+                changed = true;
+            }
+        }
         return changed;
     };
 
@@ -152,12 +146,12 @@ bool eliminateDeadCode(Code& code)
             break;
     }
 
-    // After the fixpoint, deadCandidatesInBackwardOrder holds exactly the dead Insts. Null them
+    // After the fixpoint, possiblyDead holds exactly the dead Insts. Null them
     // out and sweep with the cheap !inst predicate.
-    if (deadCandidatesInBackwardOrder.empty())
+    if (possiblyDead.isEmpty())
         return false;
 
-    for (Inst* inst : deadCandidatesInBackwardOrder)
+    for (Inst* inst : possiblyDead)
         *inst = Inst();
 
     for (BasicBlock* block : code) {

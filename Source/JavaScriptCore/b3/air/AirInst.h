@@ -194,15 +194,13 @@ struct Inst {
     template<typename Thing, typename Functor>
     static void forEachUse(Inst* prevInst, Inst* nextInst, const Functor&);
 
-    struct PaddingSummary {
-        bool hasEarlyDef { false };
-        bool hasLateUseOrDef { false };
-    };
-    PaddingSummary paddingSummary();
-
+    // Some summaries about all arguments. These are useful for needsPadding().
     bool hasEarlyDef();
     bool hasLateUseOrDef();
-
+    
+    // Check if there needs to be a padding Nop between these two instructions.
+    static bool needsPadding(Inst* prevInst, Inst* nextInst);
+    
     // Use this to report which registers are live. This should be done just before codegen. Note
     // that for efficiency, reportUsedRegisters() only works for the Patch opcode.
     void reportUsedRegisters(const RegisterSet&);
@@ -320,8 +318,8 @@ private:
     } m_storage;
 };
 
-#if !OS(WINDOWS)
-static_assert(sizeof(Inst) == 64, "Air::Inst is expected to stay 64 bytes.");
+#if USE(JSVALUE64) && !OS(WINDOWS)
+static_assert(sizeof(Inst) == 64, "Air::Inst is expected to stay 64 bytes on JSVALUE64.");
 #endif
 static_assert(std::is_trivially_destructible_v<Arg>);
 

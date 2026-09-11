@@ -34,17 +34,17 @@ namespace JSC {
 
 WTF_MAKE_STRUCT_TZONE_ALLOCATED_IMPL(CompressedLazyValueProfileHolder::LazyValueProfileHolder);
 
-void CompressedLazyValueProfileHolder::computeUpdatedPredictions(CodeBlock* codeBlock)
+void CompressedLazyValueProfileHolder::computeUpdatedPredictions(const ConcurrentJSLocker& locker, CodeBlock* codeBlock)
 {
     if (!m_data)
         return;
 
     for (auto& profile : m_data->operandValueProfiles)
-        profile.computeUpdatedPrediction();
+        profile.computeUpdatedPrediction(locker);
 
     for (auto& pair : m_data->speculationFailureValueProfileBuckets) {
         ValueProfile& profile = codeBlock->valueProfileForBytecodeIndex(pair.first);
-        profile.computeUpdatedPredictionForExtraValue(pair.second);
+        profile.computeUpdatedPredictionForExtraValue(locker, pair.second);
     }
 }
 
@@ -125,13 +125,13 @@ LazyOperandValueProfile* LazyOperandValueProfileParser::getIfPresent(const LazyO
     return iter->value;
 }
 
-SpeculatedType LazyOperandValueProfileParser::prediction(const LazyOperandValueProfileKey& key) const
+SpeculatedType LazyOperandValueProfileParser::prediction(const ConcurrentJSLocker& locker, const LazyOperandValueProfileKey& key) const
 {
     LazyOperandValueProfile* profile = getIfPresent(key);
     if (!profile)
         return SpecNone;
 
-    return profile->computeUpdatedPrediction();
+    return profile->computeUpdatedPrediction(locker);
 }
 
 } // namespace JSC

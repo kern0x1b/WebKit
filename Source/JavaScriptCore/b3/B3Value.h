@@ -434,6 +434,7 @@ protected:
         case SExt8:
         case SExt16:
         case Trunc:
+        case TruncHigh:
         case SExt8To64:
         case SExt16To64:
         case SExt32:
@@ -570,6 +571,7 @@ protected:
         case VectorTransposeEven:
         case VectorTransposeOdd:
         case VectorExtractPair:
+        case Stitch:
         case VectorRelaxedMin:
         case VectorRelaxedMax:
         case VectorRelaxedQ15Mulr:
@@ -715,6 +717,7 @@ private:
         case SExt8:
         case SExt16:
         case Trunc:
+        case TruncHigh:
         case SExt8To64:
         case SExt16To64:
         case SExt32:
@@ -831,6 +834,7 @@ private:
         case VectorRelaxedMin:
         case VectorRelaxedMax:
         case VectorRelaxedDotI8x16I7x16:
+        case Stitch:
             if (numArgs != 2) [[unlikely]]
                 badKind(kind, numArgs);
             return Two;

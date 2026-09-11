@@ -203,6 +203,7 @@ GetByStatus GetByStatus::computeFor(CodeBlock* profiledBlock, ICStatusMap& map, 
 
 #if ENABLE(DFG_JIT)
     result = computeForPropertyInlineCacheWithoutExitSiteFeedback(locker, profiledBlock, map.get(CodeOrigin(codeOrigin.bytecodeIndex())).propertyCache, callExitSiteData, codeOrigin);
+    
     if (didExit)
         return result.slowVersion();
 #else
@@ -626,14 +627,6 @@ GetByStatus GetByStatus::computeFor(JSGlobalObject* globalObject, const Structur
     
     result.shrinkToFit();
     return result;
-}
-
-GetByStatus GetByStatus::computeFor(CodeBlock* profiledBlock, BytecodeIndex bytecodeIndex, JSGlobalObject* globalObject, const StructureSet& set, CacheableIdentifier identifier, GetByStatus::LookupMode mode)
-{
-    if (hasBadCacheExitSite(profiledBlock, bytecodeIndex))
-        return GetByStatus(LikelyTakesSlowPath);
-
-    return computeFor(globalObject, set, identifier, mode);
 }
 #endif // ENABLE(JIT)
 

@@ -207,7 +207,7 @@ static inline void prepareForTailCall(CCallHelpers& jit, const B3::StackmapGener
     // The return PC was saved on the stack in the tail call patchpoint.
 #if CPU(X86_64)
     newStackOffset -= Checked<int32_t>(sizeof(Register));
-#elif CPU(ARM64) || CPU(RISCV64)
+#elif CPU(ARM) || CPU(ARM64) || CPU(RISCV64)
     jit.loadPtr(CCallHelpers::Address(MacroAssembler::stackPointerRegister, newStackOffset - Checked<int32_t>(sizeof(Register))), MacroAssembler::linkRegister);
 #if CPU(ARM64E)
     GPRReg callerSP = jit.scratchRegister();
@@ -267,27 +267,21 @@ inline void emitRestoreInstanceFrameIfNeeded(CCallHelpers& jit, GPRReg currentIn
         // these slots via positive-FP-offset ValueReps, so they must shift too.
         jit.move(MacroAssembler::stackPointerRegister, scratch1);
 
-        jit.jitAssert([&] {
+        jit.jitAssert(scopedLambda<MacroAssembler::Jump()>([&] {
             jit.addPtr(CCallHelpers::TrustedImm32(topSourceOffsetFromFP), GPRInfo::callFrameRegister, scratch2);
             return jit.branchPtr(CCallHelpers::AboveOrEqual, scratch2, MacroAssembler::stackPointerRegister);
-        });
+        }));
 
         JIT_COMMENT(jit, "Copy loop start");
         auto loop = jit.label();
         {
             auto scratch3 = jit.scratchRegister();
             DisallowMacroScratchRegisterUsage disallowScratch(jit);
-#if CPU(ARM64)
-            jit.loadPair64(CCallHelpers::PostIndexAddress(scratch1, 16), scratch2, scratch3);
-            jit.storePair64(scratch2, scratch3, CCallHelpers::Address(scratch1, -static_cast<int32_t>(restoreFrameSize) - 16));
-#else
             jit.loadPair64(scratch1, scratch2, scratch3);
+            // FIXME: This could be a PostIndexAddress.
             jit.storePair64(scratch2, scratch3, CCallHelpers::Address(scratch1, -restoreFrameSize));
-#endif
         }
-#if !CPU(ARM64)
         jit.addPtr(CCallHelpers::TrustedImm32(16), scratch1);
-#endif
         // FIXME: It'd be nice to use the address scratch on ARM64 to hold the end point.
         jit.addPtr(CCallHelpers::TrustedImm32(topSourceOffsetFromFP), GPRInfo::callFrameRegister, scratch2);
         jit.branchPtr(CCallHelpers::Below, scratch1, scratch2).linkTo(loop, &jit);

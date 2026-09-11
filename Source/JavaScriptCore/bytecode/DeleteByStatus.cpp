@@ -55,7 +55,9 @@ DeleteByStatus DeleteByStatus::computeForBaseline(CodeBlock* baselineBlock, ICSt
     DeleteByStatus result;
 
 #if ENABLE(DFG_JIT)
-    result = computeForPropertyInlineCacheWithoutExitSiteFeedback(locker, baselineBlock, map.get(CodeOrigin(bytecodeIndex)).propertyCache);
+    result = computeForPropertyInlineCacheWithoutExitSiteFeedback(
+        locker, baselineBlock, map.get(CodeOrigin(bytecodeIndex)).propertyCache);
+
     if (didExit)
         return result.slowVersion();
 #else
@@ -172,7 +174,8 @@ DeleteByStatus DeleteByStatus::computeFor(
             DeleteByStatus result;
             {
                 ConcurrentJSLocker locker(context->optimizedCodeBlock->m_lock);
-                result = computeForPropertyInlineCacheWithoutExitSiteFeedback(locker, context->optimizedCodeBlock, status.propertyCache);
+                result = computeForPropertyInlineCacheWithoutExitSiteFeedback(
+                    locker, context->optimizedCodeBlock, status.propertyCache);
             }
             if (result.isSet())
                 return bless(result);

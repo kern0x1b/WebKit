@@ -210,6 +210,16 @@ public:
         return registerFormat() == expectedFormat || spillFormat() == expectedFormat;
     }
     
+    bool isJSFormat(DataFormat expectedFormat)
+    {
+        return JSC::isJSFormat(registerFormat(), expectedFormat) || JSC::isJSFormat(spillFormat(), expectedFormat);
+    }
+    
+    bool isJSInt32()
+    {
+        return isJSFormat(DataFormatJSInt32);
+    }
+    
     bool isInt52()
     {
         return isFormat(DataFormatInt52);
@@ -218,6 +228,21 @@ public:
     bool isStrictInt52()
     {
         return isFormat(DataFormatStrictInt52);
+    }
+    
+    bool isJSDouble()
+    {
+        return isJSFormat(DataFormatJSDouble);
+    }
+    
+    bool isJSCell()
+    {
+        return isJSFormat(DataFormatJSCell);
+    }
+    
+    bool isJSBoolean()
+    {
+        return isJSFormat(DataFormatJSBoolean);
     }
     
     bool isUnknownJS()
@@ -334,6 +359,10 @@ public:
     void fillStrictInt52(VariableEventStreamBuilder& stream, GPRReg gpr)
     {
         fillGPR(stream, gpr, DataFormatStrictInt52);
+    }
+    void fillBoolean(VariableEventStreamBuilder& stream, GPRReg gpr)
+    {
+        fillGPR(stream, gpr, DataFormatBoolean);
     }
     void fillDouble(VariableEventStreamBuilder& stream, FPRReg fpr)
     {

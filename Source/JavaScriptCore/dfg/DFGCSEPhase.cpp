@@ -329,21 +329,15 @@ public:
         bool changed = false;
         
         m_graph.clearReplacements();
-
-        unsigned preciseAnalysisBlockLimit = Options::maxDFGNodesInBasicBlockForPreciseAnalysis();
-#if defined(WEBKIT_IOS6)
-        if (pipelineTuning().preciseLocalCSEBlockLimit < preciseAnalysisBlockLimit)
-            preciseAnalysisBlockLimit = pipelineTuning().preciseLocalCSEBlockLimit;
-#endif
-
+        
         for (BlockIndex blockIndex = m_graph.numBlocks(); blockIndex--;) {
             BasicBlock* block = m_graph.block(blockIndex);
             if (!block)
                 continue;
-
+            
             if (block->size() <= SmallMaps::capacity)
                 changed |= m_smallBlock.run(block);
-            else if (block->size() <= preciseAnalysisBlockLimit)
+            else if (block->size() <= Options::maxDFGNodesInBasicBlockForPreciseAnalysis())
                 changed |= m_largeBlock.run(block);
             else
                 changed |= m_hugeBlock.run(block);

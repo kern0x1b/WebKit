@@ -37,7 +37,6 @@
 #include "JSModuleNamespaceObject.h"
 #include "ModuleNamespaceAccessCase.h"
 #include "PropertyInlineCache.h"
-#include "PropertyInlineCacheClearingWatchpoint.h"
 #include "SharedJITStubSet.h"
 
 namespace JSC {
@@ -70,8 +69,6 @@ InlineCacheHandler::InlineCacheHandler(bool makesJSCalls, Ref<InlineCacheHandler
     disableThreadingChecks();
 }
 WTF_ALLOW_UNSAFE_BUFFER_USAGE_END
-
-InlineCacheHandler::~InlineCacheHandler() = default;
 
 InlineCacheHandlerWithJSCall::InlineCacheHandlerWithJSCall(Ref<InlineCacheHandler>&& previous, Ref<PolymorphicAccessJITStubRoutine>&& stubRoutine, std::unique_ptr<PropertyInlineCacheClearingWatchpoint>&& watchpoint, CacheType cacheType)
     : InlineCacheHandler(true, WTF::move(previous), WTF::move(stubRoutine), WTF::move(watchpoint), cacheType)
@@ -253,7 +250,7 @@ bool InlineCacheHandler::reconcileWeakReferencesAtGCEnd(VM& vm)
         withJSCall->m_callLinkInfo.reconcileWeakReferencesAtGCEnd(vm);
 
     if (m_accessCase)
-        isValid &= m_accessCase->isStillLive(vm);
+        isValid &= m_accessCase->reconcileWeakReferencesAtGCEnd(vm);
 
     if (m_stubRoutine)
         isValid &= m_stubRoutine->reconcileWeakReferencesAtGCEnd(vm);

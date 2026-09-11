@@ -202,8 +202,10 @@ private:
         case UInt32ToNumber: {
             if (node->canSpeculateInt32(m_pass))
                 changed |= mergePrediction(SpecInt32Only);
-            else
+            else if (enableInt52())
                 changed |= mergePrediction(SpecInt52Any);
+            else
+                changed |= mergePrediction(SpecBytecodeNumber);
             break;
         }
 
@@ -617,14 +619,18 @@ private:
                 break;
             case Array::Uint32Array: {
                 if (isInt32SpeculationForArithmetic(node->getHeapPrediction()) && node->op() == GetByVal) {
-                    if (arrayMode.isOutOfBounds())
+                    if (node->op() == GetByVal && arrayMode.isOutOfBounds())
                         changed |= mergePrediction(SpecInt32Only | SpecOther);
                     else
                         changed |= mergePrediction(SpecInt32Only);
-                } else if (!(node->op() == GetByVal && arrayMode.isOutOfBounds()))
+                } else if (!(node->op() == GetByVal && arrayMode.isOutOfBounds()) && enableInt52())
                     changed |= mergePrediction(SpecInt52Any);
-                else
-                    changed |= mergePrediction(SpecInt32Only | SpecAnyIntAsDouble | SpecOther);
+                else {
+                    if (node->op() == GetByVal && arrayMode.isOutOfBounds())
+                        changed |= mergePrediction(SpecInt32Only | SpecAnyIntAsDouble | SpecOther);
+                    else
+                        changed |= mergePrediction(SpecInt32Only | SpecAnyIntAsDouble);
+                }
                 break;
             }
             case Array::Int8Array:
@@ -1000,7 +1006,7 @@ private:
         switch (m_currentNode->op()) {
         case JSConstant: {
             SpeculatedType type = speculationFromValue(m_currentNode->asJSValue());
-            if (type == SpecAnyIntAsDouble)
+            if (type == SpecAnyIntAsDouble && enableInt52()) 
                 type = int52AwareSpeculationFromValue(m_currentNode->asJSValue());
             setPrediction(type);
             break;
@@ -1095,8 +1101,7 @@ private:
         case ExtractValueFromWeakMapGet: 
         case DataViewGetInt:
         case DataViewGetFloat:
-        case DateGetInt32OrNaN:
-        case DateGetMilliseconds: {
+        case DateGetInt32OrNaN: {
             setPrediction(m_currentNode->getHeapPrediction());
             break;
         }
@@ -1331,7 +1336,6 @@ private:
             break;
         }
         case MapGet:
-        case DateGetStorage:
         case GetButterfly:
         case GetIndexedPropertyStorage:
         case AllocatePropertyStorage:
@@ -1542,6 +1546,7 @@ private:
         }
 
         case FiatInt52: {
+            RELEASE_ASSERT(enableInt52());
             setPrediction(SpecInt52Any);
             break;
         }

@@ -75,8 +75,8 @@ void JIT::emit_op_new_object(const JSInstruction* currentInstruction)
     RegisterID scratchReg = regT2;
     RegisterID structureReg = regT3;
 
-    static_assert(ObjectAllocationProfile::offsetOfStructure() == ObjectAllocationProfile::offsetOfAllocator() + sizeof(void*));
-    loadPairPtrFromMetadata(bytecode, OpNewObject::Metadata::offsetOfObjectAllocationProfile() + ObjectAllocationProfile::offsetOfAllocator(), allocatorReg, structureReg);
+    loadPtrFromMetadata(bytecode, OpNewObject::Metadata::offsetOfObjectAllocationProfile() + ObjectAllocationProfile::offsetOfAllocator(), allocatorReg);
+    loadPtrFromMetadata(bytecode, OpNewObject::Metadata::offsetOfObjectAllocationProfile() + ObjectAllocationProfile::offsetOfStructure(), structureReg);
 
     JumpList slowCases;
     auto butterfly = TrustedImmPtr(nullptr);
@@ -99,7 +99,8 @@ void JIT::emitSlow_op_new_object(const JSInstruction* currentInstruction, Vector
     auto bytecode = currentInstruction->as<OpNewObject>();
     VirtualRegister dst = bytecode.m_dst;
     callOperationNoExceptionCheck(operationNewObject, TrustedImmPtr(&vm()), structureReg);
-    emitPutVirtualRegister(dst, returnValueGPR);
+    boxCell(returnValueGPR, returnValueJSR);
+    emitPutVirtualRegister(dst, returnValueJSR);
 }
 
 void JIT::emit_op_is_empty(const JSInstruction* currentInstruction)
@@ -415,18 +416,18 @@ MacroAssemblerCodeRef<JITThunkPtrTag> JIT::valueIsFalseyGenerator(VM& vm)
     // CallFrame::codeBlock().
     CCallHelpers jit;
 
-    using BaselineJITRegisters::JFalse::valueGPR; // Incoming
+    using BaselineJITRegisters::JFalse::valueJSR; // Incoming
     constexpr GPRReg scratch1GPR = regT1;
-    constexpr GPRReg scratch2GPR = regT3;
+    constexpr GPRReg scratch2GPR = regT5;
     constexpr GPRReg globalObjectGPR = regT4;
-    static_assert(noOverlap(valueGPR, scratch1GPR, scratch2GPR, globalObjectGPR));
+    static_assert(noOverlap(valueJSR, scratch1GPR, scratch2GPR, globalObjectGPR));
 
     constexpr bool shouldCheckMasqueradesAsUndefined = true;
 
     jit.tagReturnAddress();
 
     jit.move(TrustedImm32(1), regT0);
-    auto isFalsey = jit.branchIfFalsey(vm, valueGPR, scratch1GPR, scratch2GPR, fpRegT0, fpRegT1, shouldCheckMasqueradesAsUndefined, CCallHelpers::LazyBaselineGlobalObject);
+    auto isFalsey = jit.branchIfFalsey(vm, valueJSR, scratch1GPR, scratch2GPR, fpRegT0, fpRegT1, shouldCheckMasqueradesAsUndefined, CCallHelpers::LazyBaselineGlobalObject);
     jit.move(TrustedImm32(0), regT0);
     isFalsey.link(&jit);
     jit.ret();
@@ -619,18 +620,18 @@ MacroAssemblerCodeRef<JITThunkPtrTag> JIT::valueIsTruthyGenerator(VM& vm)
     // CallFrame::codeBlock().
     CCallHelpers jit;
 
-    using BaselineJITRegisters::JTrue::valueGPR; // Incoming
+    using BaselineJITRegisters::JTrue::valueJSR; // Incoming
     constexpr GPRReg scratch1GPR = regT1;
-    constexpr GPRReg scratch2GPR = regT3;
+    constexpr GPRReg scratch2GPR = regT5;
     constexpr GPRReg globalObjectGPR = regT4;
-    static_assert(noOverlap(valueGPR, scratch1GPR, scratch2GPR, globalObjectGPR));
+    static_assert(noOverlap(valueJSR, scratch1GPR, scratch2GPR, globalObjectGPR));
 
     constexpr bool shouldCheckMasqueradesAsUndefined = true;
 
     jit.tagReturnAddress();
 
     jit.move(TrustedImm32(1), regT0);
-    auto isTruthy = jit.branchIfTruthy(vm, valueGPR, scratch1GPR, scratch2GPR, fpRegT0, fpRegT1, shouldCheckMasqueradesAsUndefined, CCallHelpers::LazyBaselineGlobalObject);
+    auto isTruthy = jit.branchIfTruthy(vm, valueJSR, scratch1GPR, scratch2GPR, fpRegT0, fpRegT1, shouldCheckMasqueradesAsUndefined, CCallHelpers::LazyBaselineGlobalObject);
     jit.move(TrustedImm32(0), regT0);
     isTruthy.link(&jit);
     jit.ret();
@@ -1376,40 +1377,11 @@ void JIT::emit_op_switch_string(const JSInstruction* currentInstruction)
     linkedTable.ensureCTITable(unlinkedTable);
 
     using BaselineJITRegisters::SwitchString::globalObjectGPR;
-    using BaselineJITRegisters::SwitchString::scrutineeGPR;
-    using BaselineJITRegisters::SwitchString::scratch1GPR;
+    using BaselineJITRegisters::SwitchString::scrutineeJSR;
 
-    emitGetVirtualRegister(scrutinee, scrutineeGPR);
-
-    // Fast path: if the scrutinee is an atom, dispatch inline using pointer comparison.
-    // Switch keys are always atoms as asserted in BytecodeGenerator::endSwitch, and also here.
-    unsigned caseCount = unlinkedTable.m_offsetTable.size();
-    if (caseCount && caseCount <= Options::maximumInlineStringSwitchCaseCount()) {
-        Vector<int64_t, 16> caseKeys;
-        Vector<int32_t, 16> caseTargets;
-        caseKeys.reserveInitialCapacity(caseCount);
-        caseTargets.reserveInitialCapacity(caseCount);
-        for (auto& entry : unlinkedTable.m_offsetTable) {
-            ASSERT(entry.key->isAtom());
-            caseKeys.append(static_cast<int64_t>(std::bit_cast<intptr_t>(entry.key.get())));
-            caseTargets.append(entry.value.m_branchOffset);
-        }
-
-        JumpList slowCases;
-        slowCases.append(branchIfNotCell(scrutineeGPR));
-        slowCases.append(branchIfNotString(scrutineeGPR));
-        slowCases.append(loadCacheableIdentifierImpl(scrutineeGPR, scratch1GPR, /* propertyIsString */ true, /* propertyIsSymbol */ false));
-
-        BinarySwitch binarySwitch(scratch1GPR, caseKeys.span(), BinarySwitch::IntPtr);
-        while (binarySwitch.advance(*this))
-            addJump(jump(), caseTargets[binarySwitch.caseIndex()]);
-        addJump(binarySwitch.fallThrough(), defaultOffset);
-
-        slowCases.link(this);
-    }
-
+    emitGetVirtualRegister(scrutinee, scrutineeJSR);
     loadGlobalObject(globalObjectGPR);
-    callOperation(operationSwitchStringWithUnknownKeyType, globalObjectGPR, scrutineeGPR, tableIndex);
+    callOperation(operationSwitchStringWithUnknownKeyType, globalObjectGPR, scrutineeJSR, tableIndex);
     farJump(returnValueGPR, JSSwitchPtrTag);
 }
 
@@ -1503,7 +1475,7 @@ void JIT::emit_op_enter(const JSInstruction*)
 
     using BaselineJITRegisters::Enter::scratch1GPR;
     using BaselineJITRegisters::Enter::scratch2GPR;
-    using BaselineJITRegisters::Enter::scratch3GPR;
+    using BaselineJITRegisters::Enter::scratch3JSR;
 
     if (m_profiledCodeBlock->couldBeTainted())
         store8(TrustedImm32(1), vm().addressOfMightBeExecutingTaintedCode());
@@ -1664,7 +1636,7 @@ void JIT::emit_op_create_this(const JSInstruction* currentInstruction)
     RegisterID cachedFunctionReg = regT4;
     RegisterID scratchReg = regT3;
 
-    emitGetVirtualRegister(callee, calleeReg);
+    emitGetVirtualRegisterPayload(callee, calleeReg);
     addSlowCase(branchIfNotFunction(calleeReg));
     loadPtr(Address(calleeReg, JSFunction::offsetOfExecutableOrRareData()), rareDataReg);
     addSlowCase(branchTestPtr(Zero, rareDataReg, TrustedImm32(JSFunction::rareDataTag)));
@@ -1896,7 +1868,7 @@ void JIT::emitNewFuncCommon(const JSInstruction* currentInstruction)
     auto* unlinkedExecutable = m_unlinkedCodeBlock->functionDecl(bytecode.m_functionDecl);
 
     loadGlobalObject(argumentGPR0);
-    emitGetVirtualRegister(bytecode.m_scope, argumentGPR1);
+    emitGetVirtualRegisterPayload(bytecode.m_scope, argumentGPR1);
     auto constant = addToConstantPool(JITConstantPool::Type::FunctionDecl, std::bit_cast<void*>(static_cast<uintptr_t>(bytecode.m_functionDecl)));
     loadConstant(constant, argumentGPR2);
 
@@ -2024,8 +1996,8 @@ void JIT::emit_op_create_lexical_environment(const JSInstruction* currentInstruc
     JSValue value = m_unlinkedCodeBlock->getConstant(initialValue);
 
     loadGlobalObject(argumentGPR0);
-    emitGetVirtualRegister(scope, argumentGPR1);
-    emitGetVirtualRegister(symbolTable, argumentGPR2);
+    emitGetVirtualRegisterPayload(scope, argumentGPR1);
+    emitGetVirtualRegisterPayload(symbolTable, argumentGPR2);
     callOperationNoExceptionCheck(value == jsUndefined() ? operationCreateLexicalEnvironmentUndefined : operationCreateLexicalEnvironmentTDZ, dst, argumentGPR0, argumentGPR1, argumentGPR2);
 }
 
@@ -2134,7 +2106,7 @@ void JIT::emit_op_log_shadow_chicken_prologue(const JSInstruction* currentInstru
     GPRReg scratch1Reg = nonArgGPR0; // This must be a non-argument register.
     GPRReg scratch2Reg = regT2;
     ensureShadowChickenPacket(vm(), shadowPacketReg, scratch1Reg, scratch2Reg);
-    emitGetVirtualRegister(bytecode.m_scope, regT3);
+    emitGetVirtualRegisterPayload(bytecode.m_scope, regT3);
     logShadowChickenProloguePacket(shadowPacketReg, scratch1Reg, regT3);
 }
 

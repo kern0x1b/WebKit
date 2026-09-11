@@ -598,8 +598,7 @@ void LinkBuffer::performFinalization()
     
     s_profileCummulativeLinkedSizes[static_cast<unsigned>(m_profile)] += m_size;
     s_profileCummulativeLinkedCounts[static_cast<unsigned>(m_profile)]++;
-    if (m_cacheFlushOnFinalize == CacheFlushOnFinalize::Yes)
-        MacroAssembler::cacheFlush(code(), m_size);
+    MacroAssembler::cacheFlush(code(), m_size);
 }
 
 #if DUMP_LINK_STATISTICS

@@ -119,8 +119,7 @@ namespace SwitchString {
 
     static constexpr GPRReg globalObjectGPR { preferredArgumentGPR<SlowOperation, 0>() };
     static constexpr JSValueRegs scrutineeJSR { preferredArgumentJSR<SlowOperation, 1>() };
-    static constexpr GPRReg scratch1GPR { GPRInfo::regT5 };
-    static_assert(noOverlap(globalObjectGPR, scrutineeJSR, scratch1GPR), "Required for call to slow operation, and the scrutinee must survive the inline fast path");
+    static_assert(noOverlap(globalObjectGPR, scrutineeJSR), "Required for call to slow operation");
 }
 
 namespace ResolveScope {

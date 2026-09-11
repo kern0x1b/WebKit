@@ -52,7 +52,6 @@ namespace DFG {
 class JITCode;
 class JITCompiler;
 
-
 struct UnlinkedCallLinkInfo : JSC::UnlinkedCallLinkInfo {
     void setUpCall(CallLinkInfo::CallType callType)
     {

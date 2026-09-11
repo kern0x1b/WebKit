@@ -168,7 +168,7 @@ private:
     {
         ASSERT(isValueType(valueType));
         unsigned valueSize = bytesForWidth(valueType.width());
-        switch (valueType.kind()) {
+        switch (valueType.kind) {
         case TypeKind::I32:
         case TypeKind::I64:
         case TypeKind::Funcref:
@@ -176,7 +176,7 @@ private:
         case TypeKind::Externref:
         case TypeKind::Ref:
         case TypeKind::RefNull:
-            return marshallLocationImpl(role, gprArgs, gpArgumentCount, stackOffset, valueSize);
+            return marshallLocationImpl(role, jsrArgs, gpArgumentCount, stackOffset, valueSize);
         case TypeKind::F32:
         case TypeKind::F64:
         case TypeKind::V128:
@@ -262,7 +262,7 @@ private:
         case TypeKind::Externref:
         case TypeKind::Ref:
         case TypeKind::RefNull:
-            return marshallLocationImpl(role, gprArgs, gpArgumentCount, stackOffset);
+            return marshallLocationImpl(role, jsrArgs, gpArgumentCount, stackOffset);
         case TypeKind::F32:
         case TypeKind::F64:
             return marshallLocationImpl(role, fprArgs, fpArgumentCount, stackOffset);

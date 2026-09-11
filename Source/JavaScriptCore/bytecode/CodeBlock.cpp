@@ -1242,34 +1242,24 @@ DEFINE_VISIT_CHILDREN(CodeBlock);
 template<typename Visitor>
 void CodeBlock::visitChildren(Visitor& visitor)
 {
-    {
-        ConcurrentJSLocker locker(m_lock);
+    ConcurrentJSLocker locker(m_lock);
 
-        // In CodeBlock::shouldVisitStrongly() we may have decided to skip visiting this
-        // codeBlock. However, if we end up visiting it anyway due to other references,
-        // we can clear this flag and allow the verifier GC to visit it as well.
-        m_visitChildrenSkippedDueToOldAge = false;
-        if (CodeBlock* otherBlock = specialOSREntryBlockOrNull())
-            visitor.appendUnbarriered(otherBlock);
+    // In CodeBlock::shouldVisitStrongly() we may have decided to skip visiting this
+    // codeBlock. However, if we end up visiting it anyway due to other references,
+    // we can clear this flag and allow the verifier GC to visit it as well.
+    m_visitChildrenSkippedDueToOldAge = false;
+    if (CodeBlock* otherBlock = specialOSREntryBlockOrNull())
+        visitor.appendUnbarriered(otherBlock);
 
-        size_t extraMemory = 0;
-        if (m_metadata)
-            extraMemory += m_metadata->sizeInBytesForGC();
-        if (m_jitCode && !m_jitCode->isShared())
-            extraMemory += m_jitCode->size();
-        visitor.reportExtraMemoryVisited(extraMemory);
+    size_t extraMemory = 0;
+    if (m_metadata)
+        extraMemory += m_metadata->sizeInBytesForGC();
+    if (m_jitCode && !m_jitCode->isShared())
+        extraMemory += m_jitCode->size();
+    visitor.reportExtraMemoryVisited(extraMemory);
 
-        stronglyVisitStrongReferences(locker, visitor);
-        stronglyVisitWeakReferences(locker, visitor);
-    }
-
-    // Update profiles from concurrent markers to reduce the cost of update at the GC end phase as its execution is serialized.
-    if constexpr (std::is_same_v<Visitor, SlotVisitor>) {
-        if (visitor.isFirstVisit() && JITCode::isBaselineCode(jitType())) {
-            updateAllNonLazyValueProfilePredictions();
-            updateAllLazyValueProfilePredictions();
-        }
-    }
+    stronglyVisitStrongReferences(locker, visitor);
+    stronglyVisitWeakReferences(locker, visitor);
     
     Heap::CodeBlockSpaceAndSet::setFor(*subspace()).add(this);
 }
@@ -1823,7 +1813,7 @@ void CodeBlock::reconcileWeakReferencesAtGCEnd(VM& vm, CollectionScope)
 {
     UNUSED_PARAM(vm);
 
-    // Called for all live CodeBlocks.
+    // CodeBlock::finalizeUnconditionally is called for all live CodeBlocks.
     // We do not need to call updateAllPredictions for DFG / FTL since the same thing happens in LLInt / Baseline CodeBlock for them.
     if (JITCode::isBaselineCode(jitType()))
         updateAllPredictions();
@@ -2969,7 +2959,7 @@ void CodeBlock::didFailFTLCompilation()
 
 #endif
 
-ArrayProfile* CodeBlock::getArrayProfile(BytecodeIndex bytecodeIndex)
+ArrayProfile* CodeBlock::getArrayProfile(const ConcurrentJSLocker&, BytecodeIndex bytecodeIndex)
 {
     auto instruction = instructions().at(bytecodeIndex);
 
@@ -3073,7 +3063,7 @@ bool CodeBlock::hasIdentifier(UniquedStringImpl* uid)
 }
 #endif
 
-void CodeBlock::updateAllNonLazyValueProfilePredictionsAndCountLiveness(unsigned& numberOfLiveNonArgumentValueProfiles, unsigned& numberOfSamplesInProfiles)
+void CodeBlock::updateAllNonLazyValueProfilePredictionsAndCountLiveness(const ConcurrentJSLocker& locker, unsigned& numberOfLiveNonArgumentValueProfiles, unsigned& numberOfSamplesInProfiles)
 {
     numberOfLiveNonArgumentValueProfiles = 0;
     numberOfSamplesInProfiles = 0;
@@ -3085,7 +3075,7 @@ void CodeBlock::updateAllNonLazyValueProfilePredictionsAndCountLiveness(unsigned
     forEachValueProfile([&](auto& profile, bool isArgument) {
         using Profile = std::remove_reference_t<decltype(profile)>;
         static_assert(Profile::numberOfBuckets == 1);
-        bool wasLive = profile.computeUpdatedPrediction() != SpecNone;
+        bool wasLive = profile.computeUpdatedPrediction(locker) != SpecNone;
         if (wasLive) {
             ++numberOfSamplesInProfiles;
             if (!isArgument)
@@ -3161,13 +3151,13 @@ void CodeBlock::updateAllArrayAllocationProfilePredictions()
     });
 }
 
-// Folds each profile's sampled value into a pointer-free SpeculatedType and clears the sample.
-// The samples are untraced JSValues and StructureIDs, so this only runs while they are still
-// readable, which means any time from marking up to the sweep that would free them.
 void CodeBlock::updateAllPredictions()
 {
-    updateAllNonLazyValueProfilePredictions();
-    updateAllLazyValueProfilePredictions();
+    {
+        ConcurrentJSLocker locker(valueProfileLock());
+        updateAllNonLazyValueProfilePredictions(locker);
+        updateAllLazyValueProfilePredictions(locker);
+    }
     updateAllArrayAllocationProfilePredictions();
     updateAllArrayProfilePredictions();
 }
@@ -3181,8 +3171,11 @@ bool CodeBlock::shouldOptimizeNowFromBaseline()
     
     unsigned numberOfLiveNonArgumentValueProfiles;
     unsigned numberOfSamplesInProfiles;
-    updateAllNonLazyValueProfilePredictionsAndCountLiveness(numberOfLiveNonArgumentValueProfiles, numberOfSamplesInProfiles);
-    updateAllLazyValueProfilePredictions();
+    {
+        ConcurrentJSLocker locker(valueProfileLock());
+        updateAllNonLazyValueProfilePredictionsAndCountLiveness(locker, numberOfLiveNonArgumentValueProfiles, numberOfSamplesInProfiles);
+        updateAllLazyValueProfilePredictions(locker);
+    }
     updateAllArrayAllocationProfilePredictions();
     updateAllArrayProfilePredictions();
 
@@ -3446,12 +3439,12 @@ ValueProfile* CodeBlock::tryGetValueProfileForBytecodeIndex(BytecodeIndex byteco
     }
 }
 
-SpeculatedType CodeBlock::valueProfilePredictionForBytecodeIndex(BytecodeIndex bytecodeIndex, JSValue* specFailValue)
+SpeculatedType CodeBlock::valueProfilePredictionForBytecodeIndex(const ConcurrentJSLocker& locker, BytecodeIndex bytecodeIndex, JSValue* specFailValue)
 {
     if (ValueProfile* valueProfile = tryGetValueProfileForBytecodeIndex(bytecodeIndex)) {
         if (specFailValue)
-            valueProfile->computeUpdatedPredictionForExtraValue(*specFailValue);
-        return valueProfile->computeUpdatedPrediction();
+            valueProfile->computeUpdatedPredictionForExtraValue(locker, *specFailValue);
+        return valueProfile->computeUpdatedPrediction(locker);
     }
     return SpecNone;
 }

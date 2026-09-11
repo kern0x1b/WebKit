@@ -58,10 +58,9 @@ bool simplifyCFG(Code& code)
     }
 
     bool changed = false;
-    bool validateAtEachPhase = shouldValidateIRAtEachPhase();
     for (BasicBlock* block : code) {
         // We rely on predecessors being conservatively correct. Verify this here.
-        if (validateAtEachPhase) [[unlikely]] {
+        if (shouldValidateIRAtEachPhase()) {
             for (BasicBlock* block : code) {
                 for (BasicBlock* successor : block->successorBlocks())
                     RELEASE_ASSERT(successor->containsPredecessor(block));

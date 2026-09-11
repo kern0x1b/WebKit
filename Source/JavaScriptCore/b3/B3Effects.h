@@ -137,19 +137,9 @@ public:
         return result;
     }
 
-    constexpr bool isWrite() const
-    {
-        return writesLocalState || writes || writesPinned || fence;
-    }
-
-    constexpr bool isTrapBarrier() const
-    {
-        return exitsSideways || isWrite();
-    }
-
     constexpr bool mustExecute() const
     {
-        return terminal || isTrapBarrier();
+        return terminal || exitsSideways || writesLocalState || writes || writesPinned || fence;
     }
 
     // Returns true if reordering instructions with these respective effects would change program
