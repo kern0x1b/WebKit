@@ -1101,6 +1101,12 @@ llintOpWithReturn(op_to_string, OpToString, macro (size, get, dispatch, return)
 end)
 
 
+llintOpWithProfile(op_get_prototype_of, OpGetPrototypeOf, macro (size, get, dispatch, return)
+    callSlowPath(_slow_path_get_prototype_of)
+    dispatch()
+end)
+
+
 llintOpWithProfile(op_to_object, OpToObject, macro (size, get, dispatch, return)
     get(m_operand, t0)
     loadConstantOrVariable(size, t0, t2, t3)

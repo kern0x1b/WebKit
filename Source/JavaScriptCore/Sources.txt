@@ -1310,3 +1310,10 @@ yarr/YarrTZoneImpls.cpp
 
 // Derived Sources
 yarr/YarrCanonicalizeUnicode.cpp
+assembler/MacroAssemblerARMv7.cpp @no-unify-when(bundle<=8)
+b3/air/AirAllocateRegistersByGraphColoring.cpp
+dfg/DFGSpeculativeJIT32_64.cpp @no-unify-when(bundle<=8)
+disassembler/RISCV64Disassembler.cpp
+jit/CallFrameShuffler32_64.cpp
+jit/GPRInfo.cpp
+jit/JITOpcodes32_64.cpp
