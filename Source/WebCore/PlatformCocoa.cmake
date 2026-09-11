@@ -597,7 +597,6 @@ list(APPEND WebCore_SOURCES
     platform/graphics/cocoa/FontPlatformDataCocoa.mm
     platform/graphics/cocoa/GraphicsContextCocoa.mm
     platform/graphics/cocoa/GraphicsContextGLCocoa.mm
-    platform/graphics/cocoa/IOSurfaceDrawingBuffer.cpp
     platform/graphics/cocoa/IOSurface.mm
     platform/graphics/cocoa/IOSurfacePoolCocoa.mm
     platform/graphics/cocoa/IntRectCocoa.mm

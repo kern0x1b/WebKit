@@ -167,7 +167,9 @@ WEBKIT_OPTION_END()
 # ---------------------------------------------------------------------------
 # Shared Cocoa configuration.
 # ---------------------------------------------------------------------------
-set(SWIFT_REQUIRED ON)
+if (NOT DEFINED SWIFT_REQUIRED)
+    set(SWIFT_REQUIRED ON)
+endif ()
 
 if (WEBKIT_SDK_IS_MACOS AND USE_APPLE_INTERNAL_SDK)
     set(WEBKIT_CODE_SIGN_IDENTITY "Safari Engineering")
@@ -568,3 +570,17 @@ endif ()
 
 set(MiniBrowser_DERIVED_SOURCES_DIR "${CMAKE_BINARY_DIR}/DerivedSources/MiniBrowser")
 
+if (NOT TARGET OpenGL::GLES)
+    # WebCore links OpenGL::GLES when WebGL is on, and the finder that defines
+    # that target looks for a pkg-config glesv2 and a GLES2/gl2.h - a Linux
+    # install. Here GLES is a framework, and its headers are under OpenGLES/ES2.
+    find_library(OPENGLES_FRAMEWORK OpenGLES)
+    if (OPENGLES_FRAMEWORK)
+        add_library(OpenGL::GLES INTERFACE IMPORTED)
+        set_target_properties(OpenGL::GLES PROPERTIES INTERFACE_LINK_LIBRARIES "${OPENGLES_FRAMEWORK}")
+    endif ()
+endif ()
+
+if (WEBKIT_SDK_IS_IOS_FAMILY)
+    include(OptionsIOS6)
+endif ()

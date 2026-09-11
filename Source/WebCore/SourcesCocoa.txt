@@ -479,7 +479,6 @@ platform/graphics/cocoa/HEVCUtilitiesCocoa.mm @nonARC
 // ios6: platform/graphics/cocoa/IOSurface.mm @nonARC
 // ios6: platform/graphics/cocoa/IOSurfacePoolCocoa.mm @nonARC
 // ios6: platform/graphics/cocoa/ISOBMFFPreParser.cpp
-platform/graphics/cocoa/IOSurfaceDrawingBuffer.cpp
 platform/graphics/cocoa/ISOBMFFTrackInfoParser.cpp
 platform/graphics/cocoa/IconCocoa.mm @nonARC
 platform/graphics/cocoa/IntRectCocoa.mm @nonARC
