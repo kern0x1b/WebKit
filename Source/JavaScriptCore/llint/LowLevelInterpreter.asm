@@ -1579,10 +1579,16 @@ end
 
 macro getVMFromCallFrame(vm, scratch)
 if WEBASSEMBLY
-        loadq Callee[cfr], vm
-        move vm, scratch
-        andq (constexpr JSValue::NativeCalleeMask), scratch
-        bqeq scratch, (constexpr JSValue::NativeCalleeTag), .isWasmCallee
+        if JSVALUE64
+            loadq Callee[cfr], vm
+            move vm, scratch
+            andq (constexpr JSValue::NativeCalleeMask), scratch
+            bqeq scratch, (constexpr JSValue::NativeCalleeTag), .isWasmCallee
+        else
+            loadi Callee + TagOffset[cfr], scratch
+            bieq scratch, (constexpr JSValue::NativeCalleeTag), .isWasmCallee
+            loadp Callee + PayloadOffset[cfr], vm
+        end
         convertJSCalleeToVM(vm)
         jmp .loaded
     .isWasmCallee:
@@ -2240,6 +2246,10 @@ else
     macro initPCRelative(kind, pcBase)
         if X86_64
         elsif ARM64 or ARM64E
+        elsif ARMv7
+        _%kind%_relativePCBase:
+            move pc, pcBase
+            subp 3, pcBase
         end
     end
 
@@ -2287,6 +2297,7 @@ macro entry(kind, initialize)
     global _%kind%_entry
     _%kind%_entry:
         functionPrologue()
+        pushCalleeSaves()
 
         initPCRelative(kind, t3)
 
@@ -2298,6 +2309,7 @@ macro entry(kind, initialize)
         crash()
     .notFrozen:
 
+        popCalleeSaves()
         functionEpilogue()
         ret
 end
@@ -2658,18 +2670,20 @@ commonCallOp(op_construct, OpConstruct, prepareForRegularCall, invokeForRegularC
 end, dispatchAfterRegularCall)
 
 commonCallOp(op_super_construct, OpSuperConstruct, prepareForRegularCall, invokeForRegularCall, prepareForSlowRegularCall, macro (getu, metadata)
-    getu(m_argv, t1)
-    lshifti 3, t1
-    negp t1
-    addp cfr, t1
-    loadp ThisArgumentOffset + LowWordOffset[t1], t1
-    loadp OpSuperConstruct::Metadata::m_cachedCallee[t5], t2
-    bqeq t1, t2, .done
-    btqz t2, .store
-.invalidate:
-    move SeenMultipleCalleeObjects, t1
-.store:
-    storep t1, OpSuperConstruct::Metadata::m_cachedCallee[t5]
+    if JSVALUE64
+        getu(m_argv, t1)
+        lshifti 3, t1
+        negp t1
+        addp cfr, t1
+        loadp ThisArgumentOffset + LowWordOffset[t1], t1
+        loadp OpSuperConstruct::Metadata::m_cachedCallee[t5], t2
+        bqeq t1, t2, .done
+        btqz t2, .store
+    .invalidate:
+        move SeenMultipleCalleeObjects, t1
+    .store:
+        storep t1, OpSuperConstruct::Metadata::m_cachedCallee[t5]
+    end
 .done:
 end, dispatchAfterRegularCall)
 
@@ -2850,7 +2864,11 @@ end
 # t0 is callee
 # t2 is CallLinkInfo*
 macro virtualThunkFor(offsetOfJITCodeWithArityCheck, offsetOfCodeBlock, internalFunctionTrampoline, slowCase)
-    btqnz t0, NotCellMask, slowCase
+    if JSVALUE64
+        btqnz t0, NotCellMask, slowCase
+    else
+        bineq t1, CellTag, slowCase
+    end
     bbneq JSCell::m_type[t0], JSFunctionType, .notJSFunction
     loadp JSFunction::m_executableOrRareData[t0], t5
     btpz t5, (constexpr JSFunction::rareDataTag), .isExecutable
@@ -2926,7 +2944,11 @@ end)
 # t0 is callee
 # t2 is CallLinkInfo*
 op(llint_polymorphic_closure_call_trampoline, macro ()
-    btqnz t0, NotCellMask, .slowCase
+    if JSVALUE64
+        btqnz t0, NotCellMask, .slowCase
+    else
+        bineq t1, CellTag, .slowCase
+    end
     bbneq JSCell::m_type[t0], JSFunctionType, .slowCase
     loadp JSFunction::m_executableOrRareData[t0], t6
     btpz t6, (constexpr JSFunction::rareDataTag), .isExecutable
