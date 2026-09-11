@@ -1630,15 +1630,18 @@ static WebFrameLoadType NODELETE toWebFrameLoadType(WebCore::FrameLoadType frame
 
 - (void)selectNSRange:(NSRange)range onElement:(DOMElement *)element
 {
-    // FIXME: This method does not do a useful operation: treating NSRange offsets as child node offsets does not make logical sense. Also, it's highly unlikely anyone calls it. We should delete it.
     if (!element)
         return;
     auto frame = core(self);
     if (!frame)
         return;
-    auto& coreElement = *core(element);
-    unsigned startOffset = range.location;
-    unsigned endOffset = NSMaxRange(range);
+    RefPtr<WebCore::Node> node = core(static_cast<DOMNode *>(element));
+    if (!is<WebCore::Element>(node))
+        return;
+    auto& coreElement = downcast<WebCore::Element>(*node);
+    unsigned childCount = coreElement.countChildNodes();
+    unsigned startOffset = std::min<unsigned>(range.location, childCount);
+    unsigned endOffset = std::min<unsigned>(NSMaxRange(range), childCount);
     frame->selection().setSelection(WebCore::VisibleSelection { WebCore::SimpleRange { { coreElement, startOffset }, { coreElement, endOffset } } }, { WebCore::FrameSelection::SetSelectionOption::FireSelectEvent });
 }
 
@@ -1713,7 +1716,10 @@ static WebFrameLoadType NODELETE toWebFrameLoadType(WebCore::FrameLoadType frame
 
 - (NSArray *)interpretationsForCurrentRoot
 {
-    return core(self)->interpretationsForCurrentRoot();
+    auto* frame = core(self);
+    if (!frame)
+        return nil;
+    return frame->interpretationsForCurrentRoot();
 }
 
 // Collects the ranges and metadata for all of the mars voltas in the root editable element.
@@ -1849,9 +1855,25 @@ static WebFrameLoadType NODELETE toWebFrameLoadType(WebCore::FrameLoadType frame
         if (auto coreFont = _private->coreFrame->editor().fontForSelection(multipleFonts))
             font = coreFont->ctFont();
     }
-    
+
     if (hasMultipleFonts)
         *hasMultipleFonts = multipleFonts;
+
+#if PLATFORM(IOS_FAMILY)
+    // The keyboard machinery on this OS sends -pointSize to whatever comes back
+    // from here - it expects a UIFont, and handing it the CTFont ended the
+    // session with an unrecognized selector the moment a person typed into a
+    // styled field. Same pointer-sized return, an object UIKit understands.
+    Class fontClass = NSClassFromString(@"UIFont");
+    if (font && fontClass) {
+        RetainPtr<CFStringRef> postScriptName = adoptCF(CTFontCopyPostScriptName(font));
+        CGFloat size = CTFontGetSize(font);
+        id uiFont = postScriptName ? [fontClass fontWithName:(NSString *)postScriptName.get() size:size] : nil;
+        if (!uiFont)
+            uiFont = [fontClass systemFontOfSize:size];
+        return (CTFontRef)uiFont;
+    }
+#endif
     return font;
 }
 

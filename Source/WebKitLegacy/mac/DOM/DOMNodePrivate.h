@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMNodePrivate_h
+#define WebKitLegacyDOM_DOMNodePrivate_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -30,3 +33,5 @@
 
 - (void)inspect;
 @end
+
+#endif // WebKitLegacyDOM_DOMNodePrivate_h

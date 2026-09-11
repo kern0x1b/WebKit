@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMCSSRuleInternal_h
+#define WebKitLegacyDOM_DOMCSSRuleInternal_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -31,3 +34,5 @@ class CSSRule;
 
 DOMCSSRule *kit(WebCore::CSSRule*);
 Class kitClass(WebCore::CSSRule*);
+
+#endif // WebKitLegacyDOM_DOMCSSRuleInternal_h

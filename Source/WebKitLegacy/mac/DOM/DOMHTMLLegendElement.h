@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMHTMLLegendElement_h
+#define WebKitLegacyDOM_DOMHTMLLegendElement_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -34,3 +37,5 @@ WEBKIT_CLASS_DEPRECATED_MAC(10_4, 10_14)
 @property (copy) NSString *align;
 @property (copy) NSString *accessKey WEBKIT_DEPRECATED_MAC(10_4, 10_8);
 @end
+
+#endif // WebKitLegacyDOM_DOMHTMLLegendElement_h

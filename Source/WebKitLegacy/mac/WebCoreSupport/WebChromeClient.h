@@ -185,6 +185,9 @@ private:
 #if PLATFORM(IOS_FAMILY)
             AnimatedOpacityTrigger | // Allow opacity animations to trigger compositing mode for iOS: <rdar://problem/7830677>
 #endif
+#if defined(WEBKIT_IOS6)
+            ScrollableNonMainFrameTrigger |
+#endif
             AnimationTrigger);
     }
 

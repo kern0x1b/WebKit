@@ -35,7 +35,9 @@
 #import <WebCore/WebTextIndicatorLayer.h>
 #import <pal/spi/cg/CoreGraphicsSPI.h>
 #import <pal/spi/cocoa/QuartzCoreSPI.h>
+#if PLATFORM(MAC)  // ios6: mac SPI
 #import <pal/spi/mac/NSColorSPI.h>
+#endif
 #import <wtf/TZoneMallocInlines.h>
 
 @interface WebTextIndicatorView : NSView

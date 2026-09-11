@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMCore_h
+#define WebKitLegacyDOM_DOMCore_h
+
 /*
  * Copyright (C) 2004, 2006 Apple Inc. All rights reserved.
  * Copyright (C) 2006 Samuel Weinig <sam.weinig@gmail.com>
@@ -42,3 +45,5 @@
 #import <WebKitLegacy/DOMObject.h>
 #import <WebKitLegacy/DOMProcessingInstruction.h>
 #import <WebKitLegacy/DOMText.h>
+
+#endif // WebKitLegacyDOM_DOMCore_h

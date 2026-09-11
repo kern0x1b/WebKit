@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMHTMLAreaElementInternal_h
+#define WebKitLegacyDOM_DOMHTMLAreaElementInternal_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -30,3 +33,5 @@ class HTMLAreaElement;
 }
 
 WebCore::HTMLAreaElement* core(DOMHTMLAreaElement *);
+
+#endif // WebKitLegacyDOM_DOMHTMLAreaElementInternal_h

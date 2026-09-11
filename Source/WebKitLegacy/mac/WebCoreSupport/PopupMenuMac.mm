@@ -35,7 +35,9 @@
 #import <WebCore/LocalFrame.h>
 #import <WebCore/LocalFrameView.h>
 #import <WebCore/PopupMenuClient.h>
+#if PLATFORM(MAC)  // ios6: mac SPI
 #import <pal/spi/mac/NSCellSPI.h>
+#endif
 #import <pal/system/mac/PopupMenu.h>
 #import <wtf/BlockObjCExceptions.h>
 

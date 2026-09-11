@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMCSSStyleDeclarationInternal_h
+#define WebKitLegacyDOM_DOMCSSStyleDeclarationInternal_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -31,3 +34,5 @@ class CSSStyleDeclaration;
 
 WebCore::CSSStyleDeclaration* core(DOMCSSStyleDeclaration *);
 DOMCSSStyleDeclaration *kit(WebCore::CSSStyleDeclaration*);
+
+#endif // WebKitLegacyDOM_DOMCSSStyleDeclarationInternal_h

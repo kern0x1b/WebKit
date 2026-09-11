@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMHTML_h
+#define WebKitLegacyDOM_DOMHTML_h
+
 /*
  * Copyright (C) 2004-2006 Apple Inc. All rights reserved.
  * Copyright (C) 2006 Samuel Weinig <sam.weinig@gmail.com>
@@ -86,3 +89,5 @@
 #import <WebKitLegacy/DOMHTMLTextAreaElement.h>
 #import <WebKitLegacy/DOMHTMLTitleElement.h>
 #import <WebKitLegacy/DOMHTMLUListElement.h>
+
+#endif // WebKitLegacyDOM_DOMHTML_h

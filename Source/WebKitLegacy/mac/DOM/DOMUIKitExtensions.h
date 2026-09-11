@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMUIKitExtensions_h
+#define WebKitLegacyDOM_DOMUIKitExtensions_h
+
 /*
  * Copyright (C) 2007, 2008 Apple Inc. All rights reserved.
  *
@@ -87,3 +90,5 @@ typedef enum {
 @end
 
 #endif // TARGET_OS_IPHONE
+
+#endif // WebKitLegacyDOM_DOMUIKitExtensions_h

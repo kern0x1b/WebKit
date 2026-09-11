@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMDocumentPrivate_h
+#define WebKitLegacyDOM_DOMDocumentPrivate_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -55,3 +58,5 @@
 - (void)webkitExitFullscreen;
 #endif
 @end
+
+#endif // WebKitLegacyDOM_DOMDocumentPrivate_h

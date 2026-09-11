@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMHTMLOptionsCollectionInternal_h
+#define WebKitLegacyDOM_DOMHTMLOptionsCollectionInternal_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -30,3 +33,5 @@ class HTMLOptionsCollection;
 }
 
 DOMHTMLOptionsCollection *kit(WebCore::HTMLOptionsCollection*);
+
+#endif // WebKitLegacyDOM_DOMHTMLOptionsCollectionInternal_h

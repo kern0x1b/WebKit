@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMCSSRule_h
+#define WebKitLegacyDOM_DOMCSSRule_h
+
 /*
  * Copyright (C) 2004-2025 Apple Inc. All rights reserved.
  *
@@ -53,3 +56,5 @@ WEBKIT_CLASS_DEPRECATED_MAC(10_4, 10_14)
 @property (readonly, strong) DOMCSSStyleSheet *parentStyleSheet;
 @property (readonly, strong) DOMCSSRule *parentRule;
 @end
+
+#endif // WebKitLegacyDOM_DOMCSSRule_h

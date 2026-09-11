@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_WebDOMOperationsPrivate_h
+#define WebKitLegacyDOM_WebDOMOperationsPrivate_h
+
 /*
  * Copyright (C) 2005, 2008, 2009 Apple Inc. All rights reserved.
  *
@@ -71,3 +74,5 @@ typedef BOOL (^WebArchiveSubframeFilter)(WebFrame* subframe);
 - (NSEventPhase)_momentumPhase;
 @end
 #endif
+
+#endif // WebKitLegacyDOM_WebDOMOperationsPrivate_h

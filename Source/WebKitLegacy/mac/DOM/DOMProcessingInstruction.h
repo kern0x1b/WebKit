@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMProcessingInstruction_h
+#define WebKitLegacyDOM_DOMProcessingInstruction_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -33,3 +36,5 @@ WEBKIT_CLASS_DEPRECATED_MAC(10_4, 10_14)
 @property (readonly, copy) NSString *target;
 @property (readonly, strong) DOMStyleSheet *sheet WEBKIT_AVAILABLE_MAC(10_4);
 @end
+
+#endif // WebKitLegacyDOM_DOMProcessingInstruction_h

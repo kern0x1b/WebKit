@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMCSSValue_h
+#define WebKitLegacyDOM_DOMCSSValue_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -39,3 +42,5 @@ WEBKIT_CLASS_DEPRECATED_MAC(10_4, 10_14)
 @property (copy) NSString *cssText;
 @property (readonly) unsigned short cssValueType;
 @end
+
+#endif // WebKitLegacyDOM_DOMCSSValue_h

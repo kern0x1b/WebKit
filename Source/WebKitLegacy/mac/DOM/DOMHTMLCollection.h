@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMHTMLCollection_h
+#define WebKitLegacyDOM_DOMHTMLCollection_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -37,3 +40,5 @@ WEBKIT_CLASS_DEPRECATED_MAC(10_4, 10_14)
 - (DOMNode *)namedItem:(NSString *)name;
 - (DOMNodeList *)tags:(NSString *)name WEBKIT_AVAILABLE_MAC(10_6);
 @end
+
+#endif // WebKitLegacyDOM_DOMHTMLCollection_h

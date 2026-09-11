@@ -174,6 +174,10 @@ id CallResourceLoadDelegateInWebThread(IMP, WebView *, SEL, id, id, id, id);
 id CallResourceLoadDelegateInWebThread(IMP, WebView *, SEL, id, NSInteger, id);
 id CallResourceLoadDelegateInWebThread(IMP, WebView *, SEL, id, id, NSInteger, id);
 #endif
+#if defined(WEBKIT_IOS6)
+void CallResourceLoadDelegateDeferred(WebView *, SEL, id, id);
+void CallResourceLoadDelegateDeferred(WebView *, SEL, id, id, id);
+#endif
 
 BOOL CallResourceLoadDelegateReturningBoolean(BOOL, IMP, WebView *, SEL, id);
 BOOL CallResourceLoadDelegateReturningBoolean(BOOL, IMP, WebView *, SEL, id, id);

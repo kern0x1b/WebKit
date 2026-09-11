@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMEventException_h
+#define WebKitLegacyDOM_DOMEventException_h
+
 /*
  * Copyright (C) 2004, 2006 Apple Inc. All rights reserved.
  * Copyright (C) 2006 Samuel Weinig <sam.weinig@gmail.com>
@@ -33,3 +36,5 @@ extern NSString * const DOMEventException WEBKIT_DEPRECATED_MAC(10_4, 10_14);
 enum DOMEventExceptionCode {
     DOM_UNSPECIFIED_EVENT_TYPE_ERR = 0
 } WEBKIT_ENUM_DEPRECATED_MAC(10_4, 10_14);
+
+#endif // WebKitLegacyDOM_DOMEventException_h

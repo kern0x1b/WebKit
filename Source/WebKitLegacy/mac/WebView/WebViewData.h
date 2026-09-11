@@ -28,6 +28,7 @@
  */
 
 #import "LegacyWebPageDebuggable.h"
+#import <wtf/Platform.h>
 #import "LegacyWebPageInspectorController.h"
 #import "WebDelegateImplementationCaching.h"
 #import "WebUIDelegate.h"
@@ -247,6 +248,15 @@ class WebSelectionServiceController;
     BOOL didDrawTiles;
     WTF::Lock pendingFixedPositionLayoutRectMutex;
     CGRect pendingFixedPositionLayoutRect;
+#if defined(WEBKIT_IOS6)
+    CGRect lastAppliedFixedPositionLayoutRect;
+
+    WTF::Lock pendingLayoutViewportRectMutex;
+    CGRect pendingLayoutViewportRect;
+    bool layoutViewportRectUpdateScheduled;
+
+    BOOL preferencesChangedSweepScheduled;
+#endif
 #endif
     
 #if PLATFORM(IOS_FAMILY) && ENABLE(DRAG_SUPPORT)
@@ -330,6 +340,8 @@ class WebSelectionServiceController;
 #endif
 
     RefPtr<LegacyWebPageInspectorController> inspectorController;
+#if ENABLE(REMOTE_INSPECTOR)
     RefPtr<LegacyWebPageDebuggable> inspectorDebuggable;
+#endif
 }
 @end

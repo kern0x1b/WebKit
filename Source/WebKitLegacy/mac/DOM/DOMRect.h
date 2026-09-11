@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMRect_h
+#define WebKitLegacyDOM_DOMRect_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -34,3 +37,5 @@ WEBKIT_CLASS_DEPRECATED_MAC(10_4, 10_14)
 @property (readonly, strong) DOMCSSPrimitiveValue *bottom;
 @property (readonly, strong) DOMCSSPrimitiveValue *left;
 @end
+
+#endif // WebKitLegacyDOM_DOMRect_h

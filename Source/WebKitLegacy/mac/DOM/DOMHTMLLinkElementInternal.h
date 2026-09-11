@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMHTMLLinkElementInternal_h
+#define WebKitLegacyDOM_DOMHTMLLinkElementInternal_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -30,3 +33,5 @@ class HTMLLinkElement;
 }
 
 WebCore::HTMLLinkElement* core(DOMHTMLLinkElement *);
+
+#endif // WebKitLegacyDOM_DOMHTMLLinkElementInternal_h

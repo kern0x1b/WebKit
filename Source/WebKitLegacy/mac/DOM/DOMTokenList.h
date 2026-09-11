@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMTokenList_h
+#define WebKitLegacyDOM_DOMTokenList_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -37,3 +40,5 @@ WEBKIT_CLASS_DEPRECATED_MAC(10_5, 10_14)
 - (BOOL)contains:(NSString *)token;
 - (BOOL)toggle:(NSString *)token force:(BOOL)force;
 @end
+
+#endif // WebKitLegacyDOM_DOMTokenList_h

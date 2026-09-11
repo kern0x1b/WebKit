@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMCharacterData_h
+#define WebKitLegacyDOM_DOMCharacterData_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -45,3 +48,5 @@ WEBKIT_CLASS_DEPRECATED_MAC(10_4, 10_14)
 - (void)deleteData:(unsigned)offset :(unsigned)length WEBKIT_DEPRECATED_MAC(10_4, 10_5);
 - (void)replaceData:(unsigned)offset :(unsigned)length :(NSString *)data WEBKIT_DEPRECATED_MAC(10_4, 10_5);
 @end
+
+#endif // WebKitLegacyDOM_DOMCharacterData_h

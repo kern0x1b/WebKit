@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMMutationEvent_h
+#define WebKitLegacyDOM_DOMMutationEvent_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -49,3 +52,5 @@ WEBKIT_CLASS_DEPRECATED_MAC(10_4, 10_14)
 @interface DOMMutationEvent (DOMMutationEventDeprecated)
 - (void)initMutationEvent:(NSString *)type :(BOOL)canBubble :(BOOL)cancelable :(DOMNode *)relatedNode :(NSString *)prevValue :(NSString *)newValue :(NSString *)attrName :(unsigned short)attrChange WEBKIT_DEPRECATED_MAC(10_4, 10_5);
 @end
+
+#endif // WebKitLegacyDOM_DOMMutationEvent_h

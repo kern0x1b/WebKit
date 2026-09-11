@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMHTMLFormElementInternal_h
+#define WebKitLegacyDOM_DOMHTMLFormElementInternal_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -30,3 +33,5 @@ class HTMLFormElement;
 }
 
 DOMHTMLFormElement *kit(WebCore::HTMLFormElement*);
+
+#endif // WebKitLegacyDOM_DOMHTMLFormElementInternal_h

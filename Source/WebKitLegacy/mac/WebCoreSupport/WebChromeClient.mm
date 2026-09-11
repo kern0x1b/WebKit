@@ -102,7 +102,9 @@
 #import <WebCore/WKContentObservation.h>
 #import <WebCore/Widget.h>
 #import <WebCore/WindowFeatures.h>
+#if PLATFORM(MAC)  // ios6: mac SPI
 #import <pal/spi/mac/NSViewSPI.h>
+#endif
 #import <wtf/BlockObjCExceptions.h>
 #import <wtf/RefPtr.h>
 #import <wtf/TZoneMallocInlines.h>
@@ -129,6 +131,7 @@
 #endif
 
 #if PLATFORM(IOS_FAMILY)
+#import <UIKit/UIKit.h>
 #import <WebCore/WAKClipView.h>
 #import <WebCore/WAKWindow.h>
 #import <WebCore/WebCoreThreadMessage.h>
@@ -560,6 +563,12 @@ void WebChromeClient::invalidateRootView(const WebCore::IntRect&)
 
 void WebChromeClient::invalidateContentsAndRootView(const WebCore::IntRect& rect)
 {
+#if defined(WEBKIT_IOS6)
+    if (auto window = [m_webView window])
+        [window setNeedsDisplayInRect:rect];
+#else
+    UNUSED_PARAM(rect);
+#endif
 }
 
 void WebChromeClient::invalidateContentsForSlowScroll(const WebCore::IntRect& rect)
@@ -608,8 +617,12 @@ PlatformPageClient WebChromeClient::platformPageClient() const
     return 0;
 }
 
-void WebChromeClient::contentsSizeChanged(WebCore::LocalFrame&, const WebCore::IntSize&) const
+void WebChromeClient::contentsSizeChanged(WebCore::LocalFrame& frame, const WebCore::IntSize& size) const
 {
+    id delegate = [m_webView _UIKitDelegate];
+    if (![delegate respondsToSelector:@selector(webView:contentsSizeChanged:forFrame:)])
+        return;
+    [delegate webView:m_webView contentsSizeChanged:[NSValue valueWithCGSize:CGSizeMake(size.width(), size.height())] forFrame:kit(&frame)];
 }
 
 void WebChromeClient::scrollContainingScrollViewsToRevealRect(const WebCore::IntRect& r) const
@@ -934,11 +947,132 @@ bool WebChromeClient::canEnterVideoFullscreen(WebCore::HTMLVideoElement&, WebCor
 #endif
 }
 
-bool WebChromeClient::supportsVideoFullscreen(WebCore::HTMLMediaElementEnums::VideoFullscreenMode)
+
+#if PLATFORM(IOS_FAMILY) && defined(WEBKIT_IOS6) && ENABLE(VIDEO)
+
+@protocol RevMoviePlayer <NSObject>
+- (double)currentPlaybackTime;
+- (void)setCurrentPlaybackTime:(double)time;
+- (void)stop;
+@end
+
+@protocol RevMoviePlayerViewController <NSObject>
+- (id)initWithContentURL:(NSURL *)url;
+- (id<RevMoviePlayer>)moviePlayer;
+@end
+
+@interface RevFullscreenVideoPresenter : NSObject {
+    RefPtr<WebCore::HTMLVideoElement> _element;
+    RetainPtr<UIViewController> _controller;
+}
+- (id)initWithElement:(WebCore::HTMLVideoElement&)element;
+- (void)present;
+- (void)dismiss;
+@end
+
+static RetainPtr<RevFullscreenVideoPresenter>& currentFullscreenVideoPresenter()
 {
-#if !PLATFORM(IOS_FAMILY) || HAVE(AVKIT)
+    static NeverDestroyed<RetainPtr<RevFullscreenVideoPresenter>> presenter;
+    return presenter.get();
+}
+
+@implementation RevFullscreenVideoPresenter
+
+- (id)initWithElement:(WebCore::HTMLVideoElement&)element
+{
+    self = [super init];
+    if (self)
+        _element = &element;
+    return self;
+}
+
+- (UIViewController *)presentingController
+{
+    UIWindow *window = [[UIApplication sharedApplication] keyWindow];
+    UIViewController *controller = [window rootViewController];
+    while ([controller presentedViewController])
+        controller = [controller presentedViewController];
+    return controller;
+}
+
+- (void)present
+{
+    RefPtr element = _element;
+    if (!element)
+        return;
+
+    RetainPtr url = element->currentSrc().createNSURL();
+    if (!url)
+        return;
+
+    Class playerClass = NSClassFromString(@"MPMoviePlayerViewController");
+    if (!playerClass)
+        return;
+
+    _controller = adoptNS(static_cast<UIViewController *>([[playerClass alloc] initWithContentURL:url.get()]));
+    id<RevMoviePlayer> player = [static_cast<id<RevMoviePlayerViewController>>(_controller.get()) moviePlayer];
+    [player setCurrentPlaybackTime:element->currentTime()];
+
+    [[NSNotificationCenter defaultCenter] addObserver:self
+        selector:@selector(playbackDidFinish:)
+        name:@"MPMoviePlayerPlaybackDidFinishNotification"
+        object:player];
+
+    element->pause();
+
+    UIViewController *presenter = [self presentingController];
+    if (!presenter) {
+        _controller = nullptr;
+        return;
+    }
+
+    [presenter presentViewController:_controller.get() animated:YES completion:nil];
+    element->didBecomeFullscreenElement();
+}
+
+- (void)playbackDidFinish:(NSNotification *)notification
+{
+    UNUSED_PARAM(notification);
+    [self dismiss];
+}
+
+- (void)dismiss
+{
+    if (!_controller)
+        return;
+
+    id<RevMoviePlayer> player = [static_cast<id<RevMoviePlayerViewController>>(_controller.get()) moviePlayer];
+    double resumeTime = [player currentPlaybackTime];
+    [player stop];
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
+
+    [[_controller.get() presentingViewController] dismissViewControllerAnimated:YES completion:nil];
+    _controller = nullptr;
+
+    if (RefPtr element = _element) {
+        if (std::isfinite(resumeTime) && resumeTime > 0)
+            element->setCurrentTime(resumeTime);
+        element->exitFullscreen();
+        element->didStopBeingFullscreenElement();
+    }
+
+    if (currentFullscreenVideoPresenter() == self)
+        currentFullscreenVideoPresenter() = nullptr;
+}
+
+@end
+
+#endif
+
+bool WebChromeClient::supportsVideoFullscreen(WebCore::HTMLMediaElementEnums::VideoFullscreenMode mode)
+{
+#if PLATFORM(IOS_FAMILY) && defined(WEBKIT_IOS6) && ENABLE(VIDEO)
+    return mode == WebCore::HTMLMediaElementEnums::VideoFullscreenModeStandard;
+#elif !PLATFORM(IOS_FAMILY) || HAVE(AVKIT)
+    UNUSED_PARAM(mode);
     return true;
 #else
+    UNUSED_PARAM(mode);
     return false;
 #endif
 }
@@ -957,8 +1091,17 @@ void WebChromeClient::enterVideoFullscreenForVideoElement(WebCore::HTMLVideoElem
     BEGIN_BLOCK_OBJC_EXCEPTIONS
     if (m_mockVideoPresentationModeEnabled)
         videoElement.didBecomeFullscreenElement();
+#if PLATFORM(IOS_FAMILY) && defined(WEBKIT_IOS6) && ENABLE(VIDEO)
+    else {
+        UNUSED_PARAM(mode);
+        auto presenter = adoptNS([[RevFullscreenVideoPresenter alloc] initWithElement:videoElement]);
+        currentFullscreenVideoPresenter() = presenter;
+        [presenter present];
+    }
+#else
     else
         [m_webView _enterVideoFullscreenForVideoElement:&videoElement mode:mode];
+#endif
     END_BLOCK_OBJC_EXCEPTIONS
 }
 
@@ -967,8 +1110,13 @@ void WebChromeClient::exitVideoFullscreenForVideoElement(WebCore::HTMLVideoEleme
     BEGIN_BLOCK_OBJC_EXCEPTIONS
     if (m_mockVideoPresentationModeEnabled)
         videoElement.didStopBeingFullscreenElement();
+#if PLATFORM(IOS_FAMILY) && defined(WEBKIT_IOS6) && ENABLE(VIDEO)
+    else if (RetainPtr presenter = currentFullscreenVideoPresenter())
+        [presenter dismiss];
+#else
     else
         [m_webView _exitVideoFullscreen];
+#endif
     END_BLOCK_OBJC_EXCEPTIONS
     completionHandler(true);
 }
@@ -1015,13 +1163,16 @@ bool WebChromeClient::supportsFullScreenForElement(const WebCore::Element& eleme
         return CallUIDelegateReturningBoolean(false, m_webView, selector, kit(const_cast<WebCore::Element*>(&element)), withKeyboard);
 #if !PLATFORM(IOS_FAMILY)
     return [m_webView _supportsFullScreenForElement:const_cast<WebCore::Element*>(&element) withKeyboard:withKeyboard];
+#elif defined(WEBKIT_IOS6)
+    UNUSED_PARAM(element);
+    return !withKeyboard;
 #else
     return NO;
 #endif
 }
 
 // FIXME: Remove this when rdar://144645925 is resolved.
-void WebChromeClient::enterFullScreenForElement(WebCore::Element& element, WebCore::HTMLMediaElementEnums::VideoFullscreenMode, CompletionHandler<void(WebCore::ExceptionOr<void>)>&& willEnterFullscreen, CompletionHandler<bool(bool)>&& didEnterFullscreen)
+void WebChromeClient::enterFullScreenForElement(WebCore::Element& element, WebCore::HTMLMediaElementEnums::VideoFullscreenMode mode, CompletionHandler<void(WebCore::ExceptionOr<void>)>&& willEnterFullscreen, CompletionHandler<bool(bool)>&& didEnterFullscreen)
 {
     SEL selector = @selector(webView:enterFullScreenForElement:listener:);
     if ([[m_webView UIDelegate] respondsToSelector:selector]) {
@@ -1035,6 +1186,16 @@ void WebChromeClient::enterFullScreenForElement(WebCore::Element& element, WebCo
         [m_webView _enterFullScreenForElement:&element willEnterFullscreen:WTF::move(willEnterFullscreen) didEnterFullscreen:[didEnterFullscreen = WTF::move(didEnterFullscreen)] (bool result) mutable {
             didEnterFullscreen(result);
         }];
+#elif defined(WEBKIT_IOS6)
+    else {
+        callOnMainThread([element = Ref { element }, mode, willEnterFullscreen = WTF::move(willEnterFullscreen), didEnterFullscreen = WTF::move(didEnterFullscreen)] () mutable {
+            Ref fullscreen = element->document().fullscreen();
+            auto result = fullscreen->willEnterFullscreen(element.get(), mode);
+            bool succeeded = !result.hasException();
+            willEnterFullscreen(WTF::move(result));
+            didEnterFullscreen(succeeded);
+        });
+    }
 #endif
 }
 
@@ -1050,6 +1211,17 @@ void WebChromeClient::exitFullScreenForElement(WebCore::Element* element, Comple
 #if !PLATFORM(IOS_FAMILY)
     else
         [m_webView _exitFullScreenForElement:element completionHandler:WTF::move(completionHandler)];
+#elif defined(WEBKIT_IOS6)
+    else {
+        callOnMainThread([element = RefPtr { element }, completionHandler = WTF::move(completionHandler)] () mutable {
+            if (element) {
+                Ref fullscreen = element->document().fullscreen();
+                if (fullscreen->willExitFullscreen())
+                    fullscreen->didExitFullscreen([] (auto) { });
+            }
+            completionHandler();
+        });
+    }
 #endif
 }
 

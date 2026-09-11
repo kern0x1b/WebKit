@@ -248,7 +248,7 @@ private:
 
     RefPtr<WebCore::HistoryItem> createHistoryItemTree(bool clipAtTarget, WebCore::BackForwardItemIdentifier) const final;
 
-#if !PLATFORM(IOS_FAMILY)
+#if !PLATFORM(IOS_FAMILY) || defined(WEBKIT_IOS6)
     bool m_loadingIcon { false };
 #endif
 

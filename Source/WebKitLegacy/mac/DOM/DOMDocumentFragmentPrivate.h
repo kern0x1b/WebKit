@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMDocumentFragmentPrivate_h
+#define WebKitLegacyDOM_DOMDocumentFragmentPrivate_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -40,3 +43,5 @@
 - (DOMElement *)querySelector:(NSString *)selectors;
 - (DOMNodeList *)querySelectorAll:(NSString *)selectors;
 @end
+
+#endif // WebKitLegacyDOM_DOMDocumentFragmentPrivate_h

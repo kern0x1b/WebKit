@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMFileListInternal_h
+#define WebKitLegacyDOM_DOMFileListInternal_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -31,3 +34,5 @@ class FileList;
 
 WebCore::FileList* core(DOMFileList *);
 DOMFileList *kit(WebCore::FileList*);
+
+#endif // WebKitLegacyDOM_DOMFileListInternal_h

@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMHTMLStyleElement_h
+#define WebKitLegacyDOM_DOMHTMLStyleElement_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -35,3 +38,5 @@ WEBKIT_CLASS_DEPRECATED_MAC(10_4, 10_14)
 @property (copy) NSString *type;
 @property (readonly, strong) DOMStyleSheet *sheet WEBKIT_AVAILABLE_MAC(10_4);
 @end
+
+#endif // WebKitLegacyDOM_DOMHTMLStyleElement_h

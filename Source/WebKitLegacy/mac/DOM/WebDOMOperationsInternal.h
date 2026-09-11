@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_WebDOMOperationsInternal_h
+#define WebKitLegacyDOM_WebDOMOperationsInternal_h
+
 /*
  * Copyright (C) 2009 Apple Inc. All rights reserved.
  *
@@ -31,3 +34,5 @@
 @interface DOMDocument (WebDOMDocumentOperationsInternal)
 - (DOMRange *)_documentRange;
 @end
+
+#endif // WebKitLegacyDOM_WebDOMOperationsInternal_h

@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMHTMLTableColElement_h
+#define WebKitLegacyDOM_DOMHTMLTableColElement_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -36,3 +39,5 @@ WEBKIT_CLASS_DEPRECATED_MAC(10_4, 10_14)
 @property (copy) NSString *vAlign;
 @property (copy) NSString *width;
 @end
+
+#endif // WebKitLegacyDOM_DOMHTMLTableColElement_h

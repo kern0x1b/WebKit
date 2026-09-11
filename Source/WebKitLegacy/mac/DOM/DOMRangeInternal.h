@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMRangeInternal_h
+#define WebKitLegacyDOM_DOMRangeInternal_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -34,3 +37,5 @@ struct SimpleRange;
 WebCore::Range* core(DOMRange *);
 DOMRange *kit(WebCore::Range*);
 DOMRange *kit(const std::optional<WebCore::SimpleRange>&);
+
+#endif // WebKitLegacyDOM_DOMRangeInternal_h

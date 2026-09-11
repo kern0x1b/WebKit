@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMHTMLOptionElementInternal_h
+#define WebKitLegacyDOM_DOMHTMLOptionElementInternal_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -31,3 +34,5 @@ class HTMLOptionElement;
 
 WebCore::HTMLOptionElement* core(DOMHTMLOptionElement *);
 DOMHTMLOptionElement *kit(WebCore::HTMLOptionElement*);
+
+#endif // WebKitLegacyDOM_DOMHTMLOptionElementInternal_h

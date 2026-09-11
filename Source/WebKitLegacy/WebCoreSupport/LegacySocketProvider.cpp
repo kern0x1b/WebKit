@@ -25,17 +25,15 @@
 
 #import "LegacySocketProvider.h"
 
-#ifdef BUILDING_WITH_CMAKE
-// WebSocketChannel.cpp (in Sources.txt, not loaded by CMake) depends on SocketStreamHandle.
-// Stub out -- WK2 NetworkProcess handles WebSockets.
-#import <WebCore/WebTransportSession.h>
-#import <wtf/CompletionHandler.h>
-
-RefPtr<WebCore::ThreadableWebSocketChannel> LegacySocketProvider::createWebSocketChannel(WebCore::Document&, WebCore::WebSocketChannelClient&, WebCore::IsInitiatedByDedicatedWorker)
-{
-    return nullptr;
-}
-#else
+// The channel is built in this build too.
+//
+// This was stubbed to return nullptr under CMake, with a comment saying the
+// network process handles WebSockets. That is true of WebKit2 and false here:
+// this port has no network process, and WebSocket::connect asserts that a
+// channel exists - so every site that opened a socket ended the process. The
+// implementation was never missing; only WebCoreSupport/WebSocketChannel.cpp
+// was absent from Sources.txt, while the socket handle beside it was already
+// listed.
 #import "WebSocketChannel.h"
 #import <WebCore/WebTransportSession.h>
 #import <wtf/CompletionHandler.h>
@@ -44,7 +42,6 @@ RefPtr<WebCore::ThreadableWebSocketChannel> LegacySocketProvider::createWebSocke
 {
     return WebCore::WebSocketChannel::create(document, client, *this);
 }
-#endif
 
 std::pair<RefPtr<WebCore::WebTransportSession>, Ref<WebCore::WebTransportSessionPromise>> LegacySocketProvider::initializeWebTransportSession(WebCore::ScriptExecutionContext&, WebCore::WebTransportSessionClient&, const URL&, const WebCore::WebTransportOptions&)
 {

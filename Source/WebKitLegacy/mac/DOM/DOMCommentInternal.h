@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMCommentInternal_h
+#define WebKitLegacyDOM_DOMCommentInternal_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -30,3 +33,5 @@ class Comment;
 }
 
 DOMComment *kit(WebCore::Comment*);
+
+#endif // WebKitLegacyDOM_DOMCommentInternal_h

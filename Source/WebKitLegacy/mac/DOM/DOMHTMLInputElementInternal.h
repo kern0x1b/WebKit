@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMHTMLInputElementInternal_h
+#define WebKitLegacyDOM_DOMHTMLInputElementInternal_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -31,3 +34,5 @@ class HTMLInputElement;
 
 WebCore::HTMLInputElement* core(DOMHTMLInputElement *);
 DOMHTMLInputElement *kit(WebCore::HTMLInputElement*);
+
+#endif // WebKitLegacyDOM_DOMHTMLInputElementInternal_h

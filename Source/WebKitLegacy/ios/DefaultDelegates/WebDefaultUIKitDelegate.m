@@ -82,6 +82,11 @@ static WebDefaultUIKitDelegate *sharedDelegate = nil;
 
 }
 
+- (void)webView:(WebView *)aWebView didReceiveViewportArguments:(NSDictionary *)arguments forFrame:(WebFrame *)frame
+{
+
+}
+
 - (void)webView:(WebView *)aWebView needsScrollNotifications:(NSNumber *)aNumber forFrame:(WebFrame *)aFrame
 {
     
@@ -173,6 +178,14 @@ static WebDefaultUIKitDelegate *sharedDelegate = nil;
 }
 
 - (void)addInputString:(NSString *)str withFlags:(NSUInteger)flags
+{
+}
+
+- (void)addInputString:(NSString *)str
+{
+}
+
+- (void)addInputString:(NSString *)str fromVariantKey:(BOOL)fromVariantKey
 {
 }
 

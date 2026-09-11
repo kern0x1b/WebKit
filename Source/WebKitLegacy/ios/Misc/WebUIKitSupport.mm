@@ -70,18 +70,26 @@ void WebKitInitialize(void)
 
     ASSERT(pthread_main_np());
     webkitInitialized = true;
+#define WEBKIT_IOS6_STEP(name) do { fprintf(stderr, "[WebKitInitialize] " name "\n"); fflush(stderr); } while (0)
+    WEBKIT_IOS6_STEP("InitWebCoreThreadSystemInterface");
     InitWebCoreThreadSystemInterface();
+    WEBKIT_IOS6_STEP("enableWebThread");
     [WebView enableWebThread];
 
     // Initialize our platform strategies.
+    WEBKIT_IOS6_STEP("platform strategies");
     WebPlatformStrategies::initializeIfNecessary();
 
     // We'd rather eat this cost at startup than slow down situations that need to be responsive.
     // See <rdar://problem/6776301>.
+    WEBKIT_IOS6_STEP("localized strings");
     LoadWebLocalizedStrings();
     
     // This needs to be called before any requests are made in the process, <rdar://problem/9691871>
+    WEBKIT_IOS6_STEP("HTTP connection settings");
     WebCore::initializeHTTPConnectionSettingsOnStartup();
+    WEBKIT_IOS6_STEP("done");
+#undef WEBKIT_IOS6_STEP
 }
 
 float WebKitGetMinimumZoomFontSize(void)
@@ -116,6 +124,13 @@ const char *WebKitPlatformSystemRootDirectory(void)
 void WebKitSetBackgroundAndForegroundNotificationNames(NSString *didEnterBackgroundName, NSString *willEnterForegroundName)
 {
     // FIXME: Remove this function.
+}
+
+static BOOL webKitIsClassic;
+
+void WebKitSetIsClassic(BOOL isClassic)
+{
+    webKitIsClassic = isClassic;
 }
 
 void WebKitSetInvalidWebBackgroundTaskIdentifier(WebBackgroundTaskIdentifier taskIdentifier)

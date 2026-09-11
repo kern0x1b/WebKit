@@ -26,6 +26,7 @@
 
 #if PLATFORM(IOS_FAMILY)
 
+#import "config.h"
 #import "DOMUIKitExtensions.h"
 
 #import "DOM.h"

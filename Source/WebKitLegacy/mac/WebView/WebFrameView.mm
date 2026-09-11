@@ -226,6 +226,11 @@ enum {
     }
 }
 
+- (WAKScrollView *)_webScrollView
+{
+    return [self _scrollView];
+}
+
 - (WebDynamicScrollBarsView *)_scrollView
 {
     // This can be called by [super dealloc] when cleaning up the key view loop,

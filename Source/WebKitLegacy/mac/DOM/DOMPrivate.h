@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMPrivate_h
+#define WebKitLegacyDOM_DOMPrivate_h
+
 /*
  * Copyright (C) 2004-2006 Apple Inc. All rights reserved.
  * Copyright (C) 2006 Samuel Weinig <sam.weinig@gmail.com>
@@ -139,3 +142,5 @@ enum { WebMediaQueryOrientationCurrent, WebMediaQueryOrientationPortrait, WebMed
 - (void)setValueAsNumberWithChangeEvent:(double)newValueAsNumber;
 @end
 #endif // TARGET_OS_IPHONE
+
+#endif // WebKitLegacyDOM_DOMPrivate_h

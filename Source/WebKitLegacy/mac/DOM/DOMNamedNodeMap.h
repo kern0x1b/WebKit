@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMNamedNodeMap_h
+#define WebKitLegacyDOM_DOMNamedNodeMap_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -45,3 +48,5 @@ WEBKIT_CLASS_DEPRECATED_MAC(10_4, 10_14)
 - (DOMNode *)getNamedItemNS:(NSString *)namespaceURI :(NSString *)localName WEBKIT_DEPRECATED_MAC(10_4, 10_5);
 - (DOMNode *)removeNamedItemNS:(NSString *)namespaceURI :(NSString *)localName WEBKIT_DEPRECATED_MAC(10_4, 10_5);
 @end
+
+#endif // WebKitLegacyDOM_DOMNamedNodeMap_h

@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMXPath_h
+#define WebKitLegacyDOM_DOMXPath_h
+
 /*
  * Copyright (C) 2006 Apple Inc. All rights reserved.
  * Copyright (C) 2006 Samuel Weinig <sam.weinig@gmail.com>
@@ -32,3 +35,5 @@
 #import <WebKitLegacy/DOMXPathExpression.h>
 #import <WebKitLegacy/DOMXPathNSResolver.h>
 #import <WebKitLegacy/DOMXPathResult.h>
+
+#endif // WebKitLegacyDOM_DOMXPath_h

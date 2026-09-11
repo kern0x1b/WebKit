@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMNodeListInternal_h
+#define WebKitLegacyDOM_DOMNodeListInternal_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -30,3 +33,5 @@ class NodeList;
 }
 
 DOMNodeList *kit(WebCore::NodeList*);
+
+#endif // WebKitLegacyDOM_DOMNodeListInternal_h

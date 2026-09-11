@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMHTMLOptionElement_h
+#define WebKitLegacyDOM_DOMHTMLOptionElement_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -39,3 +42,5 @@ WEBKIT_CLASS_DEPRECATED_MAC(10_4, 10_14)
 @property (readonly, copy) NSString *text;
 @property (readonly) int index;
 @end
+
+#endif // WebKitLegacyDOM_DOMHTMLOptionElement_h

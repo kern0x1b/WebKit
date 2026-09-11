@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMCSSStyleRule_h
+#define WebKitLegacyDOM_DOMCSSStyleRule_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -33,3 +36,5 @@ WEBKIT_CLASS_DEPRECATED_MAC(10_4, 10_14)
 @property (copy) NSString *selectorText;
 @property (readonly, strong) DOMCSSStyleDeclaration *style;
 @end
+
+#endif // WebKitLegacyDOM_DOMCSSStyleRule_h

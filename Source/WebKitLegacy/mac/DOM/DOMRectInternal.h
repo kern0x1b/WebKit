@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMRectInternal_h
+#define WebKitLegacyDOM_DOMRectInternal_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -30,3 +33,5 @@ class DeprecatedCSSOMRect;
 }
 
 DOMRect *kit(WebCore::DeprecatedCSSOMRect*);
+
+#endif // WebKitLegacyDOM_DOMRectInternal_h

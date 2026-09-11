@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMHTMLTextAreaElementPrivate_h
+#define WebKitLegacyDOM_DOMHTMLTextAreaElementPrivate_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -43,3 +46,5 @@
 - (void)setRangeText:(NSString *)replacement;
 - (void)setRangeText:(NSString *)replacement start:(unsigned)start end:(unsigned)end selectionMode:(NSString *)selectionMode;
 @end
+
+#endif // WebKitLegacyDOM_DOMHTMLTextAreaElementPrivate_h

@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMHTMLMapElement_h
+#define WebKitLegacyDOM_DOMHTMLMapElement_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -33,3 +36,5 @@ WEBKIT_CLASS_DEPRECATED_MAC(10_4, 10_14)
 @property (readonly, strong) DOMHTMLCollection *areas;
 @property (copy) NSString *name;
 @end
+
+#endif // WebKitLegacyDOM_DOMHTMLMapElement_h

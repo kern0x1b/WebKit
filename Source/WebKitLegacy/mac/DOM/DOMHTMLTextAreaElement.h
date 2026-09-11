@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMHTMLTextAreaElement_h
+#define WebKitLegacyDOM_DOMHTMLTextAreaElement_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -46,3 +49,5 @@ WEBKIT_CLASS_DEPRECATED_MAC(10_4, 10_14)
 - (void)select;
 - (void)setSelectionRange:(int)start end:(int)end WEBKIT_AVAILABLE_MAC(10_5);
 @end
+
+#endif // WebKitLegacyDOM_DOMHTMLTextAreaElement_h

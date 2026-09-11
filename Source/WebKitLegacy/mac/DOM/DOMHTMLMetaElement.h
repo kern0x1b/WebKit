@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMHTMLMetaElement_h
+#define WebKitLegacyDOM_DOMHTMLMetaElement_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -34,3 +37,5 @@ WEBKIT_CLASS_DEPRECATED_MAC(10_4, 10_14)
 @property (copy) NSString *name;
 @property (copy) NSString *scheme;
 @end
+
+#endif // WebKitLegacyDOM_DOMHTMLMetaElement_h

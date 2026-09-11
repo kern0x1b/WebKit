@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMCSSPrimitiveValue_h
+#define WebKitLegacyDOM_DOMCSSPrimitiveValue_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -80,3 +83,5 @@ WEBKIT_CLASS_DEPRECATED_MAC(10_4, 10_14)
 - (void)setFloatValue:(unsigned short)unitType :(float)floatValue WEBKIT_DEPRECATED_MAC(10_4, 10_5);
 - (void)setStringValue:(unsigned short)stringType :(NSString *)stringValue WEBKIT_DEPRECATED_MAC(10_4, 10_5);
 @end
+
+#endif // WebKitLegacyDOM_DOMCSSPrimitiveValue_h

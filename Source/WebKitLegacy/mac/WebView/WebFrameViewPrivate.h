@@ -72,6 +72,7 @@
     @result The content view (NSClipView) of the WebFrameView's scroll view.
  */
 #if TARGET_OS_IPHONE
+- (WAKScrollView *)_webScrollView;
 - (WAKClipView *)_contentView;
 #else
 - (NSClipView *)_contentView;

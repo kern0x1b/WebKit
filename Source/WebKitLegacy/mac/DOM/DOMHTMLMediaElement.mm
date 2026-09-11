@@ -26,6 +26,7 @@
 
 #if ENABLE(VIDEO)
 
+#import "config.h"
 #import "DOMHTMLMediaElement.h"
 
 #import "DOMInternal.h"

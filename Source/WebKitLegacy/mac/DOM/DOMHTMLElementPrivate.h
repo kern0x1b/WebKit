@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMHTMLElementPrivate_h
+#define WebKitLegacyDOM_DOMHTMLElementPrivate_h
+
 /*
  * Copyright (C) 2016 Apple Inc. All rights reserved.
  *
@@ -31,3 +34,5 @@
 @property (copy) NSString *autocapitalize;
 
 @end
+
+#endif // WebKitLegacyDOM_DOMHTMLElementPrivate_h

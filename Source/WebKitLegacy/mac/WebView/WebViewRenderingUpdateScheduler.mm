@@ -25,6 +25,11 @@
 
 
 #import "WebViewRenderingUpdateScheduler.h"
+#if defined(WEBKIT_IOS6)
+#import <WebCore/Scheduling.h>
+#import <WebCore/WebCoreThread.h>
+#import <WebCore/WebCoreThreadRun.h>
+#endif
 
 #import "WebViewInternal.h"
 #import <pal/spi/cocoa/QuartzCoreSPI.h>
@@ -39,7 +44,9 @@
 #import <wtf/SetForScope.h>
 
 #if PLATFORM(MAC)
+#if PLATFORM(MAC)  // ios6: mac SPI
 #import <pal/spi/mac/NSWindowSPI.h>
+#endif
 #endif
 
 WTF_MAKE_TZONE_ALLOCATED_IMPL(WebViewRenderingUpdateScheduler);
@@ -56,20 +63,23 @@ WebViewRenderingUpdateScheduler::WebViewRenderingUpdateScheduler(WebView* webVie
         // However if the flush is rescheduled from the callback it may get pushed past it, to the next cycle.
         WebThreadLock();
 #endif
-        CheckedPtr checkedThis = weakThis;
-        if (!checkedThis)
+#if defined(WEBKIT_IOS6)
+        WebThreadYieldIfAsked();
+#endif
+        auto* scheduler = weakThis.get();
+        if (!scheduler)
             return;
-        checkedThis->renderingUpdateRunLoopObserverCallback();
+        scheduler->renderingUpdateRunLoopObserverCallback();
     });
 
     m_postRenderingUpdateRunLoopObserver = makeUnique<WebCore::RunLoopObserver>(WebCore::RunLoopObserver::WellKnownOrder::PostRenderingUpdate, [weakThis = WeakPtr { this }] {
 #if PLATFORM(IOS_FAMILY)
         WebThreadLock();
 #endif
-        CheckedPtr checkedThis = weakThis;
-        if (!checkedThis)
+        auto* scheduler = weakThis.get();
+        if (!scheduler)
             return;
-        checkedThis->postRenderingUpdateCallback();
+        scheduler->postRenderingUpdateCallback();
     });
 }
 
@@ -80,12 +90,28 @@ void WebViewRenderingUpdateScheduler::scheduleRenderingUpdate()
     if (m_insideCallback)
         m_rescheduledInsideCallback = true;
 
+#if defined(WEBKIT_IOS6)
+    WebCore::ios6SetRenderingUpdatePending(true);
+#endif
+
+#if defined(WEBKIT_IOS6)
+    if (!WebThreadIsCurrent() && WebThreadIsEnabled()) {
+        WebThreadRun(^{
+            m_renderingUpdateRunLoopObserver->schedule();
+        });
+        return;
+    }
+#endif
+
     m_renderingUpdateRunLoopObserver->schedule();
 }
 
 void WebViewRenderingUpdateScheduler::invalidate()
 {
     ASSERT(isMainThread());
+#if defined(WEBKIT_IOS6)
+    WebCore::ios6SetRenderingUpdatePending(false);
+#endif
     m_webView = nullptr;
     m_renderingUpdateRunLoopObserver->invalidate();
     m_postRenderingUpdateRunLoopObserver->invalidate();
@@ -99,6 +125,15 @@ void WebViewRenderingUpdateScheduler::didCompleteRenderingUpdateDisplay()
 
 void WebViewRenderingUpdateScheduler::schedulePostRenderingUpdate()
 {
+#if defined(WEBKIT_IOS6)
+    if (!WebThreadIsCurrent() && WebThreadIsEnabled()) {
+        WebThreadRun(^{
+            m_postRenderingUpdateRunLoopObserver->schedule();
+        });
+        return;
+    }
+#endif
+
     m_postRenderingUpdateRunLoopObserver->schedule();
 }
 
@@ -123,6 +158,10 @@ void WebViewRenderingUpdateScheduler::renderingUpdateRunLoopObserverCallback()
 {
     SetForScope insideCallbackScope(m_insideCallback, true);
     m_rescheduledInsideCallback = false;
+
+#if defined(WEBKIT_IOS6)
+    WebCore::ios6SetRenderingUpdatePending(false);
+#endif
 
     updateRendering();
     registerCACommitHandlers();

@@ -24,6 +24,7 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
+#import "config.h"
 #import "DOMAbstractViewInternal.h"
 #import "DOMCSSRuleInternal.h"
 #import "DOMCSSRuleListInternal.h"

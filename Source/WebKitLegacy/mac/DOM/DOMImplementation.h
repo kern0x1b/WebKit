@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMImplementation_h
+#define WebKitLegacyDOM_DOMImplementation_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -46,3 +49,5 @@ WEBKIT_CLASS_DEPRECATED_MAC(10_4, 10_14)
 - (DOMDocument *)createDocument:(NSString *)namespaceURI :(NSString *)qualifiedName :(DOMDocumentType *)doctype WEBKIT_DEPRECATED_MAC(10_4, 10_5);
 - (DOMCSSStyleSheet *)createCSSStyleSheet:(NSString *)title :(NSString *)media WEBKIT_DEPRECATED_MAC(10_4, 10_5);
 @end
+
+#endif // WebKitLegacyDOM_DOMImplementation_h

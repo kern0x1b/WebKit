@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMBlobInternal_h
+#define WebKitLegacyDOM_DOMBlobInternal_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -30,3 +33,5 @@ class Blob;
 }
 
 DOMBlob *kit(WebCore::Blob*);
+
+#endif // WebKitLegacyDOM_DOMBlobInternal_h

@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMHTMLInputElement_h
+#define WebKitLegacyDOM_DOMHTMLInputElement_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -63,3 +66,5 @@ WEBKIT_CLASS_DEPRECATED_MAC(10_4, 10_14)
 - (void)setSelectionRange:(int)start end:(int)end WEBKIT_AVAILABLE_MAC(10_5);
 - (void)click;
 @end
+
+#endif // WebKitLegacyDOM_DOMHTMLInputElement_h

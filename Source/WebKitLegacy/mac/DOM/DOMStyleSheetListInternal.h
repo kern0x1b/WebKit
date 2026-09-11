@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMStyleSheetListInternal_h
+#define WebKitLegacyDOM_DOMStyleSheetListInternal_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -30,3 +33,5 @@ class StyleSheetList;
 }
 
 DOMStyleSheetList *kit(WebCore::StyleSheetList*);
+
+#endif // WebKitLegacyDOM_DOMStyleSheetListInternal_h

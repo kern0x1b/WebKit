@@ -75,6 +75,7 @@
 #import "WebFrameViewInternal.h"
 #import "WebGeolocationClient.h"
 #import "WebGeolocationPositionInternal.h"
+#import "WebUserMediaClient.h"
 #import "WebHTMLRepresentation.h"
 #import "WebHTMLViewInternal.h"
 #import "WebHistoryDelegate.h"
@@ -199,6 +200,7 @@
 #import <WebCore/LocalizedStrings.h>
 #import <WebCore/LogInitialization.h>
 #import <WebCore/MIMETypeRegistry.h>
+#import <WebCore/CommonVM.h>
 #import <WebCore/MemoryCache.h>
 #import <WebCore/MemoryRelease.h>
 #import <WebCore/MutableStyleProperties.h>
@@ -230,6 +232,7 @@
 #import <WebCore/ScriptController.h>
 #import <WebCore/SecurityOrigin.h>
 #import <WebCore/SecurityPolicy.h>
+#import <WebCore/ScriptBytecodeCache.h>
 #import <WebCore/Settings.h>
 #import <WebCore/ShouldTreatAsContinuingLoad.h>
 #import <WebCore/StringUtilities.h>
@@ -269,10 +272,18 @@
 #import <pal/spi/cocoa/NSURLFileTypeMappingsSPI.h>
 #import <pal/spi/cocoa/QuartzCoreSPI.h>
 #import <pal/spi/ios/BrowserEngineKitSPI.h>
+#if PLATFORM(MAC)  // ios6: mac SPI
 #import <pal/spi/mac/NSResponderSPI.h>
+#endif
+#if PLATFORM(MAC)  // ios6: mac SPI
 #import <pal/spi/mac/NSSpellCheckerSPI.h>
+#endif
+#if PLATFORM(MAC)  // ios6: mac SPI
 #import <pal/spi/mac/NSViewSPI.h>
+#endif
+#if PLATFORM(MAC)  // ios6: mac SPI
 #import <pal/spi/mac/NSWindowSPI.h>
+#endif
 #import <wtf/Assertions.h>
 #import <wtf/Atomics.h>
 #import <wtf/BlockPtr.h>
@@ -310,8 +321,12 @@
 #import "WebVideoFullscreenController.h"
 #import <WebCore/TextIndicator.h>
 #import <pal/spi/cocoa/AVKitSPI.h>
+#if PLATFORM(MAC)  // ios6: mac SPI
 #import <pal/spi/mac/LookupSPI.h>
+#endif
+#if PLATFORM(MAC)  // ios6: mac SPI
 #import <pal/spi/mac/NSImmediateActionGestureRecognizerSPI.h>
+#endif
 #else
 #import "WebCaretChangeListener.h"
 #import "WebChromeClientIOS.h"
@@ -568,6 +583,10 @@ _Pragma("clang diagnostic pop") \
 static BOOL s_didSetCacheModel;
 static WebCacheModel s_cacheModel = WebCacheModelDocumentViewer;
 
+#if defined(WEBKIT_IOS6)
+extern "C" int g_webkitIOS6TileDidDrawPending;
+#endif
+
 const auto WKLockdownModeEnabledKeyCFString = CFSTR(STRINGIZE_VALUE_OF(WKLockdownModeEnabled));
 const auto LDMEnabledKey = CFSTR("LDMGlobalEnabled");
 
@@ -606,6 +625,9 @@ static Class s_pdfViewClass;
     __unsafe_unretained id _defaultTarget;
 #if PLATFORM(IOS_FAMILY)
     _WebSafeAsyncForwarder *_asyncForwarder;
+#endif
+#if defined(WEBKIT_IOS6)
+    BOOL _defaultTargetAnswersOnWebThread;
 #endif
 }
 - (instancetype)initWithTarget:(id)target defaultTarget:(id)defaultTarget;
@@ -1391,11 +1413,21 @@ static void WebKitInitializeGamepadProviderIfNecessary()
 }
 #endif
 
+static void webViewStartupMark(const char* what, double& last)
+{
+    double now = CFAbsoluteTimeGetCurrent() * 1000.0;
+    fprintf(stderr, "[startup] %-34s %7.1f ms\n", what, now - last);
+    last = now;
+}
+
 - (void)_commonInitializationWithFrameName:(NSString *)frameName groupName:(NSString *)groupName
 {
+    double startupLast = CFAbsoluteTimeGetCurrent() * 1000.0;
+    double startupBegan = startupLast;
     WebCoreThreadViolationCheckRoundTwo();
 
     WebPreferences *standardPreferences = [WebPreferences standardPreferences];
+    webViewStartupMark("WebPreferences standardPreferences", startupLast);
     [standardPreferences willAddToWebView];
 
     _private->preferences = standardPreferences;
@@ -1450,6 +1482,7 @@ static void WebKitInitializeGamepadProviderIfNecessary()
         if ([standardPreferences databasesEnabled])
 #endif
         [WebDatabaseManager sharedWebDatabaseManager];
+    webViewStartupMark("WebDatabaseManager (WebSQL)", startupLast);
 
 #if PLATFORM(IOS_FAMILY)
         if ([standardPreferences storageTrackerEnabled])
@@ -1467,6 +1500,7 @@ static void WebKitInitializeGamepadProviderIfNecessary()
 #endif
 #if USE(AUDIO_SESSION)
         WebCore::AudioSession::enableMediaPlayback();
+    webViewStartupMark("AudioSession::enableMediaPlayback", startupLast);
 #endif
 
 #if ENABLE(VIDEO)
@@ -1538,12 +1572,23 @@ static void WebKitInitializeGamepadProviderIfNecessary()
     pageConfiguration.storageNamespaceProvider = _private->group->storageNamespaceProvider();
     pageConfiguration.visitedLinkStore = _private->group->visitedLinkStore();
     _private->page = WebCore::Page::create(WTF::move(pageConfiguration));
+    webViewStartupMark("Page::create", startupLast);
     storageProvider->setPage(*_private->page);
+
+    // A page starts out not visible and waits for its client to say otherwise.
+    // UIKit does not say it on this configuration, and an invisible page has
+    // requestAnimationFrame switched off entirely - so a site that finishes any
+    // interaction on a frame callback, which every phone-shaped site does, goes
+    // dead while still looking alive. A WebView is built to be shown.
+    _private->page->setIsVisible(true);
 
     _private->page->setGroupName(groupName);
 
 #if ENABLE(GEOLOCATION)
     WebCore::provideGeolocationTo(_private->page.get(), WebGeolocationClient::create(self));
+#endif
+#if ENABLE(MEDIA_STREAM)
+    WebCore::provideUserMediaTo(_private->page.get(), WebUserMediaClient::create(self));
 #endif
 #if ENABLE(NOTIFICATIONS)
     WebCore::provideNotification(_private->page.get(), new WebNotificationClient(self));
@@ -1554,9 +1599,13 @@ static void WebKitInitializeGamepadProviderIfNecessary()
 
     _private->inspectorController = LegacyWebPageInspectorController::create(*_private->page);
 #if ENABLE(REMOTE_INSPECTOR)
+#if ENABLE(REMOTE_INSPECTOR)
     _private->inspectorDebuggable = LegacyWebPageDebuggable::create(*_private->inspectorController, *_private->page);
+#endif
+#if ENABLE(REMOTE_INSPECTOR)
     _private->inspectorDebuggable->init();
     _private->inspectorDebuggable->setInspectable(true);
+#endif
 #endif
 
     _private->page->setCanStartMedia([self window]);
@@ -1580,6 +1629,7 @@ static void WebKitInitializeGamepadProviderIfNecessary()
         [self setSmartInsertDeleteEnabled:[[NSUserDefaults standardUserDefaults] boolForKey:WebSmartInsertDeleteEnabled]];
 
     [WebFrame _createMainFrameWithPage:_private->page.get() frameName:frameName frameView:frameView.get()];
+    webViewStartupMark("main frame + UA stylesheet", startupLast);
 
 #if PLATFORM(IOS_FAMILY)
     NSRunLoop *runLoop = WebThreadNSRunLoop();
@@ -1623,10 +1673,12 @@ static void WebKitInitializeGamepadProviderIfNecessary()
     // do this on the current thread on iOS, since the web thread could be blocked on the main thread,
     // and prefs need to be changed synchronously <rdar://problem/5841558>
     [self _preferencesChanged:prefs];
+    webViewStartupMark("preferences sweep (623 getters)", startupLast);
     _private->page->settings().setFontFallbackPrefersPictographs(true);
 #endif
 
     WebInstallMemoryPressureHandler();
+    webViewStartupMark("memory pressure handler", startupLast);
 
 #if PLATFORM(MAC)
     if (!WebKitLinkedOnOrAfter(WEBKIT_FIRST_VERSION_WITH_LOCAL_RESOURCE_SECURITY_RESTRICTION)) {
@@ -1648,6 +1700,10 @@ static void WebKitInitializeGamepadProviderIfNecessary()
 
     WTF::listenForLanguageChangeNotifications();
 #endif // PLATFORM(MAC)
+
+    webViewStartupMark("rest of _commonInitialization", startupLast);
+    fprintf(stderr, "[startup] %-34s %7.1f ms\n", "TOTAL _commonInitialization",
+        CFAbsoluteTimeGetCurrent() * 1000.0 - startupBegan);
 }
 
 - (id)_initWithFrame:(NSRect)f frameName:(NSString *)frameName groupName:(NSString *)groupName
@@ -1795,6 +1851,13 @@ static void WebKitInitializeGamepadProviderIfNecessary()
     _private->page = WebCore::Page::create(WTF::move(pageConfiguration));
     storageProvider->setPage(*_private->page);
 
+    // A page starts out not visible and waits for its client to say otherwise.
+    // UIKit does not say it on this configuration, and an invisible page has
+    // requestAnimationFrame switched off entirely - so a site that finishes any
+    // interaction on a frame callback, which every phone-shaped site does, goes
+    // dead while still looking alive. A WebView is built to be shown.
+    _private->page->setIsVisible(true);
+
     [self setSmartInsertDeleteEnabled:YES];
 
     // FIXME: <rdar://problem/6851451> Should respect preferences in fast path WebView initialization
@@ -1825,9 +1888,13 @@ static void WebKitInitializeGamepadProviderIfNecessary()
 
     _private->inspectorController = LegacyWebPageInspectorController::create(*_private->page);
 #if ENABLE(REMOTE_INSPECTOR)
+#if ENABLE(REMOTE_INSPECTOR)
     _private->inspectorDebuggable = LegacyWebPageDebuggable::create(*_private->inspectorController, *_private->page);
+#endif
+#if ENABLE(REMOTE_INSPECTOR)
     _private->inspectorDebuggable->init();
     _private->inspectorDebuggable->setInspectable(isInternalInstall());
+#endif
 #endif
 
     [self _updateScreenScaleFromWindow];
@@ -1851,6 +1918,103 @@ static void WebKitInitializeGamepadProviderIfNecessary()
 {
     WebThreadRun(^{
         WebCore::releaseMemory(Critical::Yes, Synchronous::Yes);
+    });
+#if defined(WEBKIT_IOS6)
+    [WebStorageManager closeIdleLocalStorageDatabases];
+#endif
+}
+
+- (void)_setLayoutViewportRect:(CGRect)rect
+{
+#if defined(WEBKIT_IOS6)
+    {
+        Locker locker { _private->pendingLayoutViewportRectMutex };
+        _private->pendingLayoutViewportRect = rect;
+        if (_private->layoutViewportRectUpdateScheduled)
+            return;
+        _private->layoutViewportRectUpdateScheduled = true;
+    }
+
+    WebThreadRun(^{
+        CGRect latestRect;
+        {
+            Locker locker { _private->pendingLayoutViewportRectMutex };
+            latestRect = _private->pendingLayoutViewportRect;
+            _private->layoutViewportRectUpdateScheduled = false;
+        }
+
+        RefPtr frame = [self _mainCoreFrame];
+        if (!frame)
+            return;
+        RefPtr frameView = frame->view();
+        if (!frameView)
+            return;
+        frameView->setLayoutViewportOverrideRect(WebCore::LayoutRect(latestRect.origin.x, latestRect.origin.y, latestRect.size.width, latestRect.size.height),
+            WebCore::LocalFrameView::TriggerLayoutOrNot::No);
+    });
+#else
+    WebThreadRun(^{
+        RefPtr frame = [self _mainCoreFrame];
+        if (!frame)
+            return;
+        RefPtr frameView = frame->view();
+        if (!frameView)
+            return;
+        frameView->setLayoutViewportOverrideRect(WebCore::LayoutRect(rect.origin.x, rect.origin.y, rect.size.width, rect.size.height),
+            WebCore::LocalFrameView::TriggerLayoutOrNot::No);
+    });
+#endif
+}
+
++ (void)_relieveMemoryPressure
+{
+    WebThreadRun(^{
+        WebCore::releaseMemory(Critical::No, Synchronous::No);
+    });
+}
+
++ (void)_reportMemoryBreakdown
+{
+    WebThreadRun(^{
+        // Real numbers, from the subsystems that own the memory.
+        //
+        // The region walk in the application was guessing: it attributed two
+        // hundred and seventy four megabytes while the process was resident in a
+        // hundred and thirty, so every conclusion drawn from it was suspect. Each
+        // figure here is the owning subsystem's own count.
+        auto statistics = WebCore::MemoryCache::singleton().getStatistics();
+        double encodedMB = (statistics.images.size + statistics.cssStyleSheets.size + statistics.scripts.size
+            + statistics.xslStyleSheets.size + statistics.fonts.size) / (1024.0 * 1024.0);
+        double decodedMB = (statistics.images.decodedSize + statistics.cssStyleSheets.decodedSize
+            + statistics.scripts.decodedSize + statistics.xslStyleSheets.decodedSize
+            + statistics.fonts.decodedSize) / (1024.0 * 1024.0);
+        int imageCount = statistics.images.count;
+
+        double jsHeapMB = 0;
+        double jsCapacityMB = 0;
+        if (auto* vm = WebCore::commonVMOrNull()) {
+            jsHeapMB = vm->heap.size() / (1024.0 * 1024.0);
+            jsCapacityMB = vm->heap.capacity() / (1024.0 * 1024.0);
+        }
+
+        unsigned documentCount = WebCore::Document::allDocuments().size();
+
+        WTFLogAlways("[breakdown] javascript heap %.1f MB (capacity %.1f), resources encoded %.1f MB, images decoded %.1f MB in %d images, documents %u",
+            jsHeapMB, jsCapacityMB, encodedMB, decodedMB, imageCount, documentCount);
+    });
+}
+
++ (void)_capDecodedImageMemory:(unsigned)bytes
+{
+    WebThreadRun(^{
+        // The single largest identified block of this process is decoded image
+        // data. A feed that never removes a post keeps every avatar and every
+        // picture decoded, and because they are live in the render tree an
+        // ordinary cache prune does not touch them - so the figure only grows
+        // until the process is killed. Capping it costs a redecode for anything
+        // the reader scrolls back to, and nothing else: what is on screen is
+        // touched every paint and survives.
+        WebCore::MemoryCache::singleton().pruneLiveResourcesToSize(bytes, false);
     });
 }
 
@@ -2168,11 +2332,13 @@ static NSMutableSet *knownPluginMIMETypes()
     Class repClass = [[WebDataSource _repTypesAllowImageTypeOmission:YES] _webkit_objectForMIMEType:MIMEType];
 
 #if PLATFORM(IOS_FAMILY)
+#pragma push_macro("WebPDFView")
+#undef WebPDFView
 #define WebPDFView ([WebView _getPDFViewClass])
 #endif
     if (!viewClass || !repClass || [[WebPDFView supportedMIMETypes] containsObject:MIMEType]) {
 #if PLATFORM(IOS_FAMILY)
-#undef WebPDFView
+#pragma pop_macro("WebPDFView")
 #endif
         // Our optimization to avoid loading the plug-in DB and image types for the HTML case failed.
 
@@ -2303,15 +2469,31 @@ static NSMutableSet *knownPluginMIMETypes()
     return _private->page->renderTreeSize();
 }
 
+- (CGSize)_contentsSize
+{
+    RefPtr localMainFrame = [self _mainCoreFrame];
+    if (!localMainFrame)
+        return CGSizeZero;
+    RefPtr frameView = localMainFrame->view();
+    if (!frameView)
+        return CGSizeZero;
+    auto size = frameView->contentsSize();
+    return CGSizeMake(size.width(), size.height());
+}
+
 - (void)_dispatchTileDidDraw:(CALayer*)tile
 {
+#if defined(WEBKIT_IOS6)
+    g_webkitIOS6TileDidDrawPending = 0;
+#endif
+
     id mailDelegate = [self _webMailDelegate];
     if ([mailDelegate respondsToSelector:@selector(_webthread_webView:tileDidDraw:)]) {
         [mailDelegate _webthread_webView:self tileDidDraw:tile];
         return;
     }
 
-    if (!WTF::atomicCompareExchangeStrong(&_private->didDrawTiles, NO, YES))
+    if (WTF::atomicCompareExchangeStrong(&_private->didDrawTiles, NO, YES))
         return;
 
     WebThreadLock();
@@ -2428,7 +2610,9 @@ static bool fastDocumentTeardownEnabled()
     if (!_private || _private->closed)
         return;
 
+#if ENABLE(REMOTE_INSPECTOR)
     _private->inspectorDebuggable->detachFromPage();
+#endif
     _private->inspectorController->willDestroyPage(*_private->page);
 
     [[NSNotificationCenter defaultCenter] postNotificationName:WebViewWillCloseNotification object:self];
@@ -2646,12 +2830,16 @@ ALLOW_DEPRECATED_DECLARATIONS_END
 #if ENABLE(REMOTE_INSPECTOR)
 + (void)_enableRemoteInspector
 {
+#if ENABLE(REMOTE_INSPECTOR)
     Inspector::RemoteInspector::singleton().start();
+#endif
 }
 
 + (void)_disableRemoteInspector
 {
+#if ENABLE(REMOTE_INSPECTOR)
     Inspector::RemoteInspector::singleton().stop();
+#endif
 }
 
 + (void)_disableAutoStartRemoteInspector
@@ -2661,22 +2849,36 @@ ALLOW_DEPRECATED_DECLARATIONS_END
 
 + (BOOL)_isRemoteInspectorEnabled
 {
+#if ENABLE(REMOTE_INSPECTOR)
     return Inspector::RemoteInspector::singleton().enabled();
+#else
+    return NO;
+#endif
 }
 
 + (BOOL)_hasRemoteInspectorSession
 {
+#if ENABLE(REMOTE_INSPECTOR)
     return Inspector::RemoteInspector::singleton().hasActiveDebugSession();
+#else
+    return NO;
+#endif
 }
 
 - (BOOL)allowsRemoteInspection
 {
+#if ENABLE(REMOTE_INSPECTOR)
     return _private->inspectorDebuggable->inspectable();
+#else
+    return NO;
+#endif
 }
 
 - (void)setAllowsRemoteInspection:(BOOL)allow
 {
+#if ENABLE(REMOTE_INSPECTOR)
     _private->inspectorDebuggable->setInspectable(allow);
+#endif
 }
 
 - (void)setShowingInspectorIndication:(BOOL)showing
@@ -2703,7 +2905,9 @@ ALLOW_DEPRECATED_DECLARATIONS_END
 - (void)_setHostApplicationProcessIdentifier:(pid_t)pid auditToken:(audit_token_t)auditToken
 {
     RetainPtr<CFDataRef> auditData = adoptCF(CFDataCreate(nullptr, (const UInt8*)&auditToken, sizeof(auditToken)));
+#if ENABLE(REMOTE_INSPECTOR)
     Inspector::RemoteInspector::singleton().setParentProcessInformation(pid, auditData);
+#endif
 }
 #endif // PLATFORM(IOS_FAMILY)
 #endif // ENABLE(REMOTE_INSPECTOR)
@@ -2854,14 +3058,25 @@ ALLOW_DEPRECATED_DECLARATIONS_END
 
 #if PLATFORM(IOS_FAMILY)
     } else {
+#if defined(WEBKIT_IOS6)
+        if (!WTF::atomicCompareExchangeStrong(&_private->preferencesChangedSweepScheduled, NO, YES))
+            return;
+
         WebThreadRun(^{
-            // It is possible that the prefs object has already changed before the invocation could be called
-            // on the web thread. This is not possible on TOT which is why they have a simple ASSERT.
+            WTF::atomicStore(&_private->preferencesChangedSweepScheduled, NO);
+            WebPreferences *preferences = [self preferences];
+            if (!preferences)
+                return;
+            [self _preferencesChanged:preferences];
+        });
+#else
+        WebThreadRun(^{
             WebPreferences *preferences = (WebPreferences *)[notification object];
             if (preferences != [self preferences])
                 return;
             [self _preferencesChanged:preferences];
         });
+#endif
     }
 #endif
 }
@@ -2914,6 +3129,16 @@ ALLOW_DEPRECATED_DECLARATIONS_END
     settings.setTextDirectionSubmenuInclusionBehavior(core([preferences textDirectionSubmenuInclusionBehavior]));
     settings.setBackForwardCacheExpirationInterval(Seconds { [preferences _backForwardCacheExpirationInterval] });
     settings.setPitchCorrectionAlgorithm(static_cast<WebCore::MediaPlayerEnums::PitchCorrectionAlgorithm>([preferences _pitchCorrectionAlgorithm]));
+
+    // requestFullscreen()'s IDL is EnabledBySetting=FullScreenEnabled, checked against
+    // WebCore::Settings, not against the WebPreferences object directly - this legacy
+    // (WK1) sync function is otherwise hand-maintained per setting, and apparently never
+    // grew a line for this one, unlike the modern WK2 preferences pipeline that generates
+    // its sync automatically. Without this, [preferences setFullScreenEnabled:YES] changes
+    // a value nothing ever reads: the live Settings the JS bindings actually check stays at
+    // its compiled-in `false` default (UnifiedWebPreferences.yaml's WebKitLegacy default),
+    // and document.fullscreenEnabled/Element.requestFullscreen stay absent regardless.
+    settings.setFullScreenEnabled([preferences fullScreenEnabled]);
 
     // FIXME: Add a way to have a preference check multiple different keys.
     settings.setDeveloperExtrasEnabled([preferences developerExtrasEnabled]);
@@ -3741,6 +3966,16 @@ IGNORE_WARNINGS_END
     [self _locked_recursivelyPerformPlugInSelector:@selector(restorePluginsFromCache) inFrame:[self mainFrame]];
 }
 
+- (void)_markScrolledByUser
+{
+    WebThreadLock();
+    auto* mainCoreFrame = [self _mainCoreFrame];
+    if (!mainCoreFrame)
+        return;
+    if (RefPtr frameView = mainCoreFrame->view())
+        frameView->setLastUserScrollType(WebCore::LocalFrameView::UserScrollType::Explicit);
+}
+
 - (BOOL)_setMediaLayer:(CALayer*)layer forPluginView:(NSView*)pluginView
 {
     WebThreadLock();
@@ -3920,6 +4155,13 @@ IGNORE_WARNINGS_END
 
     if (auto* mainFrame = core([self mainFrame]))
         mainFrame->view()->setCustomFixedPositionLayoutRect(newRect);
+
+#if defined(WEBKIT_IOS6)
+    {
+        Locker locker { _private->pendingFixedPositionLayoutRectMutex };
+        _private->lastAppliedFixedPositionLayoutRect = newRect;
+    }
+#endif
 }
 
 - (void)_setCustomFixedPositionLayoutRectInWebThread:(CGRect)rect synchronize:(BOOL)synchronize
@@ -3981,7 +4223,7 @@ IGNORE_WARNINGS_END
 }
 #endif // PLATFORM(IOS_FAMILY)
 
-#if ENABLE(TOUCH_EVENTS)
+#if ENABLE(IOS_TOUCH_EVENTS)
 
 - (NSArray *)_touchEventRegions
 {
@@ -4023,7 +4265,7 @@ IGNORE_WARNINGS_END
     }).autorelease();
 }
 
-#endif // ENABLE(TOUCH_EVENTS)
+#endif // ENABLE(IOS_TOUCH_EVENTS)
 
 // For backwards compatibility with the WebBackForwardList API, we honor both
 // a per-WebView and a per-preferences setting for whether to use the back/forward cache.
@@ -4271,7 +4513,15 @@ IGNORE_WARNINGS_END
 {
     if (_private && _private->page)
 #if PLATFORM(IOS_FAMILY)
-        _private->page->focusController().setActive([[self window] isKeyWindow]);
+    {
+        bool isKey = [[self window] isKeyWindow];
+        _private->page->focusController().setActive(isKey);
+        // Active and focused are not the same flag. Only the first was ever set
+        // here, so document.hasFocus() stayed false, the caret never appeared
+        // and typed characters were dropped on the way to the focused element -
+        // the keyboard is UIKit's to show, but the text is the engine's to take.
+        _private->page->focusController().setFocused(isKey);
+    }
 #else
         _private->page->focusController().setActive([[self window] _hasKeyAppearance]);
 #endif
@@ -4382,6 +4632,60 @@ IGNORE_WARNINGS_END
         return;
 
     viewGroup->userContentController().removeAllUserContent();
+}
+
+- (BOOL)_addContentRuleList:(NSString *)ruleJSON name:(NSString *)name
+{
+#if ENABLE(CONTENT_EXTENSIONS)
+    if (!_private || !_private->group || ![ruleJSON length] || ![name length])
+        return NO;
+
+    return _private->group->userContentController().addContentRuleList(name, ruleJSON);
+#else
+    UNUSED_PARAM(ruleJSON);
+    UNUSED_PARAM(name);
+    return NO;
+#endif
+}
+
+- (void)_removeContentRuleListNamed:(NSString *)name
+{
+#if ENABLE(CONTENT_EXTENSIONS)
+    if (!_private || !_private->group)
+        return;
+
+    _private->group->userContentController().removeContentRuleList(name);
+#else
+    UNUSED_PARAM(name);
+#endif
+}
+
++ (void)_setJavaScriptBytecodeCacheDirectory:(NSString *)path maximumSize:(unsigned long long)maximumSize
+{
+    WebThreadLock();
+    WebCore::ScriptBytecodeCache::singleton().setDirectory(String { path }, maximumSize);
+}
+
++ (void)_flushJavaScriptBytecodeCache
+{
+    WebThreadLock();
+    WebCore::ScriptBytecodeCache::singleton().flush();
+}
+
++ (void)_clearJavaScriptBytecodeCache
+{
+    WebThreadLock();
+    WebCore::ScriptBytecodeCache::singleton().clear();
+}
+
+- (void)_removeAllContentRuleLists
+{
+#if ENABLE(CONTENT_EXTENSIONS)
+    if (!_private || !_private->group)
+        return;
+
+    _private->group->userContentController().removeAllContentRuleLists();
+#endif
 }
 
 - (void)_forceRepaintForTesting
@@ -4747,10 +5051,12 @@ IGNORE_WARNINGS_END
     if (WebNodeHighlight *currentHighlight = [self currentNodeHighlight])
         [currentHighlight setNeedsDisplay];
 
+#if ENABLE(REMOTE_INSPECTOR)
     if (_private->indicateLayer) {
         [_private->indicateLayer setNeedsLayout];
         [_private->indicateLayer setNeedsDisplay];
     }
+#endif
 }
 
 - (BOOL)_wantsTelephoneNumberParsing
@@ -4918,6 +5224,12 @@ IGNORE_WARNINGS_END
 #if PLATFORM(IOS_FAMILY)
     _asyncForwarder = [[_WebSafeAsyncForwarder alloc] initWithForwarder:self];
 #endif
+#if defined(WEBKIT_IOS6)
+    _defaultTargetAnswersOnWebThread = [defaultTarget isKindOfClass:[WebDefaultFrameLoadDelegate class]]
+        || [defaultTarget isKindOfClass:[WebDefaultResourceLoadDelegate class]]
+        || [defaultTarget isKindOfClass:[WebDefaultEditingDelegate class]]
+        || [defaultTarget isKindOfClass:[WebDefaultUIKitDelegate class]];
+#endif
     return self;
 }
 
@@ -4944,6 +5256,15 @@ IGNORE_WARNINGS_END
 {
 #if PLATFORM(IOS_FAMILY)
     if (WebThreadIsCurrent()) {
+#if defined(WEBKIT_IOS6)
+        if (_defaultTargetAnswersOnWebThread
+            && invocation.selector != @selector(webView:runOpenPanelForFileButtonWithResultListener:configuration:)
+            && invocation.selector != @selector(webView:runOpenPanelForFileButtonWithResultListener:)
+            && ![_target respondsToSelector:invocation.selector]) {
+            [invocation invokeWithTarget:_defaultTarget];
+            return;
+        }
+#endif
         [invocation retainArguments];
         WebThreadCallDelegate(invocation);
         return;
@@ -8340,6 +8661,16 @@ FORWARD(toggleUnderline)
     [self _performResponderOperation:_cmd with:text];
 }
 
+#if defined(WEBKIT_IOS6)
+- (BOOL)_requiresKeyboardWhenFirstResponder
+{
+    if (auto* coreFrame = core([self _selectedOrMainFrame]))
+        if (auto* doc = coreFrame->document())
+            return doc->focusedElement() != nullptr;
+    return NO;
+}
+#endif
+
 - (NSDictionary *)typingAttributes
 {
     if (auto* coreFrame = core([self _selectedOrMainFrame]))
@@ -8586,6 +8917,17 @@ FORWARD(toggleUnderline)
     // Don't shrink a big disk cache, since that would cause churn.
     nsurlCacheDiskCapacity = std::max(nsurlCacheDiskCapacity, [nsurlCache diskCapacity]);
 
+#if defined(WEBKIT_IOS6)
+    cacheTotalCapacity = std::min<unsigned>(cacheTotalCapacity, 8 * 1024 * 1024);
+    cacheMaxDeadCapacity = std::min<unsigned>(cacheMaxDeadCapacity, 4 * 1024 * 1024);
+    cacheMinDeadCapacity = 0;
+    deadDecodedDataDeletionInterval = 1_s;
+
+    nsurlCacheMemoryCapacity = std::min<unsigned>(nsurlCacheMemoryCapacity, 1 * 1024 * 1024);
+
+    pageCacheSize = std::min<unsigned>(pageCacheSize, 1);
+#endif
+
     auto& memoryCache = WebCore::MemoryCache::singleton();
     memoryCache.setCapacities(cacheMinDeadCapacity, cacheMaxDeadCapacity, cacheTotalCapacity);
     memoryCache.setDeadDecodedDataDeletionInterval(deadDecodedDataDeletionInterval);
@@ -8593,7 +8935,9 @@ FORWARD(toggleUnderline)
     auto& pageCache = WebCore::BackForwardCache::singleton();
     pageCache.setMaxSize(pageCacheSize);
 #if PLATFORM(IOS_FAMILY)
+#if !defined(WEBKIT_IOS6)
     nsurlCacheMemoryCapacity = std::max(nsurlCacheMemoryCapacity, [nsurlCache memoryCapacity]);
+#endif
     CFURLCacheRef cfCache;
     if ((cfCache = [nsurlCache _CFURLCache]))
         CFURLCacheSetMemoryCapacity(cfCache, nsurlCacheMemoryCapacity);
@@ -8615,6 +8959,13 @@ FORWARD(toggleUnderline)
 + (WebCacheModel)_cacheModel
 {
     return s_cacheModel;
+}
+
++ (void)_setMemoryCacheCapacitiesForLowMemoryDevice
+{
+    auto& memoryCache = WebCore::MemoryCache::singleton();
+    memoryCache.setCapacities(0, 2 * 1024 * 1024, 4 * 1024 * 1024);
+    memoryCache.setDeadDecodedDataDeletionInterval(1_s);
 }
 
 #if !PLATFORM(IOS_FAMILY)
@@ -8839,10 +9190,26 @@ FORWARD(toggleUnderline)
 - (BOOL)_flushCompositingChanges
 {
     auto* frame = [self _mainCoreFrame];
-    if (frame && frame->view())
-        return frame->view()->flushCompositingStateIncludingSubframes();
+    if (!frame || !frame->view())
+        return YES;
 
-    return YES;
+#if defined(WEBKIT_IOS6)
+    if (RefPtr page = _private->page.get())
+        page->prepareCanvasesForDisplayOrFlushIfNeeded();
+#endif
+
+    BOOL flushed = frame->view()->flushCompositingStateIncludingSubframes();
+
+    // Correcting the pinned bars here, inside the engine's own transaction, was
+    // tried: the parent structural layer and its children would then reach the
+    // screen together, which is the right idea. It made the application
+    // measurably worse to use and is not carried. The mechanism is real - the
+    // parent moves in the engine's transaction on the web thread and the
+    // children are corrected from the main thread in another - but moving
+    // CALayers from the web thread while the main thread is doing the same is
+    // not a trade that paid.
+
+    return flushed;
 }
 
 #if PLATFORM(IOS_FAMILY)
@@ -9869,6 +10236,11 @@ void WebInstallMemoryPressureHandler(void)
         static std::once_flag onceFlag;
         std::call_once(onceFlag, [] {
             auto& memoryPressureHandler = MemoryPressureHandler::singleton();
+#if defined(WEBKIT_IOS6)
+            constexpr uint64_t processMemoryCeiling = 300 * MB;
+            memoryPressureHandler.setConfiguration(MemoryPressureHandler::Configuration {
+                processMemoryCeiling, 0.5, 0.65, std::nullopt, 10_s });
+#endif
             memoryPressureHandler.setLowMemoryHandler([] (Critical critical, Synchronous synchronous) {
 #if PLATFORM(IOS_FAMILY)
                 WebThreadRun(^{
@@ -9879,6 +10251,9 @@ void WebInstallMemoryPressureHandler(void)
 #endif
             });
             memoryPressureHandler.install();
+#if defined(WEBKIT_IOS6)
+            memoryPressureHandler.setShouldUsePeriodicMemoryMonitor(true);
+#endif
         });
     }
 }

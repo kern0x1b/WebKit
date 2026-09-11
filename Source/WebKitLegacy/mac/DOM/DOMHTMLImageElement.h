@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMHTMLImageElement_h
+#define WebKitLegacyDOM_DOMHTMLImageElement_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -51,3 +54,5 @@ WEBKIT_CLASS_DEPRECATED_MAC(10_4, 10_14)
 @property (readonly, copy) NSString *altDisplayString WEBKIT_AVAILABLE_MAC(10_5);
 @property (readonly, copy) NSURL *absoluteImageURL WEBKIT_AVAILABLE_MAC(10_5);
 @end
+
+#endif // WebKitLegacyDOM_DOMHTMLImageElement_h

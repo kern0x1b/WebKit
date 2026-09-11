@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMMouseEvent_h
+#define WebKitLegacyDOM_DOMMouseEvent_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -55,3 +58,5 @@ WEBKIT_CLASS_DEPRECATED_MAC(10_4, 10_14)
 @interface DOMMouseEvent (DOMMouseEventDeprecated)
 - (void)initMouseEvent:(NSString *)type :(BOOL)canBubble :(BOOL)cancelable :(DOMAbstractView *)view :(int)detail :(int)screenX :(int)screenY :(int)clientX :(int)clientY :(BOOL)ctrlKey :(BOOL)altKey :(BOOL)shiftKey :(BOOL)metaKey :(unsigned short)button :(id <DOMEventTarget>)relatedTarget WEBKIT_DEPRECATED_MAC(10_4, 10_5);
 @end
+
+#endif // WebKitLegacyDOM_DOMMouseEvent_h

@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMException_h
+#define WebKitLegacyDOM_DOMException_h
+
 /*
  * Copyright (C) 2004, 2006 Apple Inc. All rights reserved.
  * Copyright (C) 2006 Samuel Weinig <sam.weinig@gmail.com>
@@ -47,3 +50,5 @@ enum DOMExceptionCode {
     DOM_NAMESPACE_ERR                 = 14,
     DOM_INVALID_ACCESS_ERR            = 15
 } WEBKIT_ENUM_DEPRECATED_MAC(10_4, 10_14);
+
+#endif // WebKitLegacyDOM_DOMException_h

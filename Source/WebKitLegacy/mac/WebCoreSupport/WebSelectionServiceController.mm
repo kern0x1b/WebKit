@@ -33,7 +33,9 @@
 #import <WebCore/Page.h>
 #import <WebCore/Range.h>
 #import <WebCore/markup.h>
+#if PLATFORM(MAC)  // ios6: mac SPI
 #import <pal/spi/mac/NSSharingServiceSPI.h>
+#endif
 #import <wtf/TZoneMallocInlines.h>
 
 

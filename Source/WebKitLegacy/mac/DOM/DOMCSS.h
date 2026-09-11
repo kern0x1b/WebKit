@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMCSS_h
+#define WebKitLegacyDOM_DOMCSS_h
+
 /*
  * Copyright (C) 2004 Apple Inc. All rights reserved.
  * Copyright (C) 2006 Samuel Weinig <sam.weinig@gmail.com>
@@ -294,3 +297,5 @@
 - (NSString *)zIndex WEBKIT_AVAILABLE_MAC(10_4);
 - (void)setZIndex:(NSString *)zIndex WEBKIT_AVAILABLE_MAC(10_4);
 @end
+
+#endif // WebKitLegacyDOM_DOMCSS_h

@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMTextEvent_h
+#define WebKitLegacyDOM_DOMTextEvent_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -34,3 +37,5 @@ WEBKIT_CLASS_DEPRECATED_MAC(10_5, 10_14)
 
 - (void)initTextEvent:(NSString *)typeArg canBubbleArg:(BOOL)canBubbleArg cancelableArg:(BOOL)cancelableArg viewArg:(DOMAbstractView *)viewArg dataArg:(NSString *)dataArg;
 @end
+
+#endif // WebKitLegacyDOM_DOMTextEvent_h

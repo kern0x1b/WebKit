@@ -43,7 +43,9 @@
 #import <WebCore/ValidationBubble.h>
 #import <WebCore/WebCoreJITOperations.h>
 #import <WebCore/WebCoreMainThread.h>
+#if PLATFORM(MAC)  // ios6: mac SPI
 #import <pal/spi/mac/NSWindowSPI.h>
+#endif
 #import <wtf/MainThread.h>
 #import <wtf/RunLoop.h>
 #import <wtf/SetForScope.h>
@@ -119,6 +121,22 @@ int pluginDatabaseClientCount = 0;
 
 #if !PLATFORM(IOS_FAMILY)
     windowOcclusionDetectionEnabled = YES;
+#else
+    // "No rect has been handed to us yet" is spelled CGRectNull, which is not
+    // all zeroes - an object's ivars start as CGRectZero, and that is a real,
+    // empty rect. _synchronizeCustomFixedPositionLayoutRect() tests for null to
+    // decide whether to publish, so leaving it zeroed makes the first rendering
+    // update publish an empty viewport for fixed-position layout, and every
+    // fixed element on the page then resolves against zero width for the rest
+    // of the WebView's life. A UIKit client hides this by pushing a real rect
+    // early; a client that never pushes one gets the empty rect.
+    pendingFixedPositionLayoutRect = CGRectNull;
+#if defined(WEBKIT_IOS6)
+    lastAppliedFixedPositionLayoutRect = CGRectNull;
+    pendingLayoutViewportRect = CGRectNull;
+    layoutViewportRectUpdateScheduled = false;
+    preferencesChangedSweepScheduled = NO;
+#endif
 #endif
 
     zoomMultiplier = 1;

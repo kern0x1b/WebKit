@@ -25,6 +25,7 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
+#import "config.h"
 #import "DOM.h"
 
 #import "ExceptionHandlers.h"
@@ -662,7 +663,21 @@ id<DOMEventTarget> kit(WebCore::EventTarget* target)
     auto* renderer = core(self)->renderer();
     if (!renderer)
         return nil;
-    return WebCore::Style::fontCascade(renderer->style()).primaryFont().ctFont();
+    CTFontRef font = WebCore::Style::fontCascade(renderer->style()).primaryFont().ctFont();
+#if PLATFORM(IOS_FAMILY)
+    // The only caller is the embedder, and on iOS 6 that is UIKit, which sends
+    // -pointSize to whatever comes back.
+    Class fontClass = NSClassFromString(@"UIFont");
+    if (font && fontClass) {
+        RetainPtr<CFStringRef> postScriptName = adoptCF(CTFontCopyPostScriptName(font));
+        CGFloat size = CTFontGetSize(font);
+        id uiFont = postScriptName ? [fontClass fontWithName:(NSString *)postScriptName.get() size:size] : nil;
+        if (!uiFont)
+            uiFont = [fontClass systemFontOfSize:size];
+        return (CTFontRef)uiFont;
+    }
+#endif
+    return font;
 }
 
 #if PLATFORM(MAC)

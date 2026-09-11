@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOM_h
+#define WebKitLegacyDOM_DOM_h
+
 /*
  * Copyright (C) 2004, 2006 Apple Inc. All rights reserved.
  * Copyright (C) 2006 Samuel Weinig <sam.weinig@gmail.com>
@@ -34,3 +37,5 @@
 #import <WebKitLegacy/DOMTraversal.h>
 #import <WebKitLegacy/DOMViews.h>
 #import <WebKitLegacy/DOMXPath.h>
+
+#endif // WebKitLegacyDOM_DOM_h

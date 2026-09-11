@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMOverflowEvent_h
+#define WebKitLegacyDOM_DOMOverflowEvent_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -39,3 +42,5 @@ WEBKIT_CLASS_DEPRECATED_MAC(10_5, 10_14)
 
 - (void)initOverflowEvent:(unsigned short)orient horizontalOverflow:(BOOL)horizontalOverflow verticalOverflow:(BOOL)verticalOverflow;
 @end
+
+#endif // WebKitLegacyDOM_DOMOverflowEvent_h

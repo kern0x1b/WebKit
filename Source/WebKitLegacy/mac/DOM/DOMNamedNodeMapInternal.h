@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMNamedNodeMapInternal_h
+#define WebKitLegacyDOM_DOMNamedNodeMapInternal_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -30,3 +33,5 @@ class NamedNodeMap;
 }
 
 DOMNamedNodeMap *kit(WebCore::NamedNodeMap*);
+
+#endif // WebKitLegacyDOM_DOMNamedNodeMapInternal_h

@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMHTMLHeadingElement_h
+#define WebKitLegacyDOM_DOMHTMLHeadingElement_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -31,3 +34,5 @@ WEBKIT_CLASS_DEPRECATED_MAC(10_4, 10_14)
 @interface DOMHTMLHeadingElement : DOMHTMLElement
 @property (copy) NSString *align;
 @end
+
+#endif // WebKitLegacyDOM_DOMHTMLHeadingElement_h

@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMHTMLPreElement_h
+#define WebKitLegacyDOM_DOMHTMLPreElement_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -30,3 +33,5 @@ WEBKIT_CLASS_DEPRECATED_MAC(10_4, 10_14)
 @property int width;
 @property BOOL wrap WEBKIT_AVAILABLE_MAC(10_5);
 @end
+
+#endif // WebKitLegacyDOM_DOMHTMLPreElement_h

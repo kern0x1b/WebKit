@@ -26,6 +26,7 @@
  */
 
 
+#import "config.h"
 #import <WebCore/CSSRule.h>
 #import <WebCore/CSSStyleSheet.h>
 #import <WebCore/DeprecatedCSSOMValue.h>

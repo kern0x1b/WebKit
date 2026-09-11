@@ -24,6 +24,7 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
+#import "config.h"
 #import "DOMDocumentFragmentInternal.h"
 #import "DOMExtensions.h"
 #import "DOMHTMLCollectionInternal.h"
@@ -134,6 +135,13 @@
     scrollPositionChangeOptions.clamping = WebCore::ScrollClamping::Unclamped;
     scrollableArea->scrollToOffset(WebCore::ScrollOffset(x, y), scrollPositionChangeOptions);
 }
+
+#if defined(WEBKIT_IOS6)
+- (void)setScrollXOffset:(int)x scrollYOffset:(int)y adjustForPurpleCaret:(BOOL)adjustForPurpleCaret
+{
+    [self setScrollXOffset:x scrollYOffset:y adjustForIOSCaret:adjustForPurpleCaret];
+}
+#endif
 
 - (void)absolutePosition:(int *)x :(int *)y :(int *)w :(int *)h
 {

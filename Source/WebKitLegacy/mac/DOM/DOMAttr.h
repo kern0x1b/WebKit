@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMAttr_h
+#define WebKitLegacyDOM_DOMAttr_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -37,3 +40,5 @@ WEBKIT_CLASS_DEPRECATED_MAC(10_4, 10_14)
 @property (readonly, strong) DOMElement *ownerElement;
 @property (readonly, strong) DOMCSSStyleDeclaration *style WEBKIT_AVAILABLE_MAC(10_5);
 @end
+
+#endif // WebKitLegacyDOM_DOMAttr_h

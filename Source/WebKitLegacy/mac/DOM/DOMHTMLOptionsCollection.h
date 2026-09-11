@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMHTMLOptionsCollection_h
+#define WebKitLegacyDOM_DOMHTMLOptionsCollection_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -39,3 +42,5 @@ WEBKIT_CLASS_DEPRECATED_MAC(10_4, 10_14)
 - (void)remove:(unsigned)index WEBKIT_AVAILABLE_MAC(10_6);
 - (DOMNode *)item:(unsigned)index;
 @end
+
+#endif // WebKitLegacyDOM_DOMHTMLOptionsCollection_h

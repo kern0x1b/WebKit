@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMImplementationInternal_h
+#define WebKitLegacyDOM_DOMImplementationInternal_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -30,3 +33,5 @@ class DOMImplementation;
 }
 
 DOMImplementation *kit(WebCore::DOMImplementation*);
+
+#endif // WebKitLegacyDOM_DOMImplementationInternal_h

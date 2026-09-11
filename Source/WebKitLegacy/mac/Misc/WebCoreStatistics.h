@@ -63,6 +63,7 @@
 + (void)setShouldPrintExceptions:(BOOL)print;
 
 + (NSDictionary *)memoryStatistics;
++ (NSDictionary *)codeMemoryStatistics;
 + (void)returnFreeMemoryToSystem;
 
 + (int)cachedPageCount;

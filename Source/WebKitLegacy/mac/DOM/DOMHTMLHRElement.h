@@ -1,3 +1,6 @@
+#ifndef WebKitLegacyDOM_DOMHTMLHRElement_h
+#define WebKitLegacyDOM_DOMHTMLHRElement_h
+
 /*
  * Copyright (C) 2004-2016 Apple Inc. All rights reserved.
  *
@@ -34,3 +37,5 @@ WEBKIT_CLASS_DEPRECATED_MAC(10_4, 10_14)
 @property (copy) NSString *size;
 @property (copy) NSString *width;
 @end
+
+#endif // WebKitLegacyDOM_DOMHTMLHRElement_h

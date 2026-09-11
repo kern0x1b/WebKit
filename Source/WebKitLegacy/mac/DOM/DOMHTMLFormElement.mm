@@ -23,6 +23,7 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#import "config.h"
 #import "DOMHTMLFormElementInternal.h"
 
 #import "DOMHTMLCollectionInternal.h"

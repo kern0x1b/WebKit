@@ -304,10 +304,17 @@ void SocketStreamHandleImpl::createStreams()
     CFWriteStreamRef writeStream = 0;
     CFStreamCreatePairWithSocketToHost(0, host.get(), port(), &readStream, &writeStream);
     CFWriteStreamSetProperty(writeStream, _kCFStreamSocketSetNoDelay, kCFBooleanTrue);
+#if !defined(WEBKIT_IOS6)
     if (m_auditData.sourceApplicationAuditData && m_auditData.sourceApplicationAuditData.get()) {
         CFReadStreamSetProperty(readStream, kCFStreamPropertySourceApplication, m_auditData.sourceApplicationAuditData.get());
         CFWriteStreamSetProperty(writeStream, kCFStreamPropertySourceApplication, m_auditData.sourceApplicationAuditData.get());
     }
+#endif
+    // The stream is not tagged with the application it belongs to on this
+    // system: kCFStreamPropertySourceApplication does not exist in a CFNetwork
+    // from 2012, and referring to it stops the whole engine from loading. The
+    // tag is for the system's own accounting; the connection is the same
+    // without it.
 
     m_readStream = adoptCF(readStream);
     m_writeStream = adoptCF(writeStream);

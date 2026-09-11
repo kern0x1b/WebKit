@@ -24,6 +24,13 @@
  */
 
 #import "WebChromeClientIOS.h"
+#import <WebCore/ShareData.h>
+#import <WebCore/WebCoreThreadRun.h>
+#import <wtf/BlockPtr.h>
+#import <UIKit/UIKit.h>
+#import <WebCore/UserGestureIndicator.h>
+#import <WebCore/HTMLSelectElement.h>
+#import <WebCore/HTMLTextFormControlElement.h>
 
 #if PLATFORM(IOS_FAMILY)
 
@@ -58,6 +65,7 @@
 #import <WebCore/Icon.h>
 #import <WebCore/IntRect.h>
 #import <WebCore/LocalFrameInlines.h>
+#import <WebCore/LocalFrameView.h>
 #import <WebCore/NodeDocument.h>
 #import <WebCore/PlatformScreen.h>
 #import <WebCore/RenderBox.h>
@@ -97,6 +105,36 @@ static WebMediaCaptureType webMediaCaptureType(MediaCaptureType type)
 #endif
 
 WTF_MAKE_TZONE_ALLOCATED_IMPL(WebChromeClientIOS);
+
+#if defined(WEBKIT_IOS6)
+@interface NSObject (RevViewportForFrameCompat)
+- (void)webView:(WebView *)webView didReceiveViewportArguments:(NSDictionary *)arguments forFrame:(WebFrame *)frame;
+@end
+
+static inline bool uiKitDelegateImplements(WebView *webView, SEL selector)
+{
+    return [[webView _UIKitDelegate] respondsToSelector:selector];
+}
+
+static void callUIKitDelegateAsync(WebView *webView, SEL selector)
+{
+    if (![webView _UIKitDelegateForwarder])
+        return;
+
+    RetainPtr<id> delegate = [webView _UIKitDelegate];
+    if (![delegate respondsToSelector:selector])
+        return;
+
+    if (!WebThreadIsCurrent()) {
+        [delegate.get() performSelector:selector withObject:webView];
+        return;
+    }
+
+    RunLoop::mainSingleton().dispatch([delegate = WTF::move(delegate), webView = retainPtr(webView), selector] {
+        [delegate.get() performSelector:selector withObject:webView.get()];
+    });
+}
+#endif
 
 void WebChromeClientIOS::setWindowRect(const WebCore::FloatRect& r)
 {
@@ -161,14 +199,67 @@ void WebChromeClientIOS::runOpenPanel(LocalFrame&, FileChooser& chooser)
         [[webView() _UIKitDelegateForwarder] webView:webView() runOpenPanelForFileButtonWithResultListener:listener.get() configuration:configuration];
 }
 
-void WebChromeClientIOS::showShareSheet(ShareDataWithParsedURL&&, CompletionHandler<void(bool)>&&)
+#if defined(WEBKIT_IOS6)
+static UIViewController *viewControllerToPresentFrom()
 {
+    UIViewController *presenter = [[[UIApplication sharedApplication] keyWindow] rootViewController];
+    while (presenter.presentedViewController)
+        presenter = presenter.presentedViewController;
+    return presenter;
+}
+#endif
+
+void WebChromeClientIOS::showShareSheet(ShareDataWithParsedURL&& data, CompletionHandler<void(bool)>&& completionHandler)
+{
+#if defined(WEBKIT_IOS6)
+    auto items = adoptNS([[NSMutableArray alloc] init]);
+    if (!data.shareData.text.isEmpty())
+        [items addObject:data.shareData.text.createNSString().get()];
+    if (data.url)
+        [items addObject:data.url->createNSURL().get()];
+    if (![items count] && !data.shareData.title.isEmpty())
+        [items addObject:data.shareData.title.createNSString().get()];
+
+    if (![items count]) {
+        completionHandler(false);
+        return;
+    }
+
+    dispatch_async(dispatch_get_main_queue(), makeBlockPtr([items = WTF::move(items), completionHandler = WTF::move(completionHandler)] () mutable {
+        auto finish = [completionHandler = WTF::move(completionHandler)] (bool completed) mutable {
+            WebThreadRun(makeBlockPtr([completionHandler = WTF::move(completionHandler), completed] () mutable {
+                completionHandler(completed);
+            }).get());
+        };
+
+        UIViewController *presenter = viewControllerToPresentFrom();
+        if (!presenter) {
+            finish(false);
+            return;
+        }
+
+        auto controller = adoptNS([[UIActivityViewController alloc] initWithActivityItems:items.get() applicationActivities:nil]);
+ALLOW_DEPRECATED_DECLARATIONS_BEGIN
+        [controller setCompletionHandler:makeBlockPtr([finish = WTF::move(finish)] (NSString *, BOOL completed) mutable {
+            finish(completed);
+        }).get()];
+ALLOW_DEPRECATED_DECLARATIONS_END
+        [presenter presentViewController:controller.get() animated:YES completion:nil];
+    }).get());
+#else
+    UNUSED_PARAM(data);
+    completionHandler(false);
+#endif
 }
 
-#if ENABLE(IOS_TOUCH_EVENTS)
+#if ENABLE(IOS_TOUCH_EVENTS) || ENABLE(TOUCH_EVENTS)
 
 void WebChromeClientIOS::didPreventDefaultForEvent()
 {
+#if defined(WEBKIT_IOS6)
+    if (!uiKitDelegateImplements(webView(), @selector(webViewDidPreventDefaultForEvent:)))
+        return;
+#endif
     [[webView() _UIKitDelegateForwarder] webViewDidPreventDefaultForEvent:webView()];
 }
 
@@ -198,6 +289,16 @@ static inline NSString *nameForViewportFitValue(ViewportFit value)
     return WebViewportFitAutoValue;
 }
 
+// UIKit lays the page out from these numbers, and the sentinel this WebKit uses
+// for device-width is not one it understands - left as it is the page is laid
+// out at the desktop default and then scaled down to fit.
+static inline float resolvedViewportLength(float length, float deviceLength)
+{
+    if (length == WebCore::ViewportArguments::ValueDeviceWidth || length == WebCore::ViewportArguments::ValueDeviceHeight)
+        return deviceLength;
+    return length;
+}
+
 static inline NSDictionary *dictionaryForViewportArguments(const WebCore::ViewportArguments& arguments)
 {
     return @{ WebViewportInitialScaleKey: @(arguments.zoom),
@@ -206,8 +307,8 @@ static inline NSDictionary *dictionaryForViewportArguments(const WebCore::Viewpo
               WebViewportUserScalableKey: @(arguments.userZoom),
               WebViewportShrinkToFitKey: @(0),
               WebViewportFitKey: nameForViewportFitValue(arguments.viewportFit),
-              WebViewportWidthKey: @(arguments.width),
-              WebViewportHeightKey: @(arguments.height) };
+              WebViewportWidthKey: @(resolvedViewportLength(arguments.width, WebCore::screenSize().width())),
+              WebViewportHeightKey: @(resolvedViewportLength(arguments.height, WebCore::screenSize().height())) };
 }
 
 FloatSize WebChromeClientIOS::screenSize() const
@@ -217,9 +318,10 @@ FloatSize WebChromeClientIOS::screenSize() const
 
 FloatSize WebChromeClientIOS::availableScreenSize() const
 {
-    // WebKit1 code should query the WAKWindow for the available screen size.
-    ASSERT_NOT_REACHED();
-    return FloatSize();
+    // Upstream asserts here because its WebKit1 callers read the WAKWindow
+    // directly. Driven by UIKit the viewport machinery does ask the chrome
+    // client, and a zero size makes device-width resolve to the desktop default.
+    return FloatSize(WebCore::availableScreenSize());
 }
 
 FloatSize WebChromeClientIOS::overrideScreenSize() const
@@ -234,7 +336,14 @@ FloatSize WebChromeClientIOS::overrideAvailableScreenSize() const
 
 void WebChromeClientIOS::dispatchViewportPropertiesDidChange(const WebCore::ViewportArguments& arguments) const
 {
-    [[webView() _UIKitDelegateForwarder] webView:webView() didReceiveViewportArguments:dictionaryForViewportArguments(arguments)];
+    NSDictionary *dictionary = dictionaryForViewportArguments(arguments);
+#if defined(WEBKIT_IOS6)
+    if (uiKitDelegateImplements(webView(), @selector(webView:didReceiveViewportArguments:forFrame:))) {
+        [[webView() _UIKitDelegateForwarder] webView:webView() didReceiveViewportArguments:dictionary forFrame:[webView() mainFrame]];
+        return;
+    }
+#endif
+    [[webView() _UIKitDelegateForwarder] webView:webView() didReceiveViewportArguments:dictionary];
 }
 
 void WebChromeClientIOS::dispatchDisabledAdaptationsDidChange(const OptionSet<WebCore::DisabledAdaptations>&) const
@@ -258,11 +367,19 @@ void WebChromeClientIOS::didLayout(LayoutType changeType)
 
 void WebChromeClientIOS::didStartOverflowScroll()
 {
+#if defined(WEBKIT_IOS6)
+    if (!uiKitDelegateImplements(webView(), @selector(webViewDidStartOverflowScroll:)))
+        return;
+#endif
     [[[webView() _UIKitDelegateForwarder] asyncForwarder] webViewDidStartOverflowScroll:webView()];
 }
 
 void WebChromeClientIOS::didEndOverflowScroll()
 {
+#if defined(WEBKIT_IOS6)
+    if (!uiKitDelegateImplements(webView(), @selector(webViewDidEndOverflowScroll:)))
+        return;
+#endif
     [[[webView() _UIKitDelegateForwarder] asyncForwarder] webViewDidEndOverflowScroll:webView()];
 }
 
@@ -279,10 +396,29 @@ void WebChromeClientIOS::restoreFormNotifications()
         m_formNotificationSuppressions = 0;
 }
 
-void WebChromeClientIOS::elementDidFocus(WebCore::Element& element, const WebCore::FocusOptions&)
+void WebChromeClientIOS::elementDidFocus(WebCore::Element& element, const WebCore::FocusOptions& options)
 {
-    if (m_formNotificationSuppressions <= 0)
-        [[webView() _UIKitDelegateForwarder] webView:webView() elementDidFocusNode:kit(&element)];
+    if (m_formNotificationSuppressions > 0)
+        return;
+
+    // UIKit answers this by bringing the focused element into view, and a feed
+    // that focuses something as it re-renders therefore throws the reader back
+    // to the top of the document mid-scroll. Measured on the device: the offset
+    // went from 870 to 0 twenty milliseconds after this message, with
+    // -shouldScrollToPoint:forFrame: in between.
+    //
+    // Only somewhere text can be typed is worth bringing into view. A feed
+    // moves focus between its own containers as it re-renders - and the gesture
+    // flag is still set while that happens, so it cannot be used to tell them
+    // apart - while the keyboard, which is what this message exists for, only
+    // ever concerns a form control or an editable box.
+    bool canBeTypedInto = is<WebCore::HTMLTextFormControlElement>(element)
+        || is<WebCore::HTMLSelectElement>(element)
+        || element.hasEditableStyle();
+    if (!canBeTypedInto)
+        return;
+
+    [[webView() _UIKitDelegateForwarder] webView:webView() elementDidFocusNode:kit(&element)];
 }
 
 void WebChromeClientIOS::elementDidBlur(WebCore::Element& element)
@@ -311,7 +447,11 @@ void WebChromeClientIOS::attachRootGraphicsLayer(LocalFrame&, GraphicsLayer* gra
 
 void WebChromeClientIOS::didFlushCompositingLayers()
 {
+#if defined(WEBKIT_IOS6)
+    callUIKitDelegateAsync(webView(), @selector(webViewDidCommitCompositingLayerChanges:));
+#else
     [[[webView() _UIKitDelegateForwarder] asyncForwarder] webViewDidCommitCompositingLayerChanges:webView()];
+#endif
 }
 
 bool WebChromeClientIOS::fetchCustomFixedPositionLayoutRect(IntRect& rect)
@@ -332,6 +472,11 @@ void WebChromeClientIOS::updateViewportConstrainedLayers(HashMap<PlatformLayer*,
 
 void WebChromeClientIOS::addOrUpdateScrollingLayer(Node* node, PlatformLayer* scrollingLayer, PlatformLayer* contentsLayer, const IntSize& scrollSize, bool allowHorizontalScrollbar, bool allowVerticalScrollbar)
 {
+#if defined(WEBKIT_IOS6)
+    if (!uiKitDelegateImplements(webView(), @selector(webView:didCreateOrUpdateScrollingLayer:withContentsLayer:scrollSize:forNode:allowHorizontalScrollbar:allowVerticalScrollbar:)))
+        return;
+#endif
+
     DOMNode *domNode = kit(node);
 
     [[[webView() _UIKitDelegateForwarder] asyncForwarder] webView:webView() didCreateOrUpdateScrollingLayer:scrollingLayer withContentsLayer:contentsLayer scrollSize:[NSValue valueWithSize:scrollSize] forNode:domNode
@@ -340,6 +485,11 @@ void WebChromeClientIOS::addOrUpdateScrollingLayer(Node* node, PlatformLayer* sc
 
 void WebChromeClientIOS::removeScrollingLayer(Node* node, PlatformLayer* scrollingLayer, PlatformLayer* contentsLayer)
 {
+#if defined(WEBKIT_IOS6)
+    if (!uiKitDelegateImplements(webView(), @selector(webView:willRemoveScrollingLayer:withContentsLayer:forNode:)))
+        return;
+#endif
+
     DOMNode *domNode = kit(node);
     [[[webView() _UIKitDelegateForwarder] asyncForwarder] webView:webView() willRemoveScrollingLayer:scrollingLayer withContentsLayer:contentsLayer forNode:domNode];
 }
