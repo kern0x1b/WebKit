@@ -41,6 +41,7 @@
 #include "WasmModuleInformation.h"
 #include "WasmTierUpCount.h"
 #include <wtf/Box.h>
+#include <wtf/Expected.h>
 
 extern "C" void SYSV_ABI dumpProcedure(void*);
 
@@ -49,7 +50,7 @@ namespace JSC::Wasm {
 class IPIntCallee;
 class Module;
 
-std::expected<std::unique_ptr<InternalFunction>, String> parseAndCompileOMG(CompilationContext&, IPIntCallee&, OptimizingJITCallee&, const FunctionData&, const RTT&, Vector<UnlinkedWasmToWasmCall>&, Module&, CalleeGroup&, const ModuleInformation&, MemoryMode, CompilationMode, FunctionCodeIndex functionIndex, uint32_t loopIndexForOSREntry);
+Expected<std::unique_ptr<InternalFunction>, String> parseAndCompileOMG(CompilationContext&, IPIntCallee&, OptimizingJITCallee&, const FunctionData&, const RTT&, Vector<UnlinkedWasmToWasmCall>&, Module&, CalleeGroup&, const ModuleInformation&, MemoryMode, CompilationMode, FunctionCodeIndex functionIndex, uint32_t loopIndexForOSREntry);
 
 } // namespace JSC::Wasm
 

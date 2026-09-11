@@ -99,7 +99,11 @@ void ObjectInitializationScope::verifyPropertiesAreInitialized(JSObject* object)
     }
 
     auto isSafeEmptyValueForGCScanning = [] (JSValue value) {
+#if USE(JSVALUE64)
         return !value;
+#else
+        return !value || !JSValue::encode(value);
+#endif
     };
 
     for (int64_t i = 0; i < static_cast<int64_t>(structure->outOfLineCapacity()); i++) {

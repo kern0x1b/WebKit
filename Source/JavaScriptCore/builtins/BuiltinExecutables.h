@@ -42,30 +42,9 @@ class VM;
 #define BUILTIN_NAME_ONLY(name, functionName, overriddenName, length) name,
 enum class BuiltinCodeIndex {
     JSC_FOREACH_BUILTIN_CODE(BUILTIN_NAME_ONLY)
+    NumberOfBuiltinCodes
 };
 #undef BUILTIN_NAME_ONLY
-
-#define COUNT_BUILTIN_CODE(name, functionName, overriddenName, length) + 1
-static constexpr unsigned numberOfBuiltinCodes = 0 JSC_FOREACH_BUILTIN_CODE(COUNT_BUILTIN_CODE);
-#undef COUNT_BUILTIN_CODE
-
-// Every field is a function of the source characters alone, which is what lets the builtins generator
-// compute these at build time.
-struct BuiltinSourceMetadata {
-    unsigned sourceLength { 0 };
-    unsigned parametersStart { 0 };
-    unsigned parameterCount { 0 };
-    unsigned lineCount { 0 };
-    unsigned endColumn { 0 };
-    unsigned offsetOfLastNewline { 0 };
-    unsigned positionBeforeLastNewlineLineStartOffset { 0 };
-    int closeBraceOffsetFromEnd { 0 };
-    bool isAsyncFunction { false };
-    bool isInStrictContext { false };
-};
-
-// Emitted by the builtins generator, indexed by BuiltinCodeIndex.
-extern constinit const BuiltinSourceMetadata s_JSCBuiltinSourceMetadata[numberOfBuiltinCodes];
 
 class BuiltinExecutables {
     WTF_MAKE_TZONE_ALLOCATED(BuiltinExecutables);
@@ -91,12 +70,10 @@ SourceCode name##Source();
 private:
     VM& m_vm;
 
-    static UnlinkedFunctionExecutable* createExecutable(VM&, const SourceCode&, const BuiltinSourceMetadata&, const Identifier&, ImplementationVisibility, ConstructorKind, ConstructAbility, InlineAttribute, NeedsClassFieldInitializer, PrivateBrandRequirement);
-
-    UnlinkedFunctionExecutable* createBuiltinExecutable(const SourceCode&, const BuiltinSourceMetadata&, const Identifier&, ImplementationVisibility, ConstructorKind, ConstructAbility, InlineAttribute);
+    UnlinkedFunctionExecutable* createBuiltinExecutable(const SourceCode&, const Identifier&, ImplementationVisibility, ConstructorKind, ConstructAbility, InlineAttribute);
 
     const Ref<StringSourceProvider> m_combinedSourceProvider;
-    UnlinkedFunctionExecutable* m_unlinkedExecutables[numberOfBuiltinCodes] { };
+    UnlinkedFunctionExecutable* m_unlinkedExecutables[static_cast<unsigned>(BuiltinCodeIndex::NumberOfBuiltinCodes)] { };
 };
 
 }

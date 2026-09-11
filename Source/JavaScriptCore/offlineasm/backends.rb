@@ -74,9 +74,13 @@ def canonicalizeBackendNames(backendNames)
     backendNames.each {
         | backendName |
         backendName = backendName.upcase
-        backendName.sub!(/ARMV7([KS]?)(.*)/) { | _ | 'ARMv7' + $1.downcase + $2 }
-        backendName = "ARM64" if backendName == "ARM64_32"
+        if backendName =~ /ARM.*/
+            backendName.sub!(/ARMV7([KS]?)(.*)/) { | _ | 'ARMv7' + $1.downcase + $2 }
+            backendName = "ARM64" if backendName == "ARM64_32"
+        end
+        backendName = "X86" if backendName == "I386"
         newBackendNames << backendName
+        newBackendNames << "ARMv7" if backendName.start_with?("ARMv7")
     }
     newBackendNames.uniq
 end

@@ -48,13 +48,13 @@ JITMathICInlineResult JITSubGenerator::generateInline(CCallHelpers& jit, MathICG
 
     if (lhs.isOnlyNumber() && rhs.isOnlyNumber()) {
         if (!m_leftOperand.definitelyIsNumber())
-            state.slowPathJumps.append(jit.branchIfNotNumber(m_left));
+            state.slowPathJumps.append(jit.branchIfNotNumber(m_left, m_scratchGPR));
         if (!m_rightOperand.definitelyIsNumber())
-            state.slowPathJumps.append(jit.branchIfNotNumber(m_right));
+            state.slowPathJumps.append(jit.branchIfNotNumber(m_right, m_scratchGPR));
         state.slowPathJumps.append(jit.branchIfInt32(m_left));
         state.slowPathJumps.append(jit.branchIfInt32(m_right));
-        jit.unboxDouble(m_left, m_scratchGPR, m_leftFPR);
-        jit.unboxDouble(m_right, m_scratchGPR, m_rightFPR);
+        jit.unboxDoubleNonDestructive(m_left, m_leftFPR, m_scratchGPR);
+        jit.unboxDoubleNonDestructive(m_right, m_rightFPR, m_scratchGPR);
         jit.subDouble(m_rightFPR, m_leftFPR);
         jit.boxDouble(m_leftFPR, m_result);
 

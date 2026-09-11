@@ -80,11 +80,11 @@ void JITStubRoutine::observeZeroRefCount()
     });
 }
 
-bool JITStubRoutine::reconcileWeakReferencesAtGCEnd(VM& vm)
+bool JITStubRoutine::visitWeak(VM& vm)
 {
     bool result = true;
     runWithDowncast([&](auto* derived) {
-        result = derived->reconcileWeakReferencesAtGCEndImpl(vm);
+        result = derived->visitWeakImpl(vm);
     });
     return result;
 }

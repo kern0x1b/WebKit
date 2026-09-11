@@ -72,6 +72,4 @@ private:
 
 JS_EXPORT_PRIVATE std::optional<ISO8601::ExactTime> bigIntValueToExactTime(JSGlobalObject*, JSValue bigIntValue, ASCIILiteral typeName);
 
-TemporalInstant* createTemporalInstant(JSGlobalObject*, ISO8601::ExactTime, TemporalNewTarget);
-
 } // namespace JSC

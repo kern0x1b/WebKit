@@ -31,7 +31,6 @@
 
 #include <JavaScriptCore/GPRInfo.h>
 #include <JavaScriptCore/MacroAssembler.h>
-#include <tuple>
 #include <wtf/WeakRandom.h>
 
 namespace JSC {
@@ -65,14 +64,10 @@ class BinarySwitch {
 public:
     enum Type {
         Int32,
-        IntPtr,
-        UInt32CheckRuns,
+        IntPtr
     };
     
     BinarySwitch(GPRReg value, std::span<const int64_t> cases, Type);
-    // Contiguous unsigned key runs: each entry is (firstKey, length). firstKey of run 0 must be 0,
-    // and each subsequent run must start immediately after the previous (no holes).
-    BinarySwitch(GPRReg value, std::span<const std::tuple<uint32_t, size_t>> runs);
     ~BinarySwitch();
     
     unsigned caseIndex() const { return m_cases[m_caseIndex].index; }
@@ -83,10 +78,7 @@ public:
     MacroAssembler::JumpList& fallThrough() LIFETIME_BOUND { return m_fallThrough; }
     
 private:
-    bool isCheckRuns() const { return m_type == UInt32CheckRuns; }
-
     void build(unsigned start, bool hardStart, unsigned end);
-    void buildCheckRuns(unsigned start, unsigned end);
     
     struct Case {
         Case() { }
@@ -112,8 +104,6 @@ private:
         NotEqualToFallThrough,
         NotEqualToPush,
         LessThanToPush,
-        BelowToPush,
-        AboveOrEqualToFallThrough,
         Pop,
         ExecuteCase
     };
@@ -142,7 +132,6 @@ private:
     GPRReg m_value;
     unsigned m_index { 0 };
     unsigned m_caseIndex { UINT_MAX };
-    unsigned m_totalCases { 0 };
 };
 
 } // namespace JSC

@@ -43,8 +43,6 @@ class JSModuleNamespaceObject;
 class JSMap;
 class JSPromise;
 
-enum class SourceProviderSourceType : uint8_t;
-
 // Based on the Source Text Module Record
 // http://www.ecma-international.org/ecma-262/6.0/#sec-source-text-module-records
 class AbstractModuleRecord : public JSInternalFieldObjectImpl<2> {
@@ -87,11 +85,10 @@ public:
         };
 
         static ExportEntry NODELETE createLocal(const Identifier& exportName, const Identifier& localName);
-        static ExportEntry NODELETE createIndirect(const Identifier& exportName, const Identifier& importName, const Identifier& moduleName, ScriptFetchParameters::Type moduleRequestType);
-        static ExportEntry NODELETE createNamespace(const Identifier& exportName, const Identifier& moduleName, ScriptFetchParameters::Type moduleRequestType);
+        static ExportEntry NODELETE createIndirect(const Identifier& exportName, const Identifier& importName, const Identifier& moduleName);
+        static ExportEntry NODELETE createNamespace(const Identifier& exportName, const Identifier& moduleName);
 
         Type type;
-        ScriptFetchParameters::Type moduleRequestType { ScriptFetchParameters::Type::JavaScript };
         Identifier exportName;
         Identifier moduleName;
         Identifier importName;
@@ -104,31 +101,12 @@ public:
     struct ImportEntry {
         ImportEntryType type;
         ModulePhase phase { ModulePhase::Evaluation };
-        ScriptFetchParameters::Type moduleRequestType { ScriptFetchParameters::Type::JavaScript };
         Identifier moduleRequest;
         Identifier importName;
         Identifier localName;
     };
 
-    using StarExportEntry = std::pair<RefPtr<UniquedStringImpl>, ScriptFetchParameters::Type>;
-
-    struct StarExportEntryHash {
-        static unsigned hash(const StarExportEntry& entry)
-        {
-            unsigned identifierHash = entry.first ? entry.first->existingSymbolAwareHash() : 0;
-            unsigned enumHash(entry.second);
-            return WTF::pairIntHash(identifierHash, enumHash);
-        }
-
-        static bool equal(const StarExportEntry& a, const StarExportEntry& b)
-        {
-            return a == b;
-        }
-
-        static constexpr bool safeToCompareToEmptyOrDeleted = false;
-    };
-    using StarExportEntries = OrderedHashSet<StarExportEntry, StarExportEntryHash>;
-
+    using OrderedIdentifierSet = OrderedHashSet<RefPtr<UniquedStringImpl>, IdentifierRepHash>;
     using ImportEntries = OrderedHashMap<RefPtr<UniquedStringImpl>, ImportEntry, IdentifierRepHash, HashTraits<RefPtr<UniquedStringImpl>>>;
     using ExportEntries = OrderedHashMap<RefPtr<UniquedStringImpl>, ExportEntry, IdentifierRepHash, HashTraits<RefPtr<UniquedStringImpl>>>;
 
@@ -150,7 +128,7 @@ public:
     DECLARE_EXPORT_INFO;
 
     void appendRequestedModule(const Identifier&, RefPtr<ScriptFetchParameters>&&, ModulePhase = ModulePhase::Evaluation);
-    void addStarExportEntry(const Identifier&, ScriptFetchParameters::Type);
+    void addStarExportEntry(const Identifier&);
     void addImportEntry(const ImportEntry&);
     void addExportEntry(const ExportEntry&);
 
@@ -185,7 +163,7 @@ public:
     const ModuleMap<LoadedModuleRequest>& loadedModules() const LIFETIME_BOUND { return m_loadedModules; }
     const ExportEntries& exportEntries() const LIFETIME_BOUND { return m_exportEntries; }
     const ImportEntries& importEntries() const LIFETIME_BOUND { return m_importEntries; }
-    const StarExportEntries& starExportEntries() const LIFETIME_BOUND { return m_starExportEntries; }
+    const OrderedIdentifierSet& starExportEntries() const LIFETIME_BOUND { return m_starExportEntries; }
     const Vector<WriteBarrier<AbstractModuleRecord>>& asyncParentModules() const LIFETIME_BOUND { return m_asyncParentModules; }
     CyclicModuleRecord* cycleRoot() const { return m_cycleRoot.get(); }
     AsyncEvaluationOrder asyncEvaluationOrder() const { return m_asyncEvaluationOrder; }
@@ -220,7 +198,7 @@ public:
     Resolution resolveExport(JSGlobalObject*, const Identifier& exportName);
     Resolution resolveImport(JSGlobalObject*, const Identifier& localName);
 
-    AbstractModuleRecord* hostResolveImportedModule(JSGlobalObject*, const Identifier& moduleName, ScriptFetchParameters::Type moduleRequestType);
+    AbstractModuleRecord* hostResolveImportedModule(JSGlobalObject*, const Identifier& moduleName);
 
     JSModuleNamespaceObject* getModuleNamespace(JSGlobalObject*, ModulePhase = ModulePhase::Evaluation);
 
@@ -256,7 +234,7 @@ public:
     JSPromise* evaluate(JSGlobalObject*);
 
 protected:
-    AbstractModuleRecord(VM&, Structure*, Identifier, SourceProviderSourceType);
+    AbstractModuleRecord(VM&, Structure*, Identifier);
     void finishCreation(JSGlobalObject*, VM&);
 
     void setModuleEnvironment(JSGlobalObject*, JSModuleEnvironment*);
@@ -277,7 +255,7 @@ private:
     ExportEntries m_exportEntries;
 
     // Save the occurrence order since resolveExport requires it.
-    StarExportEntries m_starExportEntries;
+    OrderedIdentifierSet m_starExportEntries;
 
     // Save the occurrence order since the module loader loads and runs the modules in this order.
     // http://www.ecma-international.org/ecma-262/6.0/#sec-moduleevaluation
@@ -306,12 +284,13 @@ protected:
 
     AsyncEvaluationOrder m_asyncEvaluationOrder { };
 
+    UncheckedKeyHashMap<String, WriteBarrier<AbstractModuleRecord>> m_dependencies;
+
     WriteBarrier<JSPromise> m_topLevelCapability;
 
     std::optional<int> m_pendingAsyncDependencies;
 
     bool m_hasTLA { false };
-    SourceProviderSourceType m_sourceType;
 };
 
 } // namespace JSC

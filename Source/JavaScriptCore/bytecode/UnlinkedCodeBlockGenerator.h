@@ -81,6 +81,11 @@ public:
         m_opProfileControlFlowBytecodeOffsets.append(offset);
     }
 
+    size_t numberOfJumpTargets() const { return m_jumpTargets.size(); }
+    void addJumpTarget(unsigned jumpTarget) { m_jumpTargets.append(jumpTarget); }
+    unsigned jumpTarget(int index) const { return m_jumpTargets[index]; }
+    unsigned lastJumpTarget() const { return m_jumpTargets.last(); }
+
     size_t numberOfUnlinkedSwitchJumpTables() const { return m_unlinkedSwitchJumpTables.size(); }
     UnlinkedSimpleJumpTable& addUnlinkedSwitchJumpTable() { m_unlinkedSwitchJumpTables.append(UnlinkedSimpleJumpTable()); return m_unlinkedSwitchJumpTables.last(); }
     UnlinkedSimpleJumpTable& unlinkedSwitchJumpTable(int tableIndex) { return m_unlinkedSwitchJumpTables[tableIndex]; }
@@ -183,7 +188,7 @@ public:
 
     size_t metadataSizeInBytes() { return m_codeBlock->metadataSizeInBytes(); }
 
-    void applyModification(BytecodeRewriter&);
+    void applyModification(BytecodeRewriter&, JSInstructionStreamWriter&);
 
     [[nodiscard]] bool finalize(std::unique_ptr<JSInstructionStream>);
 
@@ -196,6 +201,7 @@ private:
     VM& m_vm;
     Strong<UnlinkedCodeBlock> m_codeBlock;
     // In non-RareData.
+    Vector<JSInstructionStream::Offset> m_jumpTargets;
     Vector<Identifier> m_identifiers;
     Vector<WriteBarrier<Unknown>> m_constantRegisters;
     Vector<SourceCodeRepresentation> m_constantsSourceCodeRepresentation;

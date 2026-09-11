@@ -132,7 +132,7 @@ static constexpr SpeculatedType SpecTypeofMightBeFunction             = SpecFunc
 // SpecCellCheck is the type set representing the values that can flow through a cell check.
 // On 64-bit platforms, the empty value passes a cell check. Also, ~SpecCellCheck is the type
 // set that representing the values that flow through when testing that something is not a cell.
-static constexpr SpeculatedType SpecCellCheck          = SpecCell | SpecEmpty;
+static constexpr SpeculatedType SpecCellCheck          = is64Bit() ? (SpecCell | SpecEmpty) : SpecCell;
 
 typedef bool (*SpeculatedTypeChecker)(SpeculatedType);
 
@@ -564,10 +564,6 @@ SpeculatedType speculationFromClassInfoInheritance(const ClassInfo*);
 SpeculatedType NODELETE speculationFromStructure(Structure*);
 SpeculatedType NODELETE speculationFromCell(JSCell*);
 SpeculatedType NODELETE speculationFromValue(JSValue);
-// For collecting a value profile, which merges what it is told and so may be given a broader type
-// than the truth. This never dereferences a JSString's StringImpl, so it must not be used where the
-// exact type is required, such as constant reasoning or OSR entry validation.
-SpeculatedType NODELETE speculationFromValueForProfiling(JSValue);
 // If it's an anyInt(), it'll return speculated types from the Int52 lattice.
 // Otherwise, it'll return types from the JSValue lattice.
 JS_EXPORT_PRIVATE SpeculatedType NODELETE int52AwareSpeculationFromValue(JSValue);
@@ -600,7 +596,7 @@ SpeculatedType NODELETE typeOfDoubleBinaryOp(SpeculatedType, SpeculatedType);
 SpeculatedType NODELETE typeOfDoubleUnaryOp(SpeculatedType);
 
 // This is mostly for debugging so we can fill profiles from strings.
-SpeculatedType speculationFromString(StringView);
+SpeculatedType speculationFromString(const char*);
 
 bool NODELETE isProvenValidTypeForIndexingShapeStorage(IndexingType, SpeculatedType);
 IndexingType NODELETE leastUpperBoundOfIndexingTypeAndTypeForSpeculation(IndexingType, SpeculatedType);

@@ -27,7 +27,6 @@
 #include "config.h"
 #include "IntlPluralRulesPrototype.h"
 
-#include "IntlNumberFormatInlines.h"
 #include "IntlPluralRules.h"
 #include "JSCInlines.h"
 
@@ -90,14 +89,10 @@ JSC_DEFINE_HOST_FUNCTION(intlPluralRulesPrototypeFuncSelect, (JSGlobalObject* gl
     if (!pluralRules) [[unlikely]]
         return JSValue::encode(throwTypeError(globalObject, scope, "Intl.PluralRules.prototype.select called on value that's not a PluralRules"_s));
 
-    auto value = toIntlMathematicalValue(globalObject, callFrame->argument(0));
-    RETURN_IF_EXCEPTION(scope, { });
+    double value = callFrame->argument(0).toNumber(globalObject);
+    RETURN_IF_EXCEPTION(scope, encodedJSValue());
 
-    auto number = value.tryGetDouble();
-    if (!number) [[unlikely]]
-        RELEASE_AND_RETURN(scope, JSValue::encode(pluralRules->select(globalObject, WTF::move(value))));
-
-    RELEASE_AND_RETURN(scope, JSValue::encode(pluralRules->select(globalObject, number.value())));
+    RELEASE_AND_RETURN(scope, JSValue::encode(pluralRules->select(globalObject, value)));
 }
 
 JSC_DEFINE_HOST_FUNCTION(intlPluralRulesPrototypeFuncSelectRange, (JSGlobalObject* globalObject, CallFrame* callFrame))
@@ -116,19 +111,13 @@ JSC_DEFINE_HOST_FUNCTION(intlPluralRulesPrototypeFuncSelectRange, (JSGlobalObjec
     if (startValue.isUndefined() || endValue.isUndefined())
         return throwVMTypeError(globalObject, scope, "start or end is undefined"_s);
 
-    auto start = toIntlMathematicalValue(globalObject, startValue);
+    double start = startValue.toNumber(globalObject);
     RETURN_IF_EXCEPTION(scope, { });
 
-    auto end = toIntlMathematicalValue(globalObject, endValue);
+    double end = endValue.toNumber(globalObject);
     RETURN_IF_EXCEPTION(scope, { });
 
-    auto startNumber = start.tryGetDouble();
-    auto endNumber = end.tryGetDouble();
-
-    if (!startNumber || !endNumber) [[unlikely]]
-        RELEASE_AND_RETURN(scope, JSValue::encode(pluralRules->selectRange(globalObject, WTF::move(start), WTF::move(end))));
-
-    RELEASE_AND_RETURN(scope, JSValue::encode(pluralRules->selectRange(globalObject, startNumber.value(), endNumber.value())));
+    RELEASE_AND_RETURN(scope, JSValue::encode(pluralRules->selectRange(globalObject, start, end)));
 }
 
 JSC_DEFINE_HOST_FUNCTION(intlPluralRulesPrototypeFuncResolvedOptions, (JSGlobalObject* globalObject, CallFrame* callFrame))

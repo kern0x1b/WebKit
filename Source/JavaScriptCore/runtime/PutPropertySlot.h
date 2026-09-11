@@ -68,23 +68,17 @@ public:
         m_offset = offset;
     }
 
-    // Inline caches need the offset (which will be invalidOffset if e.g. served from a static property table,
-    // with no backing property, or the offset of the property holding the CustomGetterSetter otherwise) to
-    // recognize the case of an unbacked custom being shadowed by the addition of a property to a dictionary
-    // (that is, without a structure transition) and decline to cache.
-    void setCustomValue(JSObject* base, PutValueFunc function, PropertyOffset offset = invalidOffset)
+    void setCustomValue(JSObject* base, PutValueFunc function)
     {
         m_type = CustomValue;
         m_base = base;
-        m_offset = offset;
         m_putFunction = function.get();
     }
 
-    void setCustomAccessor(JSObject* base, PutValueFunc function, PropertyOffset offset = invalidOffset)
+    void setCustomAccessor(JSObject* base, PutValueFunc function)
     {
         m_type = CustomAccessor;
         m_base = base;
-        m_offset = offset;
         m_putFunction = function.get();
     }
 

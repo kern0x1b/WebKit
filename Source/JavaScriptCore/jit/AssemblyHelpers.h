@@ -668,7 +668,7 @@ public:
     void emitPutCellToCallFrameHeader(GPRReg from, VirtualRegister entry)
     {
         ASSERT(entry.isHeader());
-        storeValue(from, Address(GPRInfo::callFrameRegister, entry.offset() * sizeof(Register)));
+        storeCell(from, Address(GPRInfo::callFrameRegister, entry.offset() * sizeof(Register)));
     }
 
     void emitZeroToCallFrameHeader(VirtualRegister entry)
@@ -1906,7 +1906,7 @@ public:
     {
         ASSERT(scratchGPR != resultGPR);
         Jump done;
-        // If vectorLength == 0 then clz will return 32 on both ARM and x86. We can then do a 64-bit right shift on a 32-bit -1 to get a 0 mask for zero vectorLength.
+        // If vectorLength == 0 then clz will return 32 on both ARM and x86. On 64-bit systems, we can then do a 64-bit right shift on a 32-bit -1 to get a 0 mask for zero vectorLength. On 32-bit ARM, shift masks with 0xff, which means it will still create a 0 mask.
         countLeadingZeros32(vectorLengthGPR, scratchGPR);
         move(TrustedImm32(-1), resultGPR);
         urshiftPtr(scratchGPR, resultGPR);
@@ -2015,20 +2015,20 @@ public:
         
         notCell.link(this);
 
-        Jump notNumber = branchIfNotNumber(valueGPR);
+        Jump notNumber = branchIfNotNumber(regs, tempGPR);
         functor(TypeofType::Number, false);
         notNumber.link(this);
         
-        JumpList notNull = branchIfNotEqual(valueGPR, jsNull());
+        JumpList notNull = branchIfNotEqual(regs, jsNull());
         functor(TypeofType::Object, false);
         notNull.link(this);
         
-        Jump notBoolean = branchIfNotBoolean(valueGPR, tempGPR);
+        Jump notBoolean = branchIfNotBoolean(regs, tempGPR);
         functor(TypeofType::Boolean, false);
         notBoolean.link(this);
 
 #if USE(BIGINT32)
-        Jump notBigInt32 = branchIfNotBigInt32(valueGPR, tempGPR);
+        Jump notBigInt32 = branchIfNotBigInt32(regs, tempGPR);
         functor(TypeofType::BigInt, false);
         notBigInt32.link(this);
 #endif

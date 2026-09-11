@@ -52,6 +52,9 @@ namespace DFG {
 class JITCode;
 class JITCompiler;
 
+// ios6/armv7: UnlinkedPropertyInlineCache moved to bytecode/PropertyInlineCache.h
+// so it is defined even when ENABLE(DFG_JIT) is off -- JITInlineCacheGenerator.h
+// names it unconditionally in CompileTimePropertyInlineCache.
 
 struct UnlinkedCallLinkInfo : JSC::UnlinkedCallLinkInfo {
     void setUpCall(CallLinkInfo::CallType callType)
@@ -194,7 +197,7 @@ public:
 
     explicit JITData(unsigned propertyCacheSize, unsigned poolSize, const JITCode&, ExitVector&&);
 
-    void reconcileWeakReferencesAtGCEnd()
+    void finalizeUnconditionally()
     {
         m_dummyArrayProfile.clear();
     }

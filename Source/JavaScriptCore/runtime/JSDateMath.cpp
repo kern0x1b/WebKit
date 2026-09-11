@@ -73,6 +73,7 @@
 #include "JSDateMath.h"
 
 #include "ExceptionHelpers.h"
+#include "ISO8601.h"
 #include "IntlObject.h"
 #include "VM.h"
 #include <limits>
@@ -92,11 +93,6 @@
 namespace JSC {
 namespace JSDateMathInternal {
 static constexpr bool verbose = false;
-
-static bool canNarrowToInt64Milliseconds(double milliseconds)
-{
-    return std::isfinite(milliseconds) && std::abs(milliseconds) <= WTF::maxECMAScriptTime + WTF::msPerDay;
-}
 }
 
 class OpaqueICUTimeZone {
@@ -327,25 +323,25 @@ LocalTimeOffset DateCache::DSTCache::localTimeOffset(DateCache& dateCache, int64
     return { };
 }
 
-double DateCache::gregorianDateTimeToMS(int32_t year, int32_t month, int32_t monthDay, int32_t hour, int32_t minute, int32_t second, double milliseconds, TimeType inputTimeType)
+double DateCache::gregorianDateTimeToMS(const GregorianDateTime& t, double milliseconds, TimeType inputTimeType)
 {
-    double day = dateToDaysFrom1970(year, month, monthDay);
-    double ms = timeToMS(hour, minute, second, milliseconds);
+    double day = dateToDaysFrom1970(t.year(), t.month(), t.monthDay());
+    double ms = timeToMS(t.hour(), t.minute(), t.second(), milliseconds);
     double localTimeResult = (day * WTF::msPerDay) + ms;
 
-    if (inputTimeType == TimeType::LocalTime && JSDateMathInternal::canNarrowToInt64Milliseconds(localTimeResult))
+    if (inputTimeType == TimeType::LocalTime && std::isfinite(localTimeResult))
         return localTimeResult - localTimeOffset(static_cast<int64_t>(localTimeResult), inputTimeType).offset;
     return localTimeResult;
 }
 
 double DateCache::localTimeToMS(double milliseconds, TimeType inputTimeType)
 {
-    if (inputTimeType == TimeType::LocalTime && JSDateMathInternal::canNarrowToInt64Milliseconds(milliseconds))
+    if (inputTimeType == TimeType::LocalTime && std::isfinite(milliseconds))
         return milliseconds - localTimeOffset(static_cast<int64_t>(milliseconds), inputTimeType).offset;
     return milliseconds;
 }
 
-ALWAYS_INLINE std::tuple<int32_t, int32_t, int32_t> DateCache::yearMonthDayFromDaysWithCache(int32_t days)
+std::tuple<int32_t, int32_t, int32_t> DateCache::yearMonthDayFromDaysWithCache(int32_t days)
 {
     if (m_yearMonthDayCache) {
         // Check conservatively if the given 'days' has
@@ -365,39 +361,24 @@ ALWAYS_INLINE std::tuple<int32_t, int32_t, int32_t> DateCache::yearMonthDayFromD
 }
 
 // input is UTC
-ALWAYS_INLINE PlainGregorianDateTime DateCache::computeGregorianDateTime(double millisecondsFromEpoch, TimeType outputTimeType)
+void DateCache::msToGregorianDateTime(double millisecondsFromEpoch, TimeType outputTimeType, GregorianDateTime& tm)
 {
     LocalTimeOffset localTime;
-    if (outputTimeType == TimeType::LocalTime && JSDateMathInternal::canNarrowToInt64Milliseconds(millisecondsFromEpoch)) {
+    if (outputTimeType == TimeType::LocalTime && std::isfinite(millisecondsFromEpoch)) {
         localTime = localTimeOffset(static_cast<int64_t>(millisecondsFromEpoch));
         millisecondsFromEpoch += localTime.offset;
     }
-    if (!JSDateMathInternal::canNarrowToInt64Milliseconds(millisecondsFromEpoch))
-        return { };
-
-    WTF::Int64Milliseconds timeClipped(static_cast<int64_t>(millisecondsFromEpoch));
-    int32_t days = WTF::msToDays(timeClipped);
-    int32_t timeInDayMS = WTF::timeInDay(timeClipped, days);
-    auto [year, month, day] = yearMonthDayFromDaysWithCache(days);
-    int32_t hour = timeInDayMS / (60 * 60 * 1000);
-    int32_t minute = (timeInDayMS / (60 * 1000)) % 60;
-    int32_t second = (timeInDayMS / 1000) % 60;
-    return PlainGregorianDateTime(year, month, day, WTF::weekDay(days), hour, minute, second, localTime.offset / WTF::Int64Milliseconds::msPerMinute, localTime.isDST);
-}
-
-PlainGregorianDateTime DateCache::msToGregorianDateTime(double millisecondsFromEpoch, TimeType outputTimeType, UseSharedCache useSharedCache)
-{
-    if (useSharedCache == UseSharedCache::No)
-        return computeGregorianDateTime(millisecondsFromEpoch, outputTimeType);
-
-    auto& cache = m_brokenDownDateCaches[static_cast<unsigned>(outputTimeType)];
-    if (auto cached = cache.get(millisecondsFromEpoch))
-        return cached;
-
-    auto result = computeGregorianDateTime(millisecondsFromEpoch, outputTimeType);
-    if (result)
-        cache.set(millisecondsFromEpoch, result);
-    return result;
+    if (std::isfinite(millisecondsFromEpoch)) {
+        WTF::Int64Milliseconds timeClipped(static_cast<int64_t>(millisecondsFromEpoch));
+        int32_t days = WTF::msToDays(timeClipped);
+        int32_t timeInDayMS = WTF::timeInDay(timeClipped, days);
+        auto [year, month, day] = yearMonthDayFromDaysWithCache(days);
+        int32_t hour = timeInDayMS / (60 * 60 * 1000);
+        int32_t minute = (timeInDayMS / (60 * 1000)) % 60;
+        int32_t second = (timeInDayMS / 1000) % 60;
+        tm = GregorianDateTime(year, month, dayInYear(year, month, day), day, WTF::weekDay(days), hour, minute, second, localTime.offset / WTF::Int64Milliseconds::msPerMinute, localTime.isDST);
+    } else
+        tm = GregorianDateTime(millisecondsFromEpoch, localTime);
 }
 
 double DateCache::parseDate(JSGlobalObject* globalObject, VM& vm, const String& date)
@@ -429,7 +410,7 @@ double DateCache::parseDate(JSGlobalObject* globalObject, VM& vm, const String& 
         if (std::isnan(value))
             value = WTF::parseDate(dateString, isLocalTime);
 
-        if (isLocalTime && JSDateMathInternal::canNarrowToInt64Milliseconds(value))
+        if (isLocalTime && std::isfinite(value))
             value -= localTimeOffset(static_cast<int64_t>(value), TimeType::LocalTime).offset;
 
         return value;
@@ -452,16 +433,16 @@ String DateCache::timeZoneDisplayName(bool isDST)
 {
     if (m_timeZoneStandardDisplayNameCache.isNull()) {
         auto& timeZoneCache = *this->timeZoneCache();
-        auto language = defaultLanguage().utf8();
+        CString language = defaultLanguage().utf8();
         {
             Vector<char16_t, 32> standardDisplayNameBuffer;
-            auto status = callBufferProducingFunction(ucal_getTimeZoneDisplayName, timeZoneCache.m_calendar.get(), UCAL_STANDARD, language.legacyCStringPointer(), standardDisplayNameBuffer);
+            auto status = callBufferProducingFunction(ucal_getTimeZoneDisplayName, timeZoneCache.m_calendar.get(), UCAL_STANDARD, language.data(), standardDisplayNameBuffer);
             if (U_SUCCESS(status))
                 m_timeZoneStandardDisplayNameCache = String::adopt(WTF::move(standardDisplayNameBuffer));
         }
         {
             Vector<char16_t, 32> dstDisplayNameBuffer;
-            auto status = callBufferProducingFunction(ucal_getTimeZoneDisplayName, timeZoneCache.m_calendar.get(), UCAL_DST, language.legacyCStringPointer(), dstDisplayNameBuffer);
+            auto status = callBufferProducingFunction(ucal_getTimeZoneDisplayName, timeZoneCache.m_calendar.get(), UCAL_DST, language.data(), dstDisplayNameBuffer);
             if (U_SUCCESS(status))
                 m_timeZoneDSTDisplayNameCache = String::adopt(WTF::move(dstDisplayNameBuffer));
         }
@@ -520,6 +501,11 @@ static TimeZone retrieveTimeZoneInformation()
 
 DateCache::~DateCache() = default;
 
+Ref<DateInstanceData> DateCache::cachedDateInstanceData(double millisecondsFromEpoch)
+{
+    return *m_dateInstanceCache.add(millisecondsFromEpoch);
+}
+
 OpaqueICUTimeZone* DateCache::timeZoneCache()
 {
     if (!m_timeZoneCache)
@@ -527,7 +513,7 @@ OpaqueICUTimeZone* DateCache::timeZoneCache()
     return m_timeZoneCache.get();
 }
 
-ALWAYS_INLINE LocalTimeOffset DateCache::localTimeOffset(int64_t millisecondsFromEpoch, TimeType inputTimeType)
+LocalTimeOffset DateCache::localTimeOffset(int64_t millisecondsFromEpoch, TimeType inputTimeType)
 {
     using Underlying = std::underlying_type_t<TimeType>;
     static_assert(!static_cast<Underlying>(TimeType::UTCTime));
@@ -556,11 +542,10 @@ void DateCache::clearForTimeZoneChange()
     m_timeZoneCache.reset();
     for (auto& cache : m_caches)
         cache.reset();
-    for (auto& cache : m_brokenDownDateCaches)
-        cache.reset();
     m_yearMonthDayCache = std::nullopt;
     m_cachedDateString = String();
     m_cachedDateStringValue = std::numeric_limits<double>::quiet_NaN();
+    m_dateInstanceCache.reset();
     m_timeZoneStandardDisplayNameCache = String();
     m_timeZoneDSTDisplayNameCache = String();
     m_cachedTimeZoneID = WTF::lastTimeZoneID();

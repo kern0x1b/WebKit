@@ -59,6 +59,7 @@ InByStatus InByStatus::computeFor(CodeBlock* profiledBlock, ICStatusMap& map, By
 
 #if ENABLE(DFG_JIT)
     result = computeForPropertyInlineCacheWithoutExitSiteFeedback(locker, profiledBlock, map.get(CodeOrigin(bytecodeIndex)).propertyCache, callExitSiteData, codeOrigin);
+
     if (!result.takesSlowPath() && didExit)
         return InByStatus(TakesSlowPath);
 #else
@@ -311,10 +312,10 @@ void InByStatus::markIfCheap(Visitor& visitor)
 template void InByStatus::markIfCheap(AbstractSlotVisitor&);
 template void InByStatus::markIfCheap(SlotVisitor&);
 
-bool InByStatus::isStillLive(VM& vm)
+bool InByStatus::finalize(VM& vm)
 {
     for (InByVariant& variant : m_variants) {
-        if (!variant.isStillLive(vm))
+        if (!variant.finalize(vm))
             return false;
     }
     return true;

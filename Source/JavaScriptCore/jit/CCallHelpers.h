@@ -57,6 +57,20 @@ public:
     {
     }
 
+    // Wrapper to encode JSCell GPR into JSValue.
+    class CellValue {
+    public:
+        explicit CellValue(GPRReg gpr)
+            : m_gpr(gpr)
+        {
+        }
+
+        GPRReg gpr() const { return m_gpr; }
+
+    private:
+        GPRReg m_gpr;
+    };
+
     // Base class for constant materializers.
     // It offers DerivedClass::materialize and poke functions.
     class ConstantMaterializer { };
@@ -198,8 +212,8 @@ private:
             crossDestinations.fill(InvalidGPRReg);
         }
 
-        template<unsigned a, unsigned b, unsigned c, unsigned d, unsigned e, unsigned f, unsigned g>
-        ArgCollection(ArgCollection<a, b, c, d, e, f, g>& other)
+        template<unsigned a, unsigned b, unsigned c, unsigned d, unsigned e, unsigned f, unsigned g, unsigned h>
+        ArgCollection(ArgCollection<a, b, c, d, e, f, g, h>& other)
         {
             gprSources = other.gprSources;
             gprDestinations = other.gprDestinations;
@@ -319,7 +333,7 @@ private:
         return result;
     }
 
-    ALWAYS_INLINE unsigned calculatePokeOffset(unsigned currentGPRArgument, unsigned currentFPRArgument, unsigned numCrossSources, unsigned nonArgGPRs, unsigned extraPoke)
+    ALWAYS_INLINE unsigned calculatePokeOffset(unsigned currentGPRArgument, unsigned currentFPRArgument, unsigned numCrossSources, unsigned extraGPRArgs, unsigned nonArgGPRs, unsigned extraPoke)
     {
         // Clang claims that it cannot find the symbol for FPRReg/GPRReg::numberOfArgumentRegisters when they are passed directly to std::max... seems like a bug
         unsigned numberOfFPArgumentRegisters = FPRInfo::numberOfArgumentRegisters;
@@ -327,6 +341,7 @@ private:
 
         UNUSED_PARAM(nonArgGPRs);
 
+        currentGPRArgument += extraGPRArgs;
         currentFPRArgument -= numCrossSources;
 
         IGNORE_WARNINGS_BEGIN("type-limits")
@@ -340,18 +355,18 @@ private:
     }
 
     template<typename ArgType>
-    ALWAYS_INLINE void pokeForArgument(ArgType arg, unsigned currentGPRArgument, unsigned currentFPRArgument, unsigned numCrossSources, unsigned nonArgGPRs, unsigned extraPoke)
+    ALWAYS_INLINE void pokeForArgument(ArgType arg, unsigned currentGPRArgument, unsigned currentFPRArgument, unsigned numCrossSources, unsigned extraGPRArgs, unsigned nonArgGPRs, unsigned extraPoke)
     {
-        unsigned pokeOffset = calculatePokeOffset(currentGPRArgument, currentFPRArgument, numCrossSources, nonArgGPRs, extraPoke);
+        unsigned pokeOffset = calculatePokeOffset(currentGPRArgument, currentFPRArgument, numCrossSources, extraGPRArgs, nonArgGPRs, extraPoke);
         if constexpr (std::derived_from<ArgType, ConstantMaterializer>)
             arg.store(*this, addressForPoke(pokeOffset));
         else
             poke(arg, pokeOffset);
     }
 
-    ALWAYS_INLINE bool stackAligned(unsigned currentGPRArgument, unsigned currentFPRArgument, unsigned numCrossSources, unsigned nonArgGPRs, unsigned extraPoke)
+    ALWAYS_INLINE bool stackAligned(unsigned currentGPRArgument, unsigned currentFPRArgument, unsigned numCrossSources, unsigned extraGPRArgs, unsigned nonArgGPRs, unsigned extraPoke)
     {
-        unsigned pokeOffset = calculatePokeOffset(currentGPRArgument, currentFPRArgument, numCrossSources, nonArgGPRs, extraPoke);
+        unsigned pokeOffset = calculatePokeOffset(currentGPRArgument, currentFPRArgument, numCrossSources, extraGPRArgs, nonArgGPRs, extraPoke);
         return !(pokeOffset & 1);
     }
 
@@ -688,7 +703,7 @@ private:
         }
 
 
-        pokeForArgument(arg, numGPRArgs, numFPRArgs, numCrossSources, nonArgGPRs, extraPoke);
+        pokeForArgument(arg, numGPRArgs, numFPRArgs, numCrossSources, extraGPRArgs, nonArgGPRs, extraPoke);
         setupArgumentsImpl<OperationType>(argSourceRegs.addGPRArg(), args...);
     }
 
@@ -788,19 +803,19 @@ public:
     template<typename OperationType, typename... Args>
     ALWAYS_INLINE void setupArguments(Args... args)
     {
-        setupArgumentsEntryImpl<OperationType>(ArgCollection<0, 0, 0, 0, 0, 0, 0>(), args...);
+        setupArgumentsEntryImpl<OperationType>(ArgCollection<0, 0, 0, 0, 0, 0, 0, 0>(), args...);
     }
 
     template<typename OperationType, typename... Args>
     ALWAYS_INLINE void setupArgumentsForIndirectCall(GPRReg functionGPR, Args... args)
     {
-        setupArgumentsEntryImpl<OperationType>(ArgCollection<0, 0, 0, 0, 0, 0, 0>().pushNonArg(functionGPR, GPRInfo::nonArgGPR0), args...);
+        setupArgumentsEntryImpl<OperationType>(ArgCollection<0, 0, 0, 0, 0, 0, 0, 0>().pushNonArg(functionGPR, GPRInfo::nonArgGPR0), args...);
     }
 
     template<typename OperationType, typename... Args>
     ALWAYS_INLINE void setupArgumentsForIndirectCall(Address address, Args... args)
     {
-        setupArgumentsEntryImpl<OperationType>(ArgCollection<0, 0, 0, 0, 0, 0, 0>().pushNonArg(address.base, GPRInfo::nonArgGPR0), args...);
+        setupArgumentsEntryImpl<OperationType>(ArgCollection<0, 0, 0, 0, 0, 0, 0, 0>().pushNonArg(address.base, GPRInfo::nonArgGPR0), args...);
     }
 
     void setupResults(GPRReg destA, GPRReg destB = InvalidGPRReg)

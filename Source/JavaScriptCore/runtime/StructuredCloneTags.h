@@ -31,6 +31,16 @@
 #include <wtf/text/ASCIILiteral.h>
 #include <wtf/text/StringCommon.h>
 
+// Most CPUs we support are little-endian and accept unaligned loads of the
+// integer widths the wire format uses, so the read/write helpers fast-path
+// to a single load/store. Architectures that need byte-by-byte handling
+// (big-endian, middle-endian, alignment-strict) take the portable path.
+#if CPU(BIG_ENDIAN) || CPU(MIDDLE_ENDIAN) || CPU(NEEDS_ALIGNED_ACCESS)
+#define JSC_ASSUME_LITTLE_ENDIAN 0
+#else
+#define JSC_ASSUME_LITTLE_ENDIAN 1
+#endif
+
 namespace JSC {
 
 /*
@@ -92,7 +102,7 @@ namespace JSC {
  *    | DOMQuad
  *    | ImageBitmapTransferTag <value:uint32_t>
  *    | RTCCertificateTag
- *    | ImageBitmapTag <imageBitmapSerializationFlags:uint8_t> <logicalWidth:int32_t> <logicalHeight:int32_t> <resolutionScale:double> ColorSpace <byteLength:uint32_t>(<imageByteData:uint8_t>)
+ *    | ImageBitmapTag <imageBitmapSerializationFlags:uint8_t> <logicalWidth:int32_t> <logicalHeight:int32_t> <resolutionScale:double> DestinationColorSpace <byteLength:uint32_t>(<imageByteData:uint8_t>)
  *    | OffscreenCanvasTransferTag <value:uint32_t>
  *    | WasmMemoryTag <value:uint32_t>
  *    | RTCDataChannelTransferTag <identifier:uint32_t>
@@ -223,13 +233,13 @@ namespace JSC {
  *      | PredefinedColorSpaceTag::SRGBLinear
  *      | PredefinedColorSpaceTag::DisplayP3Linear
  *
- * ColorSpace :-
- *        ColorSpaceSRGBTag
- *      | ColorSpaceLinearSRGBTag
- *      | ColorSpaceDisplayP3Tag
- *      | ColorSpaceCGColorSpaceNameTag <nameDataLength:uint32_t> <nameData:uint8_t>{nameDataLength}
- *      | ColorSpaceCGColorSpacePropertyListTag <propertyListDataLength:uint32_t> <propertyListData:uint8_t>{propertyListDataLength}
- *      | ColorSpaceLinearDisplayP3Tag
+ * DestinationColorSpace :-
+ *        DestinationColorSpaceSRGBTag
+ *      | DestinationColorSpaceLinearSRGBTag
+ *      | DestinationColorSpaceDisplayP3Tag
+ *      | DestinationColorSpaceCGColorSpaceNameTag <nameDataLength:uint32_t> <nameData:uint8_t>{nameDataLength}
+ *      | DestinationColorSpaceCGColorSpacePropertyListTag <propertyListDataLength:uint32_t> <propertyListData:uint8_t>{propertyListDataLength}
+ *      | DestinationColorSpaceLinearDisplayP3Tag
  */
 
 enum SerializationTag {
@@ -421,7 +431,7 @@ inline ErrorType toErrorType(SerializableErrorType value)
     return ErrorType::Error;
 }
 
-constexpr unsigned CurrentMajorVersion = 16;
+constexpr unsigned CurrentMajorVersion = 15;
 constexpr unsigned CurrentMinorVersion = 0;
 inline constexpr unsigned NODELETE majorVersionFor(unsigned version) { return version & 0x00FFFFFF; }
 inline constexpr unsigned NODELETE minorVersionFor(unsigned version) { return version >> 24; }
@@ -452,7 +462,6 @@ inline constexpr unsigned NODELETE makeVersion(unsigned major, unsigned minor)
  * Version 13. added support for ErrorInstance objects.
  * Version 14. encode booleans as uint8_t instead of int32_t.
  * Version 15. changed the terminator of the indexed property section in array.
- * Version 16. added line/column/sourceURL/stack information to DOMException.
  */
 // FIXME: We should have two versions one for JSC version changes and one for WebCore version changes.
 inline constexpr unsigned NODELETE currentVersion() { return makeVersion(CurrentMajorVersion, CurrentMinorVersion); }

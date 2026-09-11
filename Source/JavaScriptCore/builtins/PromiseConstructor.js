@@ -34,12 +34,15 @@ function try(callback /*, ...args */)
     for (var i = 1; i < @argumentCount(); i++)
         @putByValDirect(args, i - 1, arguments[i]);
 
+    var promiseCapability = @newPromiseCapability(this);
     try {
         var value = callback.@apply(@undefined, args);
+        promiseCapability.resolve.@call(@undefined, value);
     } catch (error) {
-        return @promiseReject(this, error);
+        promiseCapability.reject.@call(@undefined, error);
     }
-    return @promiseResolve(this, value);
+
+    return promiseCapability.promise;
 }
 
 @nakedConstructor

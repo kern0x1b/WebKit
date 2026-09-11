@@ -28,7 +28,6 @@
 
 #if ENABLE(B3_JIT)
 
-#include "AirCode.h"
 #include "CCallHelpers.h"
 #include "MacroAssemblerPrinter.h"
 #include <wtf/TZoneMallocInlines.h>
@@ -44,15 +43,8 @@ PrintSpecial::PrintSpecial(Printer::PrintRecordList* list)
 
 PrintSpecial::~PrintSpecial() = default;
 
-void PrintSpecial::forEachArg(Inst& inst, const ScopedLambda<Inst::EachArgCallback>& callback)
+void PrintSpecial::forEachArg(Inst&, const ScopedLambda<Inst::EachArgCallback>&)
 {
-    // The printed Tmps must be reported, or liveness ends their ranges before the print and the
-    // register allocator has nothing to hand generate().
-    for (unsigned i = numSpecialArgs; i < inst.args().size(); ++i) {
-        Bank bank = inst.args()[i].bank();
-        Width width = code().usesSIMD() ? conservativeWidth(bank) : conservativeWidthWithoutVectors(bank);
-        callback(inst.args()[i], Arg::Use, bank, width);
-    }
 }
 
 bool PrintSpecial::isValid(Inst&)
@@ -76,16 +68,13 @@ void PrintSpecial::reportUsedRegisters(Inst&, const RegisterSet&)
 
 MacroAssembler::Jump PrintSpecial::generate(Inst& inst, CCallHelpers& jit, GenerationContext&)
 {
-    size_t currentArg = numSpecialArgs;
+    size_t currentArg = 1; // Skip the PrintSpecial arg.
     for (auto& term : *m_printRecordList) {
         if (term.printer == Printer::printAirArg) {
             const Arg& arg = inst.args()[currentArg++];
             switch (arg.kind()) {
             case Arg::Tmp:
-                if (arg.isGP())
-                    term = Printer::Printer<MacroAssembler::RegisterID>(arg.gpr());
-                else
-                    term = Printer::Printer<MacroAssembler::FPRegisterID>(arg.fpr());
+                term = Printer::Printer<MacroAssembler::RegisterID>(arg.gpr());
                 break;
             case Arg::Addr:
             case Arg::ExtendedOffsetAddr:

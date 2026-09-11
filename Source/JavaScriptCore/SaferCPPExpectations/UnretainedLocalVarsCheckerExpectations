@@ -2,3 +2,4 @@ API/JSAPIGlobalObject.mm
 API/JSValue.mm
 API/JSVirtualMachine.mm
 API/ObjCCallbackFunction.mm
+API/tests/testapi.c

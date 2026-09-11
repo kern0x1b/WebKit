@@ -92,12 +92,17 @@ void IPIntPlan::compileFunction(FunctionCodeIndex functionIndex)
     ASSERT_UNUSED(functionIndexSpace, &m_moduleInformation->rtt(functionIndexSpace) == &m_moduleInformation->rtt(typeSignatureIndex));
 
     beginCompilerSignpost(CompilationMode::IPIntMode, functionIndexSpace);
+    m_unlinkedWasmToWasmCalls[functionIndex] = Vector<UnlinkedWasmToWasmCall>();
     auto parseAndCompileResult = parseAndCompileMetadata(function.data, signature, m_moduleInformation.get(), functionIndex);
     endCompilerSignpost(CompilationMode::IPIntMode, functionIndexSpace);
 
     if (!parseAndCompileResult) [[unlikely]] {
         Locker locker { m_lock };
-        failFunctionCompilation(functionIndex, makeString(parseAndCompileResult.error(), ", in function at index "_s, functionIndex.rawIndex()));
+        if (!m_errorMessage) {
+            // Multiple compiles could fail simultaneously. We arbitrarily choose the first.
+            fail(makeString(parseAndCompileResult.error(), ", in function at index "_s, functionIndex.rawIndex())); // FIXME make this an Expected.
+        }
+        m_currentIndex = m_moduleInformation->functions.size();
         return;
     }
 
@@ -113,7 +118,7 @@ void IPIntPlan::compileFunction(FunctionCodeIndex functionIndex)
 
         if (usesSIMD && !Options::useBBQJIT() && !Options::useWasmIPIntSIMD()) {
             Locker locker { m_lock };
-            failFunctionCompilation(functionIndex, makeString("JIT is disabled, but the entrypoint for "_s, functionIndex.rawIndex(), " requires JIT"_s));
+            Base::fail(makeString("JIT is disabled, but the entrypoint for "_s, functionIndex.rawIndex(), " requires JIT"_s));
             return;
         }
 
@@ -145,6 +150,22 @@ void IPIntPlan::didCompleteCompilation()
         NativeCalleeRegistry::singleton().registerCallees(*m_ipintCallees);
         if (Options::useWasmTailCalls())
             RestoreFrameCallee::singleton();
+    }
+
+    if (m_compilerMode == CompilerMode::Validation)
+        return;
+
+    for (auto& unlinked : m_unlinkedWasmToWasmCalls) {
+        for (auto& call : unlinked) {
+            CodePtr<WasmEntryPtrTag> executableAddress;
+            if (m_moduleInformation->isImportedFunctionFromFunctionIndexSpace(call.functionIndexSpace)) {
+                // FIXME: imports could have been linked in B3, instead of generating a patchpoint. This condition should be replaced by a RELEASE_ASSERT.
+                // https://bugs.webkit.org/show_bug.cgi?id=166462
+                executableAddress = m_wasmToWasmExitStubs.at(call.functionIndexSpace).code();
+            } else
+                executableAddress = m_ipintCallees->at(call.functionIndexSpace - m_moduleInformation->importFunctionCount())->entrypoint();
+            MacroAssembler::repatchNearCall(call.callLocation, CodeLocationLabel<WasmEntryPtrTag>(executableAddress));
+        }
     }
 }
 

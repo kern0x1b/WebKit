@@ -29,7 +29,6 @@
 #if ENABLE(WEBASSEMBLY)
 
 #include "AuxiliaryBarrierInlines.h"
-#include "BuiltinNames.h"
 #include "JSCInlines.h"
 #include "JSWebAssemblyException.h"
 #include "JSWebAssemblyHelpers.h"
@@ -39,7 +38,6 @@
 namespace JSC {
 static JSC_DECLARE_HOST_FUNCTION(webAssemblyExceptionProtoFuncGetArg);
 static JSC_DECLARE_HOST_FUNCTION(webAssemblyExceptionProtoFuncIs);
-static JSC_DECLARE_CUSTOM_GETTER(webAssemblyExceptionProtoGetterStack);
 }
 
 #include "WebAssemblyExceptionPrototype.lut.h"
@@ -52,7 +50,6 @@ const ClassInfo WebAssemblyExceptionPrototype::s_info = { "WebAssembly.Exception
  @begin prototypeTableWebAssemblyException
  getArg   webAssemblyExceptionProtoFuncGetArg   Function 2
  is       webAssemblyExceptionProtoFuncIs       Function 1
- stack    webAssemblyExceptionProtoGetterStack  ReadOnly|CustomAccessor
  @end
  */
 
@@ -143,20 +140,6 @@ JSC_DEFINE_HOST_FUNCTION(webAssemblyExceptionProtoFuncIs, (JSGlobalObject* globa
         return throwVMTypeError(globalObject, throwScope, "WebAssembly.Exception.is(): First argument must be a WebAssembly.Tag"_s);
 
     RELEASE_AND_RETURN(throwScope, JSValue::encode(jsBoolean(jsException->tag() == tag->tag())));
-}
-
-JSC_DEFINE_CUSTOM_GETTER(webAssemblyExceptionProtoGetterStack, (JSGlobalObject* globalObject, EncodedJSValue thisValue, PropertyName))
-{
-    VM& vm = globalObject->vm();
-    auto throwScope = DECLARE_THROW_SCOPE(vm);
-
-    JSWebAssemblyException* jsException = getException(globalObject, JSValue::decode(thisValue));
-    RETURN_IF_EXCEPTION(throwScope, { });
-
-    JSValue stack = jsException->getDirect(vm, vm.propertyNames->builtinNames().stackPrivateName());
-    if (!stack)
-        return JSValue::encode(jsUndefined());
-    return JSValue::encode(stack);
 }
 
 } // namespace JSC

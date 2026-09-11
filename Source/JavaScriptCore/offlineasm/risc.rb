@@ -172,7 +172,7 @@ end
 #     end
 # }
 #
-# See arm64.rb for a different example, in which we lower all BaseIndex addresses
+# See arm.rb for a different example, in which we lower all BaseIndex addresses
 # that have non-zero offset, all Address addresses that have large offsets, and
 # all other addresses (like AbsoluteAddress).
 #
@@ -377,7 +377,7 @@ def riscLowerMalformedImmediates(list, validImmediates, validLogicalImmediates)
         if node.is_a? Instruction
             annotation = node.annotation
             case node.opcode
-            when "move"
+            when "move", "moveii"
                 newList << node
             when "addi", "addp", "addq", "addis", "subi", "subp", "subq", "subis"
                 if node.operands[0].is_a? Immediate and
@@ -651,19 +651,14 @@ end
 # cieq tmp, 0, t2
 #
 
-def riscLowerTest(list, &backendFilter)
-    def emit(newList, andOpcode, branchOpcode, node, backendFilter)
+def riscLowerTest(list)
+    def emit(newList, andOpcode, branchOpcode, node)
         if node.operands.size == 2
             newList << Instruction.new(node.codeOrigin, branchOpcode, [node.operands[0], Immediate.new(node.codeOrigin, 0), node.operands[1]])
             return
         end
 
         raise "Incorrect number of operands at #{codeOriginString}" unless node.operands.size == 3
-
-        if backendFilter and backendFilter.call(node)
-            newList << node
-            return
-        end
 
         if node.operands[0].immediate? and node.operands[0].value == -1
             newList << Instruction.new(node.codeOrigin, branchOpcode, [node.operands[1], Immediate.new(node.codeOrigin, 0), node.operands[2]])
@@ -686,53 +681,53 @@ def riscLowerTest(list, &backendFilter)
         if node.is_a? Instruction
             case node.opcode
             when "btis"
-                emit(newList, "andi", "bilt", node, backendFilter)
+                emit(newList, "andi", "bilt", node)
             when "btiz"
-                emit(newList, "andi", "bieq", node, backendFilter)
+                emit(newList, "andi", "bieq", node)
             when "btinz"
-                emit(newList, "andi", "bineq", node, backendFilter)
+                emit(newList, "andi", "bineq", node)
             when "btps"
-                emit(newList, "andp", "bplt", node, backendFilter)
+                emit(newList, "andp", "bplt", node)
             when "btpz"
-                emit(newList, "andp", "bpeq", node, backendFilter)
+                emit(newList, "andp", "bpeq", node)
             when "btpnz"
-                emit(newList, "andp", "bpneq", node, backendFilter)
+                emit(newList, "andp", "bpneq", node)
             when "btqs"
-                emit(newList, "andq", "bqlt", node, backendFilter)
+                emit(newList, "andq", "bqlt", node)
             when "btqz"
-                emit(newList, "andq", "bqeq", node, backendFilter)
+                emit(newList, "andq", "bqeq", node)
             when "btqnz"
-                emit(newList, "andq", "bqneq", node, backendFilter)
+                emit(newList, "andq", "bqneq", node)
             when "btbs"
-                emit(newList, "andi", "bblt", node, backendFilter)
+                emit(newList, "andi", "bblt", node)
             when "btbz"
-                emit(newList, "andi", "bbeq", node, backendFilter)
+                emit(newList, "andi", "bbeq", node)
             when "btbnz"
-                emit(newList, "andi", "bbneq", node, backendFilter)
+                emit(newList, "andi", "bbneq", node)
             when "tis"
-                emit(newList, "andi", "cilt", node, backendFilter)
+                emit(newList, "andi", "cilt", node)
             when "tiz"
-                emit(newList, "andi", "cieq", node, backendFilter)
+                emit(newList, "andi", "cieq", node)
             when "tinz"
-                emit(newList, "andi", "cineq", node, backendFilter)
+                emit(newList, "andi", "cineq", node)
             when "tps"
-                emit(newList, "andp", "cplt", node, backendFilter)
+                emit(newList, "andp", "cplt", node)
             when "tpz"
-                emit(newList, "andp", "cpeq", node, backendFilter)
+                emit(newList, "andp", "cpeq", node)
             when "tpnz"
-                emit(newList, "andp", "cpneq", node, backendFilter)
+                emit(newList, "andp", "cpneq", node)
             when "tqs"
-                emit(newList, "andq", "cqlt", node, backendFilter)
+                emit(newList, "andq", "cqlt", node)
             when "tqz"
-                emit(newList, "andq", "cqeq", node, backendFilter)
+                emit(newList, "andq", "cqeq", node)
             when "tqnz"
-                emit(newList, "andq", "cqneq", node, backendFilter)
+                emit(newList, "andq", "cqneq", node)
             when "tbs"
-                emit(newList, "andi", "cblt", node, backendFilter)
+                emit(newList, "andi", "cblt", node)
             when "tbz"
-                emit(newList, "andi", "cbeq", node, backendFilter)
+                emit(newList, "andi", "cbeq", node)
             when "tbnz"
-                emit(newList, "andi", "cbneq", node, backendFilter)
+                emit(newList, "andi", "cbneq", node)
             else
                 newList << node
             end

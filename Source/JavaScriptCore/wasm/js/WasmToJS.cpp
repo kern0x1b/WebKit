@@ -52,7 +52,7 @@ static void materializeImportJSCell(JIT& jit, const Wasm::ModuleInformation& inf
     jit.loadPtr(JIT::Address(GPRInfo::wasmContextInstancePointer, JSWebAssemblyInstance::offsetOfImportFunction(info, importIndex)), result);
 }
 
-static std::expected<MacroAssemblerCodeRef<WasmEntryPtrTag>, BindingFailure> handleBadImportTypeUse(JIT& jit, unsigned importIndex, Wasm::ExceptionType exceptionType)
+static Expected<MacroAssemblerCodeRef<WasmEntryPtrTag>, BindingFailure> handleBadImportTypeUse(JIT& jit, unsigned importIndex, Wasm::ExceptionType exceptionType)
 {
     jit.move(GPRInfo::wasmContextInstancePointer, GPRInfo::argumentGPR0);
 
@@ -65,7 +65,7 @@ static std::expected<MacroAssemblerCodeRef<WasmEntryPtrTag>, BindingFailure> han
     return FINALIZE_WASM_CODE(linkBuffer, WasmEntryPtrTag, nullptr, "WebAssembly->JavaScript throw exception due to invalid use of restricted type in import[%i]", importIndex);
 }
 
-std::expected<MacroAssemblerCodeRef<WasmEntryPtrTag>, BindingFailure> wasmToJS(const Wasm::ModuleInformation& info, unsigned importIndex)
+Expected<MacroAssemblerCodeRef<WasmEntryPtrTag>, BindingFailure> wasmToJS(const Wasm::ModuleInformation& info, unsigned importIndex)
 {
     // FIXME: This function doesn't properly abstract away the calling convention.
     // It'd be super easy to do so: https://bugs.webkit.org/show_bug.cgi?id=169401
@@ -83,7 +83,7 @@ std::expected<MacroAssemblerCodeRef<WasmEntryPtrTag>, BindingFailure> wasmToJS(c
     // If we ever change this, we will also need to change WasmOMGIRGenerator.
 
     // Below, we assume that the JS calling convention is always on the stack.
-    ASSERT_UNUSED(jsCC, !jsCC.gprArgs.size());
+    ASSERT_UNUSED(jsCC, !jsCC.jsrArgs.size());
     ASSERT(!jsCC.fprArgs.size());
 
     jit.emitFunctionPrologue();
@@ -144,9 +144,12 @@ std::expected<MacroAssemblerCodeRef<WasmEntryPtrTag>, BindingFailure> wasmToJS(c
         unsigned frOffset = CallFrameSlot::firstArgument * static_cast<int>(sizeof(Register));
         for (unsigned argNum = 0; argNum < argCount; ++argNum) {
             Type argType = signature.argumentType(argNum);
-            switch (argType.kind()) {
+            switch (argType.kind) {
             case TypeKind::Void:
+            case TypeKind::Func:
+            case TypeKind::Struct:
             case TypeKind::Structref:
+            case TypeKind::Array:
             case TypeKind::Arrayref:
             case TypeKind::Eqref:
             case TypeKind::Anyref:
@@ -155,6 +158,9 @@ std::expected<MacroAssemblerCodeRef<WasmEntryPtrTag>, BindingFailure> wasmToJS(c
             case TypeKind::Nofuncref:
             case TypeKind::Noexternref:
             case TypeKind::I31ref:
+            case TypeKind::Rec:
+            case TypeKind::Sub:
+            case TypeKind::Subfinal:
             case TypeKind::V128:
                 RELEASE_ASSERT_NOT_REACHED(); // Handled above.
             case TypeKind::RefNull:
@@ -248,6 +254,9 @@ std::expected<MacroAssemblerCodeRef<WasmEntryPtrTag>, BindingFailure> wasmToJS(c
             case TypeKind::Nofuncref:
             case TypeKind::Noexternref:
             case TypeKind::I31ref:
+            case TypeKind::Rec:
+            case TypeKind::Sub:
+            case TypeKind::Subfinal:
             case TypeKind::V128:
                 RELEASE_ASSERT_NOT_REACHED(); // Handled above.
             case TypeKind::RefNull:
@@ -258,7 +267,7 @@ std::expected<MacroAssemblerCodeRef<WasmEntryPtrTag>, BindingFailure> wasmToJS(c
             case TypeKind::I32:
             case TypeKind::I64: {
                 // Skipped: handled above.
-                if (marshalledGPRs >= wasmCC.gprArgs.size())
+                if (marshalledGPRs >= wasmCC.jsrArgs.size())
                     frOffset += sizeof(Register);
                 ++marshalledGPRs;
                 calleeFrameOffset += sizeof(Register);

@@ -38,6 +38,7 @@ WTF_ALLOW_UNSAFE_BUFFER_USAGE_BEGIN
 #include <JavaScriptCore/WasmJS.h>
 #include <JavaScriptCore/WasmMemory.h>
 #include <JavaScriptCore/WasmOps.h>
+#include <wtf/Expected.h>
 #include <wtf/Lock.h>
 #include <wtf/SharedTask.h>
 #include <wtf/ThreadSafeRefCounted.h>
@@ -58,17 +59,16 @@ enum class BindingFailure;
 
 class Module : public ThreadSafeRefCounted<Module> {
 public:
-    using ValidationResult = std::expected<Ref<Module>, String>;
+    using ValidationResult = Expected<Ref<Module>, String>;
     typedef void CallbackType(ValidationResult&&);
     using AsyncValidationCallback = RefPtr<SharedTask<CallbackType>>;
 
     static ValidationResult validateSync(VM&, Vector<uint8_t>&& source);
     static void validateAsync(VM&, Vector<uint8_t>&& source, Module::AsyncValidationCallback&&);
-    static void validateAsync(VM&, Vector<uint8_t>&& source, Name&& sourceURL, Module::AsyncValidationCallback&&);
 
-    static Ref<Module> create(IPIntPlan& plan, Name&& sourceURL = { })
+    static Ref<Module> create(IPIntPlan& plan)
     {
-        return adoptRef(*new Module(plan, WTF::move(sourceURL)));
+        return adoptRef(*new Module(plan));
     }
 
     const Wasm::RTT& rttFromFunctionIndexSpace(FunctionSpaceIndex functionIndexSpace) const;
@@ -94,14 +94,14 @@ public:
     std::unique_ptr<MergedProfile> createMergedProfile(const IPIntCallee&);
 
 #if ENABLE(WEBASSEMBLY_DEBUGGER)
-    JS_EXPORT_PRIVATE uint32_t NODELETE debugId() const;
+    uint32_t NODELETE debugId() const;
     void NODELETE setDebugId(uint32_t);
 #endif
 
 private:
     Ref<CalleeGroup> getOrCreateCalleeGroup(VM&, MemoryMode);
 
-    Module(IPIntPlan&, Name&& sourceURL);
+    Module(IPIntPlan&);
     const Ref<ModuleInformation> m_moduleInformation;
     RefPtr<CalleeGroup> m_calleeGroups[numberOfMemoryModes];
     const Ref<IPIntCallees> m_ipintCallees;

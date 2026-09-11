@@ -43,11 +43,20 @@ static void getJumpTargetsForInstruction(Block* codeBlock, const JSInstructionSt
         out.append(instruction.offset());
 }
 
-template<typename Block>
-void computePreciseJumpTargetsInternal(Block* codeBlock, const JSInstructionStream& instructions, Vector<JSInstructionStream::Offset, 32>& out)
+enum class ComputePreciseJumpTargetsMode {
+    FollowCodeBlockClaim,
+    ForceCompute,
+};
+
+template<ComputePreciseJumpTargetsMode Mode, typename Block, size_t vectorSize>
+void computePreciseJumpTargetsInternal(Block* codeBlock, const JSInstructionStream& instructions, Vector<JSInstructionStream::Offset, vectorSize>& out)
 {
     ASSERT(out.isEmpty());
 
+    // The code block has a superset of the jump targets. So if it claims to have none, we are done.
+    if (Mode == ComputePreciseJumpTargetsMode::FollowCodeBlockClaim && !codeBlock->numberOfJumpTargets())
+        return;
+    
     for (unsigned i = codeBlock->numberOfExceptionHandlers(); i--;) {
         out.append(codeBlock->exceptionHandler(i).target);
         out.append(codeBlock->exceptionHandler(i).start);
@@ -76,22 +85,22 @@ void computePreciseJumpTargetsInternal(Block* codeBlock, const JSInstructionStre
 
 void computePreciseJumpTargets(CodeBlock* codeBlock, Vector<JSInstructionStream::Offset, 32>& out)
 {
-    computePreciseJumpTargetsInternal(codeBlock, codeBlock->instructions(), out);
+    computePreciseJumpTargetsInternal<ComputePreciseJumpTargetsMode::FollowCodeBlockClaim>(codeBlock, codeBlock->instructions(), out);
 }
 
 void computePreciseJumpTargets(CodeBlock* codeBlock, const JSInstructionStream& instructions, Vector<JSInstructionStream::Offset, 32>& out)
 {
-    computePreciseJumpTargetsInternal(codeBlock, instructions, out);
-}
-
-void computePreciseJumpTargets(UnlinkedCodeBlock* codeBlock, Vector<JSInstructionStream::Offset, 32>& out)
-{
-    computePreciseJumpTargetsInternal(codeBlock, codeBlock->instructions(), out);
+    computePreciseJumpTargetsInternal<ComputePreciseJumpTargetsMode::FollowCodeBlockClaim>(codeBlock, instructions, out);
 }
 
 void computePreciseJumpTargets(UnlinkedCodeBlockGenerator* codeBlock, const JSInstructionStream& instructions, Vector<JSInstructionStream::Offset, 32>& out)
 {
-    computePreciseJumpTargetsInternal(codeBlock, instructions, out);
+    computePreciseJumpTargetsInternal<ComputePreciseJumpTargetsMode::FollowCodeBlockClaim>(codeBlock, instructions, out);
+}
+
+void recomputePreciseJumpTargets(UnlinkedCodeBlockGenerator* codeBlock, const JSInstructionStream& instructions, Vector<JSInstructionStream::Offset>& out)
+{
+    computePreciseJumpTargetsInternal<ComputePreciseJumpTargetsMode::ForceCompute>(codeBlock, instructions, out);
 }
 
 void findJumpTargetsForInstruction(CodeBlock* codeBlock, const JSInstructionStream::Ref& instruction, Vector<JSInstructionStream::Offset, 1>& out)

@@ -118,7 +118,7 @@ void MarkedBlock::Handle::unsweepWithNoNewlyAllocated()
     m_directory->didFinishUsingBlock(this);
 }
 
-void MarkedBlock::Handle::stopAllocating(const FreeList& freeList, StopAllocatingMode mode)
+void MarkedBlock::Handle::stopAllocating(const FreeList& freeList)
 {
     Locker locker { blockHeader().m_lock };
     
@@ -139,42 +139,26 @@ void MarkedBlock::Handle::stopAllocating(const FreeList& freeList, StopAllocatin
     if (MarkedBlockInternal::verbose)
         dataLog("Free list: ", freeList, "\n");
     
-    if (mode == StopAllocatingMode::ForGood) {
-        // MarkedSpace::lastChanceToFinalize() runs next and clears the newly-allocated bitmap before
-        // sweeping, so computing it here would be wasted work. The free list still has to be zapped:
-        // the sweep runs a destructor for every cell that is not zapped.
-        if (m_attributes.destruction != DoesNotNeedDestruction) {
-            freeList.forEach(
-                [&] (HeapCell* cell) {
-                    cell->zap(HeapCell::StopAllocating);
-                });
-        }
-        m_isFreeListed = false;
-        directory()->didFinishUsingBlock(this);
-        return;
-    }
-
     // Roll back to a coherent state for Heap introspection. Cells newly
     // allocated from our free list are not currently marked, so we need another
     // way to tell what's live vs dead. 
     
     blockHeader().m_newlyAllocated.clearAll();
     blockHeader().m_newlyAllocatedVersion = heap()->objectSpace().newlyAllocatedVersion();
-    blockHeader().m_newlyAllocated.setEachNthBit(m_atomsPerCell, m_startAtom, endAtom);
 
-    ASSERT(freeList.cellSize() == m_atomsPerCell * atomSize);
-    bool needsZapping = m_attributes.destruction != DoesNotNeedDestruction;
-    freeList.forEachInterval(
-        [&](char* intervalStart, char* intervalEnd) {
-            if (needsZapping || MarkedBlockInternal::verbose) {
-                for (char* cell = intervalStart; cell < intervalEnd; cell += freeList.cellSize()) {
-                    if constexpr (MarkedBlockInternal::verbose)
-                        dataLog("Free cell: ", RawPointer(cell), "\n");
-                    if (needsZapping)
-                        std::bit_cast<HeapCell*>(cell)->zap(HeapCell::StopAllocating);
-                }
-            }
-            blockHeader().m_newlyAllocated.clearEachNthBit(m_atomsPerCell, block().candidateAtomNumber(intervalStart), block().candidateAtomNumber(intervalEnd));
+    forEachCell(
+        [&] (size_t, HeapCell* cell, HeapCell::Kind) -> IterationStatus {
+            block().setNewlyAllocated(cell);
+            return IterationStatus::Continue;
+        });
+
+    freeList.forEach(
+        [&] (HeapCell* cell) {
+            if constexpr (MarkedBlockInternal::verbose)
+                dataLog("Free cell: ", RawPointer(cell), "\n");
+            if (m_attributes.destruction != DoesNotNeedDestruction)
+                cell->zap(HeapCell::StopAllocating);
+            block().clearNewlyAllocated(cell);
         });
     
     m_isFreeListed = false;

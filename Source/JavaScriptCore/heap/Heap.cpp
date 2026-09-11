@@ -24,7 +24,6 @@
 
 #include "JSCJSValueInlines.h"
 
-#include "BaselineJITCode.h"
 #include "BuiltinExecutables.h"
 #include "CodeBlock.h"
 #include "CodeBlockSetInlines.h"
@@ -88,7 +87,6 @@
 #include "SpaceTimeMutatorScheduler.h"
 #include "StochasticSpaceTimeMutatorScheduler.h"
 #include "StopIfNecessaryTimer.h"
-#include "StringSplitCache.h"
 #include "StructureAlignedMemoryAllocator.h"
 #include "SubspaceInlines.h"
 #include "SuperSampler.h"
@@ -498,7 +496,7 @@ Heap::Heap(VM& vm, HeapType heapType)
     , m_mutatorMarkStack(makeUnique<MarkStackArray>())
     , m_raceMarkStack(makeUnique<MarkStackArray>())
     , m_constraintSet(makeUnique<MarkingConstraintSet>(*this))
-    , m_strongSet(vm)
+    , m_handleSet(vm)
     , m_codeBlocks(makeUnique<CodeBlockSet>())
     , m_jitStubRoutines(makeUnique<JITStubRoutineSet>())
     // We seed with 10ms so that GCActivityCallback::didAllocate doesn't continuously
@@ -524,6 +522,7 @@ Heap::Heap(VM& vm, HeapType heapType)
     , callbackObjectHeapCellType(IsoHeapCellType::Args<JSCallbackObject<JSNonFinalObject>>())
     , customGetterFunctionHeapCellType(IsoHeapCellType::Args<JSCustomGetterFunction>())
     , customSetterFunctionHeapCellType(IsoHeapCellType::Args<JSCustomSetterFunction>())
+    , dateInstanceHeapCellType(IsoHeapCellType::Args<DateInstance>())
     , errorInstanceHeapCellType(IsoHeapCellType::Args<ErrorInstance>())
     , finalizationRegistryCellType(IsoHeapCellType::Args<JSFinalizationRegistry>())
     , globalLexicalEnvironmentHeapCellType(IsoHeapCellType::Args<JSGlobalLexicalEnvironment>())
@@ -655,6 +654,11 @@ Heap::~Heap()
         WeakBlock::destroy(*this, block);
 }
 
+bool Heap::isPagedOut()
+{
+    return m_objectSpace.isPagedOut();
+}
+
 void Heap::dumpHeapStatisticsAtVMDestruction()
 {
     unsigned counter = 0;
@@ -756,11 +760,9 @@ void Heap::lastChanceToFinalize()
         dumpHeapStatisticsAtVMDestruction();
     
     m_arrayBuffers.lastChanceToFinalize();
+    m_objectSpace.stopAllocatingForGood();
     m_objectSpace.lastChanceToFinalize();
     releaseDelayedReleasedObjects();
-#if ENABLE(WEBASSEMBLY)
-    Wasm::TypeInformation::cleanupIfRequested();
-#endif
 
     sweepAllLogicallyEmptyWeakBlocks();
     
@@ -939,72 +941,65 @@ void Heap::addReference(JSCell* cell, ArrayBuffer* buffer)
 }
 
 template<typename CellType, typename CellSet>
-void Heap::reconcileWeakReferencesInMarkedCells(CellSet& cellSet, CollectionScope collectionScope)
+void Heap::finalizeMarkedUnconditionalFinalizers(CellSet& cellSet, CollectionScope collectionScope)
 {
     cellSet.forEachMarkedCell(
         [&] (HeapCell* cell, HeapCell::Kind) {
-            static_cast<CellType*>(cell)->reconcileWeakReferencesAtGCEnd(vm(), collectionScope);
+            static_cast<CellType*>(cell)->finalizeUnconditionally(vm(), collectionScope);
         });
 }
 
-// Weak reference reconciliation: settle every untraced pointer against the liveness that
-// marking just established. Must run after marking, because isMarked() only means "dead"
-// once the closure is complete, and before sweeping, because a dying referent may still
-// need to be identified or read.
-void Heap::reconcileWeakReferencesAtGCEnd()
+void Heap::finalizeUnconditionalFinalizers()
 {
     CollectionScope collectionScope = this->collectionScope().value_or(CollectionScope::Full);
 
     {
-        // Executables go before CodeBlock, since CodeBlock::reconcileWeakReferencesAtGCEnd looks at the owner executable's installed CodeBlock.
+        // We run this before CodeBlock's unconditional finalizer since CodeBlock looks at the owner executable's installed CodeBlock in its finalizeUnconditionally.
 
-        // FunctionExecutable requires all live instances to be processed, so iterate the whole space rather than a tracking set.
-        reconcileWeakReferencesInMarkedCells<FunctionExecutable>(functionExecutableSpaceAndSet.space, collectionScope);
+        // FunctionExecutable requires all live instances to run finalizers. Thus, we do not use finalizer set.
+        finalizeMarkedUnconditionalFinalizers<FunctionExecutable>(functionExecutableSpaceAndSet.space, collectionScope);
 
-        reconcileWeakReferencesInMarkedCells<ProgramExecutable>(programExecutableSpaceAndSet.weakReconciliationSet, collectionScope);
+        finalizeMarkedUnconditionalFinalizers<ProgramExecutable>(programExecutableSpaceAndSet.finalizerSet, collectionScope);
         if (m_evalExecutableSpace)
-            reconcileWeakReferencesInMarkedCells<EvalExecutable>(m_evalExecutableSpace->weakReconciliationSet, collectionScope);
+            finalizeMarkedUnconditionalFinalizers<EvalExecutable>(m_evalExecutableSpace->finalizerSet, collectionScope);
         if (m_moduleProgramExecutableSpace)
-            reconcileWeakReferencesInMarkedCells<ModuleProgramExecutable>(m_moduleProgramExecutableSpace->weakReconciliationSet, collectionScope);
+            finalizeMarkedUnconditionalFinalizers<ModuleProgramExecutable>(m_moduleProgramExecutableSpace->finalizerSet, collectionScope);
     }
 
-    reconcileWeakReferencesInMarkedCells<SymbolTable>(symbolTableSpace, collectionScope);
+    finalizeMarkedUnconditionalFinalizers<SymbolTable>(symbolTableSpace, collectionScope);
 
     forEachCodeBlockSpace(
         [&] (auto& space) {
-            this->reconcileWeakReferencesInMarkedCells<CodeBlock>(space.set, collectionScope);
+            this->finalizeMarkedUnconditionalFinalizers<CodeBlock>(space.set, collectionScope);
         });
     if (collectionScope == CollectionScope::Full) {
-        reconcileWeakReferencesInMarkedCells<Structure>(structureSpace, collectionScope);
-        reconcileWeakReferencesInMarkedCells<BrandedStructure>(brandedStructureSpace, collectionScope);
+        finalizeMarkedUnconditionalFinalizers<Structure>(structureSpace, collectionScope);
+        finalizeMarkedUnconditionalFinalizers<BrandedStructure>(brandedStructureSpace, collectionScope);
 #if ENABLE(WEBASSEMBLY)
-        reconcileWeakReferencesInMarkedCells<WebAssemblyGCStructure>(webAssemblyGCStructureSpace, collectionScope);
+        finalizeMarkedUnconditionalFinalizers<WebAssemblyGCStructure>(webAssemblyGCStructureSpace, collectionScope);
 #endif
     }
-    reconcileWeakReferencesInMarkedCells<StructureRareData>(structureRareDataSpace, collectionScope);
-    reconcileWeakReferencesInMarkedCells<UnlinkedFunctionExecutable>(unlinkedFunctionExecutableSpaceAndSet.set, collectionScope);
+    finalizeMarkedUnconditionalFinalizers<StructureRareData>(structureRareDataSpace, collectionScope);
+    finalizeMarkedUnconditionalFinalizers<UnlinkedFunctionExecutable>(unlinkedFunctionExecutableSpaceAndSet.set, collectionScope);
     if (m_weakSetSpace)
-        reconcileWeakReferencesInMarkedCells<JSWeakSet>(*m_weakSetSpace, collectionScope);
+        finalizeMarkedUnconditionalFinalizers<JSWeakSet>(*m_weakSetSpace, collectionScope);
     if (m_weakMapSpace)
-        reconcileWeakReferencesInMarkedCells<JSWeakMap>(*m_weakMapSpace, collectionScope);
+        finalizeMarkedUnconditionalFinalizers<JSWeakMap>(*m_weakMapSpace, collectionScope);
     if (m_weakObjectRefSpace)
-        reconcileWeakReferencesInMarkedCells<JSWeakObjectRef>(*m_weakObjectRefSpace, collectionScope);
+        finalizeMarkedUnconditionalFinalizers<JSWeakObjectRef>(*m_weakObjectRefSpace, collectionScope);
     if (m_errorInstanceSpace)
-        reconcileWeakReferencesInMarkedCells<ErrorInstance>(*m_errorInstanceSpace, collectionScope);
+        finalizeMarkedUnconditionalFinalizers<ErrorInstance>(*m_errorInstanceSpace, collectionScope);
 
     // FinalizationRegistries currently rely on serial finalization because they can post tasks to the deferredWorkTimer, which normally expects tasks to only be posted by the API lock holder.
     if (m_finalizationRegistrySpace)
-        reconcileWeakReferencesInMarkedCells<JSFinalizationRegistry>(*m_finalizationRegistrySpace, collectionScope);
+        finalizeMarkedUnconditionalFinalizers<JSFinalizationRegistry>(*m_finalizationRegistrySpace, collectionScope);
 
 #if ENABLE(WEBASSEMBLY)
     if (m_webAssemblyInstanceSpace)
-        reconcileWeakReferencesInMarkedCells<JSWebAssemblyInstance>(*m_webAssemblyInstanceSpace, collectionScope);
+        finalizeMarkedUnconditionalFinalizers<JSWebAssemblyInstance>(*m_webAssemblyInstanceSpace, collectionScope);
 #endif
 
-    vm().reconcileWeakReferencesAtGCEnd();
-
-    if (auto* clientData = vm().clientData)
-        clientData->reconcileWeakReferencesAtGCEnd(vm(), collectionScope);
+    vm().finalizeUnconditionally();
 }
 
 void Heap::willStartIterating()
@@ -1316,10 +1311,6 @@ void Heap::deleteAllCodeBlocks(DeleteAllCodeEffort effort)
                 });
         });
 
-    // MicrotaskCallCache lives outside any CodeBlock and keys its cached entry points on the callee's
-    // executable, so after the code is detached above its callee check would still hit and call into it.
-    vm.clearMicrotaskCallCaches();
-
 #if ENABLE(WEBASSEMBLY)
     {
         // We must ensure that we clear the JS call ICs from Wasm. Otherwise, Wasm will
@@ -1355,25 +1346,6 @@ void Heap::deleteAllUnlinkedCodeBlocks(DeleteAllCodeEffort effort)
             UnlinkedFunctionExecutable* executable = static_cast<UnlinkedFunctionExecutable*>(cell);
             executable->clearCode(vm);
         });
-
-#if ENABLE(JIT)
-    // Shareable Baseline JIT code is cached on UnlinkedCodeBlock::m_unlinkedBaselineCode (populated by
-    // CodeBlock::setupWithUnlinkedBaselineCode). That cache is not owned by any linked CodeBlock or
-    // executable, so it survives deleteAllCodeBlocks and is otherwise only released when the
-    // UnlinkedCodeBlock itself is collected. A "warm" UnlinkedCodeBlock can therefore pin Baseline JIT
-    // executable memory across memory warnings indefinitely. Drop the cache eagerly here: any still-linked
-    // CodeBlock holds its own ref to the BaselineJITCode (so we never free code that is still in use),
-    // while a cache-only entry is freed as soon as its last ref goes away, synchronously here.
-    if (Options::useBaselineJITCodeSharing()) {
-        auto clearUnlinkedBaselineCode = [] (HeapCell* cell, HeapCell::Kind) {
-            static_cast<UnlinkedCodeBlock*>(cell)->m_unlinkedBaselineCode = nullptr;
-        };
-        for (auto* space : { m_unlinkedFunctionCodeBlockSpace.get(), m_unlinkedProgramCodeBlockSpace.get(), m_unlinkedEvalCodeBlockSpace.get(), m_unlinkedModuleProgramCodeBlockSpace.get() }) {
-            if (space)
-                space->forEachLiveCell(clearUnlinkedBaselineCode);
-        }
-    }
-#endif
 }
 
 void Heap::deleteUnmarkedCompiledCode()
@@ -1479,9 +1451,6 @@ void Heap::sweepSynchronously()
     }
     m_objectSpace.sweepBlocks();
     m_objectSpace.shrink();
-#if ENABLE(WEBASSEMBLY)
-    Wasm::TypeInformation::cleanupIfRequested();
-#endif
     if (Options::logGC()) [[unlikely]] {
         MonotonicTime after = MonotonicTime::now();
         dataLog("=> ", capacity() / 1024, "kb, ", (after - before).milliseconds(), "ms");
@@ -2023,7 +1992,7 @@ NEVER_INLINE bool Heap::runEndPhase(GCConductor conn)
         m_gcPhaseSweepTime += MonotonicTime::now() - ios6SweepPreStart;
         MonotonicTime ios6FinalizeStart = MonotonicTime::now();
 #endif
-        reconcileWeakReferencesAtGCEnd(); // Must precede clearCurrentlyExecuting: CodeBlock::reconcileWeakReferencesAtGCEnd queries which CodeBlocks are currently executing.
+        finalizeUnconditionalFinalizers(); // We rely on these unconditional finalizers running before clearCurrentlyExecuting since CodeBlock's finalizer relies on querying currently executing.
 #if defined(WEBKIT_IOS6)
         m_gcPhaseFinalizeTime += MonotonicTime::now() - ios6FinalizeStart;
         MonotonicTime ios6SweepPostStart = MonotonicTime::now();
@@ -2088,7 +2057,7 @@ NEVER_INLINE bool Heap::runEndPhase(GCConductor conn)
         m_signpostMessage = { };
     }
 
-    setNeedCollectionEpilogue();
+    setNeedFinalize();
 
     MonotonicTime now = MonotonicTime::now();
 #if defined(WEBKIT_IOS6)
@@ -2151,20 +2120,20 @@ NEVER_INLINE bool Heap::finishChangingPhase(GCConductor conn)
             if (conn == GCConductor::Collector)
                 resumeTheMutator();
             else
-                handleNeedCollectionEpilogue();
+                handleNeedFinalize();
         } else {
             RELEASE_ASSERT(!suspendedBefore);
             RELEASE_ASSERT(suspendedAfter);
             
             if (conn == GCConductor::Collector) {
-                waitWhileNeedCollectionEpilogue();
+                waitWhileNeedFinalize();
                 if (!stopTheMutator()) {
                     dataLogLnIf(HeapInternal::verbose, "Returning false.");
                     return false;
                 }
             } else {
                 sanitizeStackForVM(vm());
-                handleNeedCollectionEpilogue();
+                handleNeedFinalize();
             }
             stopThePeriphery(conn);
         }
@@ -2337,7 +2306,7 @@ void Heap::stopIfNecessarySlow()
     RELEASE_ASSERT(m_worldState.load() & hasAccessBit);
     RELEASE_ASSERT(!(m_worldState.load() & stoppedBit));
     
-    handleNeedCollectionEpilogue();
+    handleNeedFinalize();
     m_mutatorDidRun = true;
 }
 
@@ -2349,9 +2318,9 @@ bool Heap::stopIfNecessarySlow(unsigned oldState)
     RELEASE_ASSERT(oldState & hasAccessBit);
     RELEASE_ASSERT(!(oldState & stoppedBit));
     
-    // It's possible for us to wake up with the epilogue already requested but the world not yet
-    // resumed. If that happens, we can't run the epilogue yet.
-    if (handleNeedCollectionEpilogue(oldState))
+    // It's possible for us to wake up with finalization already requested but the world not yet
+    // resumed. If that happens, we can't run finalization yet.
+    if (handleNeedFinalize(oldState))
         return true;
 
     // FIXME: When entering the concurrent phase, we could arrange for this branch not to fire, and then
@@ -2391,7 +2360,7 @@ NEVER_INLINE void Heap::collectInMutatorThread()
                     }
                 }
             };
-            callWithCurrentThreadState(lambda);
+            callWithCurrentThreadState(scopedLambda<void(CurrentThreadState&)>(WTF::move(lambda)));
             return;
         }
     }
@@ -2454,7 +2423,7 @@ void Heap::acquireAccessSlow()
         RELEASE_ASSERT(!(oldState & stoppedBit));
         unsigned newState = oldState | hasAccessBit;
         if (m_worldState.compareExchangeWeak(oldState, newState)) {
-            handleNeedCollectionEpilogue();
+            handleNeedFinalize();
             m_mutatorDidRun = true;
             stopIfNecessary();
             return;
@@ -2475,7 +2444,7 @@ void Heap::releaseAccessSlow()
             RELEASE_ASSERT_NOT_REACHED();
         }
         
-        if (handleNeedCollectionEpilogue(oldState))
+        if (handleNeedFinalize(oldState))
             continue;
         
         unsigned newState = oldState & ~(hasAccessBit | mutatorHasConnBit);
@@ -2532,16 +2501,16 @@ void Heap::relinquishConn()
     while (relinquishConn(m_worldState.load())) { }
 }
 
-NEVER_INLINE bool Heap::handleNeedCollectionEpilogue(unsigned oldState)
+NEVER_INLINE bool Heap::handleNeedFinalize(unsigned oldState)
 {
     RELEASE_ASSERT(oldState & hasAccessBit);
     RELEASE_ASSERT(!(oldState & stoppedBit));
     
-    if (!(oldState & needCollectionEpilogueBit))
+    if (!(oldState & needFinalizeBit))
         return false;
-    if (m_worldState.compareExchangeWeak(oldState, oldState & ~needCollectionEpilogueBit)) {
-        runCollectionEpilogue();
-        // Wake up anyone waiting for us to run the epilogue. Note that they may have woken up already, in
+    if (m_worldState.compareExchangeWeak(oldState, oldState & ~needFinalizeBit)) {
+        finalize();
+        // Wake up anyone waiting for us to finalize. Note that they may have woken up already, in
         // which case they would be waiting for us to release heap access.
         ParkingLot::unparkAll(&m_worldState);
         return true;
@@ -2549,26 +2518,26 @@ NEVER_INLINE bool Heap::handleNeedCollectionEpilogue(unsigned oldState)
     return true;
 }
 
-void Heap::handleNeedCollectionEpilogue()
+void Heap::handleNeedFinalize()
 {
-    while (handleNeedCollectionEpilogue(m_worldState.load())) { }
+    while (handleNeedFinalize(m_worldState.load())) { }
 }
 
-void Heap::setNeedCollectionEpilogue()
+void Heap::setNeedFinalize()
 {
-    m_worldState.exchangeOr(needCollectionEpilogueBit);
+    m_worldState.exchangeOr(needFinalizeBit);
     ParkingLot::unparkAll(&m_worldState);
     m_stopIfNecessaryTimer->scheduleSoon();
 }
 
-void Heap::waitWhileNeedCollectionEpilogue()
+void Heap::waitWhileNeedFinalize()
 {
     for (;;) {
         unsigned oldState = m_worldState.load();
-        if (!(oldState & needCollectionEpilogueBit)) {
-            // This means that either there was no epilogue request or the main thread will run it
+        if (!(oldState & needFinalizeBit)) {
+            // This means that either there was no finalize request or the main thread will finalize
             // with heap access, so a subsequent call to stopTheWorld() will return only when
-            // the epilogue finishes.
+            // finalize finishes.
             return;
         }
         ParkingLot::compareAndPark(&m_worldState, oldState);
@@ -2591,22 +2560,19 @@ void Heap::notifyThreadStopping(const AbstractLocker&)
     ParkingLot::unparkAll(&m_worldState);
 }
 
-void Heap::runCollectionEpilogue()
+void Heap::finalize()
 {
     MonotonicTime before;
     if (Options::logGC()) [[unlikely]] {
         before = MonotonicTime::now();
-        dataLog("[GC<", RawPointer(this), ">: epilogue ");
+        dataLog("[GC<", RawPointer(this), ">: finalize ");
     }
     
     {
         SweepingScope sweepingScope(*this);
         deleteSourceProviderCaches();
-        sweepEagerlyInEpilogue();
+        sweepInFinalize();
     }
-#if ENABLE(WEBASSEMBLY)
-    Wasm::TypeInformation::cleanupIfRequested();
-#endif
     
     if (HasOwnPropertyCache* cache = vm().hasOwnPropertyCache())
         cache->clear();
@@ -2619,8 +2585,7 @@ void Heap::runCollectionEpilogue()
         vm().stringReplaceCache.clear();
     }
     vm().keyAtomStringCache.clear();
-    if (auto* cache = vm().stringSplitCache())
-        cache->clear();
+    vm().stringSplitCache.clear();
     vm().jsonAtomStringCache.clearJSStrings();
 
     m_possiblyAccessedStringsFromConcurrentThreadsOrGCOwnedDataScope.removeAllMatching([&](const auto& iter) {
@@ -2630,7 +2595,7 @@ void Heap::runCollectionEpilogue()
 
     immutableButterflyToStringCache.clear();
     
-    for (const GCCompletionCallback& callback : m_gcCompletionCallbacks)
+    for (const HeapFinalizerCallback& callback : m_heapFinalizerCallbacks)
         callback.run(vm());
     
     if (shouldSweepSynchronously())
@@ -2674,7 +2639,7 @@ void Heap::waitForCollection(Ticket ticket)
         });
 }
 
-void Heap::sweepEagerlyInEpilogue()
+void Heap::sweepInFinalize()
 {
     m_objectSpace.sweepPreciseAllocations();
 #if ENABLE(WEBASSEMBLY)
@@ -3651,7 +3616,7 @@ void Heap::addCoreConstraints()
         "Sh", "Strong Handles",
         MAKE_MARKING_CONSTRAINT_EXECUTOR_PAIR(([this] (auto& visitor) {
             SetRootMarkReasonScope rootScope(visitor, RootMarkReason::StrongHandles);
-            m_strongSet.visitAggregate(visitor);
+            m_handleSet.visitStrongHandles(visitor);
             vm().visitAggregate(visitor);
         })),
         ConstraintVolatility::GreyedByExecution);
@@ -3910,35 +3875,36 @@ void Heap::performIncrement(size_t bytes)
     m_incrementBalance -= bytesVisited;
 }
 
-void Heap::addGCCompletionCallback(const GCCompletionCallback& callback)
+void Heap::addHeapFinalizerCallback(const HeapFinalizerCallback& callback)
 {
-    m_gcCompletionCallbacks.append(callback);
+    m_heapFinalizerCallbacks.append(callback);
 }
 
-void Heap::removeGCCompletionCallback(const GCCompletionCallback& callback)
+void Heap::removeHeapFinalizerCallback(const HeapFinalizerCallback& callback)
 {
-    m_gcCompletionCallbacks.removeFirst(callback);
+    m_heapFinalizerCallbacks.removeFirst(callback);
 }
+
+void Heap::setBonusVisitorTask(RefPtr<SharedTask<void(SlotVisitor&)>> task)
+{
+    Locker locker { m_markingMutex };
+    m_bonusVisitorTask = task;
+    m_markingConditionVariable.notifyAll();
+}
+
 
 void Heap::runTaskInParallel(RefPtr<SharedTask<void(SlotVisitor&)>> task)
 {
     unsigned initialRefCount = task->refCount();
-    {
-        Locker locker { m_markingMutex };
-        m_bonusVisitorTask = task;
-        m_markingConditionVariable.notifyAll();
-    }
-
+    setBonusVisitorTask(task);
     task->run(*m_collectorSlotVisitor);
-
+    setBonusVisitorTask(nullptr);
+    // The constraint solver expects return of this function to imply termination of the task in all
+    // threads. This ensures that property.
     {
         Locker locker { m_markingMutex };
-        m_bonusVisitorTask = nullptr;
-
-        // The constraint solver expects return of this function to imply termination of the task in all
-        // threads. This ensures that property.
         while (task->refCount() > initialRefCount)
-            m_bonusVisitorTaskConditionVariable.wait(m_markingMutex);
+            m_markingConditionVariable.wait(m_markingMutex);
     }
 }
 

@@ -126,6 +126,8 @@ void auditCellMinimallySlow(VM&, JSCell* cell)
     }
 }
 
+#if USE(JSVALUE64)
+
 #if ENABLE(EXTRA_INTEGRITY_CHECKS)
 // toJS will trigger an audit if ENABLE(EXTRA_INTEGRITY_CHECKS).
 #define DO_AUDIT(value) toJS(value)
@@ -175,7 +177,7 @@ JSValue doAudit(JSValue value)
     return value;
 }
 
-#if ENABLE(EXTRA_INTEGRITY_CHECKS)
+#if ENABLE(EXTRA_INTEGRITY_CHECKS) && USE(JSVALUE64)
 template<>
 std::span<JSValue> audit(std::span<JSValue> span)
 {
@@ -370,6 +372,8 @@ JSGlobalObject* doAudit(JSGlobalObject* globalObject)
     IA_ASSERT(globalObject->isGlobalObject(), "Invalid JSGlobalObject %p", globalObject);
     return globalObject;
 }
+
+#endif // USE(JSVALUE64)
 
 } // namespace Integrity
 } // namespace JSC

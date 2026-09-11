@@ -1047,11 +1047,6 @@ Structure* Structure::flattenDictionaryStructure(VM& vm, JSObject* object)
     ASSERT(isDictionary());
     ASSERT(object->structure() == this);
 
-    // Must outlive cellLocker. The collection this defers until scope exit would otherwise run
-    // while the cell lock is held, and the collector takes that same cell lock to scan an array
-    // storage butterfly, so it would deadlock against us.
-    DeferGC deferGC(vm);
-
     Locker<JSCellLock> cellLocker(NoLockingNecessary);
 
     PropertyTable* table = nullptr;
@@ -1070,7 +1065,7 @@ Structure* Structure::flattenDictionaryStructure(VM& vm, JSObject* object)
     if (beforeOutOfLineCapacity != afterOutOfLineCapacity)
         cellLocker = Locker { object->cellLock() };
 
-    ConcurrentJSLocker locker(m_lock);
+    GCSafeConcurrentJSLocker locker(m_lock, vm);
 
     object->setStructureIDDirectly(id().nuke());
     WTF::storeStoreFence();
@@ -1768,9 +1763,9 @@ void DeferredStructureTransitionWatchpointFire::fireAllSlow()
     watchpointsToFire().fireAll(m_vm, detail);
 }
 
-void Structure::reconcileWeakReferencesAtGCEnd(VM& vm, CollectionScope collectionScope)
+void Structure::finalizeUnconditionally(VM& vm, CollectionScope collectionScope)
 {
-    m_transitionTable.reconcileWeakReferencesAtGCEnd(vm, collectionScope);
+    m_transitionTable.finalizeUnconditionally(vm, collectionScope);
 }
 
 void dumpTransitionKind(PrintStream& out, TransitionKind kind)

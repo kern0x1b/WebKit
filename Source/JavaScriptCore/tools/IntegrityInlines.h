@@ -91,7 +91,11 @@ ALWAYS_INLINE void auditCellRandomly(VM& vm, JSCell* cell)
 
 ALWAYS_INLINE void auditCellFully(VM& vm, JSCell* cell)
 {
+#if USE(JSVALUE64)
     doAudit(vm, cell);
+#else
+    auditCellMinimally(vm, cell);
+#endif
 }
 
 ALWAYS_INLINE void auditStructureID(StructureID structureID)
@@ -108,6 +112,8 @@ ALWAYS_INLINE void auditStructureID(StructureID structureID)
 #endif
 }
 
+#if USE(JSVALUE64)
+
 JS_EXPORT_PRIVATE VM* doAuditSlow(VM*);
 
 ALWAYS_INLINE VM* doAudit(VM* vm)
@@ -116,6 +122,8 @@ ALWAYS_INLINE VM* doAudit(VM* vm)
         return doAuditSlow(vm);
     return vm;
 }
+
+#endif // USE(JSVALUE64)
 
 } // namespace Integrity
 } // namespace JSC

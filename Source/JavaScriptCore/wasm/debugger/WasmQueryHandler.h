@@ -29,9 +29,6 @@
 #include "WasmVirtualAddress.h"
 
 namespace JSC {
-
-class JSWebAssemblyInstance;
-
 namespace Wasm {
 
 class DebugServer;
@@ -66,8 +63,6 @@ private:
 
     bool parseLibrariesReadPacket(StringView packet, size_t& offset, size_t& maxSize);
     bool handleChunkedLibrariesResponse(size_t offset, size_t maxSize, String& response);
-    JSWebAssemblyInstance* instanceForModule(uint32_t moduleId);
-    JSWebAssemblyInstance* instanceForFrame(uint32_t frameIndex);
 };
 
 } // namespace Wasm

@@ -28,7 +28,6 @@
 #include "TemporalPlainTime.h"
 
 #include "DurationArithmetic.h"
-#include "InternalFunction.h"
 #include "IntlObjectInlines.h"
 #include "JSCInlines.h"
 #include "Rounding.h"
@@ -116,19 +115,18 @@ ISO8601::PlainTime TemporalPlainTime::validateAndCreateTimeRecord(JSGlobalObject
     };
 }
 
+// CreateTemporalTime ( time [ , newTarget ] )
 // https://tc39.es/proposal-temporal/#sec-temporal-createtemporaltime
-TemporalPlainTime* createTemporalTime(JSGlobalObject* globalObject, ISO8601::PlainTime&& plainTime, TemporalNewTarget newTarget)
+TemporalPlainTime* TemporalPlainTime::tryCreateIfValid(JSGlobalObject* globalObject, Structure* structure, ISO8601::Duration&& duration)
 {
     VM& vm = globalObject->vm();
     auto scope = DECLARE_THROW_SCOPE(vm);
 
-    // Step 1: If newTarget is not present, set newTarget to %Temporal.PlainTime%.
-    // Step 2: Let object be ? OrdinaryCreateFromConstructor(newTarget, "%Temporal.PlainTime.prototype%", « ... »).
-    ASSERT(newTarget.newTarget && newTarget.constructor);
-    Structure* structure = JSC_GET_DERIVED_STRUCTURE(vm, plainTimeStructure, newTarget.newTarget, newTarget.constructor);
+    // IsValidTime + materialize the Time Record.
+    auto plainTime = validateAndCreateTimeRecord(globalObject, duration);
     RETURN_IF_EXCEPTION(scope, { });
 
-    // Step 3: set [[Time]]. Step 4: Return object.
+    // Steps 1-4: OrdinaryCreateFromConstructor + set [[Time]].
     return TemporalPlainTime::create(vm, structure, WTF::move(plainTime));
 }
 
@@ -632,6 +630,48 @@ ISO8601::Duration TemporalPlainTime::addTime(const ISO8601::PlainTime& plainTime
         static_cast<Int128>(plainTime.millisecond()) + static_cast<Int128>(duration.milliseconds()),
         static_cast<Int128>(plainTime.microsecond()) + static_cast<Int128>(duration.microseconds()),
         static_cast<Int128>(plainTime.nanosecond()) + static_cast<Int128>(duration.nanoseconds()));
+}
+
+// https://tc39.es/proposal-temporal/#sec-temporal.plaintime.prototype.with
+ISO8601::PlainTime TemporalPlainTime::with(JSGlobalObject* globalObject, JSObject* temporalTimeLike, JSValue optionsValue) const
+{
+    VM& vm = globalObject->vm();
+    auto scope = DECLARE_THROW_SCOPE(vm);
+
+    // Steps 1-2: branding done by caller.
+
+    // Step 3: If ? IsPartialTemporalObject(temporalTimeLike) is false, throw TypeError.
+    bool isPartial = isPartialTemporalObject(globalObject, JSValue(temporalTimeLike));
+    RETURN_IF_EXCEPTION(scope, { });
+    if (!isPartial) [[unlikely]] {
+        throwTypeError(globalObject, scope, "argument must be a partial Temporal object"_s);
+        return { };
+    }
+
+    // Step 4: Let partialTime be ? ToTemporalTimeRecord(temporalTimeLike, ~partial~).
+    auto [hourOptional, minuteOptional, secondOptional, millisecondOptional, microsecondOptional, nanosecondOptional] = toPartialTime(globalObject, temporalTimeLike);
+    RETURN_IF_EXCEPTION(scope, { });
+
+    // Step 17: resolvedOptions = ? GetOptionsObject(options).
+    JSObject* options = intlGetOptionsObject(globalObject, optionsValue);
+    RETURN_IF_EXCEPTION(scope, { });
+
+    // Step 18: overflow = ? GetTemporalOverflowOption(resolvedOptions).
+    TemporalOverflow overflow = toTemporalOverflow(globalObject, options);
+    RETURN_IF_EXCEPTION(scope, { });
+
+    // Steps 5-16 (per field): if partialTime.X is not undefined, x = partialTime.X; else x = this.X.
+    ISO8601::Duration duration { };
+    duration.setField(TemporalUnit::Hour, hourOptional.value_or(hour()));
+    duration.setField(TemporalUnit::Minute, minuteOptional.value_or(minute()));
+    duration.setField(TemporalUnit::Second, secondOptional.value_or(second()));
+    duration.setField(TemporalUnit::Millisecond, millisecondOptional.value_or(millisecond()));
+    duration.setField(TemporalUnit::Microsecond, microsecondOptional.value_or(microsecond()));
+    duration.setField(TemporalUnit::Nanosecond, nanosecondOptional.value_or(nanosecond()));
+
+    // Step 19: result = ? RegulateTime(h, m, s, ms, us, ns, overflow).
+    // Step 20: Return ! CreateTemporalTime(result). (Caller wraps.)
+    RELEASE_AND_RETURN(scope, regulateTime(globalObject, WTF::move(duration), overflow));
 }
 
 // DifferenceTime ( time1, time2 ) — returns a time duration (in nanoseconds).

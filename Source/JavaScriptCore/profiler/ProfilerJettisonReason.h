@@ -35,6 +35,7 @@ enum JettisonReason {
     JettisonDueToBaselineLoopReoptimizationTrigger,
     JettisonDueToBaselineLoopReoptimizationTriggerOnOSREntryFail,
     JettisonDueToOSRExit,
+    JettisonDueToProfiledWatchpoint,
     JettisonDueToUnprofiledWatchpoint,
     JettisonDueToOldAge,
     JettisonDueToVMTraps
@@ -45,6 +46,7 @@ inline bool isSpeculationFailure(JettisonReason reason)
     switch (reason) {
     case JettisonDueToOSRExit:
     case JettisonDueToUnprofiledWatchpoint:
+    case JettisonDueToProfiledWatchpoint:
     case JettisonDueToBaselineLoopReoptimizationTrigger:
     case JettisonDueToBaselineLoopReoptimizationTriggerOnOSREntryFail:
         return true;

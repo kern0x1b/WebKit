@@ -30,9 +30,11 @@
 
 namespace JSC {
 
+#if USE(JSVALUE64)
 ALWAYS_INLINE bool VMInspector::verifyCell(VM& vm, JSCell* cell)
 {
     return Integrity::verifyCell(vm, cell);
 }
+#endif
 
 } // namespace JSC

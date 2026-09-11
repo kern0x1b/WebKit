@@ -73,14 +73,14 @@ void InlineAccess::dumpCacheSizesAndCrash()
     {
         CCallHelpers jit;
 
-        GPRReg scratchGPR = valueGPR;
-        jit.load8(CCallHelpers::Address(baseGPR, JSCell::indexingTypeAndMiscOffset()), valueGPR);
-        jit.and32(CCallHelpers::TrustedImm32(IsArray | IndexingShapeMask), valueGPR);
+        GPRReg scratchGPR = value;
+        jit.load8(CCallHelpers::Address(base, JSCell::indexingTypeAndMiscOffset()), value);
+        jit.and32(CCallHelpers::TrustedImm32(IsArray | IndexingShapeMask), value);
         jit.patchableBranch32(
-            CCallHelpers::NotEqual, valueGPR, CCallHelpers::TrustedImm32(IsArray | ContiguousShape));
-        jit.loadPtr(CCallHelpers::Address(baseGPR, JSObject::butterflyOffset()), valueGPR);
-        jit.load32(CCallHelpers::Address(valueGPR, ArrayStorage::lengthOffset()), valueGPR);
-        jit.boxInt32(scratchGPR, resultGPR);
+            CCallHelpers::NotEqual, value, CCallHelpers::TrustedImm32(IsArray | ContiguousShape));
+        jit.loadPtr(CCallHelpers::Address(base, JSObject::butterflyOffset()), value);
+        jit.load32(CCallHelpers::Address(value, ArrayStorage::lengthOffset()), value);
+        jit.boxInt32(scratchGPR, regs);
 
         dataLog("array length size: ", jit.m_assembler.buffer().codeSize(), "\n");
     }
@@ -90,14 +90,14 @@ void InlineAccess::dumpCacheSizesAndCrash()
 
         jit.patchableBranch32(
             MacroAssembler::NotEqual,
-            MacroAssembler::Address(baseGPR, JSCell::structureIDOffset()),
+            MacroAssembler::Address(base, JSCell::structureIDOffset()),
             MacroAssembler::TrustedImm32(0x000ab21ca));
         jit.loadPtr(
-            CCallHelpers::Address(baseGPR, JSObject::butterflyOffset()),
-            valueGPR);
-        GPRReg storageGPR = valueGPR;
+            CCallHelpers::Address(base, JSObject::butterflyOffset()),
+            value);
+        GPRReg storageGPR = value;
         jit.loadValue(
-            CCallHelpers::Address(storageGPR, 0x000ab21ca), resultGPR);
+            CCallHelpers::Address(storageGPR, 0x000ab21ca), regs);
 
         dataLog("out of line offset cache size: ", jit.m_assembler.buffer().codeSize(), "\n");
     }
@@ -107,10 +107,10 @@ void InlineAccess::dumpCacheSizesAndCrash()
 
         jit.patchableBranch32(
             MacroAssembler::NotEqual,
-            MacroAssembler::Address(baseGPR, JSCell::structureIDOffset()),
+            MacroAssembler::Address(base, JSCell::structureIDOffset()),
             MacroAssembler::TrustedImm32(0x000ab21ca));
         jit.loadValue(
-            MacroAssembler::Address(baseGPR, 0x000ab21ca), resultGPR);
+            MacroAssembler::Address(base, 0x000ab21ca), regs);
 
         dataLog("inline offset cache size: ", jit.m_assembler.buffer().codeSize(), "\n");
     }
@@ -120,11 +120,11 @@ void InlineAccess::dumpCacheSizesAndCrash()
 
         jit.patchableBranch32(
             MacroAssembler::NotEqual,
-            MacroAssembler::Address(baseGPR, JSCell::structureIDOffset()),
+            MacroAssembler::Address(base, JSCell::structureIDOffset()),
             MacroAssembler::TrustedImm32(0x000ab21ca));
 
         jit.storeValue(
-            resultGPR, MacroAssembler::Address(baseGPR, 0x000ab21ca));
+            regs, MacroAssembler::Address(base, 0x000ab21ca));
 
         dataLog("replace cache size: ", jit.m_assembler.buffer().codeSize(), "\n");
     }
@@ -134,13 +134,13 @@ void InlineAccess::dumpCacheSizesAndCrash()
 
         jit.patchableBranch32(
             MacroAssembler::NotEqual,
-            MacroAssembler::Address(baseGPR, JSCell::structureIDOffset()),
+            MacroAssembler::Address(base, JSCell::structureIDOffset()),
             MacroAssembler::TrustedImm32(0x000ab21ca));
 
-        jit.loadPtr(MacroAssembler::Address(baseGPR, JSObject::butterflyOffset()), valueGPR);
+        jit.loadPtr(MacroAssembler::Address(base, JSObject::butterflyOffset()), value);
         jit.storeValue(
-            resultGPR,
-            MacroAssembler::Address(baseGPR, 120342));
+            regs,
+            MacroAssembler::Address(base, 120342));
 
         dataLog("replace out of line cache size: ", jit.m_assembler.buffer().codeSize(), "\n");
     }

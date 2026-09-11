@@ -89,7 +89,7 @@ std::optional<JSValue> arrayBufferSpeciesConstructorSlow(JSGlobalObject* globalO
     return species.isUndefinedOrNull() ? std::nullopt : std::make_optional(species);
 }
 
-static ALWAYS_INLINE std::pair<SpeciesConstructResult, JSArrayBuffer*> speciesConstructArrayBuffer(JSGlobalObject* globalObject, JSArrayBuffer* thisObject, size_t length, ArrayBufferSharingMode mode)
+static ALWAYS_INLINE std::pair<SpeciesConstructResult, JSArrayBuffer*> speciesConstructArrayBuffer(JSGlobalObject* globalObject, JSArrayBuffer* thisObject, unsigned length, ArrayBufferSharingMode mode)
 {
     // This is optimized way of SpeciesConstruct invoked from {ArrayBuffer,SharedArrayBuffer}.prototype.slice.
     // https://tc39.es/ecma262/#sec-arraybuffer.prototype.slice
@@ -107,10 +107,10 @@ static ALWAYS_INLINE std::pair<SpeciesConstructResult, JSArrayBuffer*> speciesCo
         return fastPathResult;
 
     // 16. Let new be ? Construct(ctor, « 𝔽(newLen) »).
-    auto args = WTF::toArray<EncodedJSValue>({
-        JSValue::encode(jsNumber(length)),
-    });
-    JSObject* newObject = construct(globalObject, species.value(), ArgList { args.data(), args.size() }, "Species construction did not get a valid constructor"_s);
+    MarkedArgumentBuffer args;
+    args.append(jsNumber(length));
+    ASSERT(!args.hasOverflowed());
+    JSObject* newObject = construct(globalObject, species.value(), args, "Species construction did not get a valid constructor"_s);
     RETURN_IF_EXCEPTION(scope, errorResult);
 
     // 17. Perform ? RequireInternalSlot(new, [[ArrayBufferData]]).
@@ -175,31 +175,31 @@ static EncodedJSValue arrayBufferSlice(JSGlobalObject* globalObject, JSValue arr
 
     // 5. Let len be O.[[ArrayBufferByteLength]].
     // https://tc39.es/proposal-resizablearraybuffer/#sec-sharedarraybuffer.prototype.slice
-    size_t byteLength = thisObject->impl()->byteLength();
+    unsigned byteLength = thisObject->impl()->byteLength();
 
-    size_t firstIndex = 0;
+    unsigned firstIndex = 0;
     double relativeStart = startValue.toIntegerOrInfinity(globalObject);
     RETURN_IF_EXCEPTION(scope, encodedJSValue());
     if (relativeStart < 0)
-        firstIndex = static_cast<size_t>(std::max<double>(byteLength + relativeStart, 0));
+        firstIndex = static_cast<unsigned>(std::max<double>(byteLength + relativeStart, 0));
     else
-        firstIndex = static_cast<size_t>(std::min<double>(relativeStart, byteLength));
+        firstIndex = static_cast<unsigned>(std::min<double>(relativeStart, byteLength));
     ASSERT(firstIndex <= byteLength);
 
-    size_t finalIndex = 0;
+    unsigned finalIndex = 0;
     if (!endValue.isUndefined()) {
         double relativeEnd = endValue.toIntegerOrInfinity(globalObject);
         RETURN_IF_EXCEPTION(scope, encodedJSValue());
         if (relativeEnd < 0)
-            finalIndex = static_cast<size_t>(std::max<double>(byteLength + relativeEnd, 0));
+            finalIndex = static_cast<unsigned>(std::max<double>(byteLength + relativeEnd, 0));
         else
-            finalIndex = static_cast<size_t>(std::min<double>(relativeEnd, byteLength));
+            finalIndex = static_cast<unsigned>(std::min<double>(relativeEnd, byteLength));
     } else
         finalIndex = byteLength;
     ASSERT(finalIndex <= byteLength);
 
     // 14. Let newLen be max(final - first, 0).
-    size_t newLength = (finalIndex >= firstIndex) ? finalIndex - firstIndex : 0;
+    unsigned newLength = (finalIndex >= firstIndex) ? finalIndex - firstIndex : 0;
 
     // 15. Let ctor be ? SpeciesConstructor(O, %ArrayBuffer%).
     auto speciesResult = speciesConstructArrayBuffer(globalObject, thisObject, newLength, mode);
@@ -288,11 +288,15 @@ JSC_DEFINE_HOST_FUNCTION(arrayBufferProtoFuncResize, (JSGlobalObject* globalObje
     if (!thisObject->impl()->isResizableOrGrowableShared()) [[unlikely]]
         return throwVMTypeError(globalObject, scope, "ArrayBuffer is not resizable"_s);
 
-    uint64_t newByteLength = callFrame->argument(0).toIndex(globalObject, "newLength"_s);
+    double newLength = callFrame->argument(0).toIntegerOrInfinity(globalObject);
     RETURN_IF_EXCEPTION(scope, { });
 
     if (thisObject->impl()->isDetached()) [[unlikely]]
         return throwVMTypeError(globalObject, scope, "Receiver is detached"_s);
+
+    if (!std::isfinite(newLength) || newLength < 0)
+        return throwVMRangeError(globalObject, scope, "new length is out of range"_s);
+    size_t newByteLength = static_cast<size_t>(newLength);
 
 #if ENABLE(WEBASSEMBLY)
     // Wasm JS API redefines the abstract operation HostResizeArrayBuffer as follows:
@@ -499,9 +503,12 @@ JSC_DEFINE_HOST_FUNCTION(sharedArrayBufferProtoFuncGrow, (JSGlobalObject* global
     if (!thisObject->impl()->isResizableOrGrowableShared())
         return throwVMTypeError(globalObject, scope, "SharedArrayBuffer is not growable"_s);
 
-    uint64_t newByteLength = callFrame->argument(0).toIndex(globalObject, "newLength"_s);
+    double newLength = callFrame->argument(0).toIntegerOrInfinity(globalObject);
     RETURN_IF_EXCEPTION(scope, { });
 
+    if (!std::isfinite(newLength) || newLength < 0)
+        return throwVMRangeError(globalObject, scope, "new length is out of range"_s);
+    size_t newByteLength = static_cast<size_t>(newLength);
     if (!thisObject->impl()->grow(vm, newByteLength))
         return throwVMRangeError(globalObject, scope, makeString("grow failed with new byte length "_s, newByteLength));
 

@@ -681,10 +681,7 @@ class Instruction
         when "loadq"
             $asm.putc "#{operands[1].clLValue(:int64)} = #{operands[0].int64MemRef};"
         when "loadp"
-            # Load pointers zero-extended into the 64-bit register. On 32-bit a heap
-            # address with the top bit set must not sign-extend, or the cell encoding
-            # would gain a bogus number tag in the high bits.
-            $asm.putc "#{operands[1].clLValue} = #{operands[0].uintptrMemRef};"
+            $asm.putc "#{operands[1].clLValue} = #{operands[0].intptrMemRef};"
         when "storei"
             $asm.putc "#{operands[1].int32MemRef} = #{operands[0].clValue(:int32)};"
         when "storeq"
@@ -769,10 +766,7 @@ class Instruction
             $asm.putc "}"
 
         when "move"
-            # The emulated register is 64 bits wide and may hold a full EncodedJSValue,
-            # so copy all 64 bits. Using :intptr would truncate on 32-bit and sign-extend
-            # a pointer's top bit back into the high half, corrupting the value.
-            $asm.putc "#{operands[1].clLValue(:int64)} = #{operands[0].clValue(:int64)};"
+            $asm.putc "#{operands[1].clLValue(:intptr)} = #{operands[0].clValue(:intptr)};"
         when "sxi2q"
             $asm.putc "#{operands[1].clLValue(:int64)} = #{operands[0].clValue(:int32)};"
         when "zxi2q"

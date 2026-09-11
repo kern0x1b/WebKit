@@ -87,9 +87,6 @@ public:
     JSValue cachedSpecialProperty(CachedSpecialPropertyKey) const;
     void cacheSpecialProperty(JSGlobalObject*, VM&, Structure* baseStructure, JSValue, CachedSpecialPropertyKey, const PropertySlot&);
 
-    TriState cachedHasDefaultToPrimitiveFastAndNonObservable() const { return static_cast<TriState>(m_cachedHasDefaultToPrimitiveFastAndNonObservable); }
-    void setCachedHasDefaultToPrimitiveFastAndNonObservable(TriState mode) { m_cachedHasDefaultToPrimitiveFastAndNonObservable = static_cast<unsigned>(mode); }
-
     JSPropertyNameEnumerator* cachedPropertyNameEnumerator() const;
     uintptr_t cachedPropertyNameEnumeratorAndFlag() const;
     void setCachedPropertyNameEnumerator(VM&, Structure*, JSPropertyNameEnumerator*, StructureChain*);
@@ -129,7 +126,7 @@ public:
 
     DECLARE_EXPORT_INFO;
 
-    void reconcileWeakReferencesAtGCEnd(VM&, CollectionScope);
+    void finalizeUnconditionally(VM&, CollectionScope);
 
     static constexpr uintptr_t cachedPropertyNameEnumeratorIsValidatedViaTraversingFlag = 1;
     static constexpr uintptr_t cachedPropertyNameEnumeratorMask = ~static_cast<uintptr_t>(1);
@@ -180,11 +177,7 @@ private:
     WriteBarrierStructureID m_previous;
     PropertyOffset m_maxOffset;
     PropertyOffset m_transitionOffset;
-    unsigned m_activeReplacementWatchpointSet : 30 { 0 };
-    unsigned m_cachedHasDefaultToPrimitiveFastAndNonObservable : 2 { static_cast<unsigned>(TriState::Indeterminate) }; // TriState
+    unsigned m_activeReplacementWatchpointSet { 0 };
 };
-#ifdef NDEBUG
-static_assert(sizeof(StructureRareData) <= 96, "StructureRareData should remain small");
-#endif
 
 } // namespace JSC

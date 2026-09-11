@@ -143,7 +143,7 @@ public:
         TimesFour,
         TimesEight,
         ScalePtr = isAddress64Bit() ? TimesEight : TimesFour,
-        ScaleRegWord = TimesEight,
+        ScaleRegWord = isRegister64Bit() ? TimesEight : TimesFour,
     };
 
     enum class Extend : uint8_t {
@@ -1021,29 +1021,15 @@ public:
         AssemblerType::relinkJump(jump.dataLocation(), destination.dataLocation());
     }
     
-    template<RepatchingInfo repatch = jitMemcpyRepatchFlush, PtrTag callTag, PtrTag destTag>
+    template<PtrTag callTag, PtrTag destTag>
     static void repatchNearCall(CodeLocationNearCall<callTag> nearCall, CodeLocationLabel<destTag> destination)
     {
         switch (nearCall.callMode()) {
         case NearCallMode::Tail:
-            AssemblerType::template relinkTailCall<repatch>(nearCall.dataLocation(), destination.dataLocation());
+            AssemblerType::relinkTailCall(nearCall.dataLocation(), destination.dataLocation());
             return;
         case NearCallMode::Regular:
-            AssemblerType::template relinkCall<repatch>(nearCall.dataLocation(), destination.untaggedPtr());
-            return;
-        }
-        RELEASE_ASSERT_NOT_REACHED();
-    }
-
-    template<PtrTag callTag>
-    static void flushNearCall(CodeLocationNearCall<callTag> nearCall)
-    {
-        switch (nearCall.callMode()) {
-        case NearCallMode::Tail:
-            AssemblerType::flushTailCall(nearCall.dataLocation());
-            return;
-        case NearCallMode::Regular:
-            AssemblerType::flushCall(nearCall.dataLocation());
+            AssemblerType::relinkCall(nearCall.dataLocation(), destination.untaggedPtr());
             return;
         }
         RELEASE_ASSERT_NOT_REACHED();

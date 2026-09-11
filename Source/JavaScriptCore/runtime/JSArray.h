@@ -108,8 +108,6 @@ public:
     JS_EXPORT_PRIVATE JSValue pop(JSGlobalObject*);
     JSValue fastShift(VM&);
 
-    static constexpr unsigned shiftThreshold = 128;
-
     static JSArray* fastSlice(JSGlobalObject*, JSObject* source, uint64_t startIndex, uint64_t count);
 
     bool holesMustForwardToPrototype() const;
@@ -153,8 +151,10 @@ public:
     template<ShiftCountMode shiftCountMode>
     bool shiftCount(JSGlobalObject* globalObject, unsigned& startIndex, unsigned count)
     {
+        constexpr unsigned shiftThreashold = 128;
+        UNUSED_VARIABLE(shiftThreashold);
         if constexpr (shiftCountMode == ShiftCountForShift)
-            return shiftCountWithAnyIndexingType(globalObject, startIndex, count, shiftThreshold);
+            return shiftCountWithAnyIndexingType(globalObject, startIndex, count, shiftThreashold);
         else if constexpr (shiftCountMode == ShiftCountForSplice)
             return shiftCountWithAnyIndexingType(globalObject, startIndex, count, UINT32_MAX);
         RELEASE_ASSERT_NOT_REACHED();

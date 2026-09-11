@@ -381,6 +381,15 @@ static void decode(Decoder& decoder, const T& src, SourceType<T>& dst, Args... a
         src.decode(decoder, dst, args...);
 }
 
+template<typename T>
+static T decode(Decoder& decoder, T src)
+{
+    if constexpr (std::is_same_v<T, SourceType<T>>)
+        return src;
+    else
+        return src.decode(decoder);
+}
+
 template<typename Source>
 class CachedObject {
     WTF_MAKE_NONCOPYABLE(CachedObject);
@@ -625,18 +634,6 @@ public:
             ::JSC::encode(encoder, buffer[i], vector[i]);
     }
 
-    template<typename Range>
-    void encodeRange(Encoder& encoder, unsigned size, const Range& range)
-    {
-        m_size = size;
-        if (!m_size)
-            return;
-        T* buffer = this->template allocate<T>(encoder, m_size);
-        unsigned i = 0;
-        for (const auto& element : range)
-            buffer[i++].encode(encoder, element);
-    }
-
     template<typename... Args, typename VectorContainer>
     void decode(Decoder& decoder, VectorContainer& vector, Args... args) const
     {
@@ -661,13 +658,6 @@ public:
         ::JSC::encode(encoder, m_second, pair.second);
     }
 
-    template<typename Key, typename Value>
-    void encode(Encoder& encoder, const WTF::KeyValuePair<Key, Value>& pair)
-    {
-        ::JSC::encode(encoder, m_first, pair.key);
-        ::JSC::encode(encoder, m_second, pair.value);
-    }
-
     void decode(Decoder& decoder, std::pair<SourceType<First>, SourceType<Second>>& pair) const
     {
         ::JSC::decode(decoder, m_first, pair.first);
@@ -688,7 +678,11 @@ public:
     template<WTF::ShouldValidateKey shouldValidateKey>
     void encode(Encoder& encoder, const Map<SourceType<Key>, SourceType<Value>, shouldValidateKey>& map)
     {
-        m_entries.encodeRange(encoder, map.size(), map);
+        SourceType<decltype(m_entries)> entriesVector(map.size());
+        unsigned i = 0;
+        for (const auto& it : map)
+            entriesVector[i++] = { it.key, it.value };
+        m_entries.encode(encoder, entriesVector);
     }
 
     template<WTF::ShouldValidateKey shouldValidateKey>
@@ -696,8 +690,8 @@ public:
     {
         SourceType<decltype(m_entries)> decodedEntries;
         m_entries.decode(decoder, decodedEntries);
-        for (auto& pair : decodedEntries)
-            map.set(WTF::move(pair.first), WTF::move(pair.second));
+        for (const auto& pair : decodedEntries)
+            map.set(pair.first, pair.second);
     }
 
 private:
@@ -1888,6 +1882,7 @@ public:
     void encode(Encoder& encoder, const UnlinkedFunctionExecutable::RareData& rareData)
     {
         m_classSource.encode(encoder, rareData.m_classSource);
+        m_parentScopeTDZVariables.encode(encoder, rareData.m_parentScopeTDZVariables);
         m_generatorOrAsyncWrapperFunctionParameterNames.encode(encoder, rareData.m_generatorOrAsyncWrapperFunctionParameterNames);
         m_classElementDefinitions.encode(encoder, rareData.m_classElementDefinitions);
         m_parentPrivateNameEnvironment.encode(encoder, rareData.m_parentPrivateNameEnvironment);
@@ -1897,6 +1892,7 @@ public:
     {
         UnlinkedFunctionExecutable::RareData* rareData = new UnlinkedFunctionExecutable::RareData { };
         m_classSource.decode(decoder, rareData->m_classSource);
+        m_parentScopeTDZVariables.decode(decoder, rareData->m_parentScopeTDZVariables);
         m_generatorOrAsyncWrapperFunctionParameterNames.decode(decoder, rareData->m_generatorOrAsyncWrapperFunctionParameterNames);
         m_classElementDefinitions.decode(decoder, rareData->m_classElementDefinitions);
         m_parentPrivateNameEnvironment.decode(decoder, rareData->m_parentPrivateNameEnvironment);
@@ -1905,6 +1901,7 @@ public:
 
 private:
     CachedSourceCodeWithoutProvider m_classSource;
+    CachedRefPtr<CachedTDZEnvironmentLink> m_parentScopeTDZVariables;
     CachedVector<CachedIdentifier> m_generatorOrAsyncWrapperFunctionParameterNames;
     CachedVector<CachedClassElementDefinition> m_classElementDefinitions;
     CachedPrivateNameEnvironment m_parentPrivateNameEnvironment;
@@ -1946,10 +1943,9 @@ public:
     unsigned NODELETE inlineAttribute() const { return m_inlineAttribute; }
     unsigned NODELETE needsClassFieldInitializer() const { return m_needsClassFieldInitializer; }
     unsigned NODELETE privateBrandRequirement() const { return m_privateBrandRequirement; }
-    unsigned NODELETE hasName() const { return m_hasName; }
 
+    Identifier name(Decoder& decoder) const { return m_name.decode(decoder); }
     Identifier ecmaName(Decoder& decoder) const { return m_ecmaName.decode(decoder); }
-    RefPtr<TDZEnvironmentLink> parentScopeTDZVariables(Decoder& decoder) const { return m_parentScopeTDZVariables.decode(decoder); }
 
     UnlinkedFunctionExecutable::RareData* rareData(Decoder& decoder) const { return m_rareData.decode(decoder); }
 
@@ -1983,12 +1979,11 @@ private:
     unsigned m_inlineAttribute : 1;
     unsigned m_needsClassFieldInitializer : 1;
     unsigned m_implementationVisibility : bitWidthOfImplementationVisibility;
-    unsigned m_hasName : 1;
 
     CachedPtr<CachedFunctionExecutableRareData> m_rareData;
 
+    CachedIdentifier m_name;
     CachedIdentifier m_ecmaName;
-    CachedRefPtr<CachedTDZEnvironmentLink> m_parentScopeTDZVariables;
 
     CachedWriteBarrier<CachedFunctionCodeBlock, UnlinkedFunctionCodeBlock> m_unlinkedCodeBlockForCall;
     CachedWriteBarrier<CachedFunctionCodeBlock, UnlinkedFunctionCodeBlock> m_unlinkedCodeBlockForConstruct;
@@ -2020,10 +2015,14 @@ public:
     VirtualRegister NODELETE thisRegister() const { return m_thisRegister; }
     VirtualRegister NODELETE scopeRegister() const { return m_scopeRegister; }
 
+    RefPtr<StringImpl> sourceURLDirective(Decoder& decoder) const { return m_sourceURLDirective.decode(decoder); }
+    RefPtr<StringImpl> sourceMappingURLDirective(Decoder& decoder) const { return m_sourceMappingURLDirective.decode(decoder); }
+
     Ref<UnlinkedMetadataTable> metadata(Decoder& decoder) const { return m_metadata.decode(decoder); }
 
     unsigned NODELETE isConstructor() const { return m_isConstructor; }
     unsigned NODELETE isBuiltinDefaultClassConstructor() const { return m_isBuiltinDefaultClassConstructor; }
+    unsigned NODELETE hasCapturedVariables() const { return m_hasCapturedVariables; }
     unsigned NODELETE isBuiltinFunction() const { return m_isBuiltinFunction; }
     unsigned NODELETE superBinding() const { return m_superBinding; }
     unsigned NODELETE scriptMode() const { return m_scriptMode; }
@@ -2034,11 +2033,15 @@ public:
     unsigned NODELETE evalContextType() const { return m_evalContextType; }
     unsigned NODELETE hasTailCalls() const { return m_hasTailCalls; }
     unsigned NODELETE hasCheckpoints() const { return m_hasCheckpoints; }
+    unsigned NODELETE lineCount() const { return m_lineCount; }
+    unsigned NODELETE endColumn() const { return m_endColumn; }
 
     int NODELETE numVars() const { return m_numVars; }
     int NODELETE numCalleeLocals() const { return m_numCalleeLocals; }
     int NODELETE numParameters() const { return m_numParameters; }
 
+    CodeFeatures NODELETE features() const { return m_features; }
+    LexicallyScopedFeatures NODELETE lexicallyScopedFeatures() const { return m_lexicallyScopedFeatures; }
     SourceParseMode NODELETE parseMode() const { return m_parseMode; }
     OptionSet<CodeGenerationMode> NODELETE codeGenerationMode() const { return m_codeGenerationMode; }
     unsigned NODELETE codeType() const { return m_codeType; }
@@ -2056,6 +2059,7 @@ private:
 
     unsigned m_isConstructor : 1;
     unsigned m_isBuiltinDefaultClassConstructor : 1;
+    unsigned m_hasCapturedVariables : 1;
     unsigned m_isBuiltinFunction : 1;
     unsigned m_superBinding : 1;
     unsigned m_scriptMode: 1;
@@ -2068,8 +2072,13 @@ private:
     unsigned m_codeType : 2;
     unsigned m_hasCheckpoints : 1;
 
+    CodeFeatures m_features : bitWidthOfCodeFeatures;
+    LexicallyScopedFeatures m_lexicallyScopedFeatures : bitWidthOfLexicallyScopedFeatures;
     SourceParseMode m_parseMode;
     OptionSet<CodeGenerationMode> m_codeGenerationMode;
+
+    unsigned m_lineCount;
+    unsigned m_endColumn;
 
     int m_numVars;
     int m_numCalleeLocals;
@@ -2084,7 +2093,11 @@ private:
 
     CachedPtr<CachedCodeBlockRareData> m_rareData;
 
+    CachedRefPtr<CachedStringImpl> m_sourceURLDirective;
+    CachedRefPtr<CachedStringImpl> m_sourceMappingURLDirective;
+
     CachedPtr<CachedInstructionStream> m_instructions;
+    CachedVector<JSInstructionStream::Offset> m_jumpTargets;
     CachedVector<CachedJSValue> m_constantRegisters;
     CachedVector<SourceCodeRepresentation> m_constantsSourceCodeRepresentation;
     CachedPtr<CachedExpressionInfo> m_expressionInfo;
@@ -2095,47 +2108,8 @@ private:
     CachedVector<CachedWriteBarrier<CachedFunctionExecutable>> m_functionExprs;
 };
 
-template<typename CodeBlockType>
-class CachedGlobalCodeBlock : public CachedCodeBlock<CodeBlockType> {
-    using Base = CachedCodeBlock<CodeBlockType>;
-
-public:
-    void encode(Encoder& encoder, const UnlinkedGlobalCodeBlock& codeBlock)
-    {
-        Base::encode(encoder, codeBlock);
-        m_features = codeBlock.m_features;
-        m_lexicallyScopedFeatures = codeBlock.m_lexicallyScopedFeatures;
-        m_hasCapturedVariables = codeBlock.m_hasCapturedVariables;
-        m_lineCount = codeBlock.m_lineCount;
-        m_endColumn = codeBlock.m_endColumn;
-        m_sourceURLDirective.encode(encoder, codeBlock.m_sourceURLDirective.get());
-        m_sourceMappingURLDirective.encode(encoder, codeBlock.m_sourceMappingURLDirective.get());
-    }
-
-    void decode(Decoder& decoder, UnlinkedGlobalCodeBlock& codeBlock) const
-    {
-        Base::decode(decoder, codeBlock);
-        codeBlock.m_features = m_features;
-        codeBlock.m_lexicallyScopedFeatures = m_lexicallyScopedFeatures;
-        codeBlock.m_hasCapturedVariables = m_hasCapturedVariables;
-        codeBlock.m_lineCount = m_lineCount;
-        codeBlock.m_endColumn = m_endColumn;
-        codeBlock.m_sourceURLDirective = m_sourceURLDirective.decode(decoder);
-        codeBlock.m_sourceMappingURLDirective = m_sourceMappingURLDirective.decode(decoder);
-    }
-
-private:
-    CodeFeatures m_features;
-    LexicallyScopedFeatures m_lexicallyScopedFeatures;
-    bool m_hasCapturedVariables;
-    unsigned m_lineCount;
-    unsigned m_endColumn;
-    CachedRefPtr<CachedStringImpl> m_sourceURLDirective;
-    CachedRefPtr<CachedStringImpl> m_sourceMappingURLDirective;
-};
-
-class CachedProgramCodeBlock : public CachedGlobalCodeBlock<UnlinkedProgramCodeBlock> {
-    using Base = CachedGlobalCodeBlock<UnlinkedProgramCodeBlock>;
+class CachedProgramCodeBlock : public CachedCodeBlock<UnlinkedProgramCodeBlock> {
+    using Base = CachedCodeBlock<UnlinkedProgramCodeBlock>;
 
 public:
     void encode(Encoder& encoder, const UnlinkedProgramCodeBlock& codeBlock)
@@ -2160,14 +2134,13 @@ private:
     CachedVariableEnvironment m_lexicalDeclarations;
 };
 
-class CachedModuleCodeBlock : public CachedGlobalCodeBlock<UnlinkedModuleProgramCodeBlock> {
-    using Base = CachedGlobalCodeBlock<UnlinkedModuleProgramCodeBlock>;
+class CachedModuleCodeBlock : public CachedCodeBlock<UnlinkedModuleProgramCodeBlock> {
+    using Base = CachedCodeBlock<UnlinkedModuleProgramCodeBlock>;
 
 public:
     void encode(Encoder& encoder, const UnlinkedModuleProgramCodeBlock& codeBlock)
     {
         Base::encode(encoder, codeBlock);
-        m_varDeclarations.encode(encoder, codeBlock.m_varDeclarations);
         m_moduleEnvironmentSymbolTableConstantRegisterOffset = codeBlock.m_moduleEnvironmentSymbolTableConstantRegisterOffset;
     }
 
@@ -2176,18 +2149,16 @@ public:
         UnlinkedModuleProgramCodeBlock* codeBlock = new (NotNull, allocateCell<UnlinkedModuleProgramCodeBlock>(decoder.vm())) UnlinkedModuleProgramCodeBlock(decoder, *this);
         codeBlock->finishCreation(decoder.vm());
         Base::decode(decoder, *codeBlock);
-        m_varDeclarations.decode(decoder, codeBlock->m_varDeclarations);
         codeBlock->m_moduleEnvironmentSymbolTableConstantRegisterOffset = m_moduleEnvironmentSymbolTableConstantRegisterOffset;
         return codeBlock;
     }
 
 private:
-    CachedVariableEnvironment m_varDeclarations;
     int m_moduleEnvironmentSymbolTableConstantRegisterOffset;
 };
 
-class CachedEvalCodeBlock : public CachedGlobalCodeBlock<UnlinkedEvalCodeBlock> {
-    using Base = CachedGlobalCodeBlock<UnlinkedEvalCodeBlock>;
+class CachedEvalCodeBlock : public CachedCodeBlock<UnlinkedEvalCodeBlock> {
+    using Base = CachedCodeBlock<UnlinkedEvalCodeBlock>;
 
 public:
     void encode(Encoder& encoder, const UnlinkedEvalCodeBlock& codeBlock)
@@ -2291,6 +2262,7 @@ ALWAYS_INLINE UnlinkedCodeBlock::UnlinkedCodeBlock(Decoder& decoder, Structure* 
     , m_numCalleeLocals(cachedCodeBlock.numCalleeLocals())
     , m_isConstructor(cachedCodeBlock.isConstructor())
     , m_numParameters(cachedCodeBlock.numParameters())
+    , m_hasCapturedVariables(cachedCodeBlock.hasCapturedVariables())
 
     , m_isBuiltinFunction(cachedCodeBlock.isBuiltinFunction())
     , m_isBuiltinDefaultClassConstructor(cachedCodeBlock.isBuiltinDefaultClassConstructor())
@@ -2307,8 +2279,16 @@ ALWAYS_INLINE UnlinkedCodeBlock::UnlinkedCodeBlock(Decoder& decoder, Structure* 
     , m_age(0)
     , m_hasCheckpoints(cachedCodeBlock.hasCheckpoints())
 
+    , m_lexicallyScopedFeatures(cachedCodeBlock.lexicallyScopedFeatures())
+    , m_features(cachedCodeBlock.features())
     , m_parseMode(cachedCodeBlock.parseMode())
     , m_codeGenerationMode(cachedCodeBlock.codeGenerationMode())
+
+    , m_lineCount(cachedCodeBlock.lineCount())
+    , m_endColumn(cachedCodeBlock.endColumn())
+
+    , m_sourceURLDirective(cachedCodeBlock.sourceURLDirective(decoder))
+    , m_sourceMappingURLDirective(cachedCodeBlock.sourceMappingURLDirective(decoder))
 
     , m_metadata(cachedCodeBlock.metadata(decoder))
     , m_instructions(cachedCodeBlock.instructions(decoder))
@@ -2328,6 +2308,7 @@ ALWAYS_INLINE void CachedCodeBlock<CodeBlockType>::decode(Decoder& decoder, Unli
     m_constantsSourceCodeRepresentation.decode(decoder, codeBlock.m_constantsSourceCodeRepresentation);
     codeBlock.m_expressionInfo = m_expressionInfo->decode(decoder);
     m_outOfLineJumpTargets.decode(decoder, codeBlock.m_outOfLineJumpTargets);
+    m_jumpTargets.decode(decoder, codeBlock.m_jumpTargets);
     m_identifiers.decode(decoder, codeBlock.m_identifiers);
     m_functionDecls.decode(decoder, codeBlock.m_functionDecls, &codeBlock);
     m_functionExprs.decode(decoder, codeBlock.m_functionExprs, &codeBlock);
@@ -2380,12 +2361,11 @@ ALWAYS_INLINE void CachedFunctionExecutable::encode(Encoder& encoder, const Unli
     m_needsClassFieldInitializer = executable.m_needsClassFieldInitializer;
     m_implementationVisibility = executable.m_implementationVisibility;
     m_privateBrandRequirement = executable.m_privateBrandRequirement;
-    m_hasName = executable.m_hasName;
 
     m_rareData.encode(encoder, executable.m_rareData.get());
 
+    m_name.encode(encoder, executable.name());
     m_ecmaName.encode(encoder, executable.ecmaName());
-    m_parentScopeTDZVariables.encode(encoder, executable.m_parentScopeTDZVariables);
 
     m_unlinkedCodeBlockForCall.encode(encoder, executable.m_unlinkedCodeBlockForCall);
     m_unlinkedCodeBlockForConstruct.encode(encoder, executable.m_unlinkedCodeBlockForConstruct);
@@ -2433,12 +2413,11 @@ ALWAYS_INLINE UnlinkedFunctionExecutable::UnlinkedFunctionExecutable(Decoder& de
     , m_derivedContextType(cachedExecutable.derivedContextType())
     , m_inlineAttribute(cachedExecutable.inlineAttribute())
     , m_evalContextType(cachedExecutable.evalContextType())
-    , m_hasName(cachedExecutable.hasName())
     , m_unlinkedCodeBlockForCall()
     , m_unlinkedCodeBlockForConstruct()
 
+    , m_name(cachedExecutable.name(decoder))
     , m_ecmaName(cachedExecutable.ecmaName(decoder))
-    , m_parentScopeTDZVariables(cachedExecutable.parentScopeTDZVariables(decoder))
 
     , m_rareData(cachedExecutable.rareData(decoder))
 {
@@ -2477,6 +2456,7 @@ ALWAYS_INLINE void CachedCodeBlock<CodeBlockType>::encode(Encoder& encoder, cons
     m_thisRegister = codeBlock.m_thisRegister;
     m_scopeRegister = codeBlock.m_scopeRegister;
     m_isConstructor = codeBlock.m_isConstructor;
+    m_hasCapturedVariables = codeBlock.m_hasCapturedVariables;
     m_isBuiltinFunction = codeBlock.m_isBuiltinFunction;
     m_isBuiltinDefaultClassConstructor = codeBlock.m_isBuiltinDefaultClassConstructor;
     m_superBinding = codeBlock.m_superBinding;
@@ -2487,9 +2467,13 @@ ALWAYS_INLINE void CachedCodeBlock<CodeBlockType>::encode(Encoder& encoder, cons
     m_constructorKind = codeBlock.m_constructorKind;
     m_derivedContextType = codeBlock.m_derivedContextType;
     m_evalContextType = codeBlock.m_evalContextType;
+    m_lineCount = codeBlock.m_lineCount;
+    m_endColumn = codeBlock.m_endColumn;
     m_numVars = codeBlock.m_numVars;
     m_numCalleeLocals = codeBlock.m_numCalleeLocals;
     m_numParameters = codeBlock.m_numParameters;
+    m_features = codeBlock.m_features;
+    m_lexicallyScopedFeatures = codeBlock.m_lexicallyScopedFeatures;
     m_parseMode = codeBlock.m_parseMode;
     m_codeGenerationMode = codeBlock.m_codeGenerationMode;
     m_codeType = codeBlock.m_codeType;
@@ -2502,10 +2486,14 @@ ALWAYS_INLINE void CachedCodeBlock<CodeBlockType>::encode(Encoder& encoder, cons
     m_metadata.encode(encoder, codeBlock.m_metadata.get());
     m_rareData.encode(encoder, codeBlock.m_rareData.get());
 
+    m_sourceURLDirective.encode(encoder, codeBlock.m_sourceURLDirective.get());
+    m_sourceMappingURLDirective.encode(encoder, codeBlock.m_sourceMappingURLDirective.get());
+
     m_instructions.encode(encoder, codeBlock.m_instructions.get());
     m_constantRegisters.encode(encoder, codeBlock.m_constantRegisters);
     m_constantsSourceCodeRepresentation.encode(encoder, codeBlock.m_constantsSourceCodeRepresentation);
     m_expressionInfo.encode(encoder, codeBlock.m_expressionInfo.get());
+    m_jumpTargets.encode(encoder, codeBlock.m_jumpTargets);
     m_outOfLineJumpTargets.encode(encoder, codeBlock.m_outOfLineJumpTargets);
 
     m_identifiers.encode(encoder, codeBlock.m_identifiers);

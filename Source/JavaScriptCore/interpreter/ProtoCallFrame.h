@@ -66,12 +66,12 @@ public:
         globalObject = object;
     }
 
-    int argumentCountIncludingThis() const { return argCountAndCodeOriginValue.lowWord(); }
+    int argumentCountIncludingThis() const { return argCountAndCodeOriginValue.payload(); }
     int argumentCount() const { return argumentCountIncludingThis() - 1; }
-    void setArgumentCountIncludingThis(int count) { argCountAndCodeOriginValue.lowWord() = count; }
+    void setArgumentCountIncludingThis(int count) { argCountAndCodeOriginValue.payload() = count; }
     void setPaddedArgCount(uint32_t argCount) { paddedArgCount = argCount; }
 
-    void clearCurrentVPC() { argCountAndCodeOriginValue.highWord() = 0; }
+    void clearCurrentVPC() { argCountAndCodeOriginValue.tag() = 0; }
     
     JSValue thisValue() const { return thisArg.Register::jsValue(); }
     void setThisValue(JSValue value) { thisArg = value; }

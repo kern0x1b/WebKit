@@ -165,11 +165,8 @@ public:
 #undef COUNT_LINKBUFFER_PROFILE
     static constexpr unsigned numberOfProfilesExcludingTotal = numberOfProfiles - 1;
 
-    enum class CacheFlushOnFinalize : bool { No, Yes };
-
-    LinkBuffer(MacroAssembler& macroAssembler, void* ownerUID, Profile profile = Profile::Uncategorized, JITCompilationEffort effort = JITCompilationMustSucceed, CacheFlushOnFinalize cacheFlushOnFinalize = CacheFlushOnFinalize::Yes)
+    LinkBuffer(MacroAssembler& macroAssembler, void* ownerUID, Profile profile = Profile::Uncategorized, JITCompilationEffort effort = JITCompilationMustSucceed)
         : m_ownerUID(ownerUID)
-        , m_cacheFlushOnFinalize(cacheFlushOnFinalize)
         , m_profile(profile)
     {
         linkCode(macroAssembler, effort);
@@ -442,7 +439,7 @@ private:
 #if DUMP_LINK_STATISTICS
     static void dumpLinkStatistics(void* code, size_t initialSize, size_t finalSize);
 #endif
-
+    
 #if DUMP_CODE
     static void dumpCode(void* code, size_t);
 #endif
@@ -468,7 +465,6 @@ private:
 #endif
     bool m_alreadyDisassembled { false };
     bool m_isThunk { false };
-    CacheFlushOnFinalize m_cacheFlushOnFinalize { CacheFlushOnFinalize::Yes };
     bool m_isRewriting { false };
     Profile m_profile { Profile::Uncategorized };
     CodePtr<LinkBufferPtrTag> m_code;

@@ -33,6 +33,7 @@
 #include <JavaScriptCore/JavaScript.h>
 #include <thread>
 #include <wtf/DataLog.h>
+#include <wtf/Expected.h>
 #include <wtf/MainThread.h>
 #include <wtf/Noncopyable.h>
 #include <wtf/NumberOfCores.h>
@@ -62,7 +63,7 @@ public:
     }
 
     APIString(const String& string)
-        : APIString(string.utf8().legacyCStringPointer())
+        : APIString(string.utf8().data())
     {
     }
 
@@ -151,7 +152,7 @@ private:
     void checkThrownException(JSValueRef* exception, const ASCIILiteral& expectedMessage, const char* description);
 
     // Helper methods.
-    using ScriptResult = std::expected<JSValueRef, JSValueRef>;
+    using ScriptResult = Expected<JSValueRef, JSValueRef>;
     ScriptResult evaluateScript(const char* script, JSObjectRef thisObject = nullptr);
     template<typename... ArgumentTypes>
     ScriptResult callFunction(const char* functionSource, ArgumentTypes... arguments);

@@ -40,14 +40,11 @@ WTF_ALLOW_UNSAFE_BUFFER_USAGE_BEGIN
 
 namespace JSC { namespace Wasm {
 
-Module::Module(IPIntPlan& plan, Name&& sourceURL)
+Module::Module(IPIntPlan& plan)
     : m_moduleInformation(plan.takeModuleInformation())
     , m_ipintCallees(plan.takeCallees())
     , m_wasmToJSExitStubs(plan.takeWasmToJSExitStubs())
 {
-    if (!sourceURL.isEmpty())
-        m_moduleInformation->sourceURL = WTF::move(sourceURL);
-
 #if ENABLE(WEBASSEMBLY_DEBUGGER)
     if (Options::enableWasmDebugger()) [[unlikely]]
         Wasm::DebugServer::singleton().trackModule(*this);
@@ -67,19 +64,19 @@ Wasm::RTT const& Module::rttFromFunctionIndexSpace(FunctionSpaceIndex functionIn
     return m_moduleInformation->rtt(functionIndexSpace);
 }
 
-static Module::ValidationResult makeValidationResult(IPIntPlan& plan, Name&& sourceURL = { })
+static Module::ValidationResult makeValidationResult(IPIntPlan& plan)
 {
     ASSERT(!plan.hasWork());
     if (plan.failed())
         return std::unexpected<String>(plan.errorMessage());
-    return Module::ValidationResult(Module::create(plan, WTF::move(sourceURL)));
+    return Module::ValidationResult(Module::create(plan));
 }
 
-static Plan::CompletionTask makeValidationCallback(Name&& sourceURL, Module::AsyncValidationCallback&& callback)
+static Plan::CompletionTask makeValidationCallback(Module::AsyncValidationCallback&& callback)
 {
-    return createSharedTask<Plan::CallbackType>([sourceURL = WTF::move(sourceURL), callback = WTF::move(callback)] (Plan& plan) mutable {
+    return createSharedTask<Plan::CallbackType>([callback = WTF::move(callback)] (Plan& plan) {
         ASSERT(!plan.hasWork());
-        callback->run(makeValidationResult(static_cast<IPIntPlan&>(plan), WTF::move(sourceURL)));
+        callback->run(makeValidationResult(static_cast<IPIntPlan&>(plan)));
     });
 }
 
@@ -93,12 +90,7 @@ Module::ValidationResult Module::validateSync(VM& vm, Vector<uint8_t>&& source)
 
 void Module::validateAsync(VM& vm, Vector<uint8_t>&& source, Module::AsyncValidationCallback&& callback)
 {
-    validateAsync(vm, WTF::move(source), { }, WTF::move(callback));
-}
-
-void Module::validateAsync(VM& vm, Vector<uint8_t>&& source, Name&& sourceURL, Module::AsyncValidationCallback&& callback)
-{
-    Ref<Plan> plan = adoptRef(*new IPIntPlan(vm, WTF::move(source), CompilerMode::Validation, makeValidationCallback(WTF::move(sourceURL), WTF::move(callback))));
+    Ref<Plan> plan = adoptRef(*new IPIntPlan(vm, WTF::move(source), CompilerMode::Validation, makeValidationCallback(WTF::move(callback))));
     Wasm::ensureWorklist().enqueue(WTF::move(plan));
 }
 

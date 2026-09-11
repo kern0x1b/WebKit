@@ -525,7 +525,7 @@ void AbstractValue::validateReferences(const TrackedReferences& trackedReference
     m_structure.validateReferences(trackedReferences);
 }
 
-#if !defined(NDEBUG)
+#if USE(JSVALUE64) && !defined(NDEBUG)
 void AbstractValue::ensureCanInitializeWithZeros()
 {
     AlignedStorage<AbstractValue> zeroFilledStorage;

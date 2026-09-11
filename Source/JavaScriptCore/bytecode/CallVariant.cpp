@@ -31,7 +31,7 @@
 
 namespace JSC {
 
-bool CallVariant::isStillLive(VM& vm)
+bool CallVariant::finalize(VM& vm)
 {
     if (m_callee && !vm.heap.isMarked(m_callee))
         return false;

@@ -40,6 +40,7 @@ public:
     }
 
     static TemporalPlainTime* create(VM&, Structure*, ISO8601::PlainTime&&);
+    static TemporalPlainTime* tryCreateIfValid(JSGlobalObject*, Structure*, ISO8601::Duration&&);
     static Structure* createStructure(VM&, JSGlobalObject*, JSValue);
 
     DECLARE_INFO;
@@ -61,6 +62,7 @@ public:
     JSC_TEMPORAL_PLAIN_TIME_UNITS(JSC_DEFINE_TEMPORAL_PLAIN_TIME_FIELD);
 #undef JSC_DEFINE_TEMPORAL_PLAIN_TIME_FIELD
 
+    ISO8601::PlainTime with(JSGlobalObject*, JSObject* temporalTimeLike, JSValue options) const;
     ISO8601::PlainTime round(JSGlobalObject*, JSValue options) const;
     String toString(JSGlobalObject*, JSValue options) const;
     String toString(std::tuple<Precision, unsigned> precision = { Precision::Auto, 0 }) const
@@ -79,7 +81,5 @@ private:
 
     ISO8601::PlainTime m_plainTime;
 };
-
-TemporalPlainTime* createTemporalTime(JSGlobalObject*, ISO8601::PlainTime&&, TemporalNewTarget);
 
 } // namespace JSC

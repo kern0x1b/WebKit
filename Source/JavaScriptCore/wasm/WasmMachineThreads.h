@@ -29,6 +29,7 @@
 
 #include "WasmCalleeGroup.h"
 #include "WasmMemory.h"
+#include <wtf/Expected.h>
 #include <wtf/Lock.h>
 #include <wtf/SharedTask.h>
 #include <wtf/ThreadSafeRefCounted.h>
@@ -37,7 +38,7 @@ namespace JSC { namespace Wasm {
 
 void startTrackingCurrentThread();
 
-void barrierInstructionCacheOnAllThreads();
+void resetInstructionCacheOnAllThreads();
     
 } } // namespace JSC::Wasm
 
@@ -46,7 +47,7 @@ void barrierInstructionCacheOnAllThreads();
 namespace JSC { namespace Wasm {
 
 inline void startTrackingCurrentThread() { }
-inline void barrierInstructionCacheOnAllThreads() { }
+inline void resetInstructionCacheOnAllThreads() { }
 
 } } // namespace JSC::Wasm
 

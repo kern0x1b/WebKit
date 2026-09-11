@@ -30,6 +30,7 @@
 #if ENABLE(WEBASSEMBLY)
 
 #include <JavaScriptCore/WasmBaselineData.h>
+#include <wtf/Expected.h>
 #include <wtf/text/WTFString.h>
 
 namespace JSC {

@@ -28,7 +28,6 @@
 
 #if ENABLE(WEBASSEMBLY)
 
-#include "Debugger.h"
 #include "JSCInlines.h"
 #include "JSWebAssemblyCompileError.h"
 #include "JSWebAssemblyLinkError.h"
@@ -48,8 +47,6 @@ JSWebAssemblyModule* JSWebAssemblyModule::create(VM& vm, Structure* structure, R
 {
     auto* module = new (NotNull, allocateCell<JSWebAssemblyModule>(vm)) JSWebAssemblyModule(vm, structure, WTF::move(result));
     module->finishCreation(vm);
-    if (auto* debugger = module->realm()->debugger()) [[unlikely]]
-        debugger->sourceParsed(module->realm(), module);
     return module;
 }
 
@@ -75,11 +72,11 @@ void JSWebAssemblyModule::finishCreation(VM& vm)
     const Wasm::ModuleInformation& moduleInformation = m_module->moduleInformation();
     {
         auto offset = exportSymbolTable->takeNextScopeOffset(NoLockingNecessary);
-        exportSymbolTable->add(NoLockingNecessary, vm.propertyNames->starNamespacePrivateName.impl(), SymbolTableEntry(VarOffset(offset)));
+        exportSymbolTable->set(NoLockingNecessary, vm.propertyNames->starNamespacePrivateName.impl(), SymbolTableEntry(VarOffset(offset)));
     }
     for (auto& exp : moduleInformation.exports) {
         auto offset = exportSymbolTable->takeNextScopeOffset(NoLockingNecessary);
-        exportSymbolTable->add(NoLockingNecessary, makeAtomString(exp.field).impl(), SymbolTableEntry(VarOffset(offset)));
+        exportSymbolTable->set(NoLockingNecessary, makeAtomString(exp.field).impl(), SymbolTableEntry(VarOffset(offset)));
     }
 
     m_exportSymbolTable.set(vm, this, exportSymbolTable);
@@ -88,7 +85,7 @@ void JSWebAssemblyModule::finishCreation(VM& vm)
 void JSWebAssemblyModule::destroy(JSCell* cell)
 {
     static_cast<JSWebAssemblyModule*>(cell)->JSWebAssemblyModule::~JSWebAssemblyModule();
-    Wasm::TypeInformation::requestCleanup();
+    Wasm::TypeInformation::tryCleanup();
 }
 
 const Wasm::ModuleInformation& JSWebAssemblyModule::moduleInformation() const
@@ -109,20 +106,6 @@ const Wasm::RTT& JSWebAssemblyModule::rttFromFunctionIndexSpace(Wasm::FunctionSp
 Wasm::Module& JSWebAssemblyModule::module()
 {
     return m_module.get();
-}
-
-std::span<const JSWebAssemblyModule::ImportName> JSWebAssemblyModule::importNames(VM& vm)
-{
-    const auto& imports = moduleInformation().imports;
-    if (m_importNames.size() != imports.size()) {
-        m_importNames = FixedVector<ImportName>::map(imports, [&](const Wasm::Import& import) {
-            return ImportName {
-                Identifier::fromString(vm, makeAtomString(import.module)),
-                Identifier::fromString(vm, makeAtomString(import.field)),
-            };
-        });
-    }
-    return m_importNames.span();
 }
 
 template<typename Visitor>

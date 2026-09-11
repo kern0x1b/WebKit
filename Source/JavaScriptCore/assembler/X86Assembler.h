@@ -47,19 +47,19 @@ namespace RegisterNames {
 
 #define REGISTER_ID(id, name, res, cs) id,
 
-enum RegisterID : int8_t {
+typedef enum : int8_t {
     FOR_EACH_GP_REGISTER(REGISTER_ID)
     InvalidGPRReg = -1,
-};
+} RegisterID;
 
-enum SPRegisterID : int8_t {
+typedef enum : int8_t {
     FOR_EACH_SP_REGISTER(REGISTER_ID)                                                     
-};
+} SPRegisterID;
 
-enum XMMRegisterID : int8_t {
+typedef enum : int8_t {
     FOR_EACH_FP_REGISTER(REGISTER_ID)
     InvalidFPRReg = -1,
-};
+} XMMRegisterID;
 
 #undef REGISTER_ID
 
@@ -6407,29 +6407,20 @@ public:
         setPointer(static_cast<char*>(code) + where.offset(), value);
     }
 
-    template<RepatchingInfo repatch = jitMemcpyRepatchFlush>
     static void relinkJump(void* from, void* to)
     {
         setRel32(from, to);
     }
-
-    template<RepatchingInfo repatch = jitMemcpyRepatchFlush>
+    
     static void relinkCall(void* from, void* to)
     {
         setRel32(from, to);
     }
 
-    template<RepatchingInfo repatch = jitMemcpyRepatchFlush>
     static void relinkTailCall(void* from, void* to)
     {
-        relinkJump<repatch>(from, to);
+        relinkJump(from, to);
     }
-
-    // Flushing is a no-op on x86: instruction fetch is coherent with data writes, so the relink
-    // functions above never flush either.
-    static void flushJump(void*) { }
-    static void flushCall(void*) { }
-    static void flushTailCall(void*) { }
 
     static void repatchPointer(void* where, void* value)
     {
@@ -6991,7 +6982,8 @@ private:
         //   * Three argument ModRM - a register, and a register and an offset describing a memory operand.
         //   * Five argument ModRM - a register, and a base register, an index, scale, and offset describing a memory operand.
         //
-        // REX prefixes will be planted as necessary, where high numbered registers are used.
+        // For 32-bit x86 targets, the address operand may also be provided as a void*.
+        // On 64-bit targets REX prefixes will be planted as necessary, where high numbered registers are used.
         //
         // The twoByteOp methods plant two-byte Intel instructions sequences (first opcode byte 0x0F).
 

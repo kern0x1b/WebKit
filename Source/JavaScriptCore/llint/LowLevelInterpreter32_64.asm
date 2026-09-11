@@ -53,9 +53,9 @@ end
 macro storeJSValueConcurrent(store, tag, payload)
     if JIT
         store(InvalidTag, TagOffset)
-        fence
+        writefence
         store(payload, PayloadOffset)
-        fence
+        writefence
         store(tag, TagOffset)
     else
         store(payload, PayloadOffset)
@@ -2803,7 +2803,7 @@ llintOpWithMetadata(op_put_to_scope, OpPutToScope, macro (size, get, dispatch, m
         loadConstantOrVariable(size, t0, t1, t2)
         loadp OpPutToScope::Metadata::m_watchpointSet[t5], t3
         btpz t3, .noVariableWatchpointSet
-        notifyWrite(t3, t3, .pDynamic)
+        notifyWrite(t3, .pDynamic)
     .noVariableWatchpointSet:
         loadp OpPutToScope::Metadata::m_operand[t5], t0
         storeJSValueConcurrent(
@@ -2833,7 +2833,7 @@ llintOpWithMetadata(op_put_to_scope, OpPutToScope, macro (size, get, dispatch, m
         loadConstantOrVariable(size, t1, t2, t3)
         loadp OpPutToScope::Metadata::m_watchpointSet[t5], t1
         btpz t1, .noVariableWatchpointSet
-        notifyWrite(t1, t1, .pDynamic)
+        notifyWrite(t1, .pDynamic)
     .noVariableWatchpointSet:
         loadp OpPutToScope::Metadata::m_operand[t5], t1
         storeJSValueConcurrent(

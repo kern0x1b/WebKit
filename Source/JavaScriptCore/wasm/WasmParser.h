@@ -40,6 +40,7 @@
 #include "WasmTypeSectionState.h"
 #include "Width.h"
 #include <type_traits>
+#include <wtf/Expected.h>
 #include <wtf/LEBDecoder.h>
 #include <wtf/StdLibExtras.h>
 #include <wtf/StringPrintStream.h>
@@ -61,7 +62,7 @@ class ParserBase {
 public:
     typedef String ErrorType;
     typedef std::unexpected<ErrorType> UnexpectedResult;
-    typedef std::expected<void, ErrorType> PartialResult;
+    typedef Expected<void, ErrorType> PartialResult;
 
     std::span<const uint8_t> source() const { return m_source; }
     size_t offset() const { return m_offset; }
@@ -130,7 +131,7 @@ protected:
 
 template<typename SuccessType> class Parser : public ParserBase {
 public:
-    using Result = std::expected<SuccessType, ErrorType>;
+    using Result = Expected<SuccessType, ErrorType>;
 
     explicit Parser(std::span<const uint8_t> span)
         : ParserBase { span }
@@ -324,14 +325,14 @@ ALWAYS_INLINE bool ParserBase::parseValueType(const ModuleInformation& info, Typ
     TypeKind typeKind = static_cast<TypeKind>(kind);
     TypeIndex typeIndex = 0;
     if (isValidHeapTypeKind(kind)) {
-        typeIndex = typeIndexFromTypeKind(typeKind);
+        typeIndex = static_cast<TypeIndex>(typeKind);
         typeKind = TypeKind::RefNull;
     } else if (typeKind == TypeKind::Ref || typeKind == TypeKind::RefNull) {
         int32_t heapType;
         if (!parseHeapType(info, heapType))
             return false;
         if (heapType < 0)
-            typeIndex = typeIndexFromTypeKind(static_cast<TypeKind>(heapType));
+            typeIndex = static_cast<TypeIndex>(heapType);
         else {
             // For recursive references inside recursion groups, we construct a
             // placeholder projection with an invalid group index. These should

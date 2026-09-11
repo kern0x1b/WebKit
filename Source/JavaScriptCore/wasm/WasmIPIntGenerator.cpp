@@ -111,7 +111,7 @@ WTF_ALLOW_UNSAFE_BUFFER_USAGE_BEGIN
 namespace JSC { namespace Wasm {
 
 using ErrorType = String;
-using PartialResult = std::expected<void, ErrorType>;
+using PartialResult = Expected<void, ErrorType>;
 using UnexpectedResult = std::unexpected<ErrorType>;
 struct IPIntValue { };
 
@@ -244,17 +244,17 @@ public:
 
     bool NODELETE usesSIMD() { return m_usesSIMD; }
     void NODELETE notifyFunctionUsesSIMD() { ASSERT(Options::useWasmSIMD()); m_usesSIMD = true; }
-    [[nodiscard]] PartialResult addSIMDLoad(ExpressionType, uint64_t, ExpressionType&, uint8_t);
-    [[nodiscard]] PartialResult addSIMDStore(ExpressionType, ExpressionType, uint64_t, uint8_t);
+    [[nodiscard]] PartialResult addSIMDLoad(ExpressionType, uint32_t, ExpressionType&, uint8_t);
+    [[nodiscard]] PartialResult addSIMDStore(ExpressionType, ExpressionType, uint32_t, uint8_t);
     [[nodiscard]] PartialResult addSIMDSplat(SIMDLane, ExpressionType, ExpressionType&);
     [[nodiscard]] PartialResult addSIMDShuffle(v128_t, ExpressionType, ExpressionType, ExpressionType&);
     [[nodiscard]] PartialResult addSIMDShift(SIMDLaneOperation, SIMDInfo, ExpressionType, ExpressionType, ExpressionType&);
     [[nodiscard]] PartialResult addSIMDExtmul(SIMDLaneOperation, SIMDInfo, ExpressionType, ExpressionType, ExpressionType&);
-    [[nodiscard]] PartialResult addSIMDLoadSplat(SIMDLaneOperation, ExpressionType, uint64_t, ExpressionType&, uint8_t);
-    [[nodiscard]] PartialResult addSIMDLoadLane(SIMDLaneOperation, ExpressionType, ExpressionType, uint64_t, uint8_t, ExpressionType&, uint8_t);
-    [[nodiscard]] PartialResult addSIMDStoreLane(SIMDLaneOperation, ExpressionType, ExpressionType, uint64_t, uint8_t, uint8_t);
-    [[nodiscard]] PartialResult addSIMDLoadExtend(SIMDLaneOperation, ExpressionType, uint64_t, ExpressionType&, uint8_t);
-    [[nodiscard]] PartialResult addSIMDLoadPad(SIMDLaneOperation, ExpressionType, uint64_t, ExpressionType&, uint8_t);
+    [[nodiscard]] PartialResult addSIMDLoadSplat(SIMDLaneOperation, ExpressionType, uint32_t, ExpressionType&, uint8_t);
+    [[nodiscard]] PartialResult addSIMDLoadLane(SIMDLaneOperation, ExpressionType, ExpressionType, uint32_t, uint8_t, ExpressionType&, uint8_t);
+    [[nodiscard]] PartialResult addSIMDStoreLane(SIMDLaneOperation, ExpressionType, ExpressionType, uint32_t, uint8_t, uint8_t);
+    [[nodiscard]] PartialResult addSIMDLoadExtend(SIMDLaneOperation, ExpressionType, uint32_t, ExpressionType&, uint8_t);
+    [[nodiscard]] PartialResult addSIMDLoadPad(SIMDLaneOperation, ExpressionType, uint32_t, ExpressionType&, uint8_t);
 
     ExpressionType addSIMDConstant(v128_t);
 
@@ -273,9 +273,9 @@ public:
 
     // References
 
-    [[nodiscard]] PartialResult addRefIsNull(ExpressionType, ExpressionType&);
+    [[nodiscard]] PartialResult NODELETE addRefIsNull(ExpressionType, ExpressionType&);
     [[nodiscard]] PartialResult addRefFunc(FunctionSpaceIndex, ExpressionType&);
-    [[nodiscard]] PartialResult addRefAsNonNull(ExpressionType, ExpressionType&);
+    [[nodiscard]] PartialResult NODELETE addRefAsNonNull(ExpressionType, ExpressionType&);
     [[nodiscard]] PartialResult addRefEq(ExpressionType, ExpressionType, ExpressionType&);
 
     // Tables
@@ -293,7 +293,7 @@ public:
 
     [[nodiscard]] PartialResult getLocal(uint32_t index, ExpressionType&);
     [[nodiscard]] PartialResult setLocal(uint32_t, ExpressionType);
-    [[nodiscard]] PartialResult teeLocal(uint32_t, ExpressionType, ExpressionType& result);
+    [[nodiscard]] PartialResult NODELETE teeLocal(uint32_t, ExpressionType, ExpressionType& result);
 
     // Globals
 
@@ -716,13 +716,13 @@ IPIntValue IPIntGenerator::addConstant(Type, uint64_t)
 
 // SIMD
 
-[[nodiscard]] PartialResult IPIntGenerator::addSIMDLoad(ExpressionType, uint64_t, ExpressionType&, uint8_t)
+[[nodiscard]] PartialResult IPIntGenerator::addSIMDLoad(ExpressionType, uint32_t, ExpressionType&, uint8_t)
 {
     changeStackSize(0); // Pop address, push v128 value (net change = 0)
     return { };
 }
 
-[[nodiscard]] PartialResult IPIntGenerator::addSIMDStore(ExpressionType, ExpressionType, uint64_t, uint8_t)
+[[nodiscard]] PartialResult IPIntGenerator::addSIMDStore(ExpressionType, ExpressionType, uint32_t, uint8_t)
 {
     changeStackSize(-2); // Pop address and v128 value
     return { };
@@ -751,29 +751,29 @@ IPIntValue IPIntGenerator::addConstant(Type, uint64_t)
     return { };
 }
 
-[[nodiscard]] PartialResult IPIntGenerator::addSIMDLoadSplat(SIMDLaneOperation, ExpressionType pointer, uint64_t offset, ExpressionType& result, uint8_t memoryIndex)
+[[nodiscard]] PartialResult IPIntGenerator::addSIMDLoadSplat(SIMDLaneOperation, ExpressionType pointer, uint32_t offset, ExpressionType& result, uint8_t memoryIndex)
 {
     return addSIMDLoad(pointer, offset, result, memoryIndex);
 }
 
-[[nodiscard]] PartialResult IPIntGenerator::addSIMDLoadLane(SIMDLaneOperation, ExpressionType, ExpressionType, uint64_t, uint8_t, ExpressionType&, uint8_t)
+[[nodiscard]] PartialResult IPIntGenerator::addSIMDLoadLane(SIMDLaneOperation, ExpressionType, ExpressionType, uint32_t, uint8_t, ExpressionType&, uint8_t)
 {
     changeStackSize(-1);
     return { };
 }
 
-[[nodiscard]] PartialResult IPIntGenerator::addSIMDStoreLane(SIMDLaneOperation, ExpressionType, ExpressionType, uint64_t, uint8_t, uint8_t)
+[[nodiscard]] PartialResult IPIntGenerator::addSIMDStoreLane(SIMDLaneOperation, ExpressionType, ExpressionType, uint32_t, uint8_t, uint8_t)
 {
     changeStackSize(-2);
     return { };
 }
 
-[[nodiscard]] PartialResult IPIntGenerator::addSIMDLoadExtend(SIMDLaneOperation, ExpressionType pointer, uint64_t offset, ExpressionType& result, uint8_t memoryIndex)
+[[nodiscard]] PartialResult IPIntGenerator::addSIMDLoadExtend(SIMDLaneOperation, ExpressionType pointer, uint32_t offset, ExpressionType& result, uint8_t memoryIndex)
 {
     return addSIMDLoad(pointer, offset, result, memoryIndex);
 }
 
-[[nodiscard]] PartialResult IPIntGenerator::addSIMDLoadPad(SIMDLaneOperation, ExpressionType pointer, uint64_t offset, ExpressionType& result, uint8_t memoryIndex)
+[[nodiscard]] PartialResult IPIntGenerator::addSIMDLoadPad(SIMDLaneOperation, ExpressionType pointer, uint32_t offset, ExpressionType& result, uint8_t memoryIndex)
 {
     return addSIMDLoad(pointer, offset, result, memoryIndex);
 }
@@ -1050,14 +1050,14 @@ IPIntGenerator::ExpressionType IPIntGenerator::addSIMDConstant(v128_t)
 
 [[nodiscard]] PartialResult IPIntGenerator::addGrowMemory(ExpressionType, ExpressionType&, uint8_t memoryIndex)
 {
-    m_metadata->addMemoryGrow(memoryIndex, getCurrentInstructionLength());
+    m_metadata->addMemoryGrow(memoryIndex);
     return { };
 }
 
 [[nodiscard]] PartialResult IPIntGenerator::addCurrentMemory(ExpressionType&, uint8_t memoryIndex)
 {
     changeStackSize(1);
-    m_metadata->addMemorySize(memoryIndex, getCurrentInstructionLength());
+    m_metadata->addMemorySize(memoryIndex);
     return { };
 }
 
@@ -2537,7 +2537,7 @@ void IPIntGenerator::convertTryToCatch(ControlType& tryBlock, CatchKind catchKin
     const auto& signature = m_info.rtt(m_info.typeSignatureIndexFromExceptionIndexSpace(exceptionIndex));
     unsigned offset = 0;
     for (unsigned i = 0; i < signature.argumentCount(); ++i)
-        offset += signature.argumentType(i).kind() == TypeKind::V128 ? 2 : 1;
+        offset += signature.argumentType(i).kind == TypeKind::V128 ? 2 : 1;
     unsigned throwCalleeStackSize = WTF::roundUpToMultipleOf<stackAlignmentBytes()>(offset * sizeof(uint64_t));
     m_metadata->m_maxCalleeStackSize = std::max(throwCalleeStackSize, m_metadata->m_maxCalleeStackSize);
 
@@ -2991,7 +2991,7 @@ std::unique_ptr<FunctionIPIntMetadataGenerator> IPIntGenerator::finalize()
     return WTF::move(m_metadata);
 }
 
-std::expected<std::unique_ptr<FunctionIPIntMetadataGenerator>, String> parseAndCompileMetadata(std::span<const uint8_t> function, const RTT& signature, ModuleInformation& info, FunctionCodeIndex functionIndex)
+Expected<std::unique_ptr<FunctionIPIntMetadataGenerator>, String> parseAndCompileMetadata(std::span<const uint8_t> function, const RTT& signature, ModuleInformation& info, FunctionCodeIndex functionIndex)
 {
     IPIntGenerator generator(info, functionIndex, signature, function);
     FunctionParser<IPIntGenerator> parser(generator, function, signature, info);

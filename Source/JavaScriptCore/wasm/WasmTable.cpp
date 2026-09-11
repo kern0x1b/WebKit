@@ -86,7 +86,7 @@ Table::Table(uint32_t initial, std::optional<uint64_t> maximum, Type wasmType, W
     : m_maximum(maximum)
     , m_type(type)
     , m_wasmType(wasmType)
-    , m_wasmTypeRTT(TypeInformation::tryGetRTT(wasmType.index()))
+    , m_wasmTypeRTT(TypeInformation::tryGetRTT(wasmType.index))
     , m_isFixedSized(maximum && maximum.value() == initial)
     , m_addressType(addressType)
     , m_owner(nullptr)
@@ -95,11 +95,10 @@ Table::Table(uint32_t initial, std::optional<uint64_t> maximum, Type wasmType, W
     ASSERT(!m_maximum || *m_maximum >= m_length);
 }
 
-RefPtr<Table> Table::tryCreate(VM& vm, uint64_t declaredInitial, std::optional<uint64_t> maximum, TableElementType type, Type wasmType, Wasm::AddressType addressType)
+RefPtr<Table> Table::tryCreate(VM& vm, uint32_t initial, std::optional<uint64_t> maximum, TableElementType type, Type wasmType, Wasm::AddressType addressType)
 {
-    if (!isValidLength(declaredInitial))
+    if (!isValidLength(initial))
         return nullptr;
-    uint32_t initial = static_cast<uint32_t>(declaredInitial);
     switch (type) {
     case TableElementType::Externref:
         return adoptRef(new ExternOrAnyRefTable(initial, maximum, wasmType, addressType));
@@ -115,7 +114,7 @@ RefPtr<Table> Table::tryCreate(VM& vm, uint64_t declaredInitial, std::optional<u
     RELEASE_ASSERT_NOT_REACHED();
 }
 
-std::optional<uint32_t> Table::grow(uint64_t delta, JSValue defaultValue)
+std::optional<uint32_t> Table::grow(uint32_t delta, JSValue defaultValue)
 {
     RELEASE_ASSERT(m_owner);
     if (delta == 0)
@@ -123,12 +122,12 @@ std::optional<uint32_t> Table::grow(uint64_t delta, JSValue defaultValue)
 
     Locker locker { m_owner->cellLock() };
 
-    CheckedUint64 newLengthChecked = length();
+    CheckedUint32 newLengthChecked = length();
     newLengthChecked += delta;
     if (newLengthChecked.hasOverflowed())
         return std::nullopt;
 
-    uint64_t newLength = newLengthChecked;
+    uint32_t newLength = newLengthChecked;
     if (maximum() && newLength > *maximum())
         return std::nullopt;
     if (!isValidLength(newLength))
@@ -214,16 +213,6 @@ void Table::set(uint32_t index, JSValue value)
     });
 }
 
-void Table::fill(VM& vm, JSValue value)
-{
-    ASSERT(m_owner);
-    Locker locker { m_owner->cellLock() };
-    Integrity::auditCell<Integrity::AuditLevel::Full>(vm, value);
-    visitDerived([&](auto& table) {
-        table.fill(vm, value);
-    });
-}
-
 JSValue Table::get(uint32_t index)
 {
     ASSERT(index < length());
@@ -287,14 +276,6 @@ void ExternOrAnyRefTable::set(uint32_t index, JSValue value)
     m_jsValues.get()[index].set(m_owner->vm(), m_owner, value);
 }
 
-void ExternOrAnyRefTable::fill(VM& vm, JSValue value)
-{
-    auto* slots = m_jsValues.get();
-    for (uint32_t i = 0; i < length(); ++i)
-        slots[i].setWithoutWriteBarrier(value);
-    vm.writeBarrier(m_owner, value);
-}
-
 FuncRefTable::FuncRefTable(VM& vm, uint32_t initial, std::optional<uint64_t> maximum, Type wasmType, Wasm::AddressType addressType)
     : Table(initial, maximum, wasmType, addressType, TableElementType::Funcref)
     , m_instances(vm)
@@ -310,16 +291,11 @@ FuncRefTable::FuncRefTable(VM& vm, uint32_t initial, std::optional<uint64_t> max
 
     m_wrappers = MallocPtr<WriteBarrier<WebAssemblyFunctionBase>, VMMalloc>::malloc(sizeof(WriteBarrier<WebAssemblyFunctionBase>) * Checked<size_t>(allocatedLength(m_length)));
 
-    // Every member of both element types defaults to a null pointer, so one bulk zero stands in
-    // for a placement-new per slot. Tables here run to thousands of entries and are then
-    // overwritten by the element segments.
-    uint32_t slots = allocatedLength(m_length);
-    zeroSpan(std::span { std::bit_cast<uint8_t*>(m_importableFunctions.get()), sizeof(Function) * slots });
-    zeroSpan(std::span { std::bit_cast<uint8_t*>(m_wrappers.get()), sizeof(WriteBarrier<WebAssemblyFunctionBase>) * slots });
-#if ASSERT_ENABLED
-    for (uint32_t i = 0; i < slots; ++i)
+    for (uint32_t i = 0; i < allocatedLength(m_length); ++i) {
+        new (&m_importableFunctions.get()[i]) Function();
         ASSERT(m_importableFunctions.get()[i].isEmpty()); // We rely on this in compiled code.
-#endif
+        new (&m_wrappers.get()[i]) WriteBarrier<WebAssemblyFunctionBase>();
+    }
 }
 
 FuncRefTable::~FuncRefTable()
@@ -414,29 +390,6 @@ void FuncRefTable::set(uint32_t index, JSValue value)
         clear(index);
     else
         setFunction(index, uncheckedDowncast<WebAssemblyFunctionBase>(value));
-}
-
-void FuncRefTable::fill(VM& vm, JSValue value)
-{
-    auto* functions = m_importableFunctions.get();
-    auto* wrappers = m_wrappers.get();
-    if (value.isNull()) {
-        for (uint32_t i = 0; i < length(); ++i) {
-            functions[i] = FuncRefTable::Function { };
-            ASSERT(functions[i].isEmpty());
-            wrappers[i].clear();
-        }
-        return;
-    }
-
-    auto* function = uncheckedDowncast<WebAssemblyFunctionBase>(value);
-    RELEASE_ASSERT_WITH_SECURITY_IMPLICATION(isSubtype(function->type(), wasmType()));
-    auto importable = function->importableFunction();
-    for (uint32_t i = 0; i < length(); ++i) {
-        functions[i] = importable;
-        wrappers[i].setWithoutWriteBarrier(function);
-    }
-    vm.writeBarrier(m_owner, function);
 }
 
 void FuncRefTable::registerInstance(JSWebAssemblyInstance& instance)

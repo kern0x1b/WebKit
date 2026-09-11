@@ -36,6 +36,7 @@
 #include <JavaScriptCore/WeakGCSet.h>
 
 #include <wtf/CagedPtr.h>
+#include <wtf/Expected.h>
 #include <wtf/Function.h>
 #include <wtf/RefCounted.h>
 #include <wtf/RefPtr.h>
@@ -51,11 +52,6 @@ namespace JSC {
 class LLIntOffsetsExtractor;
 
 namespace Wasm {
-
-// The most bytes a memory of this address type can actually be given, as opposed to declare. Bounded
-// both by the address type's own ceiling and by what a single growable reservation may claim.
-uint64_t maxAllocatableBytes(AddressType);
-
 class Memory final : public RefCounted<Memory> {
     WTF_MAKE_NONCOPYABLE(Memory);
     WTF_MAKE_TZONE_ALLOCATED_EXPORT(Memory, JS_EXPORT_PRIVATE);
@@ -91,7 +87,9 @@ public:
     MemorySharingMode sharingMode() const { return m_handle->sharingMode(); }
     MemoryMode mode() const { return m_handle->mode(); }
 
-    std::expected<PageCount, GrowFailReason> grow(VM&, PageCount);
+    Expected<PageCount, GrowFailReason> grow(VM&, PageCount);
+    bool fill(uint64_t, uint8_t, uint64_t);
+    bool copy(uint64_t, uint64_t, uint64_t);
     bool init(uint64_t, const uint8_t*, uint32_t);
 
     void registerInstance(JSWebAssemblyInstance&);
@@ -106,7 +104,7 @@ private:
     Memory(Ref<BufferMemoryHandle>&&, Ref<SharedArrayBufferContents>&&, AddressType, WTF::Function<void(GrowSuccess, PageCount, PageCount)>&& growSuccessCallback);
     Memory(PageCount initial, PageCount maximum, MemorySharingMode, AddressType, WTF::Function<void(GrowSuccess, PageCount, PageCount)>&& growSuccessCallback);
 
-    std::expected<PageCount, GrowFailReason> growShared(VM&, PageCount);
+    Expected<PageCount, GrowFailReason> growShared(VM&, PageCount);
 
     Ref<BufferMemoryHandle> m_handle;
     RefPtr<SharedArrayBufferContents> m_shared;

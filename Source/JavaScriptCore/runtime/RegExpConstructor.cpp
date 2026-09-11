@@ -131,10 +131,8 @@ JSC_DEFINE_HOST_FUNCTION(regExpConstructorEscape, (JSGlobalObject* globalObject,
             continue;
         }
 
-        bool isASCIICodePoint = isASCII(codePoint);
-
-        if (isASCIICodePoint && StringView("^$\\.*+?()[]{}|/"_s).contains(static_cast<char16_t>(codePoint))) {
-            builder.append('\\', static_cast<char16_t>(codePoint));
+        if (StringView("^$\\.*+?()[]{}|/"_s).contains(codePoint)) {
+            builder.append('\\', codePoint);
             continue;
         }
 
@@ -158,12 +156,15 @@ JSC_DEFINE_HOST_FUNCTION(regExpConstructorEscape, (JSGlobalObject* globalObject,
             break;
         }
 
-        if ((isASCIICodePoint && StringView(",-=<>#&!%:;@~'`\""_s).contains(static_cast<char16_t>(codePoint)))
-            || (U_IS_BMP(codePoint) && (isStrWhiteSpace(static_cast<char16_t>(codePoint)) || U16_IS_SURROGATE(codePoint)))) {
+        if (StringView(",-=<>#&!%:;@~'`\""_s).contains(codePoint) || isStrWhiteSpace(codePoint) || U16_IS_SURROGATE(codePoint)) {
             if (isLatin1(codePoint))
                 builder.append('\\', 'x', pad('0', 2, toStringWithRadix(codePoint, 16)));
-            else
+            else if (U_IS_BMP(codePoint))
                 builder.append('\\', 'u', pad('0', 4, toStringWithRadix(codePoint, 16)));
+            else {
+                builder.append('\\', 'u', pad('0', 4, toStringWithRadix(U16_LEAD(codePoint), 16)));
+                builder.append('\\', 'u', pad('0', 4, toStringWithRadix(U16_TRAIL(codePoint), 16)));
+            }
             continue;
         }
 

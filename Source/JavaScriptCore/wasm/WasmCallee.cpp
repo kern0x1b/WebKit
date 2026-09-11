@@ -443,18 +443,19 @@ void OptimizingJITCallee::addCodeOrigin(unsigned firstInlineCSI, unsigned lastIn
 const WasmCodeOrigin* OptimizingJITCallee::getCodeOrigin(unsigned csi, unsigned depth, bool& isInlined) const
 {
     isInlined = false;
-    auto iter = std::lower_bound(codeOrigins.begin(), codeOrigins.end(), csi, [](const WasmCodeOrigin& origin, unsigned value) {
-        return origin.lastInlineCSI < value;
+    auto iter = std::lower_bound(codeOrigins.begin(), codeOrigins.end(), WasmCodeOrigin { 0, csi, 0, 0 }, [&](const auto& a, const auto& b) {
+        return b.lastInlineCSI - a.lastInlineCSI;
     });
-    for (; iter != codeOrigins.end(); ++iter) {
-        if (iter->firstInlineCSI > csi)
-            continue;
-        if (!depth) {
+    if (!iter || iter == codeOrigins.end())
+        iter = codeOrigins.begin();
+    while (iter != codeOrigins.end()) {
+        if (iter->firstInlineCSI <= csi && iter->lastInlineCSI >= csi && !(depth--)) {
             isInlined = true;
             return iter;
         }
-        --depth;
+        ++iter;
     }
+
     return nullptr;
 }
 
@@ -566,6 +567,7 @@ const RegisterAtOffsetList* JSToWasmCallee::calleeSaveRegistersImpl()
     // So, we must store the same callee save registers at the same location to the JIT version.
 #if CPU(X86_64) || CPU(ARM64) || CPU(RISCV64)
     ASSERT(RegisterAtOffsetList::wasmPinnedRegisters().registerCount() == 3);
+#elif CPU(ARM)
 #else
 #error Unsupported architecture.
 #endif

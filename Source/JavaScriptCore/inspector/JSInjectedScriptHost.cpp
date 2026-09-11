@@ -858,7 +858,7 @@ JSValue JSInjectedScriptHost::weakSetEntries(JSGlobalObject* globalObject, CallF
 static JSObject* cloneArrayIteratorObject(JSGlobalObject* globalObject, VM& vm, JSArrayIterator* iteratorObject)
 {
     JSArrayIterator* clone = JSArrayIterator::create(vm, globalObject->arrayIteratorStructure(), iteratorObject->iteratedObject(), iteratorObject->internalField(JSArrayIterator::Field::Kind).get());
-    clone->setIndex(iteratorObject->index());
+    clone->internalField(JSArrayIterator::Field::Index).set(vm, clone, iteratorObject->internalField(JSArrayIterator::Field::Index).get());
     return clone;
 }
 

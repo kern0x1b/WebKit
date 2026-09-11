@@ -28,6 +28,7 @@
 // JSC Temporal Core — Shared types and error handling
 // temporal_rs reference: src/error.rs
 
+#include <wtf/Expected.h>
 #include <wtf/text/ASCIILiteral.h>
 #include <wtf/text/WTFString.h>
 
@@ -47,7 +48,7 @@ struct TemporalError {
 
 // TemporalResult<T> — temporal_rs: TemporalResult<T> = Result<T, TemporalError>
 template<typename T>
-using TemporalResult = std::expected<T, TemporalError>;
+using TemporalResult = Expected<T, TemporalError>;
 
 // Convenience constructors — temporal_rs: TemporalError::range() / TemporalError::type_()
 namespace TemporalCore {

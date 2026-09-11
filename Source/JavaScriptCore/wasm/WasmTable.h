@@ -55,7 +55,7 @@ class Table : public ThreadSafeRefCounted<Table> {
     WTF_MAKE_NONCOPYABLE(Table);
     WTF_MAKE_TZONE_ALLOCATED(Table);
 public:
-    static RefPtr<Table> tryCreate(VM&, uint64_t initial, std::optional<uint64_t> maximum, TableElementType, Type, Wasm::AddressType);
+    static RefPtr<Table> tryCreate(VM&, uint32_t initial, std::optional<uint64_t> maximum, TableElementType, Type, Wasm::AddressType);
 
     JS_EXPORT_PRIVATE ~Table() = default;
 
@@ -81,14 +81,13 @@ public:
     Wasm::AddressType addressType() const { return m_addressType; }
     FuncRefTable* NODELETE asFuncrefTable();
 
-    static bool isValidLength(uint64_t length) { return length <= maxTableEntries; }
+    static bool isValidLength(uint32_t length) { return length < maxTableEntries; }
 
     void clear(uint32_t);
     void set(uint32_t, JSValue);
-    void fill(VM&, JSValue);
     JSValue get(uint32_t);
 
-    std::optional<uint32_t> grow(uint64_t delta, JSValue defaultValue);
+    std::optional<uint32_t> grow(uint32_t delta, JSValue defaultValue);
     void copy(Table* srcTable, uint32_t dstIndex, uint32_t srcIndex);
 
     DECLARE_VISIT_AGGREGATE;
@@ -124,10 +123,7 @@ public:
 
     void clear(uint32_t);
     void set(uint32_t, JSValue);
-    void fill(VM&, JSValue);
     JSValue get(uint32_t index) const { return m_jsValues.get()[index].get(); }
-
-    static constexpr ptrdiff_t offsetOfJSValues() { return OBJECT_OFFSETOF(ExternOrAnyRefTable, m_jsValues); }
 
 private:
     ExternOrAnyRefTable(uint32_t initial, std::optional<uint64_t> maximum, Type wasmType, Wasm::AddressType);
@@ -151,7 +147,6 @@ public:
     void copyFunction(FuncRefTable* srcTable, uint32_t dstIndex, uint32_t srcIndex);
 
     static constexpr ptrdiff_t offsetOfFunctions() { return OBJECT_OFFSETOF(FuncRefTable, m_importableFunctions); }
-    static constexpr ptrdiff_t offsetOfWrappers() { return OBJECT_OFFSETOF(FuncRefTable, m_wrappers); }
     static constexpr ptrdiff_t offsetOfTail() { return WTF::roundUpToMultipleOf<alignof(Function)>(sizeof(FuncRefTable)); }
     static constexpr ptrdiff_t offsetOfFunctionsForFixedSizedTable() { return offsetOfTail(); }
 
@@ -169,7 +164,6 @@ public:
 
     void clear(uint32_t);
     void set(uint32_t, JSValue);
-    void fill(VM&, JSValue);
     WebAssemblyFunctionBase* get(uint32_t index);
 
     void registerInstance(JSWebAssemblyInstance&);

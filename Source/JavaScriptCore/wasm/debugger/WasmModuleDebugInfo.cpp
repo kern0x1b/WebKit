@@ -95,10 +95,9 @@ String ModuleDebugInfo::debugName() const
 
     StringBuilder result;
 
-    if (!moduleInfo->sourceURL.isEmpty()) {
+    if (!sourceURL.isEmpty()) {
         // LLDB normalizes "//" -> "/" in library names (FileSpec treats them as paths),
         // so we strip the URL scheme and store only "host/path" to avoid mangling.
-        auto sourceURL = makeString(moduleInfo->sourceURL);
         URL url { sourceURL };
         if (url.isValid() && !url.host().isEmpty())
             result.append(makeString(url.host(), url.path()));

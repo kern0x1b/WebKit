@@ -29,7 +29,6 @@
 
 #if ENABLE(WEBASSEMBLY)
 
-#include <JavaScriptCore/MemoryMode.h>
 #include <JavaScriptCore/WasmBranchHints.h>
 #include <JavaScriptCore/WasmFormat.h>
 #include <JavaScriptCore/WasmModuleDebugInfo.h>
@@ -120,15 +119,6 @@ struct ModuleInformation final : public ThreadSafeRefCounted<ModuleInformation> 
     const TableInformation& table(unsigned index) const { return tables[index]; }
     const GlobalInformation& global(unsigned index) const { return globals[index]; }
 
-    // Signaling relies on 32-bit addresses + PROT_NONE redzone. Memory64 and non-zero
-    // multi-memories must always use explicit bounds checks.
-    MemoryMode memoryModeForAccess(unsigned memoryIndex, MemoryMode memory0Mode) const
-    {
-        if (memoryIndex || memory(memoryIndex).isMemory64())
-            return MemoryMode::BoundsChecking;
-        return memory0Mode;
-    }
-
     bool isDeclaredFunction(FunctionSpaceIndex index) const { return m_declaredFunctions.contains(index); }
     void addDeclaredFunction(FunctionSpaceIndex index) { m_declaredFunctions.set(index); }
 
@@ -194,8 +184,8 @@ struct ModuleInformation final : public ThreadSafeRefCounted<ModuleInformation> 
     size_t totalFunctionSize() const { return m_totalFunctionSize; }
 
     void applyCompileOptions(const WebAssemblyCompileOptions&);
-    bool importedStringConstantsEquals(const Name& moduleName) const { return m_importedStringConstants && m_importedStringConstants.value() == moduleName; }
-    bool builtinSetsInclude(const Name& moduleName) const { return m_qualifiedBuiltinSetNames.contains(moduleName); }
+    bool importedStringConstantsEquals(const String& expected) const { return m_importedStringConstants && m_importedStringConstants.value() == expected; }
+    bool builtinSetsInclude(const String& qualifiedName) const { return m_qualifiedBuiltinSetNames.contains(qualifiedName); }
 
     // nameSection is read from compiler threads (lock-free via atomic pointer)
     // and written from the main thread when the custom "name" section is parsed.
@@ -228,14 +218,8 @@ struct ModuleInformation final : public ThreadSafeRefCounted<ModuleInformation> 
     Vector<CustomSection> customSections;
     BranchHints branchHints;
     std::optional<uint32_t> numberOfDataSegments;
-    struct ConstantExpression {
-        Vector<uint8_t> bytes;
-        size_t sourceOffset { 0 };
-        uint32_t maxStackHeight { 0 };
-    };
-    Vector<ConstantExpression> constantExpressions;
-    Name sourceURL;
-    uint64_t requestIdentifier { 0 };
+    using ConstantExpressionAndSourceOffset = std::pair<Vector<uint8_t>, size_t>;
+    Vector<ConstantExpressionAndSourceOffset> constantExpressions;
     Name sourceMappingURL;
 #if ENABLE(WEBASSEMBLY_DEBUGGER)
     std::unique_ptr<Wasm::ModuleDebugInfo> debugInfo;
@@ -253,8 +237,8 @@ private:
 
     Vector<Ref<const RTT>> m_rtts;
 
-    std::optional<Name> m_importedStringConstants;
-    Vector<Name> m_qualifiedBuiltinSetNames;
+    std::optional<String> m_importedStringConstants;
+    Vector<String> m_qualifiedBuiltinSetNames;
     Ref<NameSection> m_nameSection;
     RefPtr<NameSection> m_retiredNameSection;
     std::atomic<NameSection*> m_nameSectionPtr { nullptr };

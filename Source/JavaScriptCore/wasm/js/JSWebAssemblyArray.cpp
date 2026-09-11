@@ -31,7 +31,6 @@ WTF_ALLOW_UNSAFE_BUFFER_USAGE_BEGIN
 
 #if ENABLE(WEBASSEMBLY)
 
-#include "GCMemoryOperations.h"
 #include "JSCInlines.h"
 #include "JSWebAssemblyArrayInlines.h"
 #include "JSWebAssemblyInstance.h"
@@ -70,8 +69,9 @@ void JSWebAssemblyArray::fill(VM& vm, uint32_t offset, uint64_t value, uint32_t 
 {
     // Handle ref types separately to ensure write barriers are in effect.
     if (elementsAreRefTypes()) {
-        gcSafeMemfill(span<uint64_t>().subspan(offset, size).data(), value, static_cast<size_t>(size) * sizeof(uint64_t));
-        vm.writeBarrier(this);
+        // FIXME: We should have a GCSafeMemfill.
+        for (size_t i = 0; i < size; i++)
+            set(vm, offset + i, value);
         return;
     }
 

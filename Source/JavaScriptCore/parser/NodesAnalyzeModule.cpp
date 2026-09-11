@@ -30,12 +30,11 @@
 #include "JSCJSValueInlines.h"
 #include "JSModuleRecord.h"
 #include "ModuleAnalyzer.h"
-#include "Options.h"
 #include <wtf/text/MakeString.h>
 
 namespace JSC {
 
-static std::expected<RefPtr<ScriptFetchParameters>, std::tuple<ErrorType, String>> tryCreateAttributes(VM& vm, ImportAttributesListNode* attributesList)
+static Expected<RefPtr<ScriptFetchParameters>, std::tuple<ErrorType, String>> tryCreateAttributes(VM& vm, ImportAttributesListNode* attributesList)
 {
     if (!attributesList)
         return RefPtr<ScriptFetchParameters> { };
@@ -51,8 +50,6 @@ static std::expected<RefPtr<ScriptFetchParameters>, std::tuple<ErrorType, String
     for (auto& [key, value] : attributesList->attributes()) {
         if (*key == vm.propertyNames->type) {
             type = ScriptFetchParameters::parseType(value->impl());
-            if (type == ScriptFetchParameters::Type::Text && !Options::useImportText())
-                type = std::nullopt;
             if (!type)
                 return makeUnexpected(std::tuple { ErrorType::TypeError, makeString("Import attribute type \""_s, StringView(value->impl()), "\" is not valid"_s) });
         }
@@ -88,14 +85,12 @@ bool ImportDeclarationNode::analyzeModule(ModuleAnalyzer& analyzer)
     }
 
     auto phase = m_type == ImportType::Deferred ? AbstractModuleRecord::ModulePhase::Defer : AbstractModuleRecord::ModulePhase::Evaluation;
-    auto moduleRequestType = result.value() ? result.value()->type() : ScriptFetchParameters::Type::JavaScript;
     analyzer.appendRequestedModule(m_moduleName->moduleName(), WTF::move(result.value()), phase);
     for (auto* specifier : m_specifierList->specifiers()) {
         analyzer.moduleRecord()->addImportEntry(JSModuleRecord::ImportEntry {
             specifier->importedName() == analyzer.vm().propertyNames->starNamespacePrivateName
                 ? JSModuleRecord::ImportEntryType::Namespace : JSModuleRecord::ImportEntryType::Single,
             phase,
-            moduleRequestType,
             m_moduleName->moduleName(),
             specifier->importedName(),
             specifier->localName(),
@@ -112,9 +107,8 @@ bool ExportAllDeclarationNode::analyzeModule(ModuleAnalyzer& analyzer)
         return false;
     }
 
-    auto moduleRequestType = result.value() ? result.value()->type() : ScriptFetchParameters::Type::JavaScript;
     analyzer.appendRequestedModule(m_moduleName->moduleName(), WTF::move(result.value()));
-    analyzer.moduleRecord()->addStarExportEntry(m_moduleName->moduleName(), moduleRequestType);
+    analyzer.moduleRecord()->addStarExportEntry(m_moduleName->moduleName());
     return true;
 }
 
@@ -130,7 +124,6 @@ bool ExportLocalDeclarationNode::analyzeModule(ModuleAnalyzer&)
 
 bool ExportNamedDeclarationNode::analyzeModule(ModuleAnalyzer& analyzer)
 {
-    auto moduleRequestType = ScriptFetchParameters::Type::JavaScript;
     if (m_moduleName) {
         auto result = tryCreateAttributes(analyzer.vm(), attributesList());
         if (!result) {
@@ -138,8 +131,6 @@ bool ExportNamedDeclarationNode::analyzeModule(ModuleAnalyzer& analyzer)
             return false;
         }
 
-        if (result.value())
-            moduleRequestType = result.value()->type();
         analyzer.appendRequestedModule(m_moduleName->moduleName(), WTF::move(result.value()));
     }
 
@@ -154,9 +145,9 @@ bool ExportNamedDeclarationNode::analyzeModule(ModuleAnalyzer& analyzer)
             //
             // If it is namespace export, we should use createNamespace.
             if (specifier->localName() == analyzer.vm().propertyNames->starNamespacePrivateName)
-                analyzer.moduleRecord()->addExportEntry(JSModuleRecord::ExportEntry::createNamespace(specifier->exportedName(), m_moduleName->moduleName(), moduleRequestType));
+                analyzer.moduleRecord()->addExportEntry(JSModuleRecord::ExportEntry::createNamespace(specifier->exportedName(), m_moduleName->moduleName()));
             else
-                analyzer.moduleRecord()->addExportEntry(JSModuleRecord::ExportEntry::createIndirect(specifier->exportedName(), specifier->localName(), m_moduleName->moduleName(), moduleRequestType));
+                analyzer.moduleRecord()->addExportEntry(JSModuleRecord::ExportEntry::createIndirect(specifier->exportedName(), specifier->localName(), m_moduleName->moduleName()));
         }
     }
     return true;

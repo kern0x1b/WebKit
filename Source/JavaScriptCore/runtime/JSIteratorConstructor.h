@@ -35,7 +35,7 @@ class JSIteratorPrototype;
 // https://tc39.es/proposal-iterator-helpers/#sec-iterator-constructor
 class JSIteratorConstructor final : public InternalFunction {
 public:
-    using Base = InternalFunction;
+    typedef InternalFunction Base;
 
     static Structure* createStructure(VM&, JSGlobalObject*, JSValue);
     static JSIteratorConstructor* create(VM&, JSGlobalObject*, Structure*, JSIteratorPrototype*);

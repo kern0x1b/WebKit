@@ -38,7 +38,7 @@ namespace JSC {
 
 namespace RISCV64Registers {
 
-enum RegisterID : int8_t {
+typedef enum : int8_t {
 #define REGISTER_ID(id, name, r, cs) id,
     FOR_EACH_GP_REGISTER(REGISTER_ID)
 #undef REGISTER_ID
@@ -48,23 +48,23 @@ enum RegisterID : int8_t {
 #undef REGISTER_ALIAS
 
     InvalidGPRReg = -1,
-};
+} RegisterID;
 
-enum SPRegisterID : int8_t {
+typedef enum : int8_t {
 #define REGISTER_ID(id, name) id,
     FOR_EACH_SP_REGISTER(REGISTER_ID)
 #undef REGISTER_ID
 
     InvalidSPReg = -1,
-};
+} SPRegisterID;
 
-enum FPRegisterID : int8_t {
+typedef enum : int8_t {
 #define REGISTER_ID(id, name, r, cs) id,
     FOR_EACH_FP_REGISTER(REGISTER_ID)
 #undef REGISTER_ID
 
     InvalidFPRReg = -1,
-};
+} FPRegisterID;
 
 } // namespace RISCV64Registers
 
@@ -1632,43 +1632,23 @@ public:
         cacheFlush(location, sizeof(uint32_t) * 8);
     }
 
-    template<RepatchingInfo repatch = jitMemcpyRepatchFlush>
     static void relinkJump(void* from, void* to)
     {
         uint32_t* location = static_cast<uint32_t*>(from);
         LinkJumpImpl::apply(location, to);
-        if constexpr ((*repatch).contains(RepatchingFlag::Flush))
-            flushJump(from);
+        cacheFlush(location, sizeof(uint32_t) * 2);
     }
 
-    template<RepatchingInfo repatch = jitMemcpyRepatchFlush>
     static void relinkCall(void* from, void* to)
     {
         uint32_t* location = static_cast<uint32_t*>(from);
         LinkCallImpl::apply(location, to);
-        if constexpr ((*repatch).contains(RepatchingFlag::Flush))
-            flushCall(from);
+        cacheFlush(location, sizeof(uint32_t) * 2);
     }
 
-    template<RepatchingInfo repatch = jitMemcpyRepatchFlush>
     static void relinkTailCall(void* from, void* to)
     {
-        relinkJump<repatch>(from, to);
-    }
-
-    static void flushJump(void* from)
-    {
-        cacheFlush(static_cast<uint32_t*>(from), sizeof(uint32_t) * 2);
-    }
-
-    static void flushCall(void* from)
-    {
-        cacheFlush(static_cast<uint32_t*>(from), sizeof(uint32_t) * 2);
-    }
-
-    static void flushTailCall(void* from)
-    {
-        flushJump(from);
+        relinkJump(from, to);
     }
 
     static void replaceWithVMHalt(void* where)

@@ -299,10 +299,10 @@ JSC_DEFINE_HOST_FUNCTION(setProtoFuncIntersection, (JSGlobalObject* globalObject
                 hasResult = cachedHasCall->callWithArguments(globalObject, otherValue, entryKey);
                 RETURN_IF_EXCEPTION(scope, void());
             } else {
-                auto args = WTF::toArray<EncodedJSValue>({
-                    JSValue::encode(entryKey),
-                });
-                hasResult = call(globalObject, has, hasCallData, otherValue, ArgList { args.data(), args.size() });
+                MarkedArgumentBuffer args;
+                args.append(entryKey);
+                ASSERT(!args.hasOverflowed());
+                hasResult = call(globalObject, has, hasCallData, otherValue, args);
                 RETURN_IF_EXCEPTION(scope, void());
             }
 
@@ -317,7 +317,9 @@ JSC_DEFINE_HOST_FUNCTION(setProtoFuncIntersection, (JSGlobalObject* globalObject
     }
 
     CallData keysCallData = JSC::getCallDataInline(keys);
-    JSValue iterator = call(globalObject, keys, keysCallData, otherValue, ArgList { });
+    MarkedArgumentBuffer args;
+    ASSERT(!args.hasOverflowed());
+    JSValue iterator = call(globalObject, keys, keysCallData, otherValue, args);
     RETURN_IF_EXCEPTION(scope, { });
 
     scope.release();
@@ -388,7 +390,9 @@ JSC_DEFINE_HOST_FUNCTION(setProtoFuncUnion, (JSGlobalObject* globalObject, CallF
         return throwVMTypeError(globalObject, scope, "Set.prototype.union expects other.keys to be callable"_s);
 
     CallData keysCallData = JSC::getCallDataInline(keys);
-    JSValue iterator = call(globalObject, keys, keysCallData, otherValue, ArgList { });
+    MarkedArgumentBuffer args;
+    ASSERT(!args.hasOverflowed());
+    JSValue iterator = call(globalObject, keys, keysCallData, otherValue, args);
     RETURN_IF_EXCEPTION(scope, { });
 
     IterationRecord iterationRecord = iteratorDirect(globalObject, iterator);
@@ -511,10 +515,10 @@ JSC_DEFINE_HOST_FUNCTION(setProtoFuncDifference, (JSGlobalObject* globalObject, 
                 hasResult = cachedHasCall->callWithArguments(globalObject, otherValue, entryKey);
                 RETURN_IF_EXCEPTION(scope, void());
             } else {
-                auto hasArgs = WTF::toArray<EncodedJSValue>({
-                    JSValue::encode(entryKey),
-                });
-                hasResult = call(globalObject, has, hasCallData, otherValue, ArgList { hasArgs.data(), hasArgs.size() });
+                MarkedArgumentBuffer hasArgs;
+                hasArgs.append(entryKey);
+                ASSERT(!hasArgs.hasOverflowed());
+                hasResult = call(globalObject, has, hasCallData, otherValue, hasArgs);
                 RETURN_IF_EXCEPTION(scope, void());
             }
 
@@ -529,7 +533,9 @@ JSC_DEFINE_HOST_FUNCTION(setProtoFuncDifference, (JSGlobalObject* globalObject, 
     }
 
     CallData keysCallData = JSC::getCallDataInline(keys);
-    JSValue keysResult = call(globalObject, keys, keysCallData, otherValue, ArgList { });
+    MarkedArgumentBuffer keysArgs;
+    ASSERT(!keysArgs.hasOverflowed());
+    JSValue keysResult = call(globalObject, keys, keysCallData, otherValue, keysArgs);
     RETURN_IF_EXCEPTION(scope, { });
 
     JSValue nextMethod = keysResult.get(globalObject, vm.propertyNames->next);
@@ -551,7 +557,9 @@ JSC_DEFINE_HOST_FUNCTION(setProtoFuncDifference, (JSGlobalObject* globalObject, 
             nextResult = cachedNextCall->callWithArguments(globalObject, keysResult);
             RETURN_IF_EXCEPTION(scope, { });
         } else {
-            nextResult = call(globalObject, nextMethod, nextCallData, keysResult, ArgList { });
+            MarkedArgumentBuffer nextArgs;
+            ASSERT(!nextArgs.hasOverflowed());
+            nextResult = call(globalObject, nextMethod, nextCallData, keysResult, nextArgs);
             RETURN_IF_EXCEPTION(scope, { });
         }
 
@@ -644,7 +652,9 @@ JSC_DEFINE_HOST_FUNCTION(setProtoFuncSymmetricDifference, (JSGlobalObject* globa
         return throwVMTypeError(globalObject, scope, "Set.prototype.symmetricDifference expects other.keys to be callable"_s);
 
     CallData keysCallData = JSC::getCallDataInline(keys);
-    JSValue keysResult = call(globalObject, keys, keysCallData, otherValue, ArgList { });
+    MarkedArgumentBuffer keysArgs;
+    ASSERT(!keysArgs.hasOverflowed());
+    JSValue keysResult = call(globalObject, keys, keysCallData, otherValue, keysArgs);
     RETURN_IF_EXCEPTION(scope, { });
 
     JSValue nextMethod = keysResult.get(globalObject, vm.propertyNames->next);
@@ -669,7 +679,9 @@ JSC_DEFINE_HOST_FUNCTION(setProtoFuncSymmetricDifference, (JSGlobalObject* globa
             nextResult = cachedNextCall->callWithArguments(globalObject, keysResult);
             RETURN_IF_EXCEPTION(scope, { });
         } else {
-            nextResult = call(globalObject, nextMethod, nextCallData, keysResult, ArgList { });
+            MarkedArgumentBuffer nextArgs;
+            ASSERT(!nextArgs.hasOverflowed());
+            nextResult = call(globalObject, nextMethod, nextCallData, keysResult, nextArgs);
             RETURN_IF_EXCEPTION(scope, { });
         }
 
@@ -759,10 +771,10 @@ JSC_DEFINE_HOST_FUNCTION(setProtoFuncIsSubsetOf, (JSGlobalObject* globalObject, 
             hasResult = cachedHasCall->callWithArguments(globalObject, otherValue, entryKey);
             RETURN_IF_EXCEPTION(scope, IterationStatus::Done);
         } else {
-            auto args = WTF::toArray<EncodedJSValue>({
-                JSValue::encode(entryKey),
-            });
-            hasResult = call(globalObject, has, hasCallData, otherValue, ArgList { args.data(), args.size() });
+            MarkedArgumentBuffer args;
+            args.append(entryKey);
+            ASSERT(!args.hasOverflowed());
+            hasResult = call(globalObject, has, hasCallData, otherValue, args);
             RETURN_IF_EXCEPTION(scope, IterationStatus::Done);
         }
 
@@ -840,7 +852,9 @@ JSC_DEFINE_HOST_FUNCTION(setProtoFuncIsSupersetOf, (JSGlobalObject* globalObject
         return JSValue::encode(jsBoolean(false));
 
     CallData keysCallData = JSC::getCallDataInline(keys);
-    JSValue keysResult = call(globalObject, keys, keysCallData, otherValue, ArgList { });
+    MarkedArgumentBuffer keysArgs;
+    ASSERT(!keysArgs.hasOverflowed());
+    JSValue keysResult = call(globalObject, keys, keysCallData, otherValue, keysArgs);
     RETURN_IF_EXCEPTION(scope, { });
 
     JSValue nextMethod = keysResult.get(globalObject, vm.propertyNames->next);
@@ -862,7 +876,9 @@ JSC_DEFINE_HOST_FUNCTION(setProtoFuncIsSupersetOf, (JSGlobalObject* globalObject
             nextResult = cachedNextCall->callWithArguments(globalObject, keysResult);
             RETURN_IF_EXCEPTION(scope, { });
         } else {
-            nextResult = call(globalObject, nextMethod, nextCallData, keysResult, ArgList { });
+            MarkedArgumentBuffer nextArgs;
+            ASSERT(!nextArgs.hasOverflowed());
+            nextResult = call(globalObject, nextMethod, nextCallData, keysResult, nextArgs);
             RETURN_IF_EXCEPTION(scope, { });
         }
 
@@ -977,10 +993,10 @@ JSC_DEFINE_HOST_FUNCTION(setProtoFuncIsDisjointFrom, (JSGlobalObject* globalObje
                 hasResult = cachedHasCall->callWithArguments(globalObject, otherValue, entryKey);
                 RETURN_IF_EXCEPTION(scope, IterationStatus::Done);
             } else {
-                auto hasArgs = WTF::toArray<EncodedJSValue>({
-                    JSValue::encode(entryKey),
-                });
-                hasResult = call(globalObject, has, hasCallData, otherValue, ArgList { hasArgs.data(), hasArgs.size() });
+                MarkedArgumentBuffer hasArgs;
+                hasArgs.append(entryKey);
+                ASSERT(!hasArgs.hasOverflowed());
+                hasResult = call(globalObject, has, hasCallData, otherValue, hasArgs);
                 RETURN_IF_EXCEPTION(scope, IterationStatus::Done);
             }
 
@@ -996,7 +1012,9 @@ JSC_DEFINE_HOST_FUNCTION(setProtoFuncIsDisjointFrom, (JSGlobalObject* globalObje
     }
 
     CallData keysCallData = JSC::getCallDataInline(keys);
-    JSValue keysResult = call(globalObject, keys, keysCallData, otherValue, ArgList { });
+    MarkedArgumentBuffer keysArgs;
+    ASSERT(!keysArgs.hasOverflowed());
+    JSValue keysResult = call(globalObject, keys, keysCallData, otherValue, keysArgs);
     RETURN_IF_EXCEPTION(scope, { });
 
     JSValue nextMethod = keysResult.get(globalObject, vm.propertyNames->next);
@@ -1018,7 +1036,9 @@ JSC_DEFINE_HOST_FUNCTION(setProtoFuncIsDisjointFrom, (JSGlobalObject* globalObje
             nextResult = cachedNextCall->callWithArguments(globalObject, keysResult);
             RETURN_IF_EXCEPTION(scope, { });
         } else {
-            nextResult = call(globalObject, nextMethod, nextCallData, keysResult, ArgList { });
+            MarkedArgumentBuffer nextArgs;
+            ASSERT(!nextArgs.hasOverflowed());
+            nextResult = call(globalObject, nextMethod, nextCallData, keysResult, nextArgs);
             RETURN_IF_EXCEPTION(scope, { });
         }
 

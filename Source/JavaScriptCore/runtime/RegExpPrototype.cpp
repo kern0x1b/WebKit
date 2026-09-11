@@ -26,7 +26,6 @@
 #include "IntegrityInlines.h"
 #include "JSArray.h"
 #include "JSCJSValue.h"
-#include "JSCellButterfly.h"
 #include "JSGlobalObject.h"
 #include "JSRegExpStringIterator.h"
 #include "JSStringInlines.h"
@@ -37,7 +36,7 @@
 #include "RegExpObject.h"
 #include "RegExpObjectInlines.h"
 #include "RegExpPrototypeInlines.h"
-#include "StringSplitCacheInlines.h"
+#include "StringRecursionChecker.h"
 #include "YarrFlags.h"
 #include <wtf/text/StringBuilder.h>
 #include <wtf/text/StringCommon.h>
@@ -127,10 +126,10 @@ JSValue regExpExec(JSGlobalObject* globalObject, JSValue thisValue, JSString* st
             match = cachedCall.callWithArguments(globalObject, thisValue, str);
             RETURN_IF_EXCEPTION(scope, { });
         } else {
-            auto args = WTF::toArray<EncodedJSValue>({
-                JSValue::encode(str),
-            });
-            match = call(globalObject, regExpExec, callData, thisValue, ArgList { args.data(), args.size() });
+            MarkedArgumentBuffer args;
+            args.append(str);
+            ASSERT(!args.hasOverflowed());
+            match = call(globalObject, regExpExec, callData, thisValue, args);
             RETURN_IF_EXCEPTION(scope, { });
         }
         if (!match.isNull() && !match.isObject()) {
@@ -139,10 +138,10 @@ JSValue regExpExec(JSGlobalObject* globalObject, JSValue thisValue, JSString* st
         }
     } else {
         auto callData = JSC::getCallDataInline(regExpBuiltinExec);
-        auto args = WTF::toArray<EncodedJSValue>({
-            JSValue::encode(str),
-        });
-        match = call(globalObject, regExpBuiltinExec, callData, thisValue, ArgList { args.data(), args.size() });
+        MarkedArgumentBuffer args;
+        args.append(str);
+        ASSERT(!args.hasOverflowed());
+        match = call(globalObject, regExpBuiltinExec, callData, thisValue, args);
         RETURN_IF_EXCEPTION(scope, { });
     }
 
@@ -413,6 +412,11 @@ JSC_DEFINE_HOST_FUNCTION(regExpProtoFuncToString, (JSGlobalObject* globalObject,
     JSObject* thisObject = asObject(thisValue);
     Integrity::auditStructureID(thisObject->structureID());
 
+    StringRecursionChecker checker(globalObject, thisObject);
+    EXCEPTION_ASSERT(!scope.exception() || checker.earlyReturnValue());
+    if (JSValue earlyReturnValue = checker.earlyReturnValue())
+        return JSValue::encode(earlyReturnValue);
+
     JSValue sourceValue = thisObject->get(globalObject, vm.propertyNames->source);
     RETURN_IF_EXCEPTION(scope, { });
     String source = sourceValue.toWTFString(globalObject);
@@ -669,30 +673,29 @@ enum SplitControl {
 };
 
 template<typename ControlFunc, typename PushFunc>
-MatchResult genericSplit(
+void genericSplit(
     JSGlobalObject* globalObject, RegExp* regexp, JSString* inputString, StringView input, unsigned inputSize, unsigned& position,
     unsigned& matchPosition, bool regExpIsSticky, bool regExpIsUnicode,
     const ControlFunc& control, const PushFunc& push)
 {
     VM& vm = globalObject->vm();
     auto scope = DECLARE_THROW_SCOPE(vm);
-    MatchResult lastMatchResult;
 
     while (matchPosition < inputSize) {
         {
             auto result = control();
-            RETURN_IF_EXCEPTION(scope, { });
+            RETURN_IF_EXCEPTION(scope, void());
             if (result == AbortSplit)
-                return lastMatchResult;
+                return;
         }
-
+        
         int* ovector;
-
+        
         // a. Perform ? Set(splitter, "lastIndex", q, true).
         // b. Let z be ? RegExpExec(splitter, S).
         MatchResult result = globalObject->regExpGlobalData().performMatch(globalObject, regexp, inputString, input, matchPosition, &ovector);
         int mpos = result.start;
-        RETURN_IF_EXCEPTION(scope, { });
+        RETURN_IF_EXCEPTION(scope, void());
 
         // c. If z is null, let q be AdvanceStringIndex(S, q, unicodeMatching).
         if (mpos < 0) {
@@ -701,7 +704,6 @@ MatchResult genericSplit(
             matchPosition = advanceStringIndex(input, inputSize, matchPosition, regExpIsUnicode);
             continue;
         }
-        lastMatchResult = result;
         if (static_cast<unsigned>(mpos) >= inputSize) {
             // The spec redoes the RegExpExec starting at the next character of the input.
             // But in our case, mpos < 0 means that the native regexp already searched all permutations
@@ -731,9 +733,9 @@ MatchResult genericSplit(
         // 2. Perform ! CreateDataProperty(A, ! ToString(lengthA), T).
         {
             auto result = push(true, position, matchPosition - position);
-            RETURN_IF_EXCEPTION(scope, { });
+            RETURN_IF_EXCEPTION(scope, void());
             if (result == AbortSplit)
-                return lastMatchResult;
+                return;
         }
         
         // 5. Let p be e.
@@ -749,110 +751,14 @@ MatchResult genericSplit(
             int sub = ovector[i * 2];
             int subEnd = ovector[i * 2 + 1];
             auto result = push(sub >= 0 && subEnd >= sub, sub, subEnd - sub);
-            RETURN_IF_EXCEPTION(scope, { });
+            RETURN_IF_EXCEPTION(scope, void());
             if (result == AbortSplit)
-                return lastMatchResult;
+                return;
         }
         
         // 10. Let q be p.
         matchPosition = position;
     }
-
-    return lastMatchResult;
-}
-
-// A finished split is recorded in vm.stringSplitIndice as two entries per element, a start offset
-// in the input and a length. Keeping the result in this form until the very end means an element
-// that gets interned in vm.atomStringToJSStringMap never pays for a substring JSString on the way
-// there.
-// An element contributed by a capture group that did not participate is undefined rather than a
-// substring of the input, and is recorded with notFound as its start.
-static constexpr unsigned undefinedSplitSpanStart = static_cast<unsigned>(WTF::notFound);
-static_assert(JSString::MaxLength < undefinedSplitSpanStart, "notFound must not be a representable offset, or a real element would decode as undefined");
-
-static ALWAYS_INLINE void recordSplitSpan(Vector<unsigned>& spans, unsigned start, unsigned length)
-{
-    spans.append(start);
-    spans.append(length);
-}
-
-static ALWAYS_INLINE unsigned splitSpanCount(const Vector<unsigned>& spans)
-{
-    ASSERT(!(spans.size() % 2));
-    return spans.size() / 2;
-}
-
-static JSArray* createArrayFromSplitSpans(JSGlobalObject* globalObject, VM& vm, JSString* inputString, const Vector<unsigned>& spans)
-{
-    auto scope = DECLARE_THROW_SCOPE(vm);
-
-    unsigned resultLength = splitSpanCount(spans);
-    JSArray* result = constructEmptyArray(globalObject, static_cast<ArrayAllocationProfile*>(nullptr), resultLength);
-    RETURN_IF_EXCEPTION(scope, nullptr);
-
-    for (unsigned i = 0; i < resultLength; ++i) {
-        unsigned start = spans[i * 2];
-        unsigned length = spans[i * 2 + 1];
-        result->putDirectIndex(globalObject, i, start == undefinedSplitSpanStart ? jsUndefined() : jsSubstringOfResolved(vm, inputString, start, length));
-        RETURN_IF_EXCEPTION(scope, nullptr);
-    }
-    return result;
-}
-
-static NEVER_INLINE JSArray* tryAddToRegExpSplitCache(JSGlobalObject* globalObject, VM& vm, JSString* inputString, StringView input, RegExp* regexp, const Vector<unsigned>& spans, MatchResult lastMatch)
-{
-    auto scope = DECLARE_THROW_SCOPE(vm);
-
-    unsigned resultLength = splitSpanCount(spans);
-    if (!resultLength || resultLength >= MIN_SPARSE_ARRAY_INDEX)
-        return nullptr;
-
-    auto subject = inputString->value(globalObject);
-    RETURN_IF_EXCEPTION(scope, nullptr);
-    if (!subject->impl() || !subject->impl()->isAtom())
-        return nullptr;
-
-    constexpr unsigned atomStringsArrayLimit = 100;
-    bool makeAtomStringsArray = resultLength < atomStringsArrayLimit;
-    Structure* cellButterflyStructure = makeAtomStringsArray ? vm.cellButterflyOnlyAtomStringsStructure.get() : vm.cellButterflyStructure(CopyOnWriteArrayWithContiguous);
-    auto* newButterfly = JSCellButterfly::tryCreate(vm, cellButterflyStructure, resultLength);
-    if (!newButterfly)
-        return nullptr;
-
-    bool encounteredNonAtoms = false;
-    for (unsigned i = 0; i < resultLength; ++i) {
-        unsigned start = spans[i * 2];
-        unsigned length = spans[i * 2 + 1];
-        if (start == undefinedSplitSpanStart) {
-            encounteredNonAtoms = true;
-            newButterfly->setIndex(vm, i, jsUndefined());
-            continue;
-        }
-        JSString* string = nullptr;
-        const bool isPotentiallyIdentifier = length && isASCIIIdentifierStart(input.codeUnitAt(start));
-        if (makeAtomStringsArray && isPotentiallyIdentifier) {
-            auto subView = input.substring(start, length);
-            auto identifier = subView.is8Bit() ? Identifier::fromString(vm, subView.span8()) : Identifier::fromString(vm, subView.span16());
-
-            DeferGC defer(vm);
-            string = vm.atomStringToJSStringMap.ensureValue(identifier.impl(), [&] {
-                return jsString(vm, identifier.string());
-            });
-        } else {
-            string = jsSubstringOfResolved(vm, inputString, start, length);
-            encounteredNonAtoms = true;
-        }
-        newButterfly->setIndex(vm, i, string);
-    }
-
-    if (makeAtomStringsArray && encounteredNonAtoms) {
-        Structure* replacementStructure = vm.cellButterflyStructure(CopyOnWriteArrayWithContiguous);
-        newButterfly->setStructure(vm, replacementStructure);
-    }
-
-    vm.ensureStringSplitCache().setForRegExp(subject, regexp, newButterfly, lastMatch);
-    Structure* arrayStructure = globalObject->originalArrayStructureForIndexingType(CopyOnWriteArrayWithContiguous);
-    return JSArray::createWithButterfly(vm, nullptr, arrayStructure, newButterfly->toButterfly());
 }
 
 // Fast path used by RegExp.prototype[Symbol.split] and String.prototype.split when the
@@ -866,27 +772,6 @@ JSCell* regExpSplitFast(JSGlobalObject* globalObject, RegExpObject* regexpObject
 
     RegExp* regexp = regexpObject->regExp();
 
-    bool cacheable = limit == 0xFFFFFFFFu && !globalObject->isHavingABadTime();
-    if (cacheable) {
-        StringImpl* impl = inputString->tryGetValueImpl();
-        cacheable = impl && impl->isAtom();
-    }
-    if (cacheable) {
-        auto subject = inputString->value(globalObject);
-        RETURN_IF_EXCEPTION(scope, { });
-        MatchResult cachedLastMatch;
-        auto* cache = vm.stringSplitCache();
-        if (auto* immutableButterfly = cache ? cache->getForRegExp(subject, regexp, cachedLastMatch) : nullptr) {
-            // The skipped match loop would have updated the legacy RegExp statics
-            // (RegExp.$1, lastMatch, leftContext, ...) via performMatch. Replay its final
-            // match so those observable properties match the uncached path.
-            if (cachedLastMatch)
-                globalObject->regExpGlobalData().recordMatch(vm, globalObject, regexp, inputString, cachedLastMatch, false);
-            Structure* arrayStructure = globalObject->originalArrayStructureForIndexingType(CopyOnWriteArrayWithContiguous);
-            return JSArray::createWithButterfly(vm, nullptr, arrayStructure, immutableButterfly->toButterfly());
-        }
-    }
-
     auto input = inputString->view(globalObject);
     RETURN_IF_EXCEPTION(scope, { });
     ASSERT(!input->isNull());
@@ -898,6 +783,7 @@ JSCell* regExpSplitFast(JSGlobalObject* globalObject, RegExpObject* regexpObject
     // 11. Let array be ! ArrayCreate(0).
     // 12. Let lengthA be 0.
     // 13. If limit is undefined, let lim be 2**32 - 1; else let lim be ℝ(? ToUint32(limit)).
+    unsigned resultLength = 0;
     unsigned inputSize = input->length();
     unsigned position = 0;
 
@@ -983,49 +869,40 @@ JSCell* regExpSplitFast(JSGlobalObject* globalObject, RegExpObject* regexpObject
     bool regExpIsUnicode = regexp->eitherUnicode();
 
     unsigned maxSizeForDirectPath = 100000;
+    JSArray* result = JSArray::tryCreate(vm, globalObject->arrayStructureForIndexingTypeDuringAllocation(ArrayWithContiguous), 1);
+    if (!result) [[unlikely]] {
+        throwOutOfMemoryError(globalObject, scope);
+        return { };
+    }
 
-    auto& spans = vm.stringSplitIndice;
-    spans.shrink(0);
-    MatchResult lastMatchResult = genericSplit(
+    genericSplit(
         globalObject, regexp, inputString, input, inputSize, position, matchPosition, regExpIsSticky, regExpIsUnicode,
         [&] () -> SplitControl {
-            if (splitSpanCount(spans) >= maxSizeForDirectPath)
+            if (resultLength >= maxSizeForDirectPath)
                 return AbortSplit;
             return ContinueSplit;
         },
         [&] (bool isDefined, unsigned start, unsigned length) -> SplitControl {
-            recordSplitSpan(spans, isDefined ? start : undefinedSplitSpanStart, length);
-            if (splitSpanCount(spans) >= limit)
+            result->putDirectIndex(globalObject, resultLength++, isDefined ? jsSubstringOfResolved(vm, inputString, start, length) : jsUndefined());
+            RETURN_IF_EXCEPTION(scope, AbortSplit);
+            if (resultLength >= limit)
                 return AbortSplit;
             return ContinueSplit;
         });
     RETURN_IF_EXCEPTION(scope, { });
 
-    if (splitSpanCount(spans) >= limit)
-        RELEASE_AND_RETURN(scope, createArrayFromSplitSpans(globalObject, vm, inputString, spans));
+    if (resultLength >= limit)
+        return result;
 
-    if (splitSpanCount(spans) < maxSizeForDirectPath) {
+    if (resultLength < maxSizeForDirectPath) {
         // 20. Let substring be the substring of string from lastMatchEnd to size.
         // 21. Perform ! CreateDataPropertyOrThrow(array, ! ToString(𝔽(lengthA)), substring).
-        recordSplitSpan(spans, position, inputSize - position);
-
-        if (cacheable) {
-            JSArray* cached = tryAddToRegExpSplitCache(globalObject, vm, inputString, input, regexp, spans, lastMatchResult);
-            RETURN_IF_EXCEPTION(scope, { });
-            if (cached)
-                return cached;
-        }
+        scope.release();
+        result->putDirectIndex(globalObject, resultLength, jsSubstringOfResolved(vm, inputString, position, inputSize - position));
 
         // 22. Return array.
-        RELEASE_AND_RETURN(scope, createArrayFromSplitSpans(globalObject, vm, inputString, spans));
+        return result;
     }
-
-    // Absurdly large results are not cached, and recording every element up front would cost more
-    // scratch space than the dry run below needs to bound the total size. Materialize what the split
-    // produced so far and finish it directly into the array.
-    JSArray* result = createArrayFromSplitSpans(globalObject, vm, inputString, spans);
-    RETURN_IF_EXCEPTION(scope, { });
-    unsigned resultLength = splitSpanCount(spans);
 
     // Now do a dry run to see how big things get. Give up if they get absurd.
     unsigned savedPosition = position;
@@ -1054,7 +931,7 @@ JSCell* regExpSplitFast(JSGlobalObject* globalObject, RegExpObject* regexpObject
     // OK, we know that if we finish the split, we won't have to OOM.
     position = savedPosition;
     matchPosition = savedMatchPosition;
-
+    
     genericSplit(
         globalObject, regexp, inputString, input, inputSize, position, matchPosition, regExpIsSticky, regExpIsUnicode,
         [&] () -> SplitControl {
@@ -1169,12 +1046,12 @@ JSValue regExpSplitSlow(JSGlobalObject* globalObject, JSObject* thisObject, JSSt
     }
 
     // 10. Let splitter be ? Construct(speciesCtor, « regexp, newFlags »).
-    auto constructorArgs = WTF::toArray<EncodedJSValue>({
-        JSValue::encode(thisValue),
-        JSValue::encode(jsString(vm, newFlags)),
-    });
+    MarkedArgumentBuffer constructorArgs;
+    constructorArgs.append(thisValue);
+    constructorArgs.append(jsString(vm, newFlags));
+    ASSERT(!constructorArgs.hasOverflowed());
     auto constructData = JSC::getConstructDataInline(speciesConstructor);
-    JSObject* splitter = construct(globalObject, speciesConstructor, constructData, ArgList { constructorArgs.data(), constructorArgs.size() });
+    JSObject* splitter = construct(globalObject, speciesConstructor, constructData, constructorArgs);
     RETURN_IF_EXCEPTION(scope, { });
 
     // After Construct, re-check whether the splitter is a primordial RegExpObject with non-observable
@@ -1728,8 +1605,8 @@ JSC_DEFINE_HOST_FUNCTION(regExpProtoFuncMatchAll, (JSGlobalObject* globalObject,
         bool global = regExp->global();
         bool fullUnicode = regExp->eitherUnicode();
 
-        uint64_t lastIndex = regExpObject->getLastIndex().toLength(globalObject);
-        RETURN_IF_EXCEPTION(scope, { });
+        double lastIndexDouble = regExpObject->getLastIndex().asNumber();
+        size_t lastIndex = lastIndexDouble > 0 ? static_cast<size_t>(std::min(lastIndexDouble, maxSafeInteger())) : 0;
 
         Structure* structure = globalObject->regExpStructure();
         RegExpObject* matcher = RegExpObject::create(vm, structure, regExp);
@@ -1771,13 +1648,13 @@ JSC_DEFINE_HOST_FUNCTION(regExpProtoFuncMatchAll, (JSGlobalObject* globalObject,
     String flags = flagsValue.toWTFString(globalObject);
     RETURN_IF_EXCEPTION(scope, { });
 
-    auto constructorArgs = WTF::toArray<EncodedJSValue>({
-        JSValue::encode(thisValue),
-        JSValue::encode(jsString(vm, flags)),
-    });
+    MarkedArgumentBuffer constructorArgs;
+    constructorArgs.append(thisValue);
+    constructorArgs.append(jsString(vm, flags));
+    ASSERT(!constructorArgs.hasOverflowed());
 
     auto constructData = JSC::getConstructDataInline(constructor);
-    JSObject* matcher = construct(globalObject, constructor, constructData, ArgList { constructorArgs.data(), constructorArgs.size() });
+    JSObject* matcher = construct(globalObject, constructor, constructData, constructorArgs);
     RETURN_IF_EXCEPTION(scope, { });
 
     JSValue lastIndexValue = thisObject->get(globalObject, vm.propertyNames->lastIndex);

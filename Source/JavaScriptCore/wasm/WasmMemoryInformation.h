@@ -62,7 +62,6 @@ public:
     bool isImport() const { return m_isImport; }
     AddressType addressType() const { return m_addressType; }
     bool isMemory64() const { return m_addressType.is64Bit(); }
-    bool doesAccessOverflow(uint64_t offset, uint64_t size) const;
 
     explicit operator bool() const { return !!m_initial; }
 

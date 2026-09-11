@@ -407,7 +407,7 @@ String languageTagForLocaleID(const char* localeID, bool isImmortal)
         // This must be immortal to make concurrent ref/deref safe.
         if (isImmortal)
             return StringImpl::createStaticStringImpl(buffer.span());
-        return String::fromLatin1(buffer.span());
+        return buffer.span();
     };
 
     return createResult(canonicalizeUnicodeExtensionsAfterICULocaleCanonicalization(WTF::move(buffer)));
@@ -1171,7 +1171,7 @@ Vector<String> numberingSystemsForLocale(const String& locale)
     });
 
     UErrorCode status = U_ZERO_ERROR;
-    auto defaultSystem = std::unique_ptr<UNumberingSystem, ICUDeleter<unumsys_close>>(unumsys_open(locale.utf8().legacyCStringPointer(), &status));
+    auto defaultSystem = std::unique_ptr<UNumberingSystem, ICUDeleter<unumsys_close>>(unumsys_open(locale.utf8().data(), &status));
     ASSERT(U_SUCCESS(status));
     auto defaultSystemName = String::fromLatin1(unumsys_getName(defaultSystem.get()));
 
@@ -1183,7 +1183,7 @@ Vector<String> numberingSystemsForLocale(const String& locale)
 String defaultNumberingSystemForLocale(const String& dataLocale)
 {
     UErrorCode status = U_ZERO_ERROR;
-    auto defaultSystem = std::unique_ptr<UNumberingSystem, ICUDeleter<unumsys_close>>(unumsys_open(dataLocale.utf8().legacyCStringPointer(), &status));
+    auto defaultSystem = std::unique_ptr<UNumberingSystem, ICUDeleter<unumsys_close>>(unumsys_open(dataLocale.utf8().data(), &status));
     ASSERT(U_SUCCESS(status));
     return String::fromLatin1(unumsys_getName(defaultSystem.get()));
 }
@@ -1191,13 +1191,13 @@ String defaultNumberingSystemForLocale(const String& dataLocale)
 String defaultCalendarForLocale(const String& dataLocale)
 {
     UErrorCode status = U_ZERO_ERROR;
-    auto calendars = std::unique_ptr<UEnumeration, ICUDeleter<uenum_close>>(ucal_getKeywordValuesForLocale("calendar", dataLocale.utf8().legacyCStringPointer(), false, &status));
+    auto calendars = std::unique_ptr<UEnumeration, ICUDeleter<uenum_close>>(ucal_getKeywordValuesForLocale("calendar", dataLocale.utf8().data(), false, &status));
     ASSERT(U_SUCCESS(status));
     int32_t length;
     const char* name = uenum_next(calendars.get(), &length, &status);
     ASSERT(U_SUCCESS(status));
     ASSERT(name);
-    String calendar = String::fromLatin1(unsafeMakeSpan(name, static_cast<size_t>(length)));
+    String calendar(unsafeMakeSpan(name, static_cast<size_t>(length)));
     if (auto mapped = mapICUCalendarKeywordToBCP47(calendar))
         return mapped.value();
     return calendar;
@@ -1720,17 +1720,42 @@ const Vector<String>& intlAvailableCalendars()
         };
         availableCalendars.construct();
 
-        // https://tc39.es/proposal-intl-era-monthcode/#sup-availablecalendars
-        // proposal-intl-era-monthcode "Calendar Type" table.
-#define CANONICAL_CALENDAR_STRING(name, str) str,
-        static constexpr ASCIILiteral canonicalCalendars[] {
-            FOR_EACH_CACHED_CALENDAR_ID(CANONICAL_CALENDAR_STRING)
-            "iso8601"_s,
-        };
-#undef CANONICAL_CALENDAR_STRING
-        for (auto id : canonicalCalendars) {
-            String s(id);
-            availableCalendars->append(createImmortalThreadSafeString(WTF::move(s)));
+        if (Options::useIntlEraMonthcode()) {
+            // https://tc39.es/proposal-intl-era-monthcode/#sup-availablecalendars
+            // proposal-intl-era-monthcode "Calendar Type" table.
+            static constexpr ASCIILiteral canonicalCalendars[] {
+                "buddhist"_s, "chinese"_s, "coptic"_s, "dangi"_s, "ethioaa"_s,
+                "ethiopic"_s, "gregory"_s, "hebrew"_s, "indian"_s,
+                "islamic-civil"_s, "islamic-tbla"_s, "islamic-umalqura"_s,
+                "iso8601"_s, "japanese"_s, "persian"_s, "roc"_s,
+            };
+            for (auto id : canonicalCalendars) {
+                String s(id);
+                availableCalendars->append(createImmortalThreadSafeString(WTF::move(s)));
+            }
+        } else {
+            // Pre-proposal (default): use ICU4C's keyword-set enumeration.
+            UErrorCode status = U_ZERO_ERROR;
+            auto enumeration = std::unique_ptr<UEnumeration, ICUDeleter<uenum_close>>(ucal_getKeywordValuesForLocale("calendars", "und", false, &status));
+            ASSERT(U_SUCCESS(status));
+
+            int32_t count = uenum_count(enumeration.get(), &status);
+            ASSERT(U_SUCCESS(status));
+
+            for (int32_t i = 0; i < count; ++i) {
+                int32_t length = 0;
+                const char* pointer = uenum_next(enumeration.get(), &length, &status);
+                ASSERT(U_SUCCESS(status));
+                String calendar(unsafeMakeSpan(pointer, static_cast<size_t>(length)));
+                if (auto mapped = mapICUCalendarKeywordToBCP47(calendar))
+                    calendar = WTF::move(mapped.value());
+
+                // Skip if the obtained calendar code is not meeting Unicode Locale Identifier's `type` definition
+                // as whole ECMAScript's i18n is relying on Unicode Local Identifiers.
+                if (!isUnicodeLocaleIdentifierType(calendar))
+                    continue;
+                availableCalendars->append(createImmortalThreadSafeString(WTF::move(calendar)));
+            }
         }
 
         // The AvailableCalendars abstract operation returns a List, ordered as if an Array of the same
@@ -1797,7 +1822,8 @@ CalendarID iso8601CalendarIDSlow()
                     return; \
                 } \
             } \
-            RELEASE_ASSERT_NOT_REACHED(); \
+            if (!Options::useIntlEraMonthcode()) \
+                RELEASE_ASSERT_NOT_REACHED(); \
         }); \
         return name##CalendarIDStorage; \
     }
@@ -1842,7 +1868,7 @@ static JSArray* availableCollations(JSGlobalObject* globalObject)
             throwTypeError(globalObject, scope, "failed to enumerate available collations"_s);
             return { };
         }
-        String collation = String::fromLatin1(unsafeMakeSpan(pointer, static_cast<size_t>(length)));
+        String collation(unsafeMakeSpan(pointer, static_cast<size_t>(length)));
         if (collation == "standard"_s || collation == "search"_s)
             continue;
         if (auto mapped = mapICUCollationKeywordToBCP47(collation))
@@ -1896,7 +1922,7 @@ static JSArray* availableCurrencies(JSGlobalObject* globalObject)
             throwTypeError(globalObject, scope, "failed to enumerate available currencies"_s);
             return { };
         }
-        String currency = String::fromLatin1(unsafeMakeSpan(pointer, static_cast<size_t>(length)));
+        String currency(unsafeMakeSpan(pointer, static_cast<size_t>(length)));
         if (currency == "EQE"_s)
             continue;
         if (currency == "LSM"_s)
@@ -1948,7 +1974,7 @@ static JSArray* availableNumberingSystems(JSGlobalObject* globalObject)
         }
         if (unumsys_isAlgorithmic(numberingSystem.get()))
             continue;
-        elements.append(String::fromLatin1(unsafeMakeSpan(name, static_cast<size_t>(length))));
+        elements.constructAndAppend(std::span { name, static_cast<size_t>(length) });
     }
 
     // The AvailableNumberingSystems abstract operation returns a List, ordered as if an Array of the same

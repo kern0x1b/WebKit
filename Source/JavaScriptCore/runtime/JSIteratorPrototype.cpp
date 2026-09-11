@@ -204,12 +204,12 @@ JSC_DEFINE_HOST_FUNCTION(iteratorProtoFuncForEach, (JSGlobalObject* globalObject
 
     scope.release();
     forEachInIteratorProtocol(globalObject, thisValue, [&](VM&, JSGlobalObject*, JSValue nextItem) ALWAYS_INLINE_LAMBDA {
-        auto args = WTF::toArray<EncodedJSValue>({
-            JSValue::encode(nextItem),
-            JSValue::encode(jsNumber(counter++)),
-        });
+        MarkedArgumentBuffer args;
+        args.append(nextItem);
+        args.append(jsNumber(counter++));
+        ASSERT(!args.hasOverflowed());
 
-        call(globalObject, callbackArg, callData, jsUndefined(), ArgList { args.data(), args.size() });
+        call(globalObject, callbackArg, callData, jsUndefined(), args);
     });
 
     return JSValue::encode(jsUndefined());
@@ -319,7 +319,7 @@ JSC_DEFINE_HOST_FUNCTION(iteratorProtoFuncIncludes, (JSGlobalObject* globalObjec
     return { };
 }
 
-// https://tc39.es/proposal-iterator-join/#sec-iterator.prototype.join
+// https://tc39.es/proposal-iterator-join/
 JSC_DEFINE_HOST_FUNCTION(iteratorProtoFuncJoin, (JSGlobalObject* globalObject, CallFrame* callFrame))
 {
     VM& vm = globalObject->vm();
@@ -330,12 +330,6 @@ JSC_DEFINE_HOST_FUNCTION(iteratorProtoFuncJoin, (JSGlobalObject* globalObject, C
     if (!thisValue.isObject()) [[unlikely]]
         return throwVMTypeError(globalObject, scope, "Iterator.prototype.join requires that |this| be an Object."_s);
 
-    auto abruptCloseIterator = [&] {
-        scope.release();
-        iteratorClose(globalObject, thisValue);
-        return JSValue::encode(jsUndefined());
-    };
-
     JSValue separatorValue = callFrame->argument(0);
     JSString* separatorString = nullptr;
     if (separatorValue.isUndefined()) {
@@ -343,9 +337,14 @@ JSC_DEFINE_HOST_FUNCTION(iteratorProtoFuncJoin, (JSGlobalObject* globalObject, C
         separatorString = jsSingleCharacterString(vm, comma);
         RETURN_IF_EXCEPTION(scope, { });
     } else {
-        separatorString = separatorValue.toString(globalObject);
-        if (scope.exception()) [[unlikely]]
-            return abruptCloseIterator();
+        separatorString = separatorValue.toStringOrNull(globalObject);
+        EXCEPTION_ASSERT(!!scope.exception() == !separatorString);
+        if (!separatorString) {
+            scope.release();
+            iteratorClose(globalObject, thisValue);
+            return { };
+        }
+        RETURN_IF_EXCEPTION(scope, { });
     }
 
     IterationRecord iterationRecord = iteratorDirect(globalObject, thisValue);
@@ -363,8 +362,7 @@ JSC_DEFINE_HOST_FUNCTION(iteratorProtoFuncJoin, (JSGlobalObject* globalObject, C
         cachedCall = &cachedCallHolder.value();
     }
 
-    bool first = true;
-    JSRopeString::RopeBuilder<RecordOverflow> ropeBuilder(vm);
+    JSString* result = nullptr;
     while (true) {
         JSValue next;
         if (cachedCall) [[likely]] {
@@ -375,32 +373,39 @@ JSC_DEFINE_HOST_FUNCTION(iteratorProtoFuncJoin, (JSGlobalObject* globalObject, C
         RETURN_IF_EXCEPTION(scope, { });
 
         if (next.isFalse())
-            return JSValue::encode(ropeBuilder.release());
+            break;
 
         JSValue nextValue = iteratorValue(globalObject, next);
         RETURN_IF_EXCEPTION(scope, { });
 
-        if (first)
-            first = false;
-        else {
-            if (!ropeBuilder.append(separatorString)) [[unlikely]] {
-                throwOutOfMemoryError(globalObject, scope);
-                return abruptCloseIterator();
-            }
-        }
-
         if (nextValue.isUndefinedOrNull())
             continue;
 
-        JSString* nextString = nextValue.toString(globalObject);
-        if (scope.exception()) [[unlikely]]
-            return abruptCloseIterator();
+        JSString* nextString = nextValue.toStringOrNull(globalObject);
+        EXCEPTION_ASSERT(!!scope.exception() == !nextString);
+        if (!nextString) {
+            scope.release();
+            iteratorClose(globalObject, thisValue);
+            return { };
+        }
+        RETURN_IF_EXCEPTION(scope, { });
 
-        if (!ropeBuilder.append(nextString)) [[unlikely]] {
-            throwOutOfMemoryError(globalObject, scope);
-            return abruptCloseIterator();
+        if (!result)
+            result = nextString;
+        else {
+            result = jsString(globalObject, result, separatorString, nextString);
+            EXCEPTION_ASSERT(!!scope.exception() == !result);
+            if (!result) {
+                scope.release();
+                iteratorClose(globalObject, thisValue);
+                return { };
+            }
+            RETURN_IF_EXCEPTION(scope, { });
         }
     }
+    if (!result)
+        result = jsEmptyString(vm);
+    return JSValue::encode(result);
 }
 
 } // namespace JSC

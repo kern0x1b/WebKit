@@ -46,7 +46,6 @@
 #include "WebAssemblyModulePrototype.h"
 #include <wtf/StdLibExtras.h>
 #include <wtf/text/MakeString.h>
-#include <wtf/text/StringCommon.h>
 
 namespace JSC {
 static JSC_DECLARE_HOST_FUNCTION(webAssemblyModuleCustomSections);
@@ -90,7 +89,8 @@ JSC_DEFINE_HOST_FUNCTION(webAssemblyModuleCustomSections, (JSGlobalObject* globa
 
     const auto& customSections = module->moduleInformation().customSections;
     for (const Wasm::CustomSection& section : customSections) {
-        if (equal(sectionNameString, section.name.span())) {
+        // FIXME: Add a function that compares a String with a span<char8_t> so we don't need to make a string.
+        if (WTF::makeString(section.name) == sectionNameString) {
             auto buffer = ArrayBuffer::tryCreate(section.payload.span());
             if (!buffer)
                 return JSValue::encode(throwException(globalObject, throwScope, createOutOfMemoryError(globalObject)));
@@ -154,20 +154,14 @@ static JSObject* createTypeReflectionObject(JSGlobalObject* globalObject, JSWebA
     }
     case Wasm::ExternalKind::Memory: {
         const auto& memory = module->moduleInformation().memory(impOrExp.kindIndex);
-        auto addressType = memory.addressType();
         PageCount maximum = memory.maximum();
-        if (maximum) {
-            typeObj = constructEmptyObject(globalObject, globalObject->objectPrototype(), 4);
-            JSValue maxValue = addressValueFromUint64(globalObject, maximum.pageCount(), addressType);
-            RETURN_IF_EXCEPTION(throwScope, { });
-            typeObj->putDirect(vm, Identifier::fromString(vm, "maximum"_s), maxValue);
-        } else
+        if (maximum.isValid()) {
             typeObj = constructEmptyObject(globalObject, globalObject->objectPrototype(), 3);
-        JSValue minValue = addressValueFromUint64(globalObject, memory.initial().pageCount(), addressType);
-        RETURN_IF_EXCEPTION(throwScope, { });
-        typeObj->putDirect(vm, Identifier::fromString(vm, "minimum"_s), minValue);
+            typeObj->putDirect(vm, Identifier::fromString(vm, "maximum"_s), jsNumber(maximum.pageCount()));
+        } else
+            typeObj = constructEmptyObject(globalObject, globalObject->objectPrototype(), 2);
+        typeObj->putDirect(vm, Identifier::fromString(vm, "minimum"_s), jsNumber(memory.initial().pageCount()));
         typeObj->putDirect(vm, Identifier::fromString(vm, "shared"_s), jsBoolean(memory.isShared()));
-        typeObj->putDirect(vm, Identifier::fromString(vm, "address"_s), addressTypeString(vm, addressType));
         break;
     }
     case Wasm::ExternalKind::Table: {
@@ -177,20 +171,14 @@ static JSObject* createTypeReflectionObject(JSGlobalObject* globalObject, JSWebA
             throwException(globalObject, throwScope, createTypeError(globalObject, errorMessage));
             return nullptr;
         }
-        auto addressType = table.addressType();
-        std::optional<uint64_t> maximum = table.maximum();
+        std::optional<uint32_t> maximum = table.maximum();
         if (maximum) {
-            typeObj = constructEmptyObject(globalObject, globalObject->objectPrototype(), 4);
-            JSValue maxValue = addressValueFromUint64(globalObject, maximum.value(), addressType);
-            RETURN_IF_EXCEPTION(throwScope, { });
-            typeObj->putDirect(vm, Identifier::fromString(vm, "maximum"_s), maxValue);
-        } else
             typeObj = constructEmptyObject(globalObject, globalObject->objectPrototype(), 3);
-        JSValue minValue = addressValueFromUint64(globalObject, table.initial(), addressType);
-        RETURN_IF_EXCEPTION(throwScope, { });
-        typeObj->putDirect(vm, Identifier::fromString(vm, "minimum"_s), minValue);
+            typeObj->putDirect(vm, Identifier::fromString(vm, "maximum"_s), jsNumber(maximum.value()));
+        } else
+            typeObj = constructEmptyObject(globalObject, globalObject->objectPrototype(), 2);
+        typeObj->putDirect(vm, Identifier::fromString(vm, "minimum"_s), jsNumber(table.initial()));
         typeObj->putDirect(vm, Identifier::fromString(vm, "element"_s), typeString);
-        typeObj->putDirect(vm, Identifier::fromString(vm, "address"_s), addressTypeString(vm, addressType));
         break;
     }
     case Wasm::ExternalKind::Global: {
@@ -233,21 +221,22 @@ JSC_DEFINE_HOST_FUNCTION(webAssemblyModuleImports, (JSGlobalObject* globalObject
     // The following would theoretically be a strict ==, but an inline FixedBitVector reports a larger size than it was created with.
     RELEASE_ASSERT(shouldBeHiddenMap.size() >= imports.size());
     if (imports.size()) {
-        const bool includeTypeReflection = Options::useWasmJSTypes();
         Identifier moduleId = Identifier::fromString(vm, "module"_s);
+        Identifier name = Identifier::fromString(vm, "name"_s);
         Identifier kind = Identifier::fromString(vm, "kind"_s);
+        Identifier type = Identifier::fromString(vm, "type"_s);
         for (size_t i = 0; i < imports.size(); i++) {
             if (!shouldBeHiddenMap.test(i)) {
                 const Wasm::Import& imp = imports[i];
                 JSObject* obj = constructEmptyObject(globalObject);
                 RETURN_IF_EXCEPTION(throwScope, { });
                 obj->putDirect(vm, moduleId, jsString(vm, WTF::makeString(imp.module)));
-                obj->putDirect(vm, vm.propertyNames->name, jsString(vm, WTF::makeString(imp.field)));
+                obj->putDirect(vm, name, jsString(vm, WTF::makeString(imp.field)));
                 obj->putDirect(vm, kind, jsString(vm, String::fromLatin1(makeString(imp.kind))));
-                if (includeTypeReflection && (imp.kind == Wasm::ExternalKind::Function || imp.kind == Wasm::ExternalKind::Table || imp.kind == Wasm::ExternalKind::Memory || imp.kind == Wasm::ExternalKind::Global)) {
+                if (imp.kind == Wasm::ExternalKind::Function || imp.kind == Wasm::ExternalKind::Table || imp.kind == Wasm::ExternalKind::Memory || imp.kind == Wasm::ExternalKind::Global) {
                     JSObject* typeReflectionObject = createTypeReflectionObject(globalObject, module, imp);
                     RETURN_IF_EXCEPTION(throwScope, { });
-                    obj->putDirect(vm, vm.propertyNames->type, typeReflectionObject);
+                    obj->putDirect(vm, type, typeReflectionObject);
                 }
                 result->push(globalObject, obj);
                 RETURN_IF_EXCEPTION(throwScope, { });
@@ -272,17 +261,18 @@ JSC_DEFINE_HOST_FUNCTION(webAssemblyModuleExports, (JSGlobalObject* globalObject
 
     const auto& exports = module->moduleInformation().exports;
     if (exports.size()) {
-        const bool includeTypeReflection = Options::useWasmJSTypes();
+        Identifier name = Identifier::fromString(vm, "name"_s);
         Identifier kind = Identifier::fromString(vm, "kind"_s);
+        Identifier type = Identifier::fromString(vm, "type"_s);
         for (const Wasm::Export& exp : exports) {
             JSObject* obj = constructEmptyObject(globalObject);
             RETURN_IF_EXCEPTION(throwScope, { });
-            obj->putDirect(vm, vm.propertyNames->name, jsString(vm, WTF::makeString(exp.field)));
+            obj->putDirect(vm, name, jsString(vm, WTF::makeString(exp.field)));
             obj->putDirect(vm, kind, jsString(vm, String::fromLatin1(makeString(exp.kind))));
-            if (includeTypeReflection && (exp.kind == Wasm::ExternalKind::Function || exp.kind == Wasm::ExternalKind::Table || exp.kind == Wasm::ExternalKind::Memory || exp.kind == Wasm::ExternalKind::Global)) {
+            if (exp.kind == Wasm::ExternalKind::Function || exp.kind == Wasm::ExternalKind::Table || exp.kind == Wasm::ExternalKind::Memory || exp.kind == Wasm::ExternalKind::Global) {
                 JSObject* typeReflectionObject = createTypeReflectionObject(globalObject, module, exp);
                 RETURN_IF_EXCEPTION(throwScope, { });
-                obj->putDirect(vm, vm.propertyNames->type, typeReflectionObject);
+                obj->putDirect(vm, type, typeReflectionObject);
             }
             result->push(globalObject, obj);
             RETURN_IF_EXCEPTION(throwScope, { });
@@ -381,3 +371,4 @@ WebAssemblyModuleConstructor::WebAssemblyModuleConstructor(VM& vm, Structure* st
 } // namespace JSC
 
 #endif // ENABLE(WEBASSEMBLY)
+

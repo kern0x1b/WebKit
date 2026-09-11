@@ -36,6 +36,7 @@ static JSC_DECLARE_HOST_FUNCTION(reflectObjectDefineProperty);
 static JSC_DECLARE_HOST_FUNCTION(reflectObjectGetOwnPropertyDescriptor);
 static JSC_DECLARE_HOST_FUNCTION(reflectObjectGetPrototypeOf);
 static JSC_DECLARE_HOST_FUNCTION(reflectObjectIsExtensible);
+static JSC_DECLARE_HOST_FUNCTION(reflectObjectOwnKeys);
 static JSC_DECLARE_HOST_FUNCTION(reflectObjectPreventExtensions);
 static JSC_DECLARE_HOST_FUNCTION(reflectObjectSet);
 static JSC_DECLARE_HOST_FUNCTION(reflectObjectSetPrototypeOf);

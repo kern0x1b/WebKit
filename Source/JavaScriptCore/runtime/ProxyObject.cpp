@@ -124,9 +124,7 @@ JSObject* ProxyObject::getHandlerTrap(JSGlobalObject* globalObject, JSObject* ha
     bool isSlotCacheable = slot.isUnset() || (slot.isCacheableValue() && slot.slotBase() == handler);
     if (isSlotCacheable) {
         JSValue handlerPrototype = handler->getPrototypeDirect();
-        // isHandlerTrapsCacheValid treats a matching handler StructureID as proof that the prototype is
-        // unchanged, which only holds for mono-proto: setPrototypeOf on a poly-proto object keeps its structure.
-        bool isHandlerPrototypeChainCacheable = handler->type() == FinalObjectType && handler->structure()->hasMonoProto() && !handler->structure()->isDictionary()
+        bool isHandlerPrototypeChainCacheable = handler->type() == FinalObjectType && !handler->structure()->isDictionary()
             && handlerPrototype.inherits<ObjectPrototype>() && !asObject(handlerPrototype)->structure()->isDictionary();
         if (isHandlerPrototypeChainCacheable) {
             ASSERT(slot.cachedOffset() != emptyHandlerTrapCache);
@@ -190,12 +188,12 @@ static JSValue performProxyGet(JSGlobalObject* globalObject, ProxyObject* proxyO
     if (!getHandler)
         return performDefaultGet();
 
-    auto arguments = WTF::toArray<EncodedJSValue>({
-        JSValue::encode(target),
-        JSValue::encode(identifierToSafePublicJSValue(vm, Identifier::fromUid(vm, propertyName.uid()))),
-        JSValue::encode(receiver.toThis(globalObject, ECMAMode::strict())),
-    });
-    JSValue trapResult = call(globalObject, getHandler, callData, handler, ArgList { arguments.data(), arguments.size() });
+    MarkedArgumentBuffer arguments;
+    arguments.append(target);
+    arguments.append(identifierToSafePublicJSValue(vm, Identifier::fromUid(vm, propertyName.uid())));
+    arguments.append(receiver.toThis(globalObject, ECMAMode::strict()));
+    ASSERT(!arguments.hasOverflowed());
+    JSValue trapResult = call(globalObject, getHandler, callData, handler, arguments);
     RETURN_IF_EXCEPTION(scope, { });
 
     if (target->structure()->hasNonConfigurableReadOnlyOrGetterSetterProperties()) {
@@ -296,11 +294,11 @@ bool ProxyObject::performInternalMethodGetOwnProperty(JSGlobalObject* globalObje
     if (!getOwnPropertyDescriptorMethod)
         RELEASE_AND_RETURN(scope, performDefaultGetOwnProperty());
 
-    auto arguments = WTF::toArray<EncodedJSValue>({
-        JSValue::encode(target),
-        JSValue::encode(identifierToSafePublicJSValue(vm, Identifier::fromUid(vm, propertyName.uid()))),
-    });
-    JSValue trapResult = call(globalObject, getOwnPropertyDescriptorMethod, callData, handler, ArgList { arguments.data(), arguments.size() });
+    MarkedArgumentBuffer arguments;
+    arguments.append(target);
+    arguments.append(identifierToSafePublicJSValue(vm, Identifier::fromUid(vm, propertyName.uid())));
+    ASSERT(!arguments.hasOverflowed());
+    JSValue trapResult = call(globalObject, getOwnPropertyDescriptorMethod, callData, handler, arguments);
     RETURN_IF_EXCEPTION(scope, false);
 
     if (trapResult.isUndefined() && !target->structure()->isNonExtensibleOrHasNonConfigurableProperties())
@@ -403,11 +401,11 @@ bool ProxyObject::performHasProperty(JSGlobalObject* globalObject, PropertyName 
     if (!hasMethod)
         RELEASE_AND_RETURN(scope, performDefaultHasProperty());
 
-    auto arguments = WTF::toArray<EncodedJSValue>({
-        JSValue::encode(target),
-        JSValue::encode(identifierToSafePublicJSValue(vm, Identifier::fromUid(vm, propertyName.uid()))),
-    });
-    JSValue trapResult = call(globalObject, hasMethod, callData, handler, ArgList { arguments.data(), arguments.size() });
+    MarkedArgumentBuffer arguments;
+    arguments.append(target);
+    arguments.append(identifierToSafePublicJSValue(vm, Identifier::fromUid(vm, propertyName.uid())));
+    ASSERT(!arguments.hasOverflowed());
+    JSValue trapResult = call(globalObject, hasMethod, callData, handler, arguments);
     RETURN_IF_EXCEPTION(scope, false);
 
     bool trapResultAsBool = trapResult.toBoolean(globalObject);
@@ -519,13 +517,13 @@ bool ProxyObject::performPut(JSGlobalObject* globalObject, JSValue putValue, JSV
     if (!setMethod)
         RELEASE_AND_RETURN(scope, performDefaultPut());
 
-    auto arguments = WTF::toArray<EncodedJSValue>({
-        JSValue::encode(target),
-        JSValue::encode(identifierToSafePublicJSValue(vm, Identifier::fromUid(vm, propertyName.uid()))),
-        JSValue::encode(putValue),
-        JSValue::encode(thisValue.toThis(globalObject, ECMAMode::strict())),
-    });
-    JSValue trapResult = call(globalObject, setMethod, callData, handler, ArgList { arguments.data(), arguments.size() });
+    MarkedArgumentBuffer arguments;
+    arguments.append(target);
+    arguments.append(identifierToSafePublicJSValue(vm, Identifier::fromUid(vm, propertyName.uid())));
+    arguments.append(putValue);
+    arguments.append(thisValue.toThis(globalObject, ECMAMode::strict()));
+    ASSERT(!arguments.hasOverflowed());
+    JSValue trapResult = call(globalObject, setMethod, callData, handler, arguments);
     RETURN_IF_EXCEPTION(scope, false);
 
     bool trapResultAsBool = trapResult.toBoolean(globalObject);
@@ -629,12 +627,12 @@ JSC_DEFINE_HOST_FUNCTION(performProxyCall, (JSGlobalObject* globalObject, CallFr
 
     JSArray* argArray = constructArray(globalObject, static_cast<ArrayAllocationProfile*>(nullptr), ArgList(callFrame));
     RETURN_IF_EXCEPTION(scope, encodedJSValue());
-    auto arguments = WTF::toArray<EncodedJSValue>({
-        JSValue::encode(target),
-        JSValue::encode(callFrame->thisValue().toThis(globalObject, ECMAMode::strict())),
-        JSValue::encode(argArray),
-    });
-    RELEASE_AND_RETURN(scope, JSValue::encode(call(globalObject, applyMethod, callData, handler, ArgList { arguments.data(), arguments.size() })));
+    MarkedArgumentBuffer arguments;
+    arguments.append(target);
+    arguments.append(callFrame->thisValue().toThis(globalObject, ECMAMode::strict()));
+    arguments.append(argArray);
+    ASSERT(!arguments.hasOverflowed());
+    RELEASE_AND_RETURN(scope, JSValue::encode(call(globalObject, applyMethod, callData, handler, arguments)));
 }
 
 CallData ProxyObject::getCallData(JSCell* cell)
@@ -681,12 +679,12 @@ JSC_DEFINE_HOST_FUNCTION(performProxyConstruct, (JSGlobalObject* globalObject, C
 
     JSArray* argArray = constructArray(globalObject, static_cast<ArrayAllocationProfile*>(nullptr), ArgList(callFrame));
     RETURN_IF_EXCEPTION(scope, encodedJSValue());
-    auto arguments = WTF::toArray<EncodedJSValue>({
-        JSValue::encode(target),
-        JSValue::encode(argArray),
-        JSValue::encode(callFrame->newTarget()),
-    });
-    JSValue result = call(globalObject, constructMethod, callData, handler, ArgList { arguments.data(), arguments.size() });
+    MarkedArgumentBuffer arguments;
+    arguments.append(target);
+    arguments.append(argArray);
+    arguments.append(callFrame->newTarget());
+    ASSERT(!arguments.hasOverflowed());
+    JSValue result = call(globalObject, constructMethod, callData, handler, arguments);
     RETURN_IF_EXCEPTION(scope, encodedJSValue());
     if (!result.isObject())
         // Proxies, unlike other spec provided callable/constructable objects,
@@ -738,11 +736,11 @@ bool ProxyObject::performDelete(JSGlobalObject* globalObject, PropertyName prope
     if (deletePropertyMethod.isUndefined())
         RELEASE_AND_RETURN(scope, performDefaultDelete());
 
-    auto arguments = WTF::toArray<EncodedJSValue>({
-        JSValue::encode(target),
-        JSValue::encode(identifierToSafePublicJSValue(vm, Identifier::fromUid(vm, propertyName.uid()))),
-    });
-    JSValue trapResult = call(globalObject, deletePropertyMethod, callData, handler, ArgList { arguments.data(), arguments.size() });
+    MarkedArgumentBuffer arguments;
+    arguments.append(target);
+    arguments.append(identifierToSafePublicJSValue(vm, Identifier::fromUid(vm, propertyName.uid())));
+    ASSERT(!arguments.hasOverflowed());
+    JSValue trapResult = call(globalObject, deletePropertyMethod, callData, handler, arguments);
     RETURN_IF_EXCEPTION(scope, false);
 
     bool trapResultAsBool = trapResult.toBoolean(globalObject);
@@ -822,10 +820,10 @@ bool ProxyObject::performPreventExtensions(JSGlobalObject* globalObject)
     if (preventExtensionsMethod.isUndefined())
         RELEASE_AND_RETURN(scope, target->methodTable()->preventExtensions(target, globalObject));
 
-    auto arguments = WTF::toArray<EncodedJSValue>({
-        JSValue::encode(target),
-    });
-    JSValue trapResult = call(globalObject, preventExtensionsMethod, callData, handler, ArgList { arguments.data(), arguments.size() });
+    MarkedArgumentBuffer arguments;
+    arguments.append(target);
+    ASSERT(!arguments.hasOverflowed());
+    JSValue trapResult = call(globalObject, preventExtensionsMethod, callData, handler, arguments);
     RETURN_IF_EXCEPTION(scope, false);
 
     bool trapResultAsBool = trapResult.toBoolean(globalObject);
@@ -874,10 +872,10 @@ bool ProxyObject::performIsExtensible(JSGlobalObject* globalObject)
     if (isExtensibleMethod.isUndefined())
         RELEASE_AND_RETURN(scope, target->isExtensible(globalObject));
 
-    auto arguments = WTF::toArray<EncodedJSValue>({
-        JSValue::encode(target),
-    });
-    JSValue trapResult = call(globalObject, isExtensibleMethod, callData, handler, ArgList { arguments.data(), arguments.size() });
+    MarkedArgumentBuffer arguments;
+    arguments.append(target);
+    ASSERT(!arguments.hasOverflowed());
+    JSValue trapResult = call(globalObject, isExtensibleMethod, callData, handler, arguments);
     RETURN_IF_EXCEPTION(scope, false);
 
     bool trapResultAsBool = trapResult.toBoolean(globalObject);
@@ -942,12 +940,12 @@ bool ProxyObject::performDefineOwnProperty(JSGlobalObject* globalObject, Propert
     scope.assertNoException();
     ASSERT(descriptorObject);
 
-    auto arguments = WTF::toArray<EncodedJSValue>({
-        JSValue::encode(target),
-        JSValue::encode(identifierToSafePublicJSValue(vm, Identifier::fromUid(vm, propertyName.uid()))),
-        JSValue::encode(descriptorObject),
-    });
-    JSValue trapResult = call(globalObject, definePropertyMethod, callData, handler, ArgList { arguments.data(), arguments.size() });
+    MarkedArgumentBuffer arguments;
+    arguments.append(target);
+    arguments.append(identifierToSafePublicJSValue(vm, Identifier::fromUid(vm, propertyName.uid())));
+    arguments.append(descriptorObject);
+    ASSERT(!arguments.hasOverflowed());
+    JSValue trapResult = call(globalObject, definePropertyMethod, callData, handler, arguments);
     RETURN_IF_EXCEPTION(scope, false);
 
     bool trapResultAsBool = trapResult.toBoolean(globalObject);
@@ -1060,10 +1058,10 @@ void ProxyObject::performGetOwnPropertyNames(JSGlobalObject* globalObject, Prope
         return;
     }
 
-    auto arguments = WTF::toArray<EncodedJSValue>({
-        JSValue::encode(target),
-    });
-    JSValue trapResult = call(globalObject, ownKeysMethod, callData, handler, ArgList { arguments.data(), arguments.size() });
+    MarkedArgumentBuffer arguments;
+    arguments.append(target);
+    ASSERT(!arguments.hasOverflowed());
+    JSValue trapResult = call(globalObject, ownKeysMethod, callData, handler, arguments);
     RETURN_IF_EXCEPTION(scope, void());
 
     if (!trapResult.isObject()) {
@@ -1192,11 +1190,11 @@ bool ProxyObject::performSetPrototype(JSGlobalObject* globalObject, JSValue prot
     if (setPrototypeOfMethod.isUndefined())
         RELEASE_AND_RETURN(scope, target->setPrototype(vm, globalObject, prototype, shouldThrowIfCantSet));
 
-    auto arguments = WTF::toArray<EncodedJSValue>({
-        JSValue::encode(target),
-        JSValue::encode(prototype),
-    });
-    JSValue trapResult = call(globalObject, setPrototypeOfMethod, callData, handler, ArgList { arguments.data(), arguments.size() });
+    MarkedArgumentBuffer arguments;
+    arguments.append(target);
+    arguments.append(prototype);
+    ASSERT(!arguments.hasOverflowed());
+    JSValue trapResult = call(globalObject, setPrototypeOfMethod, callData, handler, arguments);
     RETURN_IF_EXCEPTION(scope, false);
 
     bool trapResultAsBool = trapResult.toBoolean(globalObject);
@@ -1256,10 +1254,10 @@ JSValue ProxyObject::performGetPrototype(JSGlobalObject* globalObject)
     if (getPrototypeOfMethod.isUndefined()) 
         RELEASE_AND_RETURN(scope, target->getPrototype(globalObject));
 
-    auto arguments = WTF::toArray<EncodedJSValue>({
-        JSValue::encode(target),
-    });
-    JSValue trapResult = call(globalObject, getPrototypeOfMethod, callData, handler, ArgList { arguments.data(), arguments.size() });
+    MarkedArgumentBuffer arguments;
+    arguments.append(target);
+    ASSERT(!arguments.hasOverflowed());
+    JSValue trapResult = call(globalObject, getPrototypeOfMethod, callData, handler, arguments);
     RETURN_IF_EXCEPTION(scope, { });
 
     if (!trapResult.isObject() && !trapResult.isNull()) {

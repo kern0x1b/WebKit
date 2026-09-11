@@ -293,17 +293,17 @@ public:
 
     static inline VM* findMatchingVM(const Invocable<TestCallback> auto& test)
     {
-        SUPPRESS_FORWARD_DECL_ARG return singleton().findMatchingVMImpl(test);
+        SUPPRESS_FORWARD_DECL_ARG return singleton().findMatchingVMImpl(scopedLambda<TestCallback>(test));
     }
 
     static inline void forEachVM(const Invocable<IteratorCallback> auto& functor)
     {
-        SUPPRESS_FORWARD_DECL_ARG singleton().forEachVMImpl(functor);
+        SUPPRESS_FORWARD_DECL_ARG singleton().forEachVMImpl(scopedLambda<IteratorCallback>(functor));
     }
 
     static inline Error forEachVMWithTimeout(Seconds timeout, const Invocable<IteratorCallback> auto& functor)
     {
-        SUPPRESS_FORWARD_DECL_ARG return singleton().forEachVMWithTimeoutImpl(timeout, functor);
+        SUPPRESS_FORWARD_DECL_ARG return singleton().forEachVMWithTimeoutImpl(timeout, scopedLambda<IteratorCallback>(functor));
     }
 
     JS_EXPORT_PRIVATE static void dumpVMs();

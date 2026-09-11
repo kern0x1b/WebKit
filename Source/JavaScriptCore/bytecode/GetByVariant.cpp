@@ -179,13 +179,13 @@ void GetByVariant::markIfCheap(Visitor& visitor)
 template void GetByVariant::markIfCheap(AbstractSlotVisitor&);
 template void GetByVariant::markIfCheap(SlotVisitor&);
 
-bool GetByVariant::isStillLive(VM& vm)
+bool GetByVariant::finalize(VM& vm)
 {
     if (!m_structureSet.isStillAlive(vm))
         return false;
     if (!m_conditionSet.areStillLive(vm))
         return false;
-    if (m_callLinkStatus && !m_callLinkStatus->isStillLive(vm))
+    if (m_callLinkStatus && !m_callLinkStatus->finalize(vm))
         return false;
     if (m_intrinsicFunction && !vm.heap.isMarked(m_intrinsicFunction))
         return false;

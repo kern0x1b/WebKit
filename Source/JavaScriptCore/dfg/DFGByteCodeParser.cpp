@@ -40,7 +40,6 @@
 #include "CallVariantInlines.h"
 #include "CheckPrivateBrandStatus.h"
 #include "CodeBlock.h"
-#include "CodeBlockInlines.h"
 #include "CodeBlockWithJITType.h"
 #include "CommonSlowPaths.h"
 #include "DFGAbstractHeap.h"
@@ -106,8 +105,6 @@
 #include "WeakSetConstructor.h"
 #include <wtf/CommaPrinter.h>
 #include <wtf/HashMap.h>
-#include <wtf/PriorityQueue.h>
-#include <wtf/SegmentedVector.h>
 #include <wtf/SetForScope.h>
 #include <wtf/StdLibExtras.h>
 
@@ -126,265 +123,6 @@ static constexpr bool verbose = true;
 #define VERBOSE_LOG(...) do { \
     dataLogIf(DFGByteCodeParserInternal::verbose && Options::verboseDFGBytecodeParsing(), __VA_ARGS__); \
 } while (false)
-
-// === Inlining plan ===
-//
-// The inliner decides each call site at the moment it reaches it, so an early call site claims
-// budget merely by being early. This surveys the candidates first: it walks the call sites
-// recorded in a code block's profiling, prices each one, ranks them, and hands a single
-// compilation-wide budget to the best of them.
-//
-// The survey reads profiling and bytecode costs only and builds no IR, so it costs a small
-// fraction of a parse. What it gives up is fidelity: it cannot know what the parser will make
-// of a site that becomes an intrinsic, a DOM call or a varargs frame, and it prices every site
-// as an ordinary call. So a plan is advisory. A site the survey never predicted is left to the
-// per-site heuristics exactly as if planning were off, which means a divergence between survey
-// and parse costs decision quality and never correctness.
-class InliningPlan {
-    WTF_MAKE_NONCOPYABLE(InliningPlan);
-public:
-    struct Site {
-        unsigned bytecodeOffset { 0 };
-        unsigned surveyIndex { 0 };
-        // Never dereferenced, just compared for identity
-        const ScriptExecutable* calleeIdentity { nullptr };
-        unsigned cost { 0 };
-        unsigned depth { 0 };
-        double score { 0 };
-        bool admitted { false };
-        Site* parent { nullptr };
-        Vector<Site*, 2> children;
-    };
-
-    InliningPlan() = default;
-
-    void build(CodeBlock* rootCodeBlock, JITType);
-
-    // Returns the decision for a callsite at `bytecodeOffset` within the callee that `parent` stands for,
-    // or nullptr when the survey did not predict this site at all.
-    const Site* siteFor(const Site* parent, unsigned bytecodeOffset) const
-    {
-        if (!parent)
-            return nullptr;
-        for (const Site* child : parent->children) {
-            if (child->bytecodeOffset == bytecodeOffset)
-                return child;
-        }
-        return nullptr;
-    }
-
-    bool isBuilt() const { return m_built; }
-    unsigned surveyedCount() const { return m_sites.size(); }
-    unsigned admittedCount() const { return m_admittedCount; }
-    unsigned admittedCost() const { return m_admittedCost; }
-    unsigned budget() const { return m_budget; }
-    const Site& root() const { return m_root; }
-
-private:
-    Site* addSite(Site& parent, unsigned bytecodeOffset, FunctionExecutable*, CodeSpecializationKind, unsigned cost, unsigned depth);
-    void surveyCallSites(Site& parent, CodeBlock*, unsigned depth);
-    unsigned priceCandidate(CallVariant, CodeSpecializationKind, unsigned depth, const Site& parent) const;
-
-    Site m_root;
-    SegmentedVector<Site, 16> m_sites;
-    CodeBlock* m_rootCodeBlock { nullptr };
-    JITType m_jitType { JITType::None };
-    unsigned m_budget { 0 };
-    unsigned m_budgetRemaining { 0 };
-    unsigned m_admittedCount { 0 };
-    unsigned m_admittedCost { 0 };
-    bool m_built { false };
-};
-
-// Chooses whether a callee can be inlined at all and determines what it costs to inline it.
-unsigned InliningPlan::priceCandidate(CallVariant callee, CodeSpecializationKind kind, unsigned depth, const Site& parent) const
-{
-    if (depth >= Options::maximumInliningDepth())
-        return UINT_MAX;
-
-    FunctionExecutable* executable = callee.functionExecutable();
-    if (!executable)
-        return UINT_MAX;
-
-    // Always price against the baseline block so that a callee costs the same whichever tier
-    // is asking, then let the capability level judge the tier-specific cap.
-    CodeBlock* baselineCodeBlock = executable->baselineCodeBlockFor(kind);
-    if (!baselineCodeBlock)
-        return UINT_MAX;
-
-    if (baselineCodeBlock->couldBeTainted() != m_rootCodeBlock->couldBeTainted())
-        return UINT_MAX;
-
-    CodeBlock* targetCodeBlock = baselineCodeBlock;
-    if (m_jitType == JITType::FTLJIT) {
-        if (CodeBlock* newest = executable->codeBlockFor(kind))
-            targetCodeBlock = newest;
-    }
-
-    if (!canInline(inlineFunctionForCapabilityLevel(m_jitType, targetCodeBlock, kind, callee.isClosureCall())))
-        return UINT_MAX;
-
-    if (!isSmallEnoughToInlineCodeInto(m_rootCodeBlock))
-        return UINT_MAX;
-
-    unsigned recursion = 0;
-    for (const Site* ancestor = &parent; ancestor; ancestor = ancestor->parent) {
-        if (ancestor->calleeIdentity == executable && ++recursion >= Options::maximumInliningRecursion())
-            return UINT_MAX;
-    }
-
-    return targetCodeBlock->bytecodeCost();
-}
-
-// Because call frequency data is available only for polymorphic sites and not monomorphic ones,
-// we can use callee tier as a proxy for how hot the callee is, and also for how resistant it is
-// to being jettisoned.
-static double calleeTierBonus(FunctionExecutable* executable, CodeSpecializationKind kind)
-{
-    unsigned rank = 0;
-    if (CodeBlock* codeBlock = executable->codeBlockFor(kind)) {
-        switch (codeBlock->jitType()) {
-        case JITType::FTLJIT:
-            rank = Options::inliningPlanTierBonusPowerForFTL();
-            break;
-        case JITType::DFGJIT:
-            rank = Options::inliningPlanTierBonusPowerForDFG();
-            break;
-        case JITType::BaselineJIT:
-            rank = Options::inliningPlanTierBonusPowerForBaseline();
-            break;
-        default:
-            // Hasn't been deemed worth compiling yet (still in LLInt)
-            break;
-        }
-    }
-    return std::pow(Options::inliningPlanTierBonusBase(), static_cast<double>(rank));
-}
-
-InliningPlan::Site* InliningPlan::addSite(Site& parent, unsigned bytecodeOffset, FunctionExecutable* executable, CodeSpecializationKind kind, unsigned cost, unsigned depth)
-{
-    Site& site = m_sites.alloc();
-    site.bytecodeOffset = bytecodeOffset;
-    site.surveyIndex = m_sites.size() - 1;
-    site.calleeIdentity = executable;
-    site.cost = cost;
-    site.depth = depth;
-    site.parent = &parent;
-    // Cost is just a weak logarithmic tiebreaker
-    site.score = calleeTierBonus(executable, kind) / (std::pow(Options::inliningPlanDepthPenalty(), static_cast<double>(depth)) * std::log2(4.0 + cost));
-
-    parent.children.append(&site);
-    return &site;
-}
-
-void InliningPlan::surveyCallSites(Site& parent, CodeBlock* codeBlock, unsigned depth)
-{
-    if (depth >= Options::maximumInliningDepth())
-        return;
-
-    if (m_sites.size() >= Options::maximumGlobalInliningPlanSites())
-        return;
-
-    // Call sites are read out of the interpreter/baseline profiling because that's where the parser reads them from.
-    if (!JITCode::couldBeInterpreted(codeBlock->jitType()))
-        return;
-
-    struct SurveyedCallSite {
-        unsigned bytecodeOffset { 0 };
-        CodeSpecializationKind kind { CodeSpecializationKind::CodeForCall };
-        CallLinkStatus status;
-    };
-    Vector<SurveyedCallSite, 8> callSites;
-
-    {
-        ConcurrentJSLocker locker(codeBlock->m_lock);
-        codeBlock->forEachLLIntOrBaselineCallLinkInfo([&](DataOnlyCallLinkInfo& callLinkInfo) {
-            CallLinkStatus callLinkStatus = CallLinkStatus::computeFor(locker, codeBlock, callLinkInfo);
-            if (!callLinkStatus.canOptimize())
-                return;
-            callSites.append(SurveyedCallSite {
-                callLinkInfo.codeOrigin().bytecodeIndex().offset(),
-                callLinkInfo.specializationKind(),
-                WTF::move(callLinkStatus),
-            });
-        });
-    }
-
-    for (const SurveyedCallSite& callSite : callSites) {
-        // A polymorphic site is charged for every variant it could inline and represented by the
-        // first (which is the most frequently seen because CallLinkStatus sorts variants by count).
-        unsigned cost = 0;
-        FunctionExecutable* firstExecutable = nullptr;
-        CodeBlock* firstCodeBlock = nullptr;
-        for (unsigned i = 0; i < callSite.status.size(); ++i) {
-            unsigned variantCost = priceCandidate(callSite.status[i], callSite.kind, depth, parent);
-            if (variantCost == UINT_MAX)
-                continue;
-            cost += variantCost;
-            if (!firstExecutable) {
-                FunctionExecutable* executable = callSite.status[i].functionExecutable();
-                if (CodeBlock* baselineCodeBlock = executable->baselineCodeBlockFor(callSite.kind)) {
-                    firstExecutable = executable;
-                    firstCodeBlock = baselineCodeBlock;
-                }
-            }
-        }
-
-        if (!firstExecutable)
-            continue;
-
-        Site* site = addSite(parent, callSite.bytecodeOffset, firstExecutable, callSite.kind, cost, depth);
-        surveyCallSites(*site, firstCodeBlock, depth + 1);
-    }
-}
-
-// Served first is the highest score, then the earliest surveyed site.
-struct InliningCandidateIsLowerPriority {
-    bool operator()(InliningPlan::Site* left, InliningPlan::Site* right) const
-    {
-        if (left->score != right->score)
-            return left->score < right->score;
-        return left->surveyIndex > right->surveyIndex;
-    }
-};
-
-void InliningPlan::build(CodeBlock* rootCodeBlock, JITType jitType)
-{
-    m_rootCodeBlock = rootCodeBlock;
-    m_jitType = jitType;
-    m_built = true;
-    m_budget = jitType == JITType::FTLJIT
-        ? Options::globalInliningPlanBudgetForFTL()
-        : Options::globalInliningPlanBudgetForDFG();
-    m_budgetRemaining = m_budget;
-    m_root.calleeIdentity = rootCodeBlock->ownerExecutable();
-    m_root.admitted = true;
-
-    surveyCallSites(m_root, rootCodeBlock, m_root.depth + 1);
-
-    PriorityQueue<InliningPlan::Site*, InliningCandidateIsLowerPriority> queue;
-
-    auto makeAdmissible = [&](const auto& sites) {
-        for (Site* site : sites)
-            queue.enqueue(site);
-        return;
-    };
-
-    makeAdmissible(m_root.children);
-    while (!queue.isEmpty()) {
-        Site* candidate = queue.dequeue();
-
-        if (candidate->cost > m_budgetRemaining)
-            continue;
-
-        candidate->admitted = true;
-        m_budgetRemaining -= candidate->cost;
-        m_admittedCost += candidate->cost;
-        ++m_admittedCount;
-
-        makeAdmissible(candidate->children);
-    }
-}
 
 // === ByteCodeParser ===
 //
@@ -422,11 +160,6 @@ private:
 
     // Just parse from m_currentIndex to the end of the current CodeBlock.
     void parseCodeBlock();
-
-    // Survey and rank the compilation's inlining candidates before parsing, so that the budget
-    // goes to the best of them rather than to whichever call sites come first in bytecode order.
-    void planInlining();
-    bool planPermitsInlining() const;
     
     void ensureLocals(unsigned newNumLocals)
     {
@@ -756,8 +489,9 @@ private:
     {
         ASSERT(node->op() == GetLocal);
         ASSERT(node->origin.semantic.bytecodeIndex() == m_currentIndex);
+        ConcurrentJSLocker locker(m_inlineStackTop->m_profiledBlock->m_lock);
         LazyOperandValueProfileKey key(m_currentIndex, node->operand());
-        SpeculatedType prediction = m_inlineStackTop->m_lazyOperands.prediction(key);
+        SpeculatedType prediction = m_inlineStackTop->m_lazyOperands.prediction(locker, key);
         node->variableAccessData()->predict(prediction);
         return node;
     }
@@ -1105,7 +839,7 @@ private:
         CodeOrigin semantic = m_currentSemanticOrigin.isSet() ? m_currentSemanticOrigin : currentCodeOrigin();
         CodeOrigin forExit = m_currentExitOrigin.isSet() ? m_currentExitOrigin : currentCodeOrigin();
 
-        return NodeOrigin(WTF::move(semantic), WTF::move(forExit), m_exitOK);
+        return NodeOrigin(semantic, forExit, m_exitOK);
     }
     
     BranchData* branchData(unsigned taken, unsigned notTaken)
@@ -1261,8 +995,12 @@ private:
             if (opcodeID == op_call_ignore_result)
                 return SpecFullTop;
 
-            JSValue* specFailValue = inlineStackEntry->m_specFailValueProfileBuckets.get(bytecodeIndex);
-            SpeculatedType prediction = codeBlock->valueProfilePredictionForBytecodeIndex(codeOrigin.bytecodeIndex(), specFailValue);
+            SpeculatedType prediction;
+            {
+                JSValue* specFailValue = inlineStackEntry->m_specFailValueProfileBuckets.get(bytecodeIndex);
+                ConcurrentJSLocker locker(codeBlock->valueProfileLock());
+                prediction = codeBlock->valueProfilePredictionForBytecodeIndex(locker, codeOrigin.bytecodeIndex(), specFailValue);
+            }
             auto* fuzzerAgent = m_vm->fuzzerAgent();
             if (fuzzerAgent) [[unlikely]]
                 return fuzzerAgent->getPrediction(codeBlock, codeOrigin, prediction) & SpecBytecodeTop;
@@ -1340,26 +1078,34 @@ private:
     ArrayMode getArrayMode(Array::Action action)
     {
         CodeBlock* codeBlock = m_inlineStackTop->m_profiledBlock;
-        ArrayProfile* profile = codeBlock->getArrayProfile(codeBlock->bytecodeIndex(m_currentInstruction));
+        ConcurrentJSLocker locker(codeBlock->m_lock);
+        ArrayProfile* profile = codeBlock->getArrayProfile(locker, codeBlock->bytecodeIndex(m_currentInstruction));
         if (!profile)
             return { };
-        return getArrayMode(*profile, action);
+        return getArrayMode(locker, *profile, action);
     }
 
-    ArrayMode getArrayMode(ArrayProfile& liveProfile, Array::Action action)
+    ArrayMode getArrayMode(ArrayProfile& profile, Array::Action action)
     {
-        liveProfile.computeUpdatedPrediction(m_inlineStackTop->m_profiledBlock);
-        ArrayProfile profile = liveProfile;
-        return ArrayMode::fromObserved(profile, action, profile.outOfBounds());
+        ConcurrentJSLocker locker(m_inlineStackTop->m_profiledBlock->m_lock);
+        return getArrayMode(locker, profile, action);
+    }
+
+    ArrayMode getArrayMode(const ConcurrentJSLocker& locker, ArrayProfile& profile, Array::Action action)
+    {
+        profile.computeUpdatedPrediction(m_inlineStackTop->m_profiledBlock);
+        bool makeSafe = profile.outOfBounds(locker);
+        return ArrayMode::fromObserved(locker, &profile, action, makeSafe);
     }
 
     bool profiledArrayMayBeRegExpMatchesArray()
     {
         CodeBlock* codeBlock = m_inlineStackTop->m_profiledBlock;
-        ArrayProfile* profile = codeBlock->getArrayProfile(codeBlock->bytecodeIndex(m_currentInstruction));
+        ConcurrentJSLocker locker(codeBlock->m_lock);
+        ArrayProfile* profile = codeBlock->getArrayProfile(locker, codeBlock->bytecodeIndex(m_currentInstruction));
         if (!profile)
             return false;
-        return profile->mayBeRegExpMatchesArray();
+        return profile->mayBeRegExpMatchesArray(locker);
     }
 
     Node* makeSafe(Node* node)
@@ -1557,8 +1303,6 @@ private:
 
     UncheckedKeyHashMap<InlineCallFrame*, Vector<ArgumentPosition*>, WTF::DefaultHash<InlineCallFrame*>, WTF::NullableHashTraits<InlineCallFrame*>> m_inlineCallFrameToArgumentPositions;
 
-    InliningPlan m_inliningPlan;
-
     // The number of arguments passed to the function.
     const unsigned m_numArguments;
     // The number of locals (vars + temporaries) used by the bytecode for the function.
@@ -1616,10 +1360,6 @@ private:
 
         UncheckedKeyHashMap<BytecodeIndex, JSValue*> m_specFailValueProfileBuckets;
         
-        // The plan node this frame was inlined for, so that call sites inside it can be found
-        // by descending the plan in step with the parse. Null when planning is off, or when the
-        // survey never predicted the site this frame came from.
-        const InliningPlan::Site* m_planSite { nullptr };
         ICStatusMap m_baselineMap;
         ICStatusContext m_optimizedContext;
         
@@ -2185,13 +1925,8 @@ void ByteCodeParser::inlineCall(Node* callTargetNode, Operand result, CallVarian
     m_currentExitOrigin = currentCodeOrigin();
 
     InlineStackEntry* callerStackTop = m_inlineStackTop;
-    // Locate this call site in the plan before the frame is pushed, while m_currentIndex still
-    // refers to the caller's call instruction, so that call sites inside the callee can be found
-    // by descending from here.
-    const InliningPlan::Site* planSite = m_inliningPlan.siteFor(callerStackTop->m_planSite, m_currentIndex.offset());
     InlineStackEntry inlineStackEntry(this, codeBlock, codeBlock, callee.function(), result,
         inlineCallFrameStart.virtualRegister(), argumentCountIncludingThis, kind, continuationBlock);
-    inlineStackEntry.m_planSite = planSite;
 
     // This is where the actual inlining really happens.
     BytecodeIndex oldIndex = m_currentIndex;
@@ -2420,12 +2155,6 @@ ByteCodeParser::CallOptimizationResult ByteCodeParser::handleCallVariant(Node* c
     if (!inliningBalance)
         return CallOptimizationResult::DidNothing;
 
-    // Everything above substitutes nodes for the call rather than inlining a body and is always
-    // worth doing, so the plan gets a say only from here on. It doesn't get a say over a callee
-    // that the language requires be inlined.
-    if (inlineAttribute != InlineAttribute::Always && !planPermitsInlining())
-        return CallOptimizationResult::DidNothing;
-
     if (inlineAttribute != InlineAttribute::Always && myInliningCost > inliningBalance)
         return CallOptimizationResult::DidNothing;
 
@@ -2457,16 +2186,6 @@ bool ByteCodeParser::handleVarargsInlining(Node* callTargetNode, Operand result,
         VERBOSE_LOG("Bailing inlining: too many arguments for varargs inlining.\n");
         return false;
     }
-
-    auto hasVarargsOverflowExit = [&] {
-        for (unsigned checkpoint = 0; checkpoint < BytecodeIndex::numberOfCheckpoints; ++checkpoint) {
-            if (m_inlineStackTop->m_exitProfile.hasExitSite(m_currentIndex.withCheckpoint(checkpoint), VarargsOverflow))
-                return true;
-        }
-        return false;
-    };
-    if (hasVarargsOverflowExit())
-        return false;
     if (callLinkStatus.couldTakeSlowPath() || callLinkStatus.size() != 1) {
         VERBOSE_LOG("Bailing inlining: polymorphic inlining is not yet supported for varargs.\n");
         return false;
@@ -2487,11 +2206,6 @@ bool ByteCodeParser::handleVarargsInlining(Node* callTargetNode, Operand result,
     auto [bytecodeCost, inlineAttribute] = inliningCost(callVariant, maxArgumentCountIncludingThis, kind);
     if (inlineAttribute != InlineAttribute::Always && bytecodeCost > getInliningBalance(callLinkStatus, specializationKind)) {
         VERBOSE_LOG("Bailing inlining: inlining cost too high.\n");
-        return false;
-    }
-
-    if (inlineAttribute != InlineAttribute::Always && !planPermitsInlining()) {
-        VERBOSE_LOG("Bailing inlining: the plan declined this call site.\n");
         return false;
     }
     
@@ -2571,8 +2285,9 @@ bool ByteCodeParser::handleVarargsInlining(Node* callTargetNode, Operand result,
             // arguments received inside the callee. But that probably won't matter for most
             // calls.
             if (codeBlock && argument < static_cast<unsigned>(codeBlock->numParameters())) {
+                ConcurrentJSLocker locker(codeBlock->valueProfileLock());
                 ArgumentValueProfile& profile = codeBlock->valueProfileForArgument(argument);
-                variable->predict(profile.computeUpdatedPrediction());
+                variable->predict(profile.computeUpdatedPrediction(locker));
             }
             
             Node* setArgument = addToGraph(numSetArguments >= mandatoryMinimum ? SetArgumentMaybe : SetArgumentDefinitely, OpInfo(variable));
@@ -3072,6 +2787,9 @@ auto ByteCodeParser::handleIntrinsicCall(Node* callee, Operand resultOperand, Ca
         }
 
         case ArrayUnshiftIntrinsic: {
+            if (!is64Bit())
+                return CallOptimizationResult::DidNothing;
+
             if (static_cast<unsigned>(argumentCountIncludingThis) >= MIN_SPARSE_ARRAY_INDEX)
                 return CallOptimizationResult::DidNothing;
 
@@ -3426,6 +3144,9 @@ auto ByteCodeParser::handleIntrinsicCall(Node* callee, Operand resultOperand, Ca
         }
 
         case ArrayShiftIntrinsic: {
+            if (!is64Bit())
+                return CallOptimizationResult::DidNothing;
+
             ArrayMode arrayMode = getArrayMode(Array::Write);
             if (!arrayMode.isJSArray())
                 return CallOptimizationResult::DidNothing;
@@ -3492,6 +3213,8 @@ auto ByteCodeParser::handleIntrinsicCall(Node* callee, Operand resultOperand, Ca
         case AtomicsStoreIntrinsic:
         case AtomicsSubIntrinsic:
         case AtomicsXorIntrinsic: {
+            if (!is64Bit())
+                return CallOptimizationResult::DidNothing;
             
             NodeType op = LastNodeType;
             Array::Action action = Array::Write;
@@ -4168,6 +3891,9 @@ auto ByteCodeParser::handleIntrinsicCall(Node* callee, Operand resultOperand, Ca
         }
 
         case RegExpStringIteratorNextIntrinsic: {
+            if (!is64Bit())
+                return CallOptimizationResult::DidNothing;
+
             if (m_inlineStackTop->m_exitProfile.hasExitSite(m_currentIndex, BadType))
                 return CallOptimizationResult::DidNothing;
 
@@ -4296,6 +4022,24 @@ auto ByteCodeParser::handleIntrinsicCall(Node* callee, Operand resultOperand, Ca
 
             insertChecks();
             setResult(addToGraph(GetPrototypeOf, OpInfo(0), OpInfo(prediction), Edge(get(virtualRegisterForArgumentIncludingThis(1, registerOffset)), ObjectUse)));
+            return CallOptimizationResult::Inlined;
+        }
+
+        case ObjectPrototypeIsPrototypeOfIntrinsic: {
+            if (argumentCountIncludingThis < 2)
+                return CallOptimizationResult::DidNothing;
+
+            if (m_inlineStackTop->m_exitProfile.hasExitSite(m_currentIndex, BadType))
+                return CallOptimizationResult::DidNothing;
+
+            // When |this| is an object, isPrototypeOf(V) is exactly the prototype-chain walk of
+            // OrdinaryHasInstance, so reuse the InstanceOf node. Speculate ObjectUse on |this| and
+            // OSR exit to the C++ slow path for primitive receivers.
+            insertChecks();
+            Node* prototype = get(virtualRegisterForArgumentIncludingThis(0, registerOffset));
+            Node* value = get(virtualRegisterForArgumentIncludingThis(1, registerOffset));
+            addToGraph(Check, Edge(prototype, ObjectUse));
+            setResult(addToGraph(InstanceOf, value, prototype));
             return CallOptimizationResult::Inlined;
         }
 
@@ -4441,6 +4185,8 @@ auto ByteCodeParser::handleIntrinsicCall(Node* callee, Operand resultOperand, Ca
         }
 
         case DateNowIntrinsic: {
+            if (!is64Bit())
+                return CallOptimizationResult::DidNothing;
             insertChecks();
             setResult(addToGraph(DateNow));
             return CallOptimizationResult::Inlined;
@@ -4596,6 +4342,9 @@ auto ByteCodeParser::handleIntrinsicCall(Node* callee, Operand resultOperand, Ca
         case JSMapValuesIntrinsic:
         case JSSetEntriesIntrinsic:
         case JSSetValuesIntrinsic: {
+            if (!is64Bit()) // JSEmpty must be nullptr.
+                return CallOptimizationResult::DidNothing;
+
             if (m_inlineStackTop->m_exitProfile.hasExitSite(m_currentIndex, BadConstantValue) || m_inlineStackTop->m_exitProfile.hasExitSite(m_currentIndex, BadType))
                 return CallOptimizationResult::DidNothing;
 
@@ -4658,6 +4407,9 @@ auto ByteCodeParser::handleIntrinsicCall(Node* callee, Operand resultOperand, Ca
         }
 
         case JSStringIteratorIntrinsic: {
+            if (!is64Bit())
+                return CallOptimizationResult::DidNothing;
+
             if (m_inlineStackTop->m_exitProfile.hasExitSite(m_currentIndex, BadType))
                 return CallOptimizationResult::DidNothing;
 
@@ -4678,6 +4430,9 @@ auto ByteCodeParser::handleIntrinsicCall(Node* callee, Operand resultOperand, Ca
         }
 
         case JSStringIteratorNextIntrinsic: {
+            if (!is64Bit())
+                return CallOptimizationResult::DidNothing;
+
             if (m_inlineStackTop->m_exitProfile.hasExitSite(m_currentIndex, BadType) || m_inlineStackTop->m_exitProfile.hasExitSite(m_currentIndex, BadCache))
                 return CallOptimizationResult::DidNothing;
 
@@ -4769,6 +4524,9 @@ auto ByteCodeParser::handleIntrinsicCall(Node* callee, Operand resultOperand, Ca
 
         case JSSetIteratorNextIntrinsic:
         case JSMapIteratorNextIntrinsic: {
+            if (!is64Bit())
+                return CallOptimizationResult::DidNothing;
+
             if (m_inlineStackTop->m_exitProfile.hasExitSite(m_currentIndex, BadType) || m_inlineStackTop->m_exitProfile.hasExitSite(m_currentIndex, BadCache))
                 return CallOptimizationResult::DidNothing;
 
@@ -5089,6 +4847,8 @@ auto ByteCodeParser::handleIntrinsicCall(Node* callee, Operand resultOperand, Ca
         }
 
         case DatePrototypeGetTimeIntrinsic: {
+            if (!is64Bit())
+                return CallOptimizationResult::DidNothing;
             insertChecks();
             Node* base = get(virtualRegisterForArgumentIncludingThis(0, registerOffset));
             setResult(addToGraph(DateGetTime, OpInfo(intrinsic), OpInfo(), base));
@@ -5096,6 +4856,8 @@ auto ByteCodeParser::handleIntrinsicCall(Node* callee, Operand resultOperand, Ca
         }
 
         case DatePrototypeSetTimeIntrinsic: {
+            if (!is64Bit())
+                return CallOptimizationResult::DidNothing;
             if (m_inlineStackTop->m_exitProfile.hasExitSite(m_currentIndex, BadType))
                 return CallOptimizationResult::DidNothing;
             if (argumentCountIncludingThis < 2)
@@ -5109,50 +4871,29 @@ auto ByteCodeParser::handleIntrinsicCall(Node* callee, Operand resultOperand, Ca
             return CallOptimizationResult::Inlined;
         }
 
-        case DatePrototypeGetMillisecondsIntrinsic:
-        case DatePrototypeGetUTCMillisecondsIntrinsic: {
-            insertChecks();
-            Node* base = get(virtualRegisterForArgumentIncludingThis(0, registerOffset));
-            setResult(addToGraph(DateGetMilliseconds, OpInfo(), OpInfo(prediction), base));
-            return CallOptimizationResult::Inlined;
-        }
-
-        case DatePrototypeGetUTCFullYearIntrinsic:
-        case DatePrototypeGetUTCMonthIntrinsic:
-        case DatePrototypeGetUTCDateIntrinsic:
-        case DatePrototypeGetUTCDayIntrinsic:
-        case DatePrototypeGetUTCHoursIntrinsic:
-        case DatePrototypeGetUTCMinutesIntrinsic:
-        case DatePrototypeGetUTCSecondsIntrinsic:
         case DatePrototypeGetFullYearIntrinsic:
+        case DatePrototypeGetUTCFullYearIntrinsic:
         case DatePrototypeGetMonthIntrinsic:
+        case DatePrototypeGetUTCMonthIntrinsic:
         case DatePrototypeGetDateIntrinsic:
+        case DatePrototypeGetUTCDateIntrinsic:
         case DatePrototypeGetDayIntrinsic:
+        case DatePrototypeGetUTCDayIntrinsic:
         case DatePrototypeGetHoursIntrinsic:
+        case DatePrototypeGetUTCHoursIntrinsic:
         case DatePrototypeGetMinutesIntrinsic:
+        case DatePrototypeGetUTCMinutesIntrinsic:
         case DatePrototypeGetSecondsIntrinsic:
+        case DatePrototypeGetUTCSecondsIntrinsic:
+        case DatePrototypeGetMillisecondsIntrinsic:
+        case DatePrototypeGetUTCMillisecondsIntrinsic:
         case DatePrototypeGetTimezoneOffsetIntrinsic:
         case DatePrototypeGetYearIntrinsic: {
+            if (!is64Bit())
+                return CallOptimizationResult::DidNothing;
             insertChecks();
-            // Every field comes out of one packed word, so the load and its validity check are a
-            // separate node that all the accessors on a Date share.
-            bool isUTC = false;
-            switch (intrinsic) {
-            case DatePrototypeGetUTCFullYearIntrinsic:
-            case DatePrototypeGetUTCMonthIntrinsic:
-            case DatePrototypeGetUTCDateIntrinsic:
-            case DatePrototypeGetUTCDayIntrinsic:
-            case DatePrototypeGetUTCHoursIntrinsic:
-            case DatePrototypeGetUTCMinutesIntrinsic:
-            case DatePrototypeGetUTCSecondsIntrinsic:
-                isUTC = true;
-                break;
-            default:
-                break;
-            }
             Node* base = get(virtualRegisterForArgumentIncludingThis(0, registerOffset));
-            Node* storage = addToGraph(DateGetStorage, OpInfo(isUTC), OpInfo(), base);
-            setResult(addToGraph(DateGetInt32OrNaN, OpInfo(intrinsic), OpInfo(prediction), Edge(storage, KnownStorageUse)));
+            setResult(addToGraph(DateGetInt32OrNaN, OpInfo(intrinsic), OpInfo(prediction), base));
             return CallOptimizationResult::Inlined;
         }
 
@@ -5167,6 +4908,9 @@ auto ByteCodeParser::handleIntrinsicCall(Node* callee, Operand resultOperand, Ca
         case DataViewGetFloat64:
         case DataViewGetBigInt64:
         case DataViewGetBigUint64: {
+            if (!is64Bit())
+                return CallOptimizationResult::DidNothing;
+
             // To inline data view accesses, we assume the architecture we're running on:
             // - Is little endian.
             // - Allows unaligned loads/stores without crashing. 
@@ -5276,6 +5020,9 @@ auto ByteCodeParser::handleIntrinsicCall(Node* callee, Operand resultOperand, Ca
         case DataViewSetFloat64:
         case DataViewSetBigInt64:
         case DataViewSetBigUint64: {
+            if (!is64Bit())
+                return CallOptimizationResult::DidNothing;
+
             if (argumentCountIncludingThis < 3)
                 return CallOptimizationResult::DidNothing;
 
@@ -10111,9 +9858,11 @@ void ByteCodeParser::parseBlock(unsigned limit)
             UncheckedKeyHashSet<unsigned, WTF::IntHash<unsigned>, WTF::UnsignedWithZeroKeyHashTraits<unsigned>> seenArguments;
 
             {
+                ConcurrentJSLocker locker(m_inlineStackTop->m_profiledBlock->valueProfileLock());
+
                 buffer->forEach([&](ValueProfileAndVirtualRegister& profile) {
                     VirtualRegister operand(profile.m_operand);
-                    SpeculatedType prediction = profile.computeUpdatedPrediction();
+                    SpeculatedType prediction = profile.computeUpdatedPrediction(locker);
                     if (operand.isLocal())
                         localPredictions.append(prediction);
                     else {
@@ -10472,7 +10221,7 @@ void ByteCodeParser::parseBlock(unsigned limit)
             ResolveType resolveType;
             GetPutInfo getPutInfo(0);
             Structure* structure = nullptr;
-            InlineWatchpointSet* watchpoints = nullptr;
+            WatchpointSet* watchpoints = nullptr;
             uintptr_t operand;
             {
                 ConcurrentJSLocker locker(m_inlineStackTop->m_profiledBlock->m_lock);
@@ -10493,6 +10242,8 @@ void ByteCodeParser::parseBlock(unsigned limit)
                 NEXT_OPCODE(op_get_from_scope);
             }
 
+            UNUSED_PARAM(watchpoints); // We will use this in the future. For now we set it as a way of documenting the fact that that's what index 5 is in GlobalVar mode.
+
             JSGlobalObject* globalObject = m_inlineStackTop->m_codeBlock->globalObject();
 
             switch (resolveType) {
@@ -10508,7 +10259,7 @@ void ByteCodeParser::parseBlock(unsigned limit)
                 // op_get_from_scope for a global property should walk the
                 // proto chain of the global object searching for the desired property
                 GetByStatus::LookupMode lookupMode = GetByStatus::LookupMode::Normal;
-                GetByStatus status = GetByStatus::computeFor(m_inlineStackTop->m_profiledBlock, m_currentIndex, globalObject, structure, identifier, lookupMode);
+                GetByStatus status = GetByStatus::computeFor(globalObject, structure, identifier, lookupMode);
 
                 if (status.state() != GetByStatus::Simple
                     || status.numVariants() != 1
@@ -10529,7 +10280,16 @@ void ByteCodeParser::parseBlock(unsigned limit)
             case GlobalLexicalVar:
             case GlobalLexicalVarWithVarInjectionChecks: {
                 addToGraph(Phantom, get(bytecode.m_scope));
-                if (watchpoints && watchpoints->state() == IsWatched) {
+                WatchpointSet* watchpointSet;
+                ScopeOffset offset;
+                JSSegmentedVariableObject* scopeObject = uncheckedDowncast<JSSegmentedVariableObject>(JSScope::constantScopeForCodeBlock(resolveType, m_inlineStackTop->m_codeBlock));
+                {
+                    ConcurrentJSLocker locker(scopeObject->symbolTable()->m_lock);
+                    SymbolTableEntry entry = scopeObject->symbolTable()->get(locker, uid);
+                    watchpointSet = entry.watchpointSet();
+                    offset = entry.scopeOffset();
+                }
+                if (watchpointSet && watchpointSet->state() == IsWatched) {
                     // This has a fun concurrency story. There is the possibility of a race in two
                     // directions:
                     //
@@ -10569,9 +10329,12 @@ void ByteCodeParser::parseBlock(unsigned limit)
                     // that resizes with malloc/free, so if new globals unrelated to the one we are
                     // reading are added, we might access freed memory if we do variableAt().
                     WriteBarrier<Unknown>* pointer = std::bit_cast<WriteBarrier<Unknown>*>(operand);
+                    
+                    ASSERT(scopeObject->findVariableIndex(pointer) == offset);
+                    
                     JSValue value = pointer->get();
                     if (value) {
-                        m_graph.watchpoints().addLazily(*watchpoints);
+                        m_graph.watchpoints().addLazily(*watchpointSet);
                         set(bytecode.m_dst, weakJSConstant(value));
                         break;
                     }
@@ -10681,7 +10444,7 @@ void ByteCodeParser::parseBlock(unsigned limit)
 
                 PutByStatus status;
                 if (uid)
-                    status = PutByStatus::computeFor(m_inlineStackTop->m_profiledBlock, m_currentIndex, globalObject, structure, CacheableIdentifier::createFromIdentifierOwnedByCodeBlock(m_inlineStackTop->m_profiledBlock, uid), false, PrivateFieldPutKind::none());
+                    status = PutByStatus::computeFor(globalObject, structure, CacheableIdentifier::createFromIdentifierOwnedByCodeBlock(m_inlineStackTop->m_profiledBlock, uid), false, PrivateFieldPutKind::none());
                 else
                     status = PutByStatus(PutByStatus::LikelyTakesSlowPath);
                 if (status.numVariants() != 1
@@ -10709,6 +10472,10 @@ void ByteCodeParser::parseBlock(unsigned limit)
                     m_graph.watchpoints().addLazily(globalObject->varReadOnlyWatchpointSet());
 
                 JSSegmentedVariableObject* scopeObject = uncheckedDowncast<JSSegmentedVariableObject>(JSScope::constantScopeForCodeBlock(resolveType, m_inlineStackTop->m_codeBlock));
+                if (watchpoints) {
+                    SymbolTableEntry entry = scopeObject->symbolTable()->get(uid);
+                    ASSERT_UNUSED(entry, watchpoints == entry.watchpointSet());
+                }
                 Node* valueNode = get(bytecode.m_value);
                 addToGraph(PutGlobalVariable, OpInfo(operand), weakJSConstant(scopeObject), valueNode);
                 if (watchpoints && watchpoints->state() != IsInvalidated) {
@@ -13503,8 +13270,7 @@ void ByteCodeParser::handleAsyncIteratorNext(const JSInstruction* currentInstruc
 
         Node* iterator = get(bytecode.m_iterator);
         Node* driver = get(bytecode.m_driver);
-        Node* resumeValue = bytecode.m_hasValue ? get(resumeValueOperandFor(bytecode)) : jsConstant(JSValue());
-        addToGraph(EnqueueAsyncGeneratorDriver, iterator, driver, resumeValue);
+        addToGraph(EnqueueAsyncGeneratorDriver, iterator, driver);
         set(bytecode.m_dst, jsConstant(m_vm->fastAsyncGeneratorSentinel()));
 
         m_currentIndex = osrExitIndex;
@@ -13542,13 +13308,11 @@ void ByteCodeParser::handleAsyncIteratorNext(const JSInstruction* currentInstruc
 
     if (!generatedCase) {
         // No mode observed (cold site): bail to the baseline, exactly like handleIteratorNext.
-        // Phantom every USES operand (next, iterator, driver, value) so all are recoverable on exit.
+        // Phantom every USES operand (next, iterator, driver) so all are recoverable on exit.
         addToGraph(ForceOSRExit);
         addToGraph(Phantom, get(bytecode.m_next));
         addToGraph(Phantom, get(bytecode.m_iterator));
         addToGraph(Phantom, get(bytecode.m_driver));
-        if (bytecode.m_hasValue)
-            addToGraph(Phantom, get(resumeValueOperandFor(bytecode)));
         set(bytecode.m_dst, jsConstant(jsUndefined()));
 
         m_currentIndex = osrExitIndex;
@@ -13590,6 +13354,9 @@ auto ByteCodeParser::handleArraySort(Node* callee, Operand resultOperand, CallVa
     //            of committing the actual result to the input array.
 
     UNUSED_PARAM(resultOperand);
+
+    if (!is64Bit())
+        return CallOptimizationResult::DidNothing;
 
     if (argumentCountIncludingThis < 2)
         return CallOptimizationResult::DidNothing;
@@ -14165,45 +13932,16 @@ void ByteCodeParser::pruneUnreachableNodes()
         (code);                                                      \
     } while (false);                                                 \
 
-// Whether the plan wants this call site's callee body inlined. A site the survey never
-// predicted has no opinion and is left to the per-site heuristics exactly as if planning were
-// off: the survey reads bytecode profiling and cannot anticipate everything the parser makes of
-// a call site, so a gap in it should cost inlining quality rather than silently suppress
-// inlining that would otherwise have happened.
-bool ByteCodeParser::planPermitsInlining() const
-{
-    if (!m_inliningPlan.isBuilt())
-        return true;
-    const InliningPlan::Site* site = m_inliningPlan.siteFor(m_inlineStackTop->m_planSite, m_currentIndex.offset());
-    if (!site)
-        return true;
-    return site->admitted;
-}
-
-void ByteCodeParser::planInlining()
-{
-    if (!Options::useGlobalInliningPlanner())
-        return;
-    // Unlinked DFG cannot inline at all, so there is nothing to plan.
-    if (m_graph.m_plan.isUnlinked())
-        return;
-    m_inliningPlan.build(m_profiledBlock, m_graph.m_plan.jitType());
-}
-
 bool ByteCodeParser::parse()
 {
     // Set during construction.
     ASSERT(!m_currentIndex.offset());
     
     VERBOSE_LOG("Parsing ", *m_codeBlock, "\n");
-
-    planInlining();
-
+    
     InlineStackEntry inlineStackEntry(
         this, m_codeBlock, m_profiledBlock, nullptr, VirtualRegister(), VirtualRegister(),
         m_codeBlock->numParameters(), InlineCallFrame::Call, nullptr);
-    if (m_inliningPlan.isBuilt())
-        inlineStackEntry.m_planSite = &m_inliningPlan.root();
     
     parseCodeBlock();
     linkBlocks(inlineStackEntry.m_unlinkedBlocks, inlineStackEntry.m_blockLinkingTargets);

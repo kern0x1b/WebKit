@@ -43,7 +43,6 @@ WTF_ALLOW_UNSAFE_BUFFER_USAGE_BEGIN
 #include "WasmVirtualAddress.h"
 #include <cstring>
 #include <wtf/DataLog.h>
-#include <wtf/HexNumber.h>
 #include <wtf/StdLibExtras.h>
 #include <wtf/TZoneMallocInlines.h>
 #include <wtf/Vector.h>
@@ -52,16 +51,15 @@ WTF_ALLOW_UNSAFE_BUFFER_USAGE_BEGIN
 namespace JSC {
 namespace Wasm {
 
-WTF_MAKE_TZONE_ALLOCATED_IMPL(Breakpoint);
 WTF_MAKE_STRUCT_TZONE_ALLOCATED_IMPL(DebugState);
 WTF_MAKE_STRUCT_TZONE_ALLOCATED_IMPL(StopData);
 
 String stringToHex(StringView str)
 {
     StringBuilder result;
-    auto utf8 = str.utf8();
-    for (auto c : utf8.span())
-        result.append(hex(byteCast<uint8_t>(c), 2, Lowercase));
+    CString utf8 = str.utf8();
+    for (size_t i = 0; i < utf8.length(); ++i)
+        result.append(hex(static_cast<uint8_t>(utf8.data()[i]), 2, Lowercase));
     return result.toString();
 }
 
@@ -69,7 +67,7 @@ void logWasmLocalValue(size_t index, const JSC::IPInt::IPIntLocal& local, const 
 {
     dataLog("  Local[", index, "] (", localType, "): ");
 
-    switch (localType.kind()) {
+    switch (localType.kind) {
     case TypeKind::I32:
         dataLogLn("i32=", local.i32, " [index ", index, "]");
         break;

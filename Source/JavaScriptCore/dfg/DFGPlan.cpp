@@ -158,11 +158,11 @@ size_t Plan::codeSize() const
     return m_finalizer->codeSize();
 }
 
-void Plan::reconcileWeakReferencesAtGCEnd()
+void Plan::finalizeInGC()
 {
     ASSERT(m_vm);
     if (m_recordedStatuses)
-        m_recordedStatuses->reconcileWeakReferencesWithoutDeleting(*m_vm);
+        m_recordedStatuses->finalizeWithoutDeleting(*m_vm);
 }
 
 void Plan::notifyReady()

@@ -32,6 +32,7 @@ WTF_ALLOW_UNSAFE_BUFFER_USAGE_BEGIN
 
 namespace JSC {
 
+#if USE(JSVALUE64)
 void clearArrayMemset(WriteBarrier<Unknown>* base, unsigned count)
 {
     gcSafeZeroMemory(base, count * sizeof(WriteBarrier<Unknown>));
@@ -53,6 +54,7 @@ void clearArrayMemset(double* base, unsigned count)
         base[i] = PNaN;
 #endif // generic CPU
 }
+#endif // USE(JSVALUE64)
 
 } // namespace JSC
 

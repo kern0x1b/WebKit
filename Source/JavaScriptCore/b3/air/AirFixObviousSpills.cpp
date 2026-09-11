@@ -91,8 +91,7 @@ private:
             dataLogLnIf(AirFixObviousSpillsInternal::verbose, "Executing block ", *m_block, ": ", m_state);
             for (m_instIndex = 0; m_instIndex < block->size(); ++m_instIndex) {
                 dataLogLnIf(AirFixObviousSpillsInternal::verbose, "    Executing ", m_block->at(m_instIndex), ": ", m_state);
-                if (!m_state.isEmpty())
-                    clobberAllDefs();
+                clobberAllDefs();
                 addInstAliases();
             }
 
@@ -130,10 +129,6 @@ private:
             m_state = m_atHead[block];
 
             for (m_instIndex = 0; m_instIndex < block->size(); ++m_instIndex) {
-                if (m_state.isEmpty()) {
-                    addInstAliases();
-                    continue;
-                }
                 clobberEarlyDefs();
                 fixInst();
                 clobberLateDefs();
@@ -201,31 +196,6 @@ private:
         }
     }
 
-    template<typename IsWhichDef>
-    void clobberDefTmps(Arg& arg, Arg::Role role, Bank bank, Width width, const IsWhichDef& isWhichDef)
-    {
-        auto mayReportDefTmp = [](const Arg& arg, bool argRoleIsDef) {
-            return argRoleIsDef || arg.isPreIndex() || arg.isPostIndex();
-        };
-
-        if (!mayReportDefTmp(arg, isWhichDef(role))) {
-            if (Options::airValidateGreedRegAlloc()) [[unlikely]] {
-                arg.forEachTmp(role, bank, width,
-                    [&](Tmp& tmp, Arg::Role refinedRole, Bank, Width) {
-                        RELEASE_ASSERT(!(isWhichDef(refinedRole) && tmp.isReg()));
-                    });
-            }
-            return;
-        }
-        arg.forEachTmp(role, bank, width,
-            [&](Tmp& tmp, Arg::Role refinedRole, Bank, Width) {
-                if (isWhichDef(refinedRole) && tmp.isReg()) {
-                    dataLogLnIf(AirFixObviousSpillsInternal::verbose, "        Clobbering ", tmp.reg());
-                    m_state.clobber(tmp.reg());
-                }
-            });
-    }
-
     void clobberDefs(Inst* prevInst, Inst* nextInst)
     {
         auto walk = [&] (Inst* inst, auto isWhichDef) {
@@ -237,7 +207,13 @@ private:
                     dataLogLnIf(AirFixObviousSpillsInternal::verbose, "        Clobbering ", *arg.stackSlot());
                     m_state.clobber(arg.stackSlot());
                 }
-                clobberDefTmps(arg, role, bank, width, isWhichDef);
+                arg.forEachTmp(role, bank, width,
+                    [&](Tmp& tmp, Arg::Role refinedRole, Bank, Width) {
+                        if (isWhichDef(refinedRole) && tmp.isReg()) {
+                            dataLogLnIf(AirFixObviousSpillsInternal::verbose, "        Clobbering ", tmp.reg());
+                            m_state.clobber(tmp.reg());
+                        }
+                    });
             });
         };
         walk(prevInst, [] (Arg::Role role) { return Arg::isLateDef(role); });
@@ -272,7 +248,11 @@ private:
         inst.forEachArg([&](Arg& arg, Arg::Role role, Bank bank, Width width) {
             if (Arg::isAnyDef(role) && arg.isStack() && arg.stackSlot()->isSpill())
                 m_state.clobber(arg.stackSlot());
-            clobberDefTmps(arg, role, bank, width, [](Arg::Role role) { return Arg::isAnyDef(role); });
+            arg.forEachTmp(role, bank, width,
+                [&](Tmp& tmp, Arg::Role refinedRole, Bank, Width) {
+                    if (Arg::isAnyDef(refinedRole) && tmp.isReg())
+                        m_state.clobber(tmp.reg());
+                });
         });
 
         // Patch ops have extra-clobbered registers that aren't represented as
@@ -349,25 +329,6 @@ private:
         // FIXME: This code should be taught how to simplify the spill-to-spill move
         // instruction. Basically it needs to know to remove the scratch arg.
         // https://bugs.webkit.org/show_bug.cgi?id=171133
-
-        // Substitution below only ever replaces a spill slot argument, and it can only do that from
-        // a RegSlot or a SlotConst, so without either there is nothing to look for.
-        if (m_state.hasNoSlotAlias())
-            return;
-
-        // It also needs the instruction to mention a spill slot at all. Deciding that does not need
-        // the Arg roles, and iterating args() can only over-approximate what forEachArg reports, so
-        // this cannot skip an instruction the scan below would have changed. Worth doing before the
-        // Inst copy, which is otherwise paid by every instruction that gets this far.
-        bool mentionsSpillSlot = false;
-        for (Arg& arg : inst.args()) {
-            if (isSpillSlot(arg)) {
-                mentionsSpillSlot = true;
-                break;
-            }
-        }
-        if (!mentionsSpillSlot)
-            return;
 
         // Create a copy in case we invalidate the instruction. That doesn't happen often.
         Inst instCopy = inst;
@@ -538,7 +499,7 @@ private:
         {
             return slot;
         }
-
+        
         friend bool NODELETE operator==(const SlotConst&, const SlotConst&) = default;
 
         bool NODELETE operator<(const SlotConst& other) const
@@ -556,10 +517,6 @@ private:
     };
 
     struct State {
-        bool NODELETE isEmpty() const { return regConst.isEmpty() && slotConst.isEmpty() && regSlot.isEmpty(); }
-
-        bool NODELETE hasNoSlotAlias() const { return slotConst.isEmpty() && regSlot.isEmpty(); }
-
         void addAlias(const RegConst& newAlias)
         {
             regConst.append(newAlias);

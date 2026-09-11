@@ -288,7 +288,7 @@ using SupertypeCount = uint32_t;
 
 ALWAYS_INLINE Width Type::width() const
 {
-    switch (kind()) {
+    switch (kind) {
 #define CREATE_CASE(name, id, b3type, inc, wasmName, width, ...) case TypeKind::name: return widthForBytes(width / 8);
     FOR_EACH_WASM_TYPE(CREATE_CASE)
 #undef CREATE_CASE
@@ -300,7 +300,7 @@ ALWAYS_INLINE Width Type::width() const
 #define CREATE_CASE(name, id, b3type, ...) case TypeKind::name: return b3type;
 inline B3::Type toB3Type(Type type)
 {
-    switch (type.kind()) {
+    switch (type.kind) {
     FOR_EACH_WASM_TYPE(CREATE_CASE)
     }
     RELEASE_ASSERT_NOT_REACHED();
@@ -332,7 +332,13 @@ constexpr size_t typeKindSizeInBytes(TypeKind kind)
     case TypeKind::RefNull: {
         return sizeof(WriteBarrierBase<Unknown>);
     }
+    case TypeKind::Array:
+    case TypeKind::Func:
+    case TypeKind::Struct:
     case TypeKind::Void:
+    case TypeKind::Sub:
+    case TypeKind::Subfinal:
+    case TypeKind::Rec:
     case TypeKind::Eqref:
     case TypeKind::Anyref:
     case TypeKind::Noexnref:
@@ -390,7 +396,7 @@ public:
     size_t elementSize() const
     {
         if (is<Type>()) {
-            switch (as<Type>().kind()) {
+            switch (as<Type>().kind) {
             case Wasm::TypeKind::I32:
             case Wasm::TypeKind::F32:
                 return sizeof(uint32_t);
@@ -426,14 +432,14 @@ public:
     int8_t typeCode() const
     {
         if (is<Type>())
-            return static_cast<int8_t>(as<Type>().kind());
+            return static_cast<int8_t>(as<Type>().kind);
         return static_cast<int8_t>(as<PackedType>());
     }
 
     TypeIndex index() const
     {
         if (is<Type>())
-            return as<Type>().index();
+            return as<Type>().index;
         return 0;
     }
     void dump(WTF::PrintStream& out) const;
@@ -444,7 +450,7 @@ private:
 
 inline ASCIILiteral makeString(const StorageType& storageType)
 {
-    return(storageType.is<Type>() ? makeString(storageType.as<Type>().kind()) :
+    return(storageType.is<Type>() ? makeString(storageType.as<Type>().kind) :
         makeString(storageType.as<PackedType>()));
 }
 
@@ -460,7 +466,7 @@ inline size_t typeSizeInBytes(const StorageType& storageType)
         }
         }
     }
-    return typeKindSizeInBytes(storageType.as<Type>().kind());
+    return typeKindSizeInBytes(storageType.as<Type>().kind);
 }
 
 inline size_t typeAlignmentInBytes(const StorageType& storageType)
@@ -635,7 +641,6 @@ public:
     StructFieldCount fieldCount() const { return m_fields.size(); }
     const FieldType& field(StructFieldCount i) const LIFETIME_BOUND { return m_fields[i].type; }
     unsigned offsetOfFieldInPayload(StructFieldCount i) const { return m_fields[i].offset; }
-    const StructFieldEntry& fieldEntry(StructFieldCount i) const LIFETIME_BOUND { return m_fields[i]; }
     size_t instancePayloadSize() const { return m_instancePayloadSize; }
     bool hasRefFieldTypes() const { return m_hasRefFieldTypes; }
     bool hasRecursiveReference() const { return m_hasRecursiveReference; }
@@ -802,13 +807,6 @@ public:
         return structPayload().field(i);
     }
     unsigned offsetOfFieldInPayload(StructFieldCount i) const { return structPayload().offsetOfFieldInPayload(i); }
-
-    const StructFieldEntry& fieldEntry(StructFieldCount i) const LIFETIME_BOUND
-    {
-        ASSERT(m_kind == RTTKind::Struct);
-        return structPayload().fieldEntry(i);
-    }
-
     size_t instancePayloadSize() const { return structPayload().instancePayloadSize(); }
     bool hasRefFieldTypes() const { return structPayload().hasRefFieldTypes(); }
 
@@ -846,10 +844,14 @@ public:
     uint64_t fieldHeapKey(StructFieldCount fieldIndex) const
     {
         uint64_t ptr = std::bit_cast<uintptr_t>(this);
+#if CPU(ADDRESS64)
         static_assert(maxStructFieldCount <= (1U << 20));
         constexpr uint32_t fieldIndexMask = (1 << 20) - 1;
         uint32_t maskedFieldIndex = fieldIndex & fieldIndexMask; // mod 20-bits.
         return static_cast<uint64_t>(ptr | (maskedFieldIndex & 0b1111) | (static_cast<uint64_t>(maskedFieldIndex >> 4) << 48));
+#else
+        return static_cast<uint64_t>(ptr | (static_cast<uint64_t>(fieldIndex) << 32));
+#endif
     }
 
     bool NODELETE isSubRTT(const RTT& other) const;
@@ -1201,15 +1203,12 @@ public:
     // convention).
     static RefPtr<const RTT> tryGetRTT(TypeIndex);
 
-    static void requestCleanup();
-    static void cleanupIfRequested();
+    static void tryCleanup();
 
     // Total canonical entries currently retained. Used by tests.
     static size_t canonicalTypeCount();
 
 private:
-    static void tryCleanup();
-
     static Ref<const RTT> typeDefinitionForFunction(const Vector<Type, 16>& returnTypes, const Vector<Type, 16>& argumentTypes);
     static Ref<const RTT> typeDefinitionForStruct(const Vector<FieldType>& fields);
     static Ref<const RTT> typeDefinitionForArray(FieldType);

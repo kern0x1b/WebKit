@@ -133,19 +133,19 @@ inline void Heap::mutatorFence()
 
 template<typename Functor> inline void Heap::forEachCodeBlock(NOESCAPE const Functor& func)
 {
-    forEachCodeBlockImpl(func);
+    forEachCodeBlockImpl(scopedLambdaRef<void(CodeBlock*)>(func));
 }
 
 template<typename Functor> inline void Heap::forEachCodeBlockIgnoringJITPlans(const AbstractLocker& codeBlockSetLocker, NOESCAPE const Functor& func)
 {
-    forEachCodeBlockIgnoringJITPlansImpl(codeBlockSetLocker, func);
+    forEachCodeBlockIgnoringJITPlansImpl(codeBlockSetLocker, scopedLambdaRef<void(CodeBlock*)>(func));
 }
 
 template<typename Functor> inline void Heap::forEachProtectedCell(const Functor& functor)
 {
     for (auto& pair : m_protectedValues)
         functor(pair.key);
-    m_strongSet.forEachStrongHandle(functor, m_protectedValues);
+    m_handleSet.forEachStrongHandle(functor, m_protectedValues);
 }
 
 #if USE(FOUNDATION)

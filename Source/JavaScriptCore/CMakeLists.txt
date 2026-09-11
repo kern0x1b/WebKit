@@ -197,17 +197,6 @@ set(JavaScriptCore_SCRIPTS_SOURCES_PATHS
     ${JavaScriptCore_SCRIPTS_SOURCES_DIR}/wkbuiltins/wkbuiltins.py
 )
 
-# JavaScriptCore_SCRIPTS_DIR is the framework's PrivateHeaders here, which is where
-# clients above WebKit look for the inspector protocol generator.
-if (USE_FRAMEWORK_BUNDLES)
-    list(APPEND JavaScriptCore_SCRIPTS_SOURCES_PATHS
-        ${JAVASCRIPTCORE_DIR}/inspector/scripts/generate*.py
-        ${JAVASCRIPTCORE_DIR}/inspector/scripts/codegen/generate*.py
-        ${JAVASCRIPTCORE_DIR}/inspector/scripts/codegen/*generator*.py
-        ${JAVASCRIPTCORE_DIR}/inspector/scripts/codegen/models.py
-    )
-endif ()
-
 # The directory flattening performed below mirrors what the Mac port does with private headers.
 
 file(GLOB JavaScriptCore_SCRIPTS_SOURCES ${JavaScriptCore_SCRIPTS_SOURCES_PATHS})
@@ -247,10 +236,12 @@ set(LLINT_ASM
     llint/InPlaceInterpreter.asm
     llint/InPlaceInterpreter64.asm
     llint/LowLevelInterpreter.asm
+    llint/LowLevelInterpreter32_64.asm
     llint/LowLevelInterpreter64.asm
 )
 
 set(OFFLINE_ASM
+    offlineasm/arm.rb
     offlineasm/arm64.rb
     offlineasm/arm64e.rb
     offlineasm/asm.rb
@@ -315,14 +306,14 @@ list(APPEND JavaScriptCore_HEADERS
 
 if (WTF_CPU_X86_64)
     set(OFFLINE_ASM_BACKEND "X86_64")
-elseif (WTF_CPU_ARM)
-    set(OFFLINE_ASM_BACKEND "ARMv7")
 elseif (WTF_CPU_ARM64)
     if (CMAKE_OSX_ARCHITECTURES STREQUAL "arm64e")
         set(OFFLINE_ASM_BACKEND "ARM64E")
     else ()
         set(OFFLINE_ASM_BACKEND "ARM64")
     endif ()
+elseif (ARM_THUMB2_DETECTED)
+    set(OFFLINE_ASM_BACKEND "ARMv7")
 elseif (WTF_CPU_RISCV64)
     set(OFFLINE_ASM_BACKEND "RISCV64")
 endif ()
@@ -396,6 +387,7 @@ set(JavaScriptCore_BUILTINS_SOURCES
     ${JAVASCRIPTCORE_DIR}/builtins/MapPrototype.js
     ${JAVASCRIPTCORE_DIR}/builtins/ObjectConstructor.js
     ${JAVASCRIPTCORE_DIR}/builtins/PromiseConstructor.js
+    ${JAVASCRIPTCORE_DIR}/builtins/PromiseOperations.js
     ${JAVASCRIPTCORE_DIR}/builtins/ProxyHelpers.js
     ${JAVASCRIPTCORE_DIR}/builtins/ReflectObject.js
     ${JAVASCRIPTCORE_DIR}/builtins/SetPrototype.js
@@ -624,12 +616,11 @@ set(JavaScriptCore_PRIVATE_FRAMEWORK_HEADERS
     API/glib/JSCVirtualMachinePrivate.h
     API/glib/JSCWrapperMap.h
 
-    assembler/ARMv7Assembler.h
-    assembler/ARMv7Registers.h
-    assembler/MacroAssemblerARMv7.h
     assembler/ARM64Assembler.h
     assembler/ARM64EAssembler.h
     assembler/ARM64Registers.h
+    assembler/ARMv7Assembler.h
+    assembler/ARMv7Registers.h
     assembler/AbortReason.h
     assembler/AbstractMacroAssembler.h
     assembler/AllowMacroScratchRegisterUsage.h
@@ -646,6 +637,7 @@ set(JavaScriptCore_PRIVATE_FRAMEWORK_HEADERS
     assembler/MacroAssembler.h
     assembler/MacroAssemblerARM64.h
     assembler/MacroAssemblerARM64E.h
+    assembler/MacroAssemblerARMv7.h
     assembler/MacroAssemblerCodeRef.h
     assembler/MacroAssemblerHelpers.h
     assembler/MacroAssemblerX86_64.h
@@ -661,6 +653,7 @@ set(JavaScriptCore_PRIVATE_FRAMEWORK_HEADERS
     assembler/X86Assembler.h
     assembler/X86_64Registers.h
 
+    b3/air/AirAllocateRegistersByGraphColoring.h
     b3/air/AirDisassembler.h
     b3/B3CanonicalizePrePostIncrements.h
     b3/B3Common.h
@@ -834,7 +827,6 @@ set(JavaScriptCore_PRIVATE_FRAMEWORK_HEADERS
     heap/FullGCActivityCallback.h
     heap/GCActivityCallback.h
     heap/GCAssertions.h
-    heap/GCCompletionCallback.h
     heap/GCConductor.h
     heap/GCDeferralContext.h
     heap/GCIncomingRefCounted.h
@@ -847,13 +839,16 @@ set(JavaScriptCore_PRIVATE_FRAMEWORK_HEADERS
     heap/GCSegmentedArray.h
     heap/GCSegmentedArrayInlines.h
     heap/Handle.h
+    heap/HandleBlock.h
     heap/HandleForward.h
+    heap/HandleSet.h
     heap/HandleTypes.h
     heap/Heap.h
     heap/HeapAnalyzer.h
     heap/HeapCell.h
     heap/HeapCellInlines.h
     heap/HeapCellType.h
+    heap/HeapFinalizerCallback.h
     heap/HeapInlines.h
     heap/HeapIterationScope.h
     heap/HeapObserver.h
@@ -885,10 +880,8 @@ set(JavaScriptCore_PRIVATE_FRAMEWORK_HEADERS
     heap/SlotVisitorInlines.h
     heap/SlotVisitorMacros.h
     heap/Strong.h
-    heap/StrongBlock.h
     heap/StrongForward.h
     heap/StrongInlines.h
-    heap/StrongSet.h
     heap/Subspace.h
     heap/SubspaceInlines.h
     heap/Synchronousness.h
@@ -1001,6 +994,7 @@ set(JavaScriptCore_PRIVATE_FRAMEWORK_HEADERS
     jit/ScratchRegisterAllocator.h
     jit/Snippet.h
     jit/SnippetParams.h
+    jit/SnippetReg.h
     jit/SnippetSlowPathCalls.h
     jit/SpillRegistersMode.h
     jit/TagRegistersMode.h
@@ -1120,6 +1114,7 @@ set(JavaScriptCore_PRIVATE_FRAMEWORK_HEADERS
     runtime/DOMAnnotation.h
     runtime/DataView.h
     runtime/DateInstance.h
+    runtime/DateInstanceCache.h
     runtime/DeferredWorkTimer.h
     runtime/DeferTermination.h
     runtime/DefinePropertyAttributes.h
@@ -1207,7 +1202,6 @@ set(JavaScriptCore_PRIVATE_FRAMEWORK_HEADERS
     runtime/JSArrayBufferViewInlinesLight.h
     runtime/JSArrayInlines.h
     runtime/JSArrayIterator.h
-    runtime/JSArrayIteratorInlines.h
     runtime/JSArrayBuffer.h
     runtime/JSBigInt.h
     runtime/JSBigIntInlines.h
@@ -1366,7 +1360,6 @@ set(JavaScriptCore_PRIVATE_FRAMEWORK_HEADERS
     runtime/PageCount.h
     runtime/ParseInt.h
     runtime/PinballCompletion.h
-    runtime/PlainGregorianDateTime.h
     runtime/PrivateFieldPutKind.h
     runtime/PrivateName.h
     runtime/ProfilerSupport.h
@@ -1633,26 +1626,6 @@ if (USE_INSPECTOR_SOCKET_SERVER)
     )
 endif ()
 
-# The corpse memory-analysis support is built on Mach task and corpse APIs, so
-# its headers have no content off Darwin and there is nothing to build or export.
-if (APPLE)
-    list(APPEND JavaScriptCore_PRIVATE_INCLUDE_DIRECTORIES
-        "${JAVASCRIPTCORE_DIR}/corpse"
-    )
-    list(APPEND JavaScriptCore_PRIVATE_FRAMEWORK_HEADERS
-        corpse/CorpseAddress.h
-        corpse/CorpseByteParser.h
-        corpse/CorpseClient.h
-        corpse/CorpseError.h
-        corpse/CorpseExportsTrie.h
-        corpse/CorpseProcess.h
-        corpse/CorpseRegion.h
-        corpse/CorpseSnapshot.h
-        corpse/CorpseSymbol.h
-        corpse/CorpseThread.h
-    )
-endif ()
-
 # GENERATOR 1-B: particular LUT creator (for 1 file only)
 GENERATE_HASH_LUT(${CMAKE_CURRENT_SOURCE_DIR}/parser/Keywords.table ${JavaScriptCore_DERIVED_SOURCES_DIR}/Lexer.lut.h)
 
@@ -1811,11 +1784,13 @@ if (COMPILER_IS_GCC_OR_CLANG)
 endif ()
 
 WEBKIT_COPY_FILES(JavaScriptCore_CopyHeaders
+    PRUNE_STALE
     DESTINATION ${JavaScriptCore_HEADERS_DIR}
     FILES ${JavaScriptCore_PUBLIC_FRAMEWORK_HEADERS}
     FLATTENED
 )
 WEBKIT_SYMLINK_FILES(JavaScriptCore_CopyPrivateHeaders
+    PRUNE_STALE
     DESTINATION ${JavaScriptCore_PRIVATE_HEADERS_DIR}
     FILES ${JavaScriptCore_PRIVATE_FRAMEWORK_HEADERS}
     FLATTENED
@@ -1905,7 +1880,7 @@ endif ()
 
 WEBKIT_ADD_PREFIX_HEADER(JavaScriptCore JavaScriptCorePrefix.h PREFIX_LANGUAGES CXX)
 
-if (NOT "${PORT}" STREQUAL "Cocoa")
+if (NOT "${PORT}" STREQUAL "Mac")
     if (${JavaScriptCore_LIBRARY_TYPE} STREQUAL "SHARED")
         WEBKIT_POPULATE_LIBRARY_VERSION(JAVASCRIPTCORE)
         set_target_properties(JavaScriptCore PROPERTIES VERSION ${JAVASCRIPTCORE_VERSION} SOVERSION ${JAVASCRIPTCORE_VERSION_MAJOR})
@@ -1918,14 +1893,6 @@ endif ()
 add_custom_target(JavaScriptCoreSharedScripts DEPENDS ${JavaScriptCore_SCRIPTS})
 add_dependencies(JavaScriptCore JavaScriptCoreSharedScripts ${JavaScriptCore_EXTRA_DEPENDENCIES})
 add_dependencies(JavaScriptCoreSharedScripts JSCBuiltins)
-
-# The corpse code is part of JavaScriptCoreTools, which ships as a static library used
-# only by tools for assisting in the development of JavaScriptCore and WebKit. This code
-# is not needed for JavaScriptCore and WebKit functionality as a browser engine. The
-# corpse code rely on Mach APIs which are only available on Apple platforms.
-if (APPLE)
-  add_subdirectory(corpse)
-endif ()
 
 if (ENABLE_JAVASCRIPT_SHELL)
   add_subdirectory(shell)

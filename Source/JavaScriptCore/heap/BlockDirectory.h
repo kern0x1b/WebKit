@@ -37,6 +37,10 @@
 #include <wtf/SharedTask.h>
 #include <wtf/Vector.h>
 
+namespace WTF {
+class SimpleStats;
+}
+
 namespace JSC {
 
 class GCDeferralContext;
@@ -76,10 +80,7 @@ public:
 
     inline void forEachBlock(const std::invocable<MarkedBlock::Handle*> auto&);
     inline void forEachNotEmptyBlock(const std::invocable<MarkedBlock::Handle*> auto&);
-
-    // Intended for diagnostics only (rdar://157153895)
-    bool isFreeListedCell(const void*);
-
+    
     RefPtr<SharedTask<MarkedBlock::Handle*()>> parallelNotEmptyBlockSource();
     
     void addBlock(MarkedBlock::Handle*);
@@ -87,6 +88,8 @@ public:
     // If WillDeleteBlock::Yes is passed then the block will be left in an invalid state. We do this, however, to avoid potentially paging in / decompressing old blocks to update their handle just before freeing them.
     void removeBlock(MarkedBlock::Handle*, WillDeleteBlock = WillDeleteBlock::No);
 
+    void updatePercentageOfPagedOutPages(WTF::SimpleStats&);
+    
 #if ASSERT_ENABLED
     JS_EXPORT_PRIVATE void assertIsMutatorOrMutatorIsStopped() const WTF_ASSERTS_ACQUIRED_SHARED_LOCK(m_bitvectorLock);
     void assertSweeperIsSuspended() const WTF_ASSERTS_ACQUIRED_LOCK(m_bitvectorLock);

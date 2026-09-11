@@ -91,10 +91,10 @@ JSC_DEFINE_HOST_FUNCTION(constructWeakSet, (JSGlobalObject* globalObject, CallFr
             return;
         }
 
-        auto arguments = WTF::toArray<EncodedJSValue>({
-            JSValue::encode(nextValue),
-        });
-        call(globalObject, adderFunction, adderFunctionCallData, weakSet, ArgList { arguments.data(), arguments.size() });
+        MarkedArgumentBuffer arguments;
+        arguments.append(nextValue);
+        ASSERT(!arguments.hasOverflowed());
+        call(globalObject, adderFunction, adderFunctionCallData, weakSet, arguments);
     });
 
     return JSValue::encode(weakSet);

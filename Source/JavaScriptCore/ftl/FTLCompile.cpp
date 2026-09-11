@@ -228,8 +228,9 @@ void compile(State& state, Safepoint::Result& safepointResult)
     if (graph.needsScopeRegister() && codeBlock->scopeRegister().isValid())
         codeBlock->setScopeRegister(codeBlock->scopeRegister() + localsOffset);
 
-    state.jitCode->setOSRExitLocalsOffset(localsOffset);
     for (OSRExitDescriptor& descriptor : state.jitCode->osrExitDescriptors) {
+        for (unsigned i = descriptor.m_values.size(); i--;)
+            descriptor.m_values[i] = descriptor.m_values[i].withLocalsOffset(localsOffset);
         for (ExitTimeObjectMaterialization* materialization : descriptor.m_materializations)
             materialization->accountForLocalsOffset(localsOffset);
     }
@@ -261,7 +262,7 @@ void compile(State& state, Safepoint::Result& safepointResult)
             CCallHelpers::JumpList mainPathJumps;
 
             arityCheckLabel = jit.label();
-            jit.load32(CCallHelpers::calleeFrameLowWordSlot(CallFrameSlot::argumentCountIncludingThis).withOffset(sizeof(CallerFrameAndPC) - prologueStackPointerDelta()), GPRInfo::argumentGPR2);
+            jit.load32(CCallHelpers::calleeFramePayloadSlot(CallFrameSlot::argumentCountIncludingThis).withOffset(sizeof(CallerFrameAndPC) - prologueStackPointerDelta()), GPRInfo::argumentGPR2);
             mainPathJumps.append(jit.branch32(CCallHelpers::AboveOrEqual, GPRInfo::argumentGPR2, CCallHelpers::TrustedImm32(codeBlock->numParameters())));
 
             unsigned numberOfParameters = codeBlock->numParameters();
@@ -395,10 +396,10 @@ void compile(State& state, Safepoint::Result& safepointResult)
         compilation->addDescription(Profiler::OriginStack(), out.toCString());
         out.reset();
 
-        state.dumpDisassembly(out, *state.b3CodeLinkBuffer, [&] (DFG::Node*) {
+        state.dumpDisassembly(out, *state.b3CodeLinkBuffer, scopedLambda<void(DFG::Node*)>([&] (DFG::Node*) {
             compilation->addDescription({ }, out.toCString());
             out.reset();
-        });
+        }));
         compilation->addDescription({ }, out.toCString());
         out.reset();
 

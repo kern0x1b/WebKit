@@ -309,16 +309,21 @@ EncodedJSValue isLockFree(JSGlobalObject* globalObject, JSValue arg)
     VM& vm = globalObject->vm();
     auto scope = DECLARE_THROW_SCOPE(vm);
 
-    if (arg.isInt32()) [[likely]] {
-        int32_t size = arg.asInt32();
-        bool result = size == 1 || size == 2 || size == 4 || size == 8;
-        return JSValue::encode(jsBoolean(result));
-    }
-
-    double size = arg.toIntegerOrInfinity(globalObject);
+    int32_t size = arg.toInt32(globalObject);
     RETURN_IF_EXCEPTION(scope, JSValue::encode(jsUndefined()));
-
-    bool result = size == 1 || size == 2 || size == 4 || size == 8;
+    
+    bool result;
+    switch (size) {
+    case 1:
+    case 2:
+    case 4:
+    case 8:
+        result = true;
+        break;
+    default:
+        result = false;
+        break;
+    }
     return JSValue::encode(jsBoolean(result));
 }
 
@@ -465,7 +470,7 @@ JSValue atomicsWaitImpl(JSGlobalObject* globalObject, JSArrayType* typedArray, u
     case WaiterListManager::WaitSyncResult::TimedOut:
         return vm.smallStrings.timedOutString();
     case WaiterListManager::WaitSyncResult::Terminated:
-        vm.throwTerminationExceptionIfNeeded();
+        vm.throwTerminationException();
         return { };
     }
     RELEASE_ASSERT_NOT_REACHED();

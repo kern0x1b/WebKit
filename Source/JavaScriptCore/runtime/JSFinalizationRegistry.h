@@ -69,7 +69,7 @@ public:
 
     DECLARE_EXPORT_INFO;
 
-    void reconcileWeakReferencesAtGCEnd(VM&, CollectionScope);
+    void finalizeUnconditionally(VM&, CollectionScope);
     DECLARE_VISIT_CHILDREN;
     static void destroy(JSCell*);
     static constexpr DestructionMode needsDestruction = NeedsDestruction;

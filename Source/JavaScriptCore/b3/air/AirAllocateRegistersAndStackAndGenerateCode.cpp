@@ -584,9 +584,8 @@ void GenerateAndAllocateRegisters::generate(CCallHelpers& jit)
 
     Disassembler* disassembler = m_code.disassembler();
     PCToOriginMap& pcToOriginMap = m_code.proc().pcToOriginMap();
-    bool shouldPreserveB3Origins = m_code.shouldPreserveB3Origins();
     auto addItem = [&](Inst& inst) {
-        if (!shouldPreserveB3Origins)
+        if (!m_code.shouldPreserveB3Origins())
             return;
         if (inst.origin)
             pcToOriginMap.appendItem(m_jit->labelIgnoringWatchpoints(), inst.origin->origin());
@@ -619,7 +618,8 @@ void GenerateAndAllocateRegisters::generate(CCallHelpers& jit)
         } else
             ASSERT(!m_code.isEntrypoint(block));
 
-        auto startLabel = disassembler ? m_jit->labelIgnoringWatchpoints() : CCallHelpers::Label();
+        auto startLabel = m_jit->labelIgnoringWatchpoints();
+
         {
             auto iter = m_blocksAfterTerminalPatchForSpilling.find(block);
             if (iter != m_blocksAfterTerminalPatchForSpilling.end()) {
@@ -664,7 +664,7 @@ void GenerateAndAllocateRegisters::generate(CCallHelpers& jit)
         for (size_t instIndex = 0; instIndex < block->size(); ++instIndex) {
             checkConsistency();
 
-            if (instIndex && !isReplayingSameInst && disassembler)
+            if (instIndex && !isReplayingSameInst)
                 startLabel = m_jit->labelIgnoringWatchpoints();
 
             context.indexInBlock = instIndex;
@@ -682,6 +682,11 @@ void GenerateAndAllocateRegisters::generate(CCallHelpers& jit)
                 if (inst.kind.opcode == Move)
                     return true;
                 if (inst.kind.opcode == MoveDouble)
+                    return true;
+                // on 32 bit, a Move32 doesn't have the same zero-extending
+                // semantics it does on 64-bit, so we can treat it exactly like
+                // a Move
+                if (is32Bit() && inst.kind.opcode == Move32)
                     return true;
                 return false;
             })();
@@ -991,8 +996,9 @@ void GenerateAndAllocateRegisters::generate(CCallHelpers& jit)
                 }
             }
 
+            auto endLabel = m_jit->labelIgnoringWatchpoints();
             if (disassembler)
-                disassembler->addInst(&inst, startLabel, m_jit->labelIgnoringWatchpoints());
+                disassembler->addInst(&inst, startLabel, endLabel);
 
             ++m_globalInstIndex;
         }

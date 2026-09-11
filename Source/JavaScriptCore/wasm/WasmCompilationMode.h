@@ -43,7 +43,7 @@ enum class CompilationMode : uint8_t {
     RestoreFrameMode
 };
 
-inline constexpr bool isAnyInterpreter(CompilationMode compilationMode)
+constexpr inline bool isAnyInterpreter(CompilationMode compilationMode)
 {
     switch (compilationMode) {
     case CompilationMode::IPIntMode:
@@ -61,7 +61,7 @@ inline constexpr bool isAnyInterpreter(CompilationMode compilationMode)
     RELEASE_ASSERT_NOT_REACHED_UNDER_CONSTEXPR_CONTEXT();
 }
 
-inline constexpr bool isAnyBBQ(CompilationMode compilationMode)
+constexpr inline bool isAnyBBQ(CompilationMode compilationMode)
 {
     switch (compilationMode) {
     case CompilationMode::BBQMode:
@@ -79,7 +79,7 @@ inline constexpr bool isAnyBBQ(CompilationMode compilationMode)
     RELEASE_ASSERT_NOT_REACHED_UNDER_CONSTEXPR_CONTEXT();
 }
 
-inline constexpr bool isAnyOMG(CompilationMode compilationMode)
+constexpr inline bool isAnyOMG(CompilationMode compilationMode)
 {
     switch (compilationMode) {
     case CompilationMode::OMGMode:
@@ -97,7 +97,7 @@ inline constexpr bool isAnyOMG(CompilationMode compilationMode)
     RELEASE_ASSERT_NOT_REACHED_UNDER_CONSTEXPR_CONTEXT();
 }
 
-inline constexpr bool isAnyWasmToJS(CompilationMode compilationMode)
+constexpr inline bool isAnyWasmToJS(CompilationMode compilationMode)
 {
     switch (compilationMode) {
     case CompilationMode::WasmToJSMode:

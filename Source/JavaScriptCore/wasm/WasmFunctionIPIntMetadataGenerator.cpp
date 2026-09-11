@@ -51,20 +51,18 @@ void FunctionIPIntMetadataGenerator::addLength(size_t length)
     WRITE_TO_METADATA(m_metadata.mutableSpan().data() + size, instructionLength, IPInt::InstructionLengthMetadata);
 }
 
-void FunctionIPIntMetadataGenerator::addMemorySize(uint8_t memoryIndex, size_t length)
+void FunctionIPIntMetadataGenerator::addMemorySize(uint8_t memoryIndex)
 {
     IPInt::MemorySizeMetadata md {
-        .memoryIndex = memoryIndex,
-        .instructionLength = { .length = safeCast<uint8_t>(length) }
+        .memoryIndex = memoryIndex
     };
     appendMetadata(md);
 }
 
-void FunctionIPIntMetadataGenerator::addMemoryGrow(uint8_t memoryIndex, size_t length)
+void FunctionIPIntMetadataGenerator::addMemoryGrow(uint8_t memoryIndex)
 {
     IPInt::MemoryGrowMetadata md {
-        .memoryIndex = memoryIndex,
-        .instructionLength = { .length = safeCast<uint8_t>(length) }
+        .memoryIndex = memoryIndex
     };
     appendMetadata(md);
 }

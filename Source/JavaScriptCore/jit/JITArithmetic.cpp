@@ -289,18 +289,18 @@ void JIT::emit_compareUnsignedAndJump(const JSInstruction* instruction, Relation
 void JIT::emit_compareUnsignedAndJumpImpl(VirtualRegister op1, VirtualRegister op2, unsigned target, RelationalCondition condition)
 {
     if (isOperandConstantInt(op2)) {
-        emitGetVirtualRegister(op1, regT0);
+        emitGetVirtualRegisterPayload(op1, regT0);
         jitAssertIsJSInt32(regT0);
         int32_t op2imm = getOperandConstantInt(op2);
         addJump(branch32(condition, regT0, Imm32(op2imm)), target);
     } else if (isOperandConstantInt(op1)) {
-        emitGetVirtualRegister(op2, regT1);
+        emitGetVirtualRegisterPayload(op2, regT1);
         jitAssertIsJSInt32(regT1);
         int32_t op1imm = getOperandConstantInt(op1);
         addJump(branch32(commute(condition), regT1, Imm32(op1imm)), target);
     } else {
-        emitGetVirtualRegister(op1, regT0);
-        emitGetVirtualRegister(op2, regT1);
+        emitGetVirtualRegisterPayload(op1, regT0);
+        emitGetVirtualRegisterPayload(op2, regT1);
         jitAssertIsJSInt32(regT0);
         jitAssertIsJSInt32(regT1);
         addJump(branch32(condition, regT0, regT1), target);
@@ -689,24 +689,17 @@ void JIT::emitBitBinaryOpFastPath(const JSInstruction* currentInstruction)
     RELEASE_ASSERT(!leftOperand.isConst() || !rightOperand.isConst());
 
     if (!leftOperand.isConst())
-        emitGetVirtualRegister(op1, leftGPR);
+        emitGetVirtualRegister(op1, leftRegs);
     if (!rightOperand.isConst())
-        emitGetVirtualRegister(op2, rightGPR);
+        emitGetVirtualRegister(op2, rightRegs);
 
-    SnippetGenerator gen = [&] {
-        if constexpr (SnippetGenerator::needsScratchGPR)
-            return SnippetGenerator(leftOperand, rightOperand, resultGPR, leftGPR, rightGPR, scratchGPR);
-        else {
-            UNUSED_VARIABLE(scratchGPR);
-            return SnippetGenerator(leftOperand, rightOperand, resultGPR, leftGPR, rightGPR);
-        }
-    }();
+    SnippetGenerator gen(leftOperand, rightOperand, resultRegs, leftRegs, rightRegs, scratchGPR);
 
     gen.generateFastPath(*this);
 
     ASSERT(gen.didEmitFastPath());
     gen.endJumpList().link(this);
-    emitPutVirtualRegister(result, resultGPR);
+    emitPutVirtualRegister(result, resultRegs);
 
     addSlowCase(gen.slowPathJumpList());
 }
@@ -771,17 +764,17 @@ void JIT::emitRightShiftFastPath(const JSInstruction* currentInstruction, JITRig
     RELEASE_ASSERT(!leftOperand.isConst() || !rightOperand.isConst());
 
     if (!leftOperand.isConst())
-        emitGetVirtualRegister(op1, leftGPR);
+        emitGetVirtualRegister(op1, leftRegs);
     if (!rightOperand.isConst())
-        emitGetVirtualRegister(op2, rightGPR);
+        emitGetVirtualRegister(op2, rightRegs);
 
-    JITRightShiftGenerator gen(leftOperand, rightOperand, resultGPR, leftGPR, rightGPR, fpRegT0, scratchGPR, snippetShiftType);
+    JITRightShiftGenerator gen(leftOperand, rightOperand, resultRegs, leftRegs, rightRegs, fpRegT0, scratchGPR, snippetShiftType);
 
     gen.generateFastPath(*this);
 
     ASSERT(gen.didEmitFastPath());
     gen.endJumpList().link(this);
-    emitPutVirtualRegister(result, resultGPR);
+    emitPutVirtualRegister(result, resultRegs);
 
     addSlowCase(gen.slowPathJumpList());
 }
@@ -841,9 +834,9 @@ void JIT::emitMathICFast(JITUnaryMathIC<Generator>* mathIC, const JSInstruction*
         UnaryArithProfile* arithProfile = mathIC->arithProfile();
         loadGlobalObject(globalObjectGPR);
         if (arithProfile && shouldEmitProfiling())
-            callOperationWithResult(profiledFunction, resultGPR, globalObjectGPR, srcGPR, TrustedImmPtr(arithProfile));
+            callOperationWithResult(profiledFunction, resultRegs, globalObjectGPR, srcRegs, TrustedImmPtr(arithProfile));
         else
-            callOperationWithResult(nonProfiledFunction, resultGPR, globalObjectGPR, srcGPR);
+            callOperationWithResult(nonProfiledFunction, resultRegs, globalObjectGPR, srcRegs);
     } else
         addSlowCase(mathICGenerationState.slowPathJumps);
 
@@ -884,14 +877,14 @@ void JIT::emitMathICFast(JITBinaryMathIC<Generator>* mathIC, const JSInstruction
 
     RELEASE_ASSERT(!leftOperand.isConst() || !rightOperand.isConst());
 
-    mathIC->m_generator = Generator(leftOperand, rightOperand, resultGPR, leftGPR, rightGPR, fpRegT0, fpRegT1, scratchGPR);
+    mathIC->m_generator = Generator(leftOperand, rightOperand, resultRegs, leftRegs, rightRegs, fpRegT0, fpRegT1, scratchGPR);
     
     ASSERT(!(Generator::isLeftOperandValidConstant(leftOperand) && Generator::isRightOperandValidConstant(rightOperand)));
     
     if (!Generator::isLeftOperandValidConstant(leftOperand))
-        emitGetVirtualRegister(op1, leftGPR);
+        emitGetVirtualRegister(op1, leftRegs);
     if (!Generator::isRightOperandValidConstant(rightOperand))
-        emitGetVirtualRegister(op2, rightGPR);
+        emitGetVirtualRegister(op2, rightRegs);
 
 #if ENABLE(MATH_IC_STATS)
     auto inlineStart = label();
@@ -902,15 +895,15 @@ void JIT::emitMathICFast(JITBinaryMathIC<Generator>* mathIC, const JSInstruction
     bool generatedInlineCode = mathIC->generateInline(*this, mathICGenerationState);
     if (!generatedInlineCode) {
         if (leftOperand.isConst())
-            emitGetVirtualRegister(op1, leftGPR);
+            emitGetVirtualRegister(op1, leftRegs);
         else if (rightOperand.isConst())
-            emitGetVirtualRegister(op2, rightGPR);
+            emitGetVirtualRegister(op2, rightRegs);
         BinaryArithProfile* arithProfile = mathIC->arithProfile();
         loadGlobalObject(globalObjectGPR);
         if (arithProfile && shouldEmitProfiling())
-            callOperationWithResult(profiledFunction, resultGPR, globalObjectGPR, leftGPR, rightGPR, TrustedImmPtr(arithProfile));
+            callOperationWithResult(profiledFunction, resultRegs, globalObjectGPR, leftRegs, rightRegs, TrustedImmPtr(arithProfile));
         else
-            callOperationWithResult(nonProfiledFunction, resultGPR, globalObjectGPR, leftGPR, rightGPR);
+            callOperationWithResult(nonProfiledFunction, resultRegs, globalObjectGPR, leftRegs, rightRegs);
     } else
         addSlowCase(mathICGenerationState.slowPathJumps);
 
@@ -946,11 +939,11 @@ void JIT::emitMathICSlow(JITUnaryMathIC<Generator>* mathIC, const JSInstruction*
     loadGlobalObject(globalObjetGPR);
     if (arithProfile && shouldEmitProfiling()) {
         if (mathICGenerationState.shouldSlowPathRepatch)
-            mathICGenerationState.slowPathCall = callOperationWithResult(reinterpret_cast<J_JITOperation_GJMic>(profiledRepatchFunction), resultGPR, globalObjetGPR, srcGPR, TrustedImmPtr(mathIC));
+            mathICGenerationState.slowPathCall = callOperationWithResult(reinterpret_cast<J_JITOperation_GJMic>(profiledRepatchFunction), resultRegs, globalObjetGPR, srcRegs, TrustedImmPtr(mathIC));
         else
-            mathICGenerationState.slowPathCall = callOperationWithResult(profiledFunction, resultGPR, globalObjetGPR, srcGPR, TrustedImmPtr(arithProfile));
+            mathICGenerationState.slowPathCall = callOperationWithResult(profiledFunction, resultRegs, globalObjetGPR, srcRegs, TrustedImmPtr(arithProfile));
     } else
-        mathICGenerationState.slowPathCall = callOperationWithResult(reinterpret_cast<J_JITOperation_GJMic>(repatchFunction), resultGPR, globalObjetGPR, srcGPR, TrustedImmPtr(mathIC));
+        mathICGenerationState.slowPathCall = callOperationWithResult(reinterpret_cast<J_JITOperation_GJMic>(repatchFunction), resultRegs, globalObjetGPR, srcRegs, TrustedImmPtr(mathIC));
 
 #if ENABLE(MATH_IC_STATS)
     auto slowPathEnd = label();
@@ -1007,11 +1000,11 @@ void JIT::emitMathICSlow(JITBinaryMathIC<Generator>* mathIC, const JSInstruction
     loadGlobalObject(globalObjetGPR);
     if (arithProfile && shouldEmitProfiling()) {
         if (mathICGenerationState.shouldSlowPathRepatch)
-            mathICGenerationState.slowPathCall = callOperationWithResult(std::bit_cast<J_JITOperation_GJJMic>(profiledRepatchFunction), resultGPR, globalObjetGPR, leftGPR, rightGPR, TrustedImmPtr(mathIC));
+            mathICGenerationState.slowPathCall = callOperationWithResult(std::bit_cast<J_JITOperation_GJJMic>(profiledRepatchFunction), resultRegs, globalObjetGPR, leftRegs, rightRegs, TrustedImmPtr(mathIC));
         else
-            mathICGenerationState.slowPathCall = callOperationWithResult(profiledFunction, resultGPR, globalObjetGPR, leftGPR, rightGPR, TrustedImmPtr(arithProfile));
+            mathICGenerationState.slowPathCall = callOperationWithResult(profiledFunction, resultRegs, globalObjetGPR, leftRegs, rightRegs, TrustedImmPtr(arithProfile));
     } else
-        mathICGenerationState.slowPathCall = callOperationWithResult(std::bit_cast<J_JITOperation_GJJMic>(repatchFunction), resultGPR, globalObjetGPR, leftGPR, rightGPR, TrustedImmPtr(mathIC));
+        mathICGenerationState.slowPathCall = callOperationWithResult(std::bit_cast<J_JITOperation_GJJMic>(repatchFunction), resultRegs, globalObjetGPR, leftRegs, rightRegs, TrustedImmPtr(mathIC));
 
 #if ENABLE(MATH_IC_STATS)
     auto slowPathEnd = label();

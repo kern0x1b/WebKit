@@ -70,7 +70,7 @@ ImportMap::ImportMap(SpecifierMap&& imports, ScopesMap&& scopesMap, IntegrityMap
     });
 }
 
-std::expected<URL, String> ImportMap::resolveImportMatch(const AtomString& normalizedSpecifier, const URL& asURL, const SpecifierMap& specifierMap)
+Expected<URL, String> ImportMap::resolveImportMatch(const AtomString& normalizedSpecifier, const URL& asURL, const SpecifierMap& specifierMap)
 {
     // https://html.spec.whatwg.org/C#resolving-an-imports-match
 

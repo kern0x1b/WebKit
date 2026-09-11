@@ -27,8 +27,8 @@
 
 #include <JavaScriptCore/CyclicModuleRecord.h>
 #include <JavaScriptCore/ErrorInstance.h>
-#include <JavaScriptCore/ParserModes.h>
 #include <JavaScriptCore/SourceCode.h>
+#include <JavaScriptCore/VariableEnvironment.h>
 
 namespace JSC {
 
@@ -55,7 +55,7 @@ public:
     }
 
     inline static Structure* createStructure(VM&, JSGlobalObject*, JSValue);
-    static JSModuleRecord* create(JSGlobalObject*, VM&, Structure*, const Identifier&, const SourceCode&, CodeFeatures);
+    static JSModuleRecord* create(JSGlobalObject*, VM&, Structure*, const Identifier&, const SourceCode&, const VariableEnvironment&, const VariableEnvironment&, CodeFeatures);
 
     JS_EXPORT_PRIVATE JSValue evaluate(JSGlobalObject*, JSValue sentValue, JSValue resumeMode);
 
@@ -65,16 +65,20 @@ public:
     void executeAsync(JSGlobalObject*);
 
     const SourceCode& sourceCode() const LIFETIME_BOUND { return m_sourceCode; }
+    const VariableEnvironment& declaredVariables() const LIFETIME_BOUND { return m_declaredVariables; }
+    const VariableEnvironment& lexicalVariables() const LIFETIME_BOUND { return m_lexicalVariables; }
     CodeFeatures features() const { return m_features; }
 
     ModuleProgramExecutable* getOrMakeExecutable(JSGlobalObject*);
 
 private:
-    JSModuleRecord(VM&, Structure*, const Identifier&, const SourceCode&, CodeFeatures);
+    JSModuleRecord(VM&, Structure*, const Identifier&, const SourceCode&, const VariableEnvironment&, const VariableEnvironment&, CodeFeatures);
 
     void finishCreation(JSGlobalObject*, VM&);
 
     SourceCode m_sourceCode;
+    VariableEnvironment m_declaredVariables;
+    VariableEnvironment m_lexicalVariables;
     WriteBarrier<ModuleProgramExecutable> m_moduleProgramExecutable;
     CodeFeatures m_features;
 };

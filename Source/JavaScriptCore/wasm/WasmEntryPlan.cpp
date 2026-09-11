@@ -122,6 +122,10 @@ void EntryPlan::prepare()
         return;
     if (!tryReserveCapacity(m_wasmToJSExitStubs, importFunctionCount, " WebAssembly to JavaScript stubs"_s))
         return;
+    if (!tryReserveCapacity(m_unlinkedWasmToWasmCalls, functions.size(), " unlinked WebAssembly to WebAssembly calls"_s))
+        return;
+
+    m_unlinkedWasmToWasmCalls.resize(functions.size());
 
     for (const auto& exp : m_moduleInformation->exports) {
         if (exp.kindIndex >= importFunctionCount)
@@ -271,14 +275,6 @@ bool EntryPlan::failIfMixedExceptionHandlingProposals()
         return true;
     }
     return false;
-}
-
-void EntryPlan::failFunctionCompilation(FunctionCodeIndex functionIndex, String&& errorMessage, CompilationError error)
-{
-    failAtFunction(functionIndex, WTF::move(errorMessage), error);
-    m_currentIndex = m_numberOfFunctions;
-    if (hasWork())
-        moveToState(State::Compiled);
 }
 
 bool EntryPlan::completeSyncIfPossible()

@@ -56,20 +56,22 @@ bool BreakpointManager::hasOneTimeBreakpoints()
     return !m_oneTimeBreakpoints.isEmpty();
 }
 
-void BreakpointManager::setBreakpoint(VirtualAddress address, Ref<Breakpoint>&& breakpoint)
+void BreakpointManager::setBreakpoint(VirtualAddress address, Breakpoint&& breakpoint)
 {
     Locker locker { m_lock };
-    breakpoint->patchBreakpoint();
+    breakpoint.patchBreakpoint();
     dataLogLnIf(Options::verboseWasmDebugger(), "[BreakpointManager] setBreakpoint ", breakpoint, " at moduleAddress:", address);
-    if (breakpoint->isOneTimeBreakpoint())
+    if (breakpoint.isOneTimeBreakpoint())
         m_oneTimeBreakpoints.add(address);
     m_breakpoints.set(address, WTF::move(breakpoint));
 }
 
-RefPtr<Breakpoint> BreakpointManager::findBreakpoint(VirtualAddress address)
+Breakpoint* BreakpointManager::findBreakpoint(VirtualAddress address)
 {
     Locker locker { m_lock };
-    return m_breakpoints.get(address);
+    if (auto it = m_breakpoints.find(address); it != m_breakpoints.end())
+        return &it->value;
+    return nullptr;
 }
 
 bool BreakpointManager::removeBreakpointImpl(VirtualAddress address)
@@ -77,7 +79,7 @@ bool BreakpointManager::removeBreakpointImpl(VirtualAddress address)
     auto it = m_breakpoints.find(address);
     RELEASE_ASSERT(it != m_breakpoints.end());
     dataLogLnIf(Options::verboseWasmDebugger(), "[BreakpointManager] Removing breakpoint ", it->value, " at ", address);
-    it->value->restorePatch();
+    it->value.restorePatch();
     m_breakpoints.remove(it);
     return true;
 }
@@ -103,7 +105,7 @@ void BreakpointManager::clearAllBreakpoints()
 {
     Locker locker { m_lock };
     for (auto& [_, breakpoint] : m_breakpoints)
-        breakpoint->restorePatch();
+        breakpoint.restorePatch();
     m_breakpoints.clear();
     RELEASE_ASSERT(m_oneTimeBreakpoints.isEmpty());
 }

@@ -39,7 +39,7 @@ class JITNegGenerator {
 public:
     JITNegGenerator() = default;
 
-    JITNegGenerator(GPRReg result, GPRReg src, GPRReg scratchGPR)
+    JITNegGenerator(JSValueRegs result, JSValueRegs src, GPRReg scratchGPR)
         : m_result(result)
         , m_src(src)
         , m_scratchGPR(scratchGPR)
@@ -49,8 +49,8 @@ public:
     bool generateFastPath(CCallHelpers&, CCallHelpers::JumpList& endJumpList, CCallHelpers::JumpList& slowPathJumpList, const UnaryArithProfile*, bool shouldEmitProfiling);
 
 private:
-    GPRReg m_result { InvalidGPRReg };
-    GPRReg m_src { InvalidGPRReg };
+    JSValueRegs m_result;
+    JSValueRegs m_src;
     GPRReg m_scratchGPR;
 };
 

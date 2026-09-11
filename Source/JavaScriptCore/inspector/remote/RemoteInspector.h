@@ -108,7 +108,6 @@ public:
             std::optional<bool> suppressICECandidateFiltering;
             std::optional<bool> alwaysAllowAutoplay;
             std::optional<bool> siteIsolationEnabled;
-            std::optional<bool> controlledByExternalAgent;
 #endif
         };
 

@@ -30,6 +30,7 @@
 #if ENABLE(WEBASSEMBLY)
 
 #include <JavaScriptCore/WasmCallingConvention.h>
+#include <wtf/Expected.h>
 #include <wtf/text/WTFString.h>
 
 namespace JSC { namespace Wasm {
@@ -38,7 +39,7 @@ class FunctionIPIntMetadataGenerator;
 struct ModuleInformation;
 struct FunctionDebugInfo;
 
-std::expected<std::unique_ptr<FunctionIPIntMetadataGenerator>, String> parseAndCompileMetadata(std::span<const uint8_t>, const RTT&, ModuleInformation&, FunctionCodeIndex functionIndex);
+Expected<std::unique_ptr<FunctionIPIntMetadataGenerator>, String> parseAndCompileMetadata(std::span<const uint8_t>, const RTT&, ModuleInformation&, FunctionCodeIndex functionIndex);
 JS_EXPORT_PRIVATE void parseForDebugInfo(std::span<const uint8_t>, const RTT&, ModuleInformation&, FunctionCodeIndex, FunctionDebugInfo&);
 
 } // namespace JSC::Wasm
@@ -179,12 +180,10 @@ struct AtomicMemoryAccessMetadata {
 
 struct MemorySizeMetadata {
     uint8_t memoryIndex;
-    InstructionLengthMetadata instructionLength;
 };
 
 struct MemoryGrowMetadata {
     uint8_t memoryIndex;
-    InstructionLengthMetadata instructionLength;
 };
 
 struct TableInitMetadata {

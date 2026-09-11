@@ -59,6 +59,7 @@ MACRO_INSTRUCTIONS =
      "rrotateq",
      "subi",
      "xori",
+     "load2ia",
      "loadi",
      "loadis",
      "loadb",
@@ -67,6 +68,7 @@ MACRO_INSTRUCTIONS =
      "loadh",
      "loadhsi",
      "loadhsq",
+     "store2ia",
      "storei",
      "storeh",
      "storeb",
@@ -114,6 +116,8 @@ MACRO_INSTRUCTIONS =
      "cq2ds",
      "cd2f",
      "cf2d",
+     "fii2d", # usage: fii2d <gpr with least significant bits>, <gpr with most significant bits>, <fpr>
+     "fd2ii", # usage: fd2ii <fpr>, <gpr with least significant bits>, <gpr with most significant bits>
      "fq2d",
      "fd2q",
      "bdeq",
@@ -391,10 +395,6 @@ X86_SIMD_INSTRUCTIONS =
 
 ARM_INSTRUCTIONS =
     [
-     "fii2d",
-     "fd2ii",
-     "load2ia",
-     "store2ia",
      "adci",
      "bcs",
      "clrbp",

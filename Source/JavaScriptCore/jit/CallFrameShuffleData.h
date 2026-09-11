@@ -52,7 +52,9 @@ public:
     unsigned numPassedArgs { UINT_MAX };
     unsigned numParameters { UINT_MAX }; // On our machine frame.
     RegisterMap<ValueRecovery> registers;
+#if USE(JSVALUE64)
     GPRReg numberTagRegister { InvalidGPRReg };
+#endif
 
     void setupCalleeSaveRegisters(const RegisterAtOffsetList*);
     ValueRecovery callee;

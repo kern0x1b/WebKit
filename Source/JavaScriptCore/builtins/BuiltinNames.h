@@ -217,7 +217,6 @@ namespace JSC {
     macro(asyncFromSyncIteratorCreate) \
     macro(regExpStringIteratorCreate) \
     macro(iteratorHelperCreate) \
-    macro(ownKeys) \
     macro(includes) \
     macro(ReferenceError) \
     macro(SuppressedError) \
@@ -238,7 +237,6 @@ JSC_COMMON_PRIVATE_IDENTIFIERS_EACH_PROPERTY_NAME(DECLARE_BUILTIN_PRIVATE_NAMES)
 
 extern JS_EXPORT_PRIVATE SymbolImpl::StaticSymbolImpl dollarVMPrivateName;
 extern JS_EXPORT_PRIVATE SymbolImpl::StaticSymbolImpl polyProtoPrivateName;
-extern JS_EXPORT_PRIVATE SymbolImpl::StaticSymbolImpl stackPrivateName;
 }
 
 class BuiltinNames {
@@ -270,7 +268,6 @@ public:
     const JSC::Identifier& dollarVMPublicName() const { return m_dollarVMName; }
     const JSC::Identifier& dollarVMPrivateName() const { return m_dollarVMPrivateName; }
     const JSC::Identifier& polyProtoName() const { return m_polyProtoPrivateName; }
-    const JSC::Identifier& stackPrivateName() const { return m_stackPrivateName; }
 
 private:
     void checkPublicToPrivateMapConsistency(UniquedStringImpl* privateName);
@@ -283,7 +280,6 @@ private:
     const JSC::Identifier m_dollarVMName;
     const JSC::Identifier m_dollarVMPrivateName;
     const JSC::Identifier m_polyProtoPrivateName;
-    const JSC::Identifier m_stackPrivateName;
     PrivateNameSet m_privateNameSet;
     WellKnownSymbolMap m_wellKnownSymbolsMap;
 };

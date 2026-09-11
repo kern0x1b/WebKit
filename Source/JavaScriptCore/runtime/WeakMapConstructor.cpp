@@ -104,12 +104,12 @@ JSC_DEFINE_HOST_FUNCTION(constructWeakMap, (JSGlobalObject* globalObject, CallFr
             return;
         }
 
-        auto arguments = WTF::toArray<EncodedJSValue>({
-            JSValue::encode(key),
-            JSValue::encode(value),
-        });
+        MarkedArgumentBuffer arguments;
+        arguments.append(key);
+        arguments.append(value);
+        ASSERT(!arguments.hasOverflowed());
         scope.release();
-        call(globalObject, adderFunction, adderFunctionCallData, weakMap, ArgList { arguments.data(), arguments.size() });
+        call(globalObject, adderFunction, adderFunctionCallData, weakMap, arguments);
     });
 
     return JSValue::encode(weakMap);

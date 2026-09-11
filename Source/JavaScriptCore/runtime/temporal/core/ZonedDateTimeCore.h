@@ -38,17 +38,14 @@
 namespace JSC {
 namespace TemporalCore {
 
-enum class MatchBehaviour : bool { MatchMinutes, MatchExactly };
-enum class UseStartOfDay : bool { No, Yes };
-
 JS_EXPORT_PRIVATE TemporalResult<ISO8601::ExactTime> interpretISODateTimeOffset(
     const ISO8601::PlainDate&,
     const ISO8601::PlainTime&,
-    UseStartOfDay,
+    bool useStartOfDay,
     OffsetBehaviour,
     TemporalOffsetDisambiguation,
     int64_t inlineOffsetNs,
-    MatchBehaviour,
+    bool offsetHasSubMinutePrecision,
     const TimeZone&,
     TemporalDisambiguation);
 

@@ -34,6 +34,7 @@
 #include "WasmCallee.h"
 #include "WasmFaultSignalHandler.h"
 #include "WasmIRGeneratorHelpers.h"
+#include "WasmMachineThreads.h"
 #include "WasmNameSection.h"
 #include "WasmOMGIRGenerator.h"
 #include "WasmTypeDefinitionInlines.h"
@@ -48,7 +49,7 @@ namespace WasmOSREntryPlanInternal {
 static constexpr bool verbose = false;
 }
 
-OSREntryPlan::OSREntryPlan(VM& vm, Ref<Module>&& module, Ref<BBQCallee>&& callee, FunctionCodeIndex functionIndex, uint32_t loopIndex, MemoryMode mode, CompletionTask&& task)
+OSREntryPlan::OSREntryPlan(VM& vm, Ref<Module>&& module, Ref<Callee>&& callee, FunctionCodeIndex functionIndex, uint32_t loopIndex, MemoryMode mode, CompletionTask&& task)
     : Base(vm, const_cast<ModuleInformation&>(module->moduleInformation()), WTF::move(task))
     , m_module(WTF::move(module))
     , m_calleeGroup(*m_module->calleeGroupFor(mode))
@@ -76,7 +77,7 @@ void OSREntryPlan::dumpDisassembly(CompilationContext& context, LinkBuffer& link
         const char* asmPrefix = "asm              ";
 
         B3::Value* prevOrigin = nullptr;
-        auto forEachInst = [&] (B3::Air::Inst& inst) {
+        auto forEachInst = scopedLambda<void(B3::Air::Inst&)>([&] (B3::Air::Inst& inst) {
             if (inst.origin && inst.origin != prevOrigin && context.procedure->code().shouldPreserveB3Origins()) {
                 if (String string = inst.origin->compilerConstructionSite(); !string.isNull())
                     dataLogLn(string);
@@ -85,7 +86,7 @@ void OSREntryPlan::dumpDisassembly(CompilationContext& context, LinkBuffer& link
                 dataLogLn();
                 prevOrigin = inst.origin;
             }
-        };
+        });
 
         disassembler->dump(context.procedure->code(), WTF::dataFile(), linkBuffer, airPrefix, asmPrefix, forEachInst);
         linkBuffer.didAlreadyDisassemble();
@@ -120,9 +121,7 @@ void OSREntryPlan::work()
     }
 
     Entrypoint omgEntrypoint;
-    // The finished code is patched further (wasm call-site linking in installOptimizedCallee) and
-    // flushed once afterward, so skip LinkBuffer's finalize instruction-cache flush.
-    LinkBuffer linkBuffer(*context.wasmEntrypointJIT, callee.ptr(), LinkBuffer::Profile::WasmOMG, JITCompilationCanFail, LinkBuffer::CacheFlushOnFinalize::No);
+    LinkBuffer linkBuffer(*context.wasmEntrypointJIT, callee.ptr(), LinkBuffer::Profile::WasmOMG, JITCompilationCanFail);
     if (linkBuffer.didFailToAllocate()) [[unlikely]] {
         Locker locker { m_lock };
         Base::fail(makeString("Out of executable memory while tiering up function at index "_s, m_functionIndex.rawIndex()));
@@ -150,23 +149,42 @@ void OSREntryPlan::work()
         callee->setPCToCodeOriginMap(WTF::move(samplingProfilerMap));
     }
 
-    bool newlyInstalled = false;
-    CalleeGroup::CallerCallsiteFlushes deferredFlushes;
     {
         Locker locker { m_calleeGroup->m_lock };
-        newlyInstalled = m_calleeGroup->installOptimizedCallee(locker, m_module->moduleInformation(), m_functionIndex, callee.copyRef(), internalFunction->outgoingJITDirectCallees, deferredFlushes);
-    }
-    // Nothing holds a direct call to an OSR entry callee, so there should be no callsites to flush.
-    ASSERT(deferredFlushes.callsites.isEmpty());
-    deferredFlushes.flush();
+        bool newlyInstalled = m_calleeGroup->recordOMGOSREntryCallee(locker, m_functionIndex, callee.get());
+        if (newlyInstalled) {
+            m_calleeGroup->reportCallees(locker, callee.ptr(), internalFunction->outgoingJITDirectCallees);
 
-    if (newlyInstalled) {
-        WTF::storeStoreFence();
+            for (auto& call : callee->wasmToWasmCallsites()) {
+                CodePtr<WasmEntryPtrTag> entrypoint;
+                if (call.functionIndexSpace < m_module->moduleInformation().importFunctionCount())
+                    entrypoint = m_calleeGroup->m_wasmToWasmExitStubs[call.functionIndexSpace].code();
+                else {
+                    Ref wasmCallee = m_calleeGroup->wasmEntrypointCalleeFromFunctionIndexSpace(locker, call.functionIndexSpace);
+                    entrypoint = wasmCallee->entrypoint().retagged<WasmEntryPtrTag>();
+                }
 
-        Locker locker { m_callee->tierUpCounter().getLock() };
-        m_callee->setOSREntryCallee(callee.copyRef(), mode());
-        m_callee->tierUpCounter().osrEntryTriggers()[m_loopIndex] = TierUpCount::TriggerReason::CompilationDone;
-        m_callee->tierUpCounter().setCompilationStatusForOMGForOSREntry(mode(), TierUpCount::CompilationStatus::Compiled);
+                MacroAssembler::repatchNearCall(call.callLocation, CodeLocationLabel<WasmEntryPtrTag>(entrypoint));
+            }
+
+            resetInstructionCacheOnAllThreads();
+            WTF::storeStoreFence();
+
+            {
+                switch (m_callee->compilationMode()) {
+                case CompilationMode::BBQMode: {
+                    BBQCallee* bbqCallee = uncheckedDowncast<BBQCallee>(m_callee.ptr());
+                    Locker locker { bbqCallee->tierUpCounter().getLock() };
+                    bbqCallee->setOSREntryCallee(callee.copyRef(), mode());
+                    bbqCallee->tierUpCounter().osrEntryTriggers()[m_loopIndex] = TierUpCount::TriggerReason::CompilationDone;
+                    bbqCallee->tierUpCounter().setCompilationStatusForOMGForOSREntry(mode(), TierUpCount::CompilationStatus::Compiled);
+                    break;
+                }
+                default:
+                    RELEASE_ASSERT_NOT_REACHED();
+                }
+            }
+        }
     }
 
     // We don't register our BBQCallee for deletion because this entrypoint isn't a general one and is only used for loop OSR.

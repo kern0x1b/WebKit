@@ -45,15 +45,11 @@ public:
     using enum Kind;
     AddressType() = default;
     AddressType(TypeKind);
-    constexpr AddressType(AddressType::Kind addressType)
-        : m_type(addressType)
-    { }
-#if !PLATFORM(PLAYSTATION) && ENABLE(JIT)
+    AddressType(AddressType::Kind);
+#if !PLATFORM(PLAYSTATION)
     AddressType(B3::Type);
 #endif
-    explicit constexpr AddressType(bool is64Bit)
-        : m_type(is64Bit ? AddressType::I64 : AddressType::I32)
-    { }
+    explicit AddressType(bool is64bit);
 
     AddressType::Kind type() const { return m_type; }
     TypeKind NODELETE asWasmTypeKind() const;
@@ -62,7 +58,7 @@ public:
 
     friend bool NODELETE operator==(const AddressType& lhs, const AddressType& rhs);
     friend bool operator!=(const AddressType& lhs, const AddressType& rhs);
-    constexpr bool is64Bit() const { return m_type == AddressType::I64; }
+    bool is64Bit() const { return m_type == AddressType::I64; }
 
 private:
 

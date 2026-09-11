@@ -2,8 +2,7 @@
 
 function plistbuddy()
 {
-    /usr/libexec/PlistBuddy -c "$*" "${WK_PROCESSED_XCENT_FILE}" | fgrep -vE "(File Doesn't Exist|Initializing Plist)" || true
-    return ${PIPESTATUS[0]}
+    /usr/libexec/PlistBuddy -c "$*" "${WK_PROCESSED_XCENT_FILE}"
 }
 
 # ========================================
@@ -64,23 +63,6 @@ function mac_process_testapi_entitlements()
             plistbuddy Add :com.apple.private.verified-jit bool YES
             plistbuddy Add :com.apple.security.cs.single-jit bool YES
         fi
-
-        plistbuddy Add :com.apple.developer.hardened-process bool YES
-    fi
-}
-
-function mac_process_mya_entitlements()
-{
-    if [[ "${WK_USE_RESTRICTED_ENTITLEMENTS}" == YES ]]
-    then
-        plistbuddy Add :com.apple.private.cs.debugger bool YES
-
-        if [[ "${WK_USE_FATAL_EXCEPTIONS}" == YES ]]
-        then
-            plistbuddy Add :com.apple.private.pac.exception bool YES
-        fi
-
-        plistbuddy Add :com.apple.developer.kernel.extended-virtual-addressing bool YES
 
         plistbuddy Add :com.apple.developer.hardened-process bool YES
     fi
@@ -150,23 +132,6 @@ function maccatalyst_process_testapi_entitlements()
     fi
 }
 
-function maccatalyst_process_mya_entitlements()
-{
-    if [[ "${WK_USE_RESTRICTED_ENTITLEMENTS}" == YES ]]
-    then
-        plistbuddy Add :com.apple.private.cs.debugger bool YES
-
-        if [[ "${WK_USE_FATAL_EXCEPTIONS}" == YES ]]
-        then
-            plistbuddy Add :com.apple.private.pac.exception bool YES
-        fi
-
-        plistbuddy Add :com.apple.developer.kernel.extended-virtual-addressing bool YES
-
-        plistbuddy Add :com.apple.developer.hardened-process bool YES
-    fi
-}
-
 # ========================================
 # iOS Family entitlements
 # ========================================
@@ -199,22 +164,6 @@ function ios_family_process_jsc_entitlements()
     plistbuddy Add :com.apple.developer.hardened-process bool YES
 }
 
-function ios_family_process_mya_entitlements()
-{
-    if [[ "${WK_USE_RESTRICTED_ENTITLEMENTS}" == YES ]]
-    then
-        plistbuddy Add :com.apple.private.cs.debugger bool YES
-    fi
-
-    if [[ "${WK_USE_FATAL_EXCEPTIONS}" == YES ]]
-    then
-        plistbuddy Add :com.apple.private.pac.exception bool YES
-    fi
-
-    plistbuddy Add :com.apple.developer.kernel.extended-virtual-addressing bool YES
-    plistbuddy Add :com.apple.developer.hardened-process bool YES
-}
-
 rm -f "${WK_PROCESSED_XCENT_FILE}"
 plistbuddy Clear dict
 
@@ -235,9 +184,6 @@ then
           "${PRODUCT_NAME}" == testmem ||
           "${PRODUCT_NAME}" == testRegExp ]]; then mac_process_jsc_entitlements
     elif [[ "${PRODUCT_NAME}" == testapi ]]; then mac_process_testapi_entitlements
-    elif [[ "${PRODUCT_NAME}" == mya ]]; then mac_process_mya_entitlements
-    # testLibJSCTools only ever snapshots its own process, which needs no entitlement.
-    elif [[ "${PRODUCT_NAME}" == testLibJSCTools ]]; then true
     else echo "Unsupported/unknown product: ${PRODUCT_NAME}"
     fi
 elif [[ "${WK_PLATFORM_NAME}" == maccatalyst || "${WK_PLATFORM_NAME}" == iosmac ]]
@@ -254,9 +200,6 @@ then
           "${PRODUCT_NAME}" == testmem ||
           "${PRODUCT_NAME}" == testRegExp ]]; then maccatalyst_process_jsc_entitlements
     elif [[ "${PRODUCT_NAME}" == testapi ]]; then maccatalyst_process_testapi_entitlements
-    elif [[ "${PRODUCT_NAME}" == mya ]]; then maccatalyst_process_mya_entitlements
-    # testLibJSCTools only ever snapshots its own process, which needs no entitlement.
-    elif [[ "${PRODUCT_NAME}" == testLibJSCTools ]]; then true
     else echo "Unsupported/unknown product: ${PRODUCT_NAME}"
     fi
 elif [[ "${WK_PLATFORM_NAME}" == iphoneos ||
@@ -274,9 +217,6 @@ then
           "${PRODUCT_NAME}" == testmasm ||
           "${PRODUCT_NAME}" == testmem ||
           "${PRODUCT_NAME}" == testRegExp ]]; then ios_family_process_jsc_entitlements
-    elif [[ "${PRODUCT_NAME}" == mya ]]; then ios_family_process_mya_entitlements
-    # testLibJSCTools only ever snapshots its own process, which needs no entitlement.
-    elif [[ "${PRODUCT_NAME}" == testLibJSCTools ]]; then true
     else echo "Unsupported/unknown product: ${PRODUCT_NAME}"
     fi
 else

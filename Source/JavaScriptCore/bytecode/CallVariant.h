@@ -134,7 +134,7 @@ public:
         return nullptr;
     }
     
-    bool isStillLive(VM&);
+    bool finalize(VM&);
     
     bool NODELETE merge(const CallVariant&);
     

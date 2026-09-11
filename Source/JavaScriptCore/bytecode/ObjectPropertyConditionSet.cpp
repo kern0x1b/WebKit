@@ -479,16 +479,7 @@ ObjectPropertyConditionSet generateConditionsForInstanceOf(
             if (ObjectPropertyConditionSetInternal::verbose)
                 dataLog("Encountered object: ", RawPointer(object), "\n");
             if (object == prototype) {
-                // The prototype chain can be mutated by user code (e.g. a Proxy
-                // getPrototypeOf trap or a getter) that runs while defaultHasInstance
-                // computes the instanceof result. When that happens, the chain we walk
-                // here may no longer match the result we observed, so we can reach the
-                // prototype even though the operation reported a miss (shouldHit is
-                // false). In that case there is no consistent IC to build, so bail out
-                // and let the caller fall back to the megamorphic case instead of
-                // caching a stale condition set.
-                if (!shouldHit) [[unlikely]]
-                    return false;
+                RELEASE_ASSERT(shouldHit);
                 didHit = true;
                 return true;
             }
@@ -503,8 +494,7 @@ ObjectPropertyConditionSet generateConditionsForInstanceOf(
     if (result.isValid()) {
         if (ObjectPropertyConditionSetInternal::verbose)
             dataLog("didHit = ", didHit, ", shouldHit = ", shouldHit, "\n");
-        if (didHit != shouldHit) [[unlikely]]
-            return ObjectPropertyConditionSet::invalid();
+        RELEASE_ASSERT(didHit == shouldHit);
     }
     return result;
 }

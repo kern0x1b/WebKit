@@ -31,6 +31,7 @@
 #include "WasmBinding.h"
 #include "WasmJS.h"
 #include <wtf/Bag.h>
+#include <wtf/Expected.h>
 
 namespace JSC {
 
@@ -41,7 +42,7 @@ namespace Wasm {
 
 class WasmToJSCallee;
 
-std::expected<MacroAssemblerCodeRef<WasmEntryPtrTag>, BindingFailure> wasmToJS(const Wasm::ModuleInformation&, unsigned importIndex);
+Expected<MacroAssemblerCodeRef<WasmEntryPtrTag>, BindingFailure> wasmToJS(const Wasm::ModuleInformation&, unsigned importIndex);
 
 void emitThrowWasmToJSException(CCallHelpers&, GPRReg wasmInstance, Wasm::ExceptionType);
 

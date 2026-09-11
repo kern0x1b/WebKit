@@ -170,7 +170,7 @@ inline uint16_t getHalfword(uint64_t value, int which)
 
 namespace RegisterNames {
 
-enum RegisterID : int8_t {
+typedef enum : int8_t {
 #define REGISTER_ID(id, name, r, cs) id,
     FOR_EACH_GP_REGISTER(REGISTER_ID)
 #undef REGISTER_ID
@@ -180,22 +180,22 @@ enum RegisterID : int8_t {
 #undef REGISTER_ALIAS
 
     InvalidGPRReg = -1,
-};
+} RegisterID;
 
-enum SPRegisterID : int8_t {
+typedef enum : int8_t {
 #define REGISTER_ID(id, name) id,
     FOR_EACH_SP_REGISTER(REGISTER_ID)
 #undef REGISTER_ID
-};
+} SPRegisterID;
 
 // ARM64 always has 32 FPU registers 128-bits each. See http://llvm.org/devmtg/2012-11/Northover-AArch64.pdf
 // and Section 5.1.2 in http://infocenter.arm.com/help/topic/com.arm.doc.ihi0055b/IHI0055B_aapcs64.pdf.
-enum FPRegisterID : int8_t {
+typedef enum : int8_t {
 #define REGISTER_ID(id, name, r, cs) id,
     FOR_EACH_FP_REGISTER(REGISTER_ID)
 #undef REGISTER_ID                       
     InvalidFPRReg = -1,
-};
+} FPRegisterID;
 
 static constexpr bool isSp(RegisterID reg) { return reg == sp; }
 static constexpr bool isZr(RegisterID reg) { return reg == zr; }
@@ -3973,41 +3973,21 @@ public:
     // and jump patching as they're modifying existing (linked) code,
     // so the address being provided is correct for relative address
     // computation.
-    template<RepatchingInfo repatch = jitMemcpyRepatchFlush>
     static void relinkJump(void* from, void* to)
     {
-        relinkJumpOrCall<BranchType_JMP, noFlush(repatch)>(reinterpret_cast<int*>(from), reinterpret_cast<const int*>(from), to);
-        if constexpr ((*repatch).contains(RepatchingFlag::Flush))
-            flushJump(from);
-    }
-
-    template<RepatchingInfo repatch = jitMemcpyRepatchFlush>
-    static void relinkCall(void* from, void* to)
-    {
-        relinkJumpOrCall<BranchType_CALL, noFlush(repatch)>(reinterpret_cast<int*>(from) - 1, reinterpret_cast<const int*>(from) - 1, to);
-        if constexpr ((*repatch).contains(RepatchingFlag::Flush))
-            flushCall(from);
-    }
-
-    template<RepatchingInfo repatch = jitMemcpyRepatchFlush>
-    static void relinkTailCall(void* from, void* to)
-    {
-        relinkJump<repatch>(from, to);
-    }
-
-    static void flushJump(void* from)
-    {
+        relinkJumpOrCall<BranchType_JMP>(reinterpret_cast<int*>(from), reinterpret_cast<const int*>(from), to);
         cacheFlush(from, sizeof(int));
     }
-
-    static void flushCall(void* from)
+    
+    static void relinkCall(void* from, void* to)
     {
+        relinkJumpOrCall<BranchType_CALL>(reinterpret_cast<int*>(from) - 1, reinterpret_cast<const int*>(from) - 1, to);
         cacheFlush(reinterpret_cast<int*>(from) - 1, sizeof(int));
     }
 
-    static void flushTailCall(void* from)
+    static void relinkTailCall(void* from, void* to)
     {
-        flushJump(from);
+        relinkJump(from, to);
     }
 
 #if ENABLE(JUMP_ISLANDS)
@@ -4356,7 +4336,7 @@ protected:
         }
     }
 
-    template<BranchType type, RepatchingInfo repatch = jitMemcpyRepatch>
+    template<BranchType type>
     static void relinkJumpOrCall(int* from, const int* fromInstruction, void* to)
     {
         static_assert(type == BranchType_JMP || type == BranchType_CALL);
@@ -4373,7 +4353,7 @@ protected:
                 if (imm19 == 8)
                     condition = invert(condition);
 
-                linkConditionalBranch<IndirectBranch, repatch>(condition, from - 1, fromInstruction - 1, to);
+                linkConditionalBranch<IndirectBranch>(condition, from - 1, fromInstruction - 1, to);
                 return;
             }
 
@@ -4386,7 +4366,7 @@ protected:
                 if (imm19 == 8)
                     op = !op;
 
-                linkCompareAndBranch<IndirectBranch, repatch>(op ? ConditionNE : ConditionEQ, opSize == Datasize_64, rt, from - 1, fromInstruction - 1, to);
+                linkCompareAndBranch<IndirectBranch>(op ? ConditionNE : ConditionEQ, opSize == Datasize_64, rt, from - 1, fromInstruction - 1, to);
                 return;
             }
 
@@ -4398,12 +4378,12 @@ protected:
                 if (imm14 == 8)
                     op = !op;
 
-                linkTestAndBranch<IndirectBranch, repatch>(op ? ConditionNE : ConditionEQ, bitNumber, rt, from - 1, fromInstruction - 1, to);
+                linkTestAndBranch<IndirectBranch>(op ? ConditionNE : ConditionEQ, bitNumber, rt, from - 1, fromInstruction - 1, to);
                 return;
             }
         }
 
-        linkJumpOrCall<type, repatch>(from, fromInstruction, to);
+        linkJumpOrCall<type>(from, fromInstruction, to);
     }
 
     static int* addressOf(void* code, AssemblerLabel label)

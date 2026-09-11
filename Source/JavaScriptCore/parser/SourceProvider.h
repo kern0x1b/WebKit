@@ -54,7 +54,6 @@ enum class SourceProviderSourceType : uint8_t {
     Module,
     WebAssembly,
     JSON,
-    Text,
     ImportMap,
 };
 
@@ -94,17 +93,7 @@ public:
 
     TextPosition startPosition() const { return m_startPosition; }
     SourceProviderSourceType sourceType() const { return m_sourceType; }
-    bool isModuleType() const
-    {
-        switch (m_sourceType) {
-        case SourceProviderSourceType::Module:
-        case SourceProviderSourceType::JSON:
-        case SourceProviderSourceType::Text:
-            return true;
-        default:
-            return false;
-        }
-    }
+    bool isModuleType() const { return m_sourceType == SourceProviderSourceType::Module || m_sourceType == SourceProviderSourceType::JSON; }
 
     SourceID asID()
     {

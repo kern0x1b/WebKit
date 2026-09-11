@@ -112,7 +112,7 @@ inline void ConservativeRoots::genericAddPointer(char* pointer, const StateType&
     ASSERT(m_heap.objectSpace().isMarking());
     static constexpr bool isMarking = true;
 
-#if ENABLE(WEBASSEMBLY)
+#if ENABLE(WEBASSEMBLY) && USE(JSVALUE64)
     if constexpr (lookForWasmCallees) {
         CalleeBits calleeBits = std::bit_cast<CalleeBits>(pointer);
         // No point in even checking the hash set if the pointer doesn't even look like a native callee.

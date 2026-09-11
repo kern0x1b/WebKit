@@ -26,6 +26,7 @@
 #pragma once
 
 #include <JavaScriptCore/JSExportMacros.h>
+#include <wtf/Expected.h>
 #include <wtf/HashMap.h>
 #include <wtf/HashSet.h>
 #include <wtf/URL.h>
@@ -70,7 +71,7 @@ private:
     ImportMap() = default;
     ImportMap(SpecifierMap&&, ScopesMap&&, IntegrityMap&&);
 
-    static std::expected<URL, String> resolveImportMatch(const AtomString&, const URL&, const SpecifierMap&);
+    static Expected<URL, String> resolveImportMatch(const AtomString&, const URL&, const SpecifierMap&);
 
     SpecifierMap m_imports;
     ScopesMap m_scopesMap;

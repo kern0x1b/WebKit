@@ -89,7 +89,7 @@ auto JSWebAssemblyArray::visitSpan(auto functor)
 
     // m_element_type must be a type, so we can get its kind
     ASSERT(type.is<Wasm::Type>());
-    switch (type.as<Wasm::Type>().kind()) {
+    switch (type.as<Wasm::Type>().kind) {
     case Wasm::TypeKind::I32:
     case Wasm::TypeKind::F32:
         return functor(span<uint32_t>());
@@ -118,7 +118,7 @@ auto JSWebAssemblyArray::visitSpanNonVector(auto functor)
 
     // m_element_type must be a type, so we can get its kind
     ASSERT(type.is<Wasm::Type>());
-    switch (type.as<Wasm::Type>().kind()) {
+    switch (type.as<Wasm::Type>().kind) {
     case Wasm::TypeKind::I32:
     case Wasm::TypeKind::F32:
         return functor(span<uint32_t>());
@@ -142,23 +142,18 @@ v128_t JSWebAssemblyArray::getVector(uint32_t index)
     return span<v128_t>()[index];
 }
 
-void JSWebAssemblyArray::setWithoutWriteBarrier(uint32_t index, uint64_t value)
+void JSWebAssemblyArray::set(VM& vm, uint32_t index, uint64_t value)
 {
     visitSpanNonVector([&]<typename T>(std::span<T> span) ALWAYS_INLINE_LAMBDA {
         span[index] = static_cast<T>(value);
+        if (elementsAreRefTypes())
+            vm.writeBarrier(this);
     });
-}
-
-void JSWebAssemblyArray::set(VM& vm, uint32_t index, uint64_t value)
-{
-    setWithoutWriteBarrier(index, value);
-    if (elementsAreRefTypes())
-        vm.writeBarrier(this);
 }
 
 void JSWebAssemblyArray::set(VM&, uint32_t index, v128_t value)
 {
-    ASSERT(elementType().type.as<Wasm::Type>().kind() == Wasm::TypeKind::V128);
+    ASSERT(elementType().type.as<Wasm::Type>().kind == Wasm::TypeKind::V128);
     span<v128_t>()[index] = value;
 }
 

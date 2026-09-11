@@ -86,7 +86,7 @@ public:
             Vector<std::pair<Ref<JSRunLoopTimer>, MonotonicTime>> timers;
         };
 
-        UncheckedKeyHashMap<Ref<JSLock>, std::unique_ptr<PerVMData>> m_mapping WTF_GUARDED_BY_LOCK(m_lock);
+        UncheckedKeyHashMap<Ref<JSLock>, std::unique_ptr<PerVMData>> m_mapping;
     };
 
     JSRunLoopTimer(VM&);
@@ -115,7 +115,7 @@ private:
 
     void timerDidFire();
 
-    UncheckedKeyHashSet<TimerNotificationCallback> m_timerSetCallbacks WTF_GUARDED_BY_LOCK(m_timerCallbacksLock);
+    UncheckedKeyHashSet<TimerNotificationCallback> m_timerSetCallbacks;
     Lock m_timerCallbacksLock;
 
     Lock m_lock;

@@ -30,7 +30,6 @@
 #include "IteratorOperations.h"
 #include "JSArrayInlines.h"
 #include "JSArrayIterator.h"
-#include "JSArrayIteratorInlines.h"
 #include "JSAsyncFromSyncIterator.h"
 #include "JSCInlines.h"
 #include "JSInternalFieldObjectImplInlines.h"
@@ -87,10 +86,11 @@ static bool callSyncIteratorMethodAndExtract(JSGlobalObject* globalObject, JSVal
         return { };
     }
 
-    auto args = WTF::toArray<EncodedJSValue>({
-        JSValue::encode(argument),
-    });
-    JSValue result = call(globalObject, method, callData, syncIterator, ArgList { args.data(), argument.isEmpty() ? 0u : 1u });
+    MarkedArgumentBuffer args;
+    if (!argument.isEmpty())
+        args.append(argument);
+    ASSERT(!args.hasOverflowed());
+    JSValue result = call(globalObject, method, callData, syncIterator, args);
     RETURN_IF_EXCEPTION(scope, { });
 
     if (!result.isObject()) [[unlikely]] {
@@ -114,9 +114,27 @@ static bool driveFastSyncIterator(JSGlobalObject* globalObject, VM& vm, JSObject
     case IterationMode::FastArrayValues:
     case IterationMode::FastArrayKeys:
     case IterationMode::FastArrayEntries: {
-        bool hasNext = uncheckedDowncast<JSArrayIterator>(syncIterator)->next(globalObject, value);
+        auto* arrayIterator = uncheckedDowncast<JSArrayIterator>(syncIterator);
+        auto* array = downcast<JSArray>(arrayIterator->iteratedObject());
+        auto& indexSlot = arrayIterator->internalField(JSArrayIterator::Field::Index);
+        int64_t index = indexSlot.get().asAnyInt();
+        if (index == JSArrayIterator::doneIndex || index >= array->length()) {
+            indexSlot.setWithoutWriteBarrier(jsNumber(JSArrayIterator::doneIndex));
+            return true;
+        }
+        indexSlot.setWithoutWriteBarrier(jsNumber(index + 1));
+        if (mode == IterationMode::FastArrayKeys) {
+            value = jsNumber(static_cast<unsigned>(index));
+            return false;
+        }
+        JSValue element = array->getIndex(globalObject, static_cast<unsigned>(index));
         RETURN_IF_EXCEPTION(scope, false);
-        return !hasNext;
+        if (mode == IterationMode::FastArrayEntries) {
+            value = constructArrayPair(globalObject, jsNumber(static_cast<unsigned>(index)), element);
+            RETURN_IF_EXCEPTION(scope, false);
+        } else
+            value = element;
+        return false;
     }
 
     case IterationMode::FastMapKeys:
@@ -255,7 +273,7 @@ JSC_DEFINE_HOST_FUNCTION(asyncFromSyncIteratorPrototypeFuncThrow, (JSGlobalObjec
     return JSValue::encode(promise);
 }
 
-void driveAsyncFromSyncIteratorWithDriver(JSGlobalObject* globalObject, JSAsyncFromSyncIterator* iterator, JSObject* driver, JSValue resumeValue)
+void driveAsyncFromSyncIteratorWithDriver(JSGlobalObject* globalObject, JSAsyncFromSyncIterator* iterator, JSObject* driver)
 {
     VM& vm = globalObject->vm();
 
@@ -264,7 +282,7 @@ void driveAsyncFromSyncIteratorWithDriver(JSGlobalObject* globalObject, JSAsyncF
 
     {
         auto catchScope = DECLARE_TOP_EXCEPTION_SCOPE(vm);
-        done = driveSyncIterator(globalObject, vm, iterator, resumeValue, value);
+        done = driveSyncIterator(globalObject, vm, iterator, JSValue(), value);
 
         if (catchScope.exception()) [[unlikely]] {
             JSValue error = catchScope.exception()->value();

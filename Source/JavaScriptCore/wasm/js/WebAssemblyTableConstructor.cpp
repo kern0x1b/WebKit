@@ -78,11 +78,6 @@ JSC_DEFINE_HOST_FUNCTION(constructJSWebAssemblyTable, (JSGlobalObject* globalObj
             throwTypeError(globalObject, throwScope, "WebAssembly.Table 'address' must be a string of value 'i32' or 'i64'"_s);
             return { };
         }
-
-        if (addressType.is64Bit() && !Options::useWasmMemory64()) {
-            throwTypeError(globalObject, throwScope, "WebAssembly.Table 'address' of 'i64' requires Memory64 to be enabled"_s);
-            return { };
-        }
     }
 
     Wasm::TableElementType type;
@@ -115,10 +110,10 @@ JSC_DEFINE_HOST_FUNCTION(constructJSWebAssemblyTable, (JSGlobalObject* globalObj
     uint64_t initial64 = addressValueToUint64(globalObject, initialSizeValue, addressType);
     RETURN_IF_EXCEPTION(throwScope, encodedJSValue());
 
-    if (!Wasm::Table::isValidLength(initial64))
-        return throwVMRangeError(globalObject, throwScope, WTF::makeString("WebAssembly.Table 'initial' value is above the upper bound "_s, Wasm::maxTableEntries));
+    if (initial64 > Wasm::maxTableInitializationEntries)
+        return throwVMRangeError(globalObject, throwScope, WTF::makeString("WebAssembly.Table 'initial' value is above the upper bound "_s, Wasm::maxTableInitializationEntries));
 
-    uint32_t initial = static_cast<uint32_t>(initial64);
+    uint32_t initial = initial64;
 
     // In WebIDL, "present" means that [[Get]] result is undefined, not [[HasProperty]] result.
     // https://webidl.spec.whatwg.org/#idl-dictionaries
@@ -145,9 +140,13 @@ JSC_DEFINE_HOST_FUNCTION(constructJSWebAssemblyTable, (JSGlobalObject* globalObj
         : callFrame->uncheckedArgument(1);
     if (jsWebAssemblyTable->table()->isFuncrefTable() && !defaultValue.isNull() && !isWebAssemblyHostFunction(defaultValue))
         return throwVMTypeError(globalObject, throwScope, "WebAssembly.Table.prototype.constructor expects the second argument to be null or an instance of WebAssembly.Function"_s);
-
-    if (!defaultValue.isNull())
-        jsWebAssemblyTable->table()->fill(vm, defaultValue);
+    for (uint32_t tableIndex = 0; tableIndex < initial; ++tableIndex) {
+        if (jsWebAssemblyTable->table()->isFuncrefTable() && !defaultValue.isNull())
+            jsWebAssemblyTable->set(tableIndex, defaultValue);
+        if (jsWebAssemblyTable->table()->isExternrefTable())
+            jsWebAssemblyTable->set(tableIndex, defaultValue);
+        RETURN_IF_EXCEPTION(throwScope, encodedJSValue());
+    }
 
     RELEASE_AND_RETURN(throwScope, JSValue::encode(jsWebAssemblyTable));
 }

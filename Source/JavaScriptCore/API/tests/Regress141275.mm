@@ -107,7 +107,7 @@ static const NSString* JSTEvaluatorThreadContextKey = @"JSTEvaluatorThreadContex
 {
     self = [super init];
     if (self) {
-        _jsSourcePerformQueue = dispatch_queue_create("JSTEval", concurrentQueueWithAutoreleasePoolAttrSingleton());
+        _jsSourcePerformQueue = dispatch_queue_create("JSTEval", DISPATCH_QUEUE_CONCURRENT);
 
         _allScriptsDone = dispatch_semaphore_create(0);
 

@@ -33,6 +33,7 @@
 #include <JavaScriptCore/InjectedScript.h>
 #include <JavaScriptCore/InspectorEnvironment.h>
 #include <wtf/CheckedRef.h>
+#include <wtf/Expected.h>
 #include <wtf/Forward.h>
 #include <wtf/HashMap.h>
 #include <wtf/NakedPtr.h>
@@ -79,7 +80,7 @@ protected:
     UncheckedKeyHashMap<JSC::JSGlobalObject*, int> m_scriptStateToId;
 
 private:
-    std::expected<JSC::JSObject*, NakedPtr<JSC::Exception>> createInjectedScript(JSC::JSGlobalObject*, int id);
+    Expected<JSC::JSObject*, NakedPtr<JSC::Exception>> createInjectedScript(JSC::JSGlobalObject*, int id);
 
     WeakPtr<InspectorEnvironment> m_environment;
     const Ref<InjectedScriptHost> m_injectedScriptHost;

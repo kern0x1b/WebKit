@@ -27,7 +27,6 @@
 #include "config.h"
 #include "YarrSyntaxChecker.h"
 
-#include "Options.h"
 #include "YarrFlags.h"
 #include "YarrParser.h"
 
@@ -37,8 +36,6 @@ class SyntaxChecker {
 public:
     void NODELETE assertionBOL() { }
     void NODELETE assertionEOL() { }
-    void NODELETE assertionBOI() { }
-    void NODELETE assertionEOI(bool) { }
     void NODELETE assertionWordBoundary(bool) { }
     void NODELETE atomPatternCharacter(char32_t, bool) { }
     void NODELETE atomBuiltInCharacterClass(BuiltInCharacterClassID, bool) { }
@@ -75,7 +72,7 @@ ErrorCode checkSyntax(StringView pattern, StringView flags)
     if (!parsedFlags)
         return ErrorCode::InvalidRegularExpressionFlags;
 
-    return parse(syntaxChecker, pattern, compileMode(parsedFlags), quantifyInfinite, true, Options::useRegExpBufferBoundaries());
+    return parse(syntaxChecker, pattern, compileMode(parsedFlags));
 }
 
 }} // JSC::Yarr

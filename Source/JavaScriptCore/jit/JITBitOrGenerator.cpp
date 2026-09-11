@@ -37,25 +37,32 @@ void JITBitOrGenerator::generateFastPath(CCallHelpers& jit)
     m_didEmitFastPath = true;
     
     if (m_leftOperand.isConstInt32() || m_rightOperand.isConstInt32()) {
-        GPRReg var = m_leftOperand.isConstInt32() ? m_right : m_left;
+        JSValueRegs var = m_leftOperand.isConstInt32() ? m_right : m_left;
         SnippetOperand& constOpr = m_leftOperand.isConstInt32() ? m_leftOperand : m_rightOperand;
         
         // Try to do intVar | intConstant.
         m_slowPathJumpList.append(jit.branchIfNotInt32(var));
 
         if (constOpr.asConstInt32()) {
-            jit.or64(CCallHelpers::TrustedImm64(static_cast<uint64_t>(static_cast<uint32_t>(constOpr.asConstInt32()))), var, m_result);
+#if USE(JSVALUE64)
+            jit.or64(CCallHelpers::TrustedImm64(static_cast<uint64_t>(static_cast<uint32_t>(constOpr.asConstInt32()))), var.payloadGPR(), m_result.payloadGPR());
+#else
+            jit.moveValueRegs(var, m_result);
+            jit.or32(CCallHelpers::Imm32(constOpr.asConstInt32()), m_result.payloadGPR());
+#endif
         } else
-            jit.move(var, m_result);
+            jit.moveValueRegs(var, m_result);
         return;
     }
 
+#if USE(JSVALUE64)
     if (m_leftOperand.definitelyIsBoolean() && m_rightOperand.definitelyIsBoolean()) {
-        jit.or32(m_left, m_right, m_result);
-        jit.and32(CCallHelpers::TrustedImm32(1), m_result);
-        jit.boxInt32(m_result, m_result);
+        jit.or32(m_left.payloadGPR(), m_right.payloadGPR(), m_result.payloadGPR());
+        jit.and32(CCallHelpers::TrustedImm32(1), m_result.payloadGPR());
+        jit.boxInt32(m_result.payloadGPR(), m_result);
         return;
     }
+#endif
 
     ASSERT(!m_leftOperand.isConstInt32() && !m_rightOperand.isConstInt32());
 
@@ -63,7 +70,12 @@ void JITBitOrGenerator::generateFastPath(CCallHelpers& jit)
     m_slowPathJumpList.append(jit.branchIfNotInt32(m_left));
     m_slowPathJumpList.append(jit.branchIfNotInt32(m_right));
 
-    jit.or64(m_right, m_left, m_result);
+#if USE(JSVALUE64)
+    jit.or64(m_right.payloadGPR(), m_left.payloadGPR(), m_result.payloadGPR());
+#else
+    jit.moveValueRegs(m_left, m_result);
+    jit.or32(m_right.payloadGPR(), m_result.payloadGPR());
+#endif
 }
 
 } // namespace JSC

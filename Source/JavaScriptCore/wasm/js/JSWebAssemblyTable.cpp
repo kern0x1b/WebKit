@@ -75,7 +75,7 @@ void JSWebAssemblyTable::visitChildrenImpl(JSCell* cell, Visitor& visitor)
 
 DEFINE_VISIT_CHILDREN(JSWebAssemblyTable);
 
-std::optional<uint32_t> JSWebAssemblyTable::grow(JSGlobalObject* globalObject, uint64_t delta, JSValue defaultValue)
+std::optional<uint32_t> JSWebAssemblyTable::grow(JSGlobalObject* globalObject, uint32_t delta, JSValue defaultValue)
 {
     VM& vm = globalObject->vm();
     auto scope = DECLARE_THROW_SCOPE(vm);
@@ -163,22 +163,31 @@ JSObject* JSWebAssemblyTable::type(JSGlobalObject* globalObject)
     }
 
     JSObject* result;
-    auto addressType = m_table->addressType();
+    auto numberOrBigInt = [&](uint32_t value) {
+        return m_table->addressType().is64Bit()
+            ? JSBigInt::createFrom(globalObject, value)
+            : jsNumber(value);
+    };
 
     auto maximum = m_table->maximum();
     if (maximum) {
-        result = constructEmptyObject(globalObject, globalObject->objectPrototype(), 4);
-        auto maxValue = addressValueFromUint64(globalObject, *maximum, addressType);
+        result = constructEmptyObject(globalObject, globalObject->objectPrototype(), 3);
+        auto maxValue = numberOrBigInt(*maximum);
         RETURN_IF_EXCEPTION(scope, nullptr);
         result->putDirect(vm, Identifier::fromString(vm, "maximum"_s), maxValue);
     } else
-        result = constructEmptyObject(globalObject, globalObject->objectPrototype(), 3);
+        result = constructEmptyObject(globalObject, globalObject->objectPrototype(), 2);
 
-    auto minValue = addressValueFromUint64(globalObject, m_table->length(), addressType);
+    uint64_t minimum = m_table->length();
+    auto minValue = numberOrBigInt(minimum);
     RETURN_IF_EXCEPTION(scope, nullptr);
     result->putDirect(vm, Identifier::fromString(vm, "minimum"_s), minValue);
     result->putDirect(vm, Identifier::fromString(vm, "element"_s), elementString);
-    result->putDirect(vm, Identifier::fromString(vm, "address"_s), addressTypeString(vm, addressType));
+
+    JSString* address = m_table->addressType().is64Bit()
+        ? jsNontrivialString(vm, "i64"_s)
+        : jsNontrivialString(vm, "i32"_s);
+    result->putDirect(vm, Identifier::fromString(vm, "address"_s), address);
 
     return result;
 }

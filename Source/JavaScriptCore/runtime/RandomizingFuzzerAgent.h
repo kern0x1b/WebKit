@@ -42,7 +42,7 @@ public:
     SpeculatedType getPrediction(CodeBlock*, const CodeOrigin&, SpeculatedType) final;
 
 private:
-    WeakRandom m_random WTF_GUARDED_BY_LOCK(m_lock);
+    WeakRandom m_random;
     Lock m_lock;
 };
 

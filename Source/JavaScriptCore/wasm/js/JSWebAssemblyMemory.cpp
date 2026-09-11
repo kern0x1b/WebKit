@@ -28,10 +28,10 @@
 
 #if ENABLE(WEBASSEMBLY)
 
+#include "JSCInlines.h"
+
 #include "ArrayBuffer.h"
 #include "JSArrayBuffer.h"
-#include "JSCInlines.h"
-#include "JSWebAssemblyHelpers.h"
 #include "ObjectConstructor.h"
 
 WTF_ALLOW_UNSAFE_BUFFER_USAGE_BEGIN
@@ -82,11 +82,20 @@ void JSWebAssemblyMemory::associateArrayBuffer(JSGlobalObject* globalObject, boo
             auto destructor = createSharedTask<void(void*)>([protectedHandle = WTF::move(protectedHandle)] (void*) { });
             m_buffer = ArrayBuffer::createFromBytes({ static_cast<const uint8_t*>(data), size }, WTF::move(destructor));
         } else {
-            // The buffer must not advertise a length this platform could never grow the memory to, so the
-            // ceiling is what can be allocated rather than what the address type may declare.
-            size_t ceilingBytes = Wasm::maxAllocatableBytes(m_memory->addressType());
+            // The determination of maxByteLength of a resizable non-shared array buffer may change in
+            // https://webassembly.github.io/threads/js-api/index.html#create-a-resizable-memory-buffer
+            // Currently we are implementing the behavior expected by WPT tests,
+            // so that maxByteLength is 2^32 if the memory has no user-defined max size.
+#if USE(LARGE_TYPED_ARRAYS)
+            // If sizeof(size_t) == 8 we use the proper spec value because it's representable.
+            constexpr size_t defaultMaxByteLengthIfMemoryHasNoMax = 65536ULL * 65536ULL;
+#else
+            // If sizeof(size_t) == 4, compute the largest page-aligned size that fits within MAX_ARRAY_BUFFER_SIZE.
+            uint32_t maxPages = MAX_ARRAY_BUFFER_SIZE / PageCount::pageSize;
+            const size_t defaultMaxByteLengthIfMemoryHasNoMax = static_cast<size_t>(PageCount(maxPages).bytes());
+#endif
             PageCount memoryMax = m_memory->maximum();
-            size_t maxByteLength = memoryMax ? std::min<uint64_t>(memoryMax.bytes(), ceilingBytes) : ceilingBytes;
+            size_t maxByteLength = memoryMax.isValid() ? memoryMax.bytes() : defaultMaxByteLengthIfMemoryHasNoMax;
             ArrayBufferContents contents(data, size, maxByteLength, WTF::move(protectedHandle));
             m_buffer = ArrayBuffer::create(WTF::move(contents));
         }
@@ -251,24 +260,31 @@ JSObject* JSWebAssemblyMemory::type(JSGlobalObject* globalObject)
     VM& vm = globalObject->vm();
     auto throwScope = DECLARE_THROW_SCOPE(vm);
 
-    PageCount minimum = PageCount::fromBytes(m_memory->size());
+    PageCount minimum = m_memory->initial();
     PageCount maximum = m_memory->maximum();
-    auto addressType = m_memory->addressType();
+
+    auto pageCountValue = [&](PageCount count) -> JSValue {
+        if (m_memory->addressType().is64Bit())
+            return JSBigInt::createFrom(globalObject, count.pageCount());
+        return jsNumber(count.pageCount());
+    };
 
     JSObject* result;
-    if (maximum) {
-        result = constructEmptyObject(globalObject, globalObject->objectPrototype(), 4);
-        JSValue maxValue = addressValueFromUint64(globalObject, maximum.pageCount(), addressType);
+    if (maximum.isValid()) {
+        result = constructEmptyObject(globalObject, globalObject->objectPrototype(), 3);
+        JSValue maxValue = pageCountValue(maximum);
         RETURN_IF_EXCEPTION(throwScope, nullptr);
         result->putDirect(vm, Identifier::fromString(vm, "maximum"_s), maxValue);
     } else
-        result = constructEmptyObject(globalObject, globalObject->objectPrototype(), 3);
+        result = constructEmptyObject(globalObject, globalObject->objectPrototype(), 2);
 
-    JSValue minValue = addressValueFromUint64(globalObject, minimum.pageCount(), addressType);
+    JSValue minValue = pageCountValue(minimum);
     RETURN_IF_EXCEPTION(throwScope, nullptr);
     result->putDirect(vm, Identifier::fromString(vm, "minimum"_s), minValue);
     result->putDirect(vm, Identifier::fromString(vm, "shared"_s), jsBoolean(m_memory->sharingMode() == MemorySharingMode::Shared));
-    result->putDirect(vm, Identifier::fromString(vm, "address"_s), addressTypeString(vm, addressType));
+
+    JSString* address = m_memory->addressType().is64Bit() ? jsNontrivialString(vm, "i64"_s) : jsNontrivialString(vm, "i32"_s);
+    result->putDirect(vm, Identifier::fromString(vm, "address"_s), address);
 
     return result;
 }

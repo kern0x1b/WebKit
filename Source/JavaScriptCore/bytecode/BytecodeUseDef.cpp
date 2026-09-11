@@ -26,8 +26,6 @@
 #include "config.h"
 #include "BytecodeUseDef.h"
 
-#include "BytecodeOperandsForCheckpoint.h"
-
 namespace JSC {
 
 #define CALL_FUNCTOR(__arg) \
@@ -142,6 +140,7 @@ void computeUsesForBytecodeIndexImpl(const JSInstruction* instruction, Checkpoin
     USES(OpJneqPtr, value, specialPointer)
 
     USES(OpSetFunctionName, function, name)
+    USES(OpAsyncIteratorNext, next, iterator, driver)
     USES(OpLogShadowChickenTail, thisValue, scope)
 
     USES(OpPutByVal, base, property, value)
@@ -317,18 +316,6 @@ void computeUsesForBytecodeIndexImpl(const JSInstruction* instruction, Checkpoin
         auto bytecode = instruction->as<OpIteratorNext>();
         useAtEachCheckpoint(bytecode.m_iterator, bytecode.m_next);
         useAtEachCheckpointStartingWith(OpIteratorNext::computeNext, bytecode.m_iterable);
-        return;
-    }
-
-    case op_async_iterator_next: {
-        auto bytecode = instruction->as<OpAsyncIteratorNext>();
-        functor(bytecode.m_next);
-        functor(bytecode.m_iterator);
-        functor(bytecode.m_driver);
-        // The resume value isn't a stored field (see BytecodeList.rb); it's call argument index 1,
-        // derived from m_stackOffset, and only present when m_hasValue.
-        if (bytecode.m_hasValue)
-            functor(resumeValueOperandFor(bytecode));
         return;
     }
 

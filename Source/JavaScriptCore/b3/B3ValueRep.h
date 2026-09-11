@@ -357,6 +357,12 @@ private:
         OffsetType offsetFromSP;
         int64_t value;
 
+        struct RegisterPair {
+            Reg regLo;
+            Reg regHi;
+        };
+        RegisterPair regPair;
+
         U()
         {
 WTF_ALLOW_UNSAFE_BUFFER_USAGE_BEGIN

@@ -35,7 +35,6 @@
 #include "JSPromise.h"
 #include "JSWithScope.h"
 #include "ModuleAnalyzer.h"
-#include "Options.h"
 #include "Parser.h"
 #include "ScriptProfilingScope.h"
 #include "TopExceptionScope.h"
@@ -91,7 +90,7 @@ bool checkModuleSyntax(JSGlobalObject* globalObject, const SourceCode& source, P
         return false;
 
     PrivateName privateName(PrivateName::Description, "EntrypointModule"_s);
-    ModuleAnalyzer moduleAnalyzer(globalObject, Identifier::fromUid(privateName), source, moduleProgramNode->features());
+    ModuleAnalyzer moduleAnalyzer(globalObject, Identifier::fromUid(privateName), source, moduleProgramNode->varDeclarations(), moduleProgramNode->lexicalVariables(), moduleProgramNode->features());
     return !!moduleAnalyzer.analyze(*moduleProgramNode);
 }
 
@@ -204,8 +203,6 @@ static ScriptFetchParameters::Type getSourceType(const SourceCode& source)
     switch (source.provider()->sourceType()) {
     case SourceProviderSourceType::JSON:
         return ScriptFetchParameters::Type::JSON;
-    case SourceProviderSourceType::Text:
-        return ScriptFetchParameters::Type::Text;
     case SourceProviderSourceType::WebAssembly:
         return ScriptFetchParameters::Type::WebAssembly;
     case SourceProviderSourceType::Module:
@@ -364,10 +361,7 @@ std::optional<ScriptFetchParameters::Type> retrieveTypeImportAttribute(JSGlobalO
         return { };
 
     String value = iterator->value;
-    auto result = ScriptFetchParameters::parseType(value);
-    if (result == ScriptFetchParameters::Type::Text && !Options::useImportText())
-        result = std::nullopt;
-    if (result)
+    if (auto result = ScriptFetchParameters::parseType(value))
         return result;
 
     throwTypeError(globalObject, scope, makeString("Import attribute type \""_s, value, "\" is not valid"_s));

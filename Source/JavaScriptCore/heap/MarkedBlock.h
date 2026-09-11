@@ -167,10 +167,7 @@ public:
         // cell liveness data. To restore accurate cell liveness data, call one
         // of these functions:
         void didConsumeFreeList(); // Call this once you've allocated all the items in the free list.
-        // ForGood is the heap-teardown path, where the caller sweeps every block immediately
-        // afterwards and so has no use for the newly-allocated bitmap this would otherwise compute.
-        enum class StopAllocatingMode : bool { Resumable, ForGood };
-        void stopAllocating(const FreeList&, StopAllocatingMode = StopAllocatingMode::Resumable);
+        void stopAllocating(const FreeList&);
         void resumeAllocating(FreeList&); // Call this if you canonicalized a block for some non-collection related purpose.
             
         size_t cellSize();

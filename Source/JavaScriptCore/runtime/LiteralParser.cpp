@@ -1183,16 +1183,14 @@ TokenType LiteralParser<CharType, reviverMode>::Lexer::lexNumber(LiteralParserTo
     auto* start = m_ptr; // Do not include '-'.
 
     // (0 | [1-9][0-9]*)
-    uint32_t accumulated = 0;
+    uint32_t accumulator = 0;
     if (m_ptr < m_end && isASCIIDigit(*m_ptr)) [[likely]] {
         auto character = *m_ptr++;
-        accumulated = character - '0';
+        accumulator = character - '0';
         if (character != '0') {
             // [0-9]*
-            while (m_ptr < m_end && isASCIIDigit(*m_ptr)) {
-                accumulated = accumulated * 10 + (*m_ptr - '0');
-                ++m_ptr;
-            }
+            while (m_ptr < m_end && isASCIIDigit(*m_ptr))
+                accumulator = accumulator * 10 + (*m_ptr++ - '0');
         }
     } else {
         m_lexErrorMessage = "Invalid number"_s;
@@ -1201,7 +1199,7 @@ TokenType LiteralParser<CharType, reviverMode>::Lexer::lexNumber(LiteralParserTo
 
     const int numberOfDigitsForSafeInt32 = 9; // The numbers from -999999999 to 999999999 are always in range of Int32.
     if (m_ptr < m_end && (*m_ptr != '.' && *m_ptr != 'e' && *m_ptr != 'E') && (m_ptr - start) <= numberOfDigitsForSafeInt32) {
-        int32_t result = static_cast<int32_t>(accumulated);
+        int32_t result = static_cast<int32_t>(accumulator);
 
         if (!negative) [[likely]] {
             token.type = TokNumberInt32;
@@ -1436,50 +1434,6 @@ JSValue LiteralParser<CharType, reviverMode>::evalRecursivelyEntry(VM& vm)
 }
 
 template<typename CharType, JSONReviverMode reviverMode>
-JSArray* LiteralParser<CharType, reviverMode>::materializeArray(VM& vm, unsigned stackBase)
-{
-    auto scope = DECLARE_THROW_SCOPE(vm);
-
-    unsigned length = m_elementStack.size() - stackBase;
-    JSValue* values = m_elementStack.begin() + stackBase;
-    ASSERT(length);
-
-    // putDirectIndex would have discovered this while growing the butterfly one element at a time.
-    IndexingType indexingType = ArrayWithInt32;
-    for (unsigned i = 0; i < length; ++i) {
-        JSValue value = values[i];
-        if (value.isInt32())
-            continue;
-        if (value.isDouble()) {
-            indexingType = ArrayWithDouble;
-            continue;
-        }
-        indexingType = ArrayWithContiguous;
-        break;
-    }
-
-    {
-        ObjectInitializationScope initializationScope(vm);
-        Structure* structure = m_globalObject->arrayStructureForIndexingTypeDuringAllocation(indexingType);
-        if (JSArray* array = JSArray::tryCreateUninitializedRestricted(initializationScope, structure, length)) [[likely]] {
-            for (unsigned i = 0; i < length; ++i)
-                array->initializeIndex(initializationScope, i, values[i]);
-            return array;
-        }
-    }
-
-    // Lengths beyond what a contiguous vector can hold, and allocation failures, grow an empty array
-    // instead so that they report out of memory rather than crashing.
-    JSArray* array = constructEmptyArray(m_globalObject, nullptr);
-    RETURN_IF_EXCEPTION(scope, nullptr);
-    for (unsigned i = 0; i < length; ++i) {
-        array->putDirectIndex(m_globalObject, i, values[i]);
-        RETURN_IF_EXCEPTION(scope, nullptr);
-    }
-    return array;
-}
-
-template<typename CharType, JSONReviverMode reviverMode>
 template<ParserMode parserMode>
 JSValue LiteralParser<CharType, reviverMode>::parseRecursively(VM& vm, uint8_t* stackLimit)
     requires (reviverMode == JSONReviverMode::Disabled)
@@ -1490,15 +1444,14 @@ JSValue LiteralParser<CharType, reviverMode>::parseRecursively(VM& vm, uint8_t* 
     auto scope = DECLARE_THROW_SCOPE(vm);
     TokenType type = m_lexer.currentToken()->type;
     if (type == TokLBracket) {
+        JSArray* array = constructEmptyArray(m_globalObject, nullptr);
+        RETURN_IF_EXCEPTION(scope, { });
         TokenType type = m_lexer.next();
         if (type == TokRBracket) {
             m_lexer.next();
-            RELEASE_AND_RETURN(scope, constructEmptyArray(m_globalObject, nullptr));
+            return array;
         }
-
-        // Elements are collected first so that the array is allocated once at its final length and
-        // indexing type, rather than growing a butterfly once per element.
-        unsigned stackBase = m_elementStack.size();
+        unsigned index = 0;
         while (true) {
             JSValue value;
             if (type == TokLBrace || type == TokLBracket)
@@ -1506,23 +1459,17 @@ JSValue LiteralParser<CharType, reviverMode>::parseRecursively(VM& vm, uint8_t* 
             else
                 value = parsePrimitiveValue(vm);
             EXCEPTION_ASSERT((!!scope.exception() || !m_parseErrorMessage.isNull()) == !value);
-            if (!value) [[unlikely]] {
-                m_elementStack.shrink(stackBase);
+            if (!value) [[unlikely]]
                 return { };
-            }
-            m_elementStack.append(value);
-            if (m_elementStack.hasOverflowed()) [[unlikely]] {
-                m_elementStack.shrink(stackBase);
-                throwOutOfMemoryError(m_globalObject, scope);
-                return { };
-            }
+
+            array->putDirectIndex(m_globalObject, index++, value);
+            RETURN_IF_EXCEPTION(scope, { });
 
             type = m_lexer.currentToken()->type;
             if (type == TokComma) {
                 type = m_lexer.next();
                 if (type == TokRBracket) [[unlikely]] {
                     m_parseErrorMessage = "Unexpected comma at the end of array expression"_s;
-                    m_elementStack.shrink(stackBase);
                     return { };
                 }
                 continue;
@@ -1530,18 +1477,12 @@ JSValue LiteralParser<CharType, reviverMode>::parseRecursively(VM& vm, uint8_t* 
 
             if (type != TokRBracket) [[unlikely]] {
                 setErrorMessageForToken(TokRBracket);
-                m_elementStack.shrink(stackBase);
                 return { };
             }
 
             m_lexer.next();
-            break;
+            return array;
         }
-
-        JSArray* array = materializeArray(vm, stackBase);
-        m_elementStack.shrink(stackBase);
-        RETURN_IF_EXCEPTION(scope, { });
-        return array;
     }
 
     ASSERT(type == TokLBrace);
@@ -1629,9 +1570,7 @@ JSValue LiteralParser<CharType, reviverMode>::parseRecursively(VM& vm, uint8_t* 
                 auto& [newStructure, offset] = std::get<ExistingProperty>(property);
 
                 Butterfly* newButterfly = object->butterfly();
-                // Both capacities are zero while the properties still fit in inline storage, which
-                // is the common case, and reading them means touching two Structures.
-                if (offset >= firstOutOfLineOffset && originalStructure->outOfLineCapacity() != newStructure->outOfLineCapacity()) [[unlikely]] {
+                if (originalStructure->outOfLineCapacity() != newStructure->outOfLineCapacity()) {
                     ASSERT(newStructure != originalStructure);
                     newButterfly = object->allocateMoreOutOfLineStorage(vm, originalStructure->outOfLineCapacity(), newStructure->outOfLineCapacity());
                     object->nukeStructureAndSetButterfly(vm, originalStructure->id(), newButterfly);

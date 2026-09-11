@@ -230,7 +230,7 @@
         {
             "name": "loadResource",
             "description": "Loads a resource in the context of a frame on the inspected page without cross origin checks.",
-            "targetTypes": ["page", "web-page"],
+            "targetTypes": ["page"],
             "async": true,
             "parameters": [
                 { "name": "frameId", "$ref": "FrameId", "description": "Frame to load the resource from." },
@@ -245,8 +245,7 @@
         {
             "name": "getSerializedCertificate",
             "description": "Fetches a serialized secure certificate for the given requestId to be displayed via InspectorFrontendHost.showCertificate.",
-            "targetTypes": ["page", "web-page"],
-            "async": true,
+            "targetTypes": ["page"],
             "parameters": [
                 { "name": "requestId", "$ref": "RequestId" }
             ],
@@ -360,8 +359,7 @@
             "targetTypes": ["page", "web-page"],
             "condition": "defined(ENABLE_INSPECTOR_NETWORK_THROTTLING) && ENABLE_INSPECTOR_NETWORK_THROTTLING",
             "parameters": [
-                { "name": "bandwidth", "type": "integer", "optional": true, "description": "Limits the bytes per second of requests if positive. Removes any limits if zero or not provided." },
-                { "name": "latency", "type": "integer", "optional": true, "description": "Adds a round-trip delay (in milliseconds) to each request if positive. Removes any delay if zero or not provided." }
+                { "name": "bytesPerSecondLimit", "type": "integer", "optional": true, "description": "Limits the bytes per second of requests if positive. Removes any limits if zero or not provided." }
             ]
         }
     ],

@@ -235,11 +235,7 @@ public:
 
     void updateCache(const UnlinkedFunctionExecutable*, const SourceCode&, CodeSpecializationKind, const UnlinkedFunctionCodeBlock*);
 
-    void clear()
-    {
-        write();
-        m_sourceCode.clear();
-    }
+    void clear() { m_sourceCode.clear(); }
     JS_EXPORT_PRIVATE void write();
 
 private:

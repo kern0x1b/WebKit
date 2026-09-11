@@ -52,20 +52,6 @@ void LocalAllocator::reset()
     m_allocationCursor = 0;
 }
 
-bool LocalAllocator::isFreeListedCell(const void* target) const
-{
-    // Because the free list describes only those cells within the block this allocator is
-    // currently allocating from, a match implies target lives in that (freelisted) block.
-    if (!m_currentBlock)
-        return false;
-    bool found = false;
-    m_freeList.forEach([&] (auto* cell) {
-        if (static_cast<const void*>(cell) == target)
-            found = true;
-    });
-    return found;
-}
-
 LocalAllocator::~LocalAllocator()
 {
     if (isOnList()) {
@@ -89,7 +75,7 @@ LocalAllocator::~LocalAllocator()
     RELEASE_ASSERT(ok);
 }
 
-void LocalAllocator::stopAllocating(MarkedBlock::Handle::StopAllocatingMode mode)
+void LocalAllocator::stopAllocating()
 {
     ASSERT(!m_lastActiveBlock);
     if (!m_currentBlock) {
@@ -97,7 +83,7 @@ void LocalAllocator::stopAllocating(MarkedBlock::Handle::StopAllocatingMode mode
         return;
     }
     
-    m_currentBlock->stopAllocating(m_freeList, mode);
+    m_currentBlock->stopAllocating(m_freeList);
     m_lastActiveBlock = m_currentBlock;
     m_currentBlock = nullptr;
     m_freeList.clear();
@@ -120,7 +106,7 @@ void LocalAllocator::prepareForAllocation()
 
 void LocalAllocator::stopAllocatingForGood()
 {
-    stopAllocating(MarkedBlock::Handle::StopAllocatingMode::ForGood);
+    stopAllocating();
     reset();
 }
 

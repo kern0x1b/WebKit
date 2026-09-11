@@ -344,7 +344,7 @@ void JITWorklist::removeDeadPlans(VM& vm)
     removeMatchingPlansForVM(vm, [&](JITPlan& plan) {
         if (!plan.isKnownToBeLiveAfterGC())
             return true;
-        plan.reconcileWeakReferencesAtGCEnd();
+        plan.finalizeInGC();
         return false;
     });
 

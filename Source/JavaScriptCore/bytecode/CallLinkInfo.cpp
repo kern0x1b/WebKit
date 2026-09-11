@@ -170,7 +170,7 @@ bool CallLinkInfo::haveLastSeenCallee() const
     return !!m_lastSeenCallee;
 }
 
-void CallLinkInfo::reconcileWeakReferencesAtGCEnd(VM& vm)
+void CallLinkInfo::visitWeak(VM& vm)
 {
     auto handleSpecificCallee = [&] (JSFunction* callee) {
         if (vm.heap.isMarked(callee->executable()))
@@ -185,7 +185,7 @@ void CallLinkInfo::reconcileWeakReferencesAtGCEnd(VM& vm)
         break;
     case Mode::Polymorphic: {
         if (stub()) {
-            if (!stub()->reconcileWeakReferencesAtGCEnd(vm)) {
+            if (!stub()->visitWeak(vm)) {
                 dataLogLnIf(Options::verboseOSR(), "At ", codeOrigin(), ", ", RawPointer(this), ": clearing call stub to ", listDump(stub()->variants()), ", stub routine ", RawPointer(stub()), ".");
                 unlinkOrUpgrade(vm, nullptr, nullptr);
                 m_clearedByGC = true;
@@ -448,7 +448,7 @@ void DirectCallLinkInfo::unlinkOrUpgradeImpl(VM&, CodeBlock* oldCodeBlock, CodeB
     RELEASE_ASSERT(!isOnList());
 }
 
-void DirectCallLinkInfo::reconcileWeakReferencesAtGCEnd(VM& vm)
+void DirectCallLinkInfo::visitWeak(VM& vm)
 {
     if (m_codeBlock && !vm.heap.isMarked(m_codeBlock)) {
         dataLogLnIf(Options::verboseOSR(), "Clearing call to ", RawPointer(m_codeBlock), " (", pointerDump(m_codeBlock), ").");

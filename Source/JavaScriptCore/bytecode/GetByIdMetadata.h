@@ -62,14 +62,15 @@ static_assert(sizeof(GetByIdModeMetadataArrayLength) == 12);
 struct GetByIdModeMetadataProtoLoad {
     StructureID structureID;
     PropertyOffset cachedOffset;
-    // Always 64 bits wide, so that the enclosing union has one layout on every target and
-    // storing the slot always clears the bytes that overlap mode and hitCountForLLIntCaching.
-    uint64_t cachedSlot;
+    JSObject* cachedSlot;
 };
+#if CPU(LITTLE_ENDIAN) && CPU(ADDRESS64)
 static_assert(sizeof(GetByIdModeMetadataProtoLoad) == 16);
+#endif
 
-// This union shares ProtoLoad's cachedSlot with "hitCountForLLIntCaching" and "mode".
+// In 64bit Little endian architecture, this union shares ProtoLoad's JSObject* cachedSlot with "hitCountForLLIntCaching" and "mode".
 // This is possible because these values must be zero if we use ProtoLoad mode.
+#if CPU(LITTLE_ENDIAN) && CPU(ADDRESS64)
 union GetByIdModeMetadata {
     GetByIdModeMetadata()
     {
@@ -100,6 +101,33 @@ union GetByIdModeMetadata {
     GetByIdModeMetadataProtoLoad protoLoadMode;
 };
 static_assert(sizeof(GetByIdModeMetadata) == 16);
+#else
+struct GetByIdModeMetadata {
+    GetByIdModeMetadata()
+    {
+        defaultMode.structureID = StructureID();
+        defaultMode.cachedOffset = 0;
+        defaultMode.padding1 = 0;
+        mode = GetByIdMode::Default;
+        hitCountForLLIntCaching = Options::prototypeHitCountForLLIntCaching();
+    }
+
+    void clearToDefaultModeWithoutCache();
+    void setUnsetMode(Structure*);
+    void setArrayLengthMode();
+    void setProtoLoadMode(Structure*, PropertyOffset, JSObject*);
+
+    union {
+        GetByIdModeMetadataDefault defaultMode;
+        GetByIdModeMetadataUnset unsetMode;
+        GetByIdModeMetadataArrayLength arrayLengthMode;
+        GetByIdModeMetadataProtoLoad protoLoadMode;
+    };
+    GetByIdMode mode;
+    static constexpr ptrdiff_t offsetOfMode() { return OBJECT_OFFSETOF(GetByIdModeMetadata, mode); }
+    uint8_t hitCountForLLIntCaching;
+};
+#endif
 
 inline void GetByIdModeMetadata::clearToDefaultModeWithoutCache()
 {
@@ -127,8 +155,12 @@ inline void GetByIdModeMetadata::setArrayLengthMode()
 
 inline void GetByIdModeMetadata::setProtoLoadMode(Structure* structure, PropertyOffset offset, JSObject* cachedSlot)
 {
-    // We rely on ProtoLoad being 0, or else the high bits of cachedSlot would write the wrong mode and hit count.
-    static_assert(!static_cast<std::underlying_type_t<GetByIdMode>>(GetByIdMode::ProtoLoad));
+#if CPU(LITTLE_ENDIAN) && CPU(ADDRESS64)
+    // We rely on ProtoLoad being 0, or else the high bits of the pointer would write the wrong mode and hit count
+    static_assert(!static_cast<std::underlying_type_t<GetByIdMode>>(GetByIdMode::ProtoLoad)); // In 64bit architecture, this field is shared with protoLoadMode.cachedSlot.
+#else
+    mode = GetByIdMode::ProtoLoad;
+#endif
 
     protoLoadMode.structureID = structure->id();
     protoLoadMode.cachedOffset = offset;
@@ -138,13 +170,13 @@ inline void GetByIdModeMetadata::setProtoLoadMode(Structure* structure, Property
 
     // The write to cachedSlot also writes the mode, since they overlap in the struct layout. We know that
     // the mode ProtoLoad is 0 by the static assertion above.
-    protoLoadMode.cachedSlot = static_cast<uint64_t>(std::bit_cast<uintptr_t>(cachedSlot));
+    protoLoadMode.cachedSlot = cachedSlot;
 
     ASSERT(mode == GetByIdMode::ProtoLoad);
     ASSERT(!hitCountForLLIntCaching);
     ASSERT(protoLoadMode.structureID == structure->id());
     ASSERT(protoLoadMode.cachedOffset == offset);
-    ASSERT(protoLoadMode.cachedSlot == static_cast<uint64_t>(std::bit_cast<uintptr_t>(cachedSlot)));
+    ASSERT(protoLoadMode.cachedSlot == cachedSlot);
 }
 
 } // namespace JSC

@@ -754,19 +754,6 @@ MacroAssemblerCodeRef<NativeToJITGatePtrTag> jitCagePtrThunk()
     return codeRef;
 }
 
-MacroAssemblerCodeRef<NativeToJITGatePtrTag> jitCageProbeThunk()
-{
-    static LazyNeverDestroyed<MacroAssemblerCodeRef<NativeToJITGatePtrTag>> codeRef;
-    static std::once_flag onceKey;
-    std::call_once(onceKey, [&] {
-        CCallHelpers jit;
-        JSC_JIT_CAGE_PROBE_IMPL(jit);
-        LinkBuffer patchBuffer(jit, GLOBAL_THUNK_ID, LinkBuffer::Profile::LLIntThunk);
-        codeRef.construct(FINALIZE_CODE(patchBuffer, NativeToJITGatePtrTag, "jitCageProbe"_s, "jitCageProbe thunk"));
-    });
-    return codeRef;
-}
-
 #endif // ENABLE(JIT_CAGE)
 
 MacroAssemblerCodeRef<JSEntryPtrTag> normalOSRExitTrampolineThunk()
@@ -865,6 +852,16 @@ namespace LLInt {
 #if ENABLE(WEBASSEMBLY)
 #if ENABLE(JIT)
 
+MacroAssemblerCodeRef<JITThunkPtrTag> inPlaceInterpreterEntryThunk()
+{
+    static LazyNeverDestroyed<MacroAssemblerCodeRef<JITThunkPtrTag>> codeRef;
+    static std::once_flag onceKey;
+    std::call_once(onceKey, [&] {
+        codeRef.construct(generateThunkWithJumpToPrologue<JITThunkPtrTag>(ipint_entry, "function for IPInt entry"));
+    });
+    return codeRef;
+}
+
 #if CPU(ARM64E)
 MacroAssemblerCodeRef<NativeToJITGatePtrTag> relocateJITReturnPCThunk(void* returnLocation)
 {
@@ -906,17 +903,6 @@ MacroAssemblerCodeRef<NativeToJITGatePtrTag> getSentinelFrameReturnPCGateThunk(v
     return FINALIZE_THUNK(patchBuffer, NativeToJITGatePtrTag, "getSentinelFrameReturnPCGate"_s, "sign exit implanted slice gate thunk");
 }
 #endif // CPU(ARM64E)
-
-#define DEFINE_IPINT_THUNK_FOR_ENTRY(funcName, target) \
-    MacroAssemblerCodeRef<JITThunkPtrTag> funcName() \
-    { \
-        static LazyNeverDestroyed<MacroAssemblerCodeRef<JITThunkPtrTag>> codeRef; \
-        static std::once_flag onceKey; \
-        std::call_once(onceKey, [&] { \
-            codeRef.construct(generateThunkWithJumpToPrologue<JITThunkPtrTag>(target, #target)); \
-        }); \
-        return codeRef; \
-    }
 
 #define DEFINE_IPINT_THUNK_FOR_CATCH(funcName, target) \
     MacroAssemblerCodeRef<JITThunkPtrTag> funcName() \

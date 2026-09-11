@@ -96,9 +96,6 @@ ALWAYS_INLINE bool speciesWatchpointIsValid(JSGlobalObject* globalObject, ViewCl
 // This implements 22.2.4.7 TypedArraySpeciesCreate
 // Note, that this function throws.
 // https://tc39.es/ecma262/#typedarray-species-create
-// constructArgs fills the caller's buffer and returns how many entries it used.
-static constexpr size_t maximumSpeciesConstructArguments = 3;
-
 template<typename ViewClass, typename Functor, typename SlowPathArgsConstructor>
 inline JSArrayBufferView* speciesConstruct(JSGlobalObject* globalObject, ViewClass* exemplar, const Functor& defaultConstructor, const SlowPathArgsConstructor& constructArgs, std::optional<size_t> length)
 {
@@ -142,11 +139,11 @@ inline JSArrayBufferView* speciesConstruct(JSGlobalObject* globalObject, ViewCla
     if (species == viewClassConstructor)
         RELEASE_AND_RETURN(scope, defaultConstructor());
 
-    std::array<EncodedJSValue, maximumSpeciesConstructArguments> args { };
-    unsigned argCount = constructArgs(args);
+    MarkedArgumentBuffer args;
+    constructArgs(args);
     RETURN_IF_EXCEPTION(scope, nullptr);
 
-    JSValue result = construct(globalObject, species, ArgList { args.data(), argCount }, "species is not a constructor"_s);
+    JSValue result = construct(globalObject, species, args, "species is not a constructor"_s);
     RETURN_IF_EXCEPTION(scope, nullptr);
 
     if (JSArrayBufferView* view = dynamicDowncast<JSArrayBufferView>(result); view) [[likely]] {
@@ -845,14 +842,24 @@ ALWAYS_INLINE EncodedJSValue genericTypedArrayViewProtoFuncForEach(VM& vm, JSGlo
         return JSValue::encode(jsUndefined());
     }
 
+    MarkedArgumentBuffer args;
+
     scope.release();
     typedArrayViewForEachImpl<ForEachDirection::Forward>(globalObject, vm, thisObject, length, [&](JSValue element, size_t index, auto) ALWAYS_INLINE_LAMBDA {
-        auto args = WTF::toArray<EncodedJSValue>({
-            JSValue::encode(element),
-            JSValue::encode(jsNumber(index)),
-            JSValue::encode(thisObject),
-        });
-        call(globalObject, functorValue, callData, thisArg, ArgList { args.data(), args.size() });
+        auto scope = DECLARE_THROW_SCOPE(vm);
+
+        args.clear();
+
+        args.append(element);
+        args.append(jsNumber(index));
+        args.append(thisObject);
+        if (args.hasOverflowed()) [[unlikely]] {
+            throwOutOfMemoryError(globalObject, scope);
+            return IterationStatus::Continue;
+        }
+
+        scope.release();
+        call(globalObject, functorValue, callData, thisArg, args);
         return IterationStatus::Continue;
     });
     return JSValue::encode(jsUndefined());
@@ -887,9 +894,9 @@ ALWAYS_INLINE EncodedJSValue genericTypedArrayViewProtoFuncMap(VM& vm, JSGlobalO
         bool isResizableOrGrowableShared = false;
         Structure* structure = globalObject->typedArrayStructure(ViewClass::TypedArrayStorageType, isResizableOrGrowableShared);
         return ViewClass::createUninitialized(globalObject, structure, length);
-    }, [&](auto& args) {
-        args[0] = JSValue::encode(jsNumber(length));
-        return 1;
+    }, [&](MarkedArgumentBuffer& args) {
+        args.append(jsNumber(length));
+        ASSERT(!args.hasOverflowed());
     }, length);
     RETURN_IF_EXCEPTION(scope, { });
 
@@ -917,17 +924,23 @@ ALWAYS_INLINE EncodedJSValue genericTypedArrayViewProtoFuncMap(VM& vm, JSGlobalO
         return JSValue::encode(result);
     }
 
+    MarkedArgumentBuffer args;
+
     scope.release();
     typedArrayViewForEachImpl<ForEachDirection::Forward>(globalObject, vm, thisObject, length, [&](JSValue element, size_t index, auto) ALWAYS_INLINE_LAMBDA {
         auto scope = DECLARE_THROW_SCOPE(vm);
 
-        auto args = WTF::toArray<EncodedJSValue>({
-            JSValue::encode(element),
-            JSValue::encode(jsNumber(index)),
-            JSValue::encode(thisObject),
-        });
+        args.clear();
 
-        JSValue mapped = call(globalObject, functorValue, callData, thisArg, ArgList { args.data(), args.size() });
+        args.append(element);
+        args.append(jsNumber(index));
+        args.append(thisObject);
+        if (args.hasOverflowed()) [[unlikely]] {
+            throwOutOfMemoryError(globalObject, scope);
+            return IterationStatus::Continue;
+        }
+
+        JSValue mapped = call(globalObject, functorValue, callData, thisArg, args);
         RETURN_IF_EXCEPTION_WITH_TRAPS_DEFERRED(scope, IterationStatus::Done);
 
         scope.release();
@@ -1006,16 +1019,22 @@ ALWAYS_INLINE EncodedJSValue genericTypedArrayViewProtoFuncFilter(VM& vm, JSGlob
         });
         RETURN_IF_EXCEPTION(scope, { });
     } else {
+        MarkedArgumentBuffer args;
+
         typedArrayViewForEachImpl<ForEachDirection::Forward>(globalObject, vm, thisObject, length, [&](JSValue element, size_t index, auto nativeValue) ALWAYS_INLINE_LAMBDA {
             auto scope = DECLARE_THROW_SCOPE(vm);
 
-            auto args = WTF::toArray<EncodedJSValue>({
-                JSValue::encode(element),
-                JSValue::encode(jsNumber(index)),
-                JSValue::encode(thisObject),
-            });
+            args.clear();
 
-            JSValue result = call(globalObject, functorValue, callData, thisArg, ArgList { args.data(), args.size() });
+            args.append(element);
+            args.append(jsNumber(index));
+            args.append(thisObject);
+            if (args.hasOverflowed()) [[unlikely]] {
+                throwOutOfMemoryError(globalObject, scope);
+                return IterationStatus::Continue;
+            }
+
+            JSValue result = call(globalObject, functorValue, callData, thisArg, args);
             RETURN_IF_EXCEPTION_WITH_TRAPS_DEFERRED(scope, IterationStatus::Done);
 
             scope.release();
@@ -1031,9 +1050,9 @@ ALWAYS_INLINE EncodedJSValue genericTypedArrayViewProtoFuncFilter(VM& vm, JSGlob
         bool isResizableOrGrowableShared = false;
         Structure* structure = globalObject->typedArrayStructure(ViewClass::TypedArrayStorageType, isResizableOrGrowableShared);
         return ViewClass::createUninitialized(globalObject, structure, length);
-    }, [&](auto& args) {
-        args[0] = JSValue::encode(jsNumber(length));
-        return 1;
+    }, [&](MarkedArgumentBuffer& args) {
+        args.append(jsNumber(length));
+        ASSERT(!args.hasOverflowed());
     }, length);
     RETURN_IF_EXCEPTION(scope, { });
 
@@ -1094,19 +1113,25 @@ ALWAYS_INLINE EncodedJSValue genericTypedArrayViewProtoFuncFind(VM& vm, JSGlobal
         return JSValue::encode(found);
     }
 
+    MarkedArgumentBuffer args;
+
     scope.release();
 
     JSValue found = jsUndefined();
     typedArrayViewForEachImpl<ForEachDirection::Forward>(globalObject, vm, thisObject, length, [&](JSValue element, size_t index, auto) ALWAYS_INLINE_LAMBDA -> IterationStatus {
         auto scope = DECLARE_THROW_SCOPE(vm);
 
-        auto args = WTF::toArray<EncodedJSValue>({
-            JSValue::encode(element),
-            JSValue::encode(jsNumber(index)),
-            JSValue::encode(thisObject),
-        });
+        args.clear();
 
-        JSValue result = call(globalObject, functorValue, callData, thisArg, ArgList { args.data(), args.size() });
+        args.append(element);
+        args.append(jsNumber(index));
+        args.append(thisObject);
+        if (args.hasOverflowed()) [[unlikely]] {
+            throwOutOfMemoryError(globalObject, scope);
+            return IterationStatus::Continue;
+        }
+
+        JSValue result = call(globalObject, functorValue, callData, thisArg, args);
         RETURN_IF_EXCEPTION_WITH_TRAPS_DEFERRED(scope, { });
 
         scope.release();
@@ -1161,19 +1186,25 @@ ALWAYS_INLINE EncodedJSValue genericTypedArrayViewProtoFuncFindIndex(VM& vm, JSG
         return JSValue::encode(found);
     }
 
+    MarkedArgumentBuffer args;
+
     scope.release();
 
     JSValue found = jsNumber(-1);
     typedArrayViewForEachImpl<ForEachDirection::Forward>(globalObject, vm, thisObject, length, [&](JSValue element, size_t index, auto) ALWAYS_INLINE_LAMBDA -> IterationStatus {
         auto scope = DECLARE_THROW_SCOPE(vm);
 
-        auto args = WTF::toArray<EncodedJSValue>({
-            JSValue::encode(element),
-            JSValue::encode(jsNumber(index)),
-            JSValue::encode(thisObject),
-        });
+        args.clear();
 
-        JSValue result = call(globalObject, functorValue, callData, thisArg, ArgList { args.data(), args.size() });
+        args.append(element);
+        args.append(jsNumber(index));
+        args.append(thisObject);
+        if (args.hasOverflowed()) [[unlikely]] {
+            throwOutOfMemoryError(globalObject, scope);
+            return IterationStatus::Continue;
+        }
+
+        JSValue result = call(globalObject, functorValue, callData, thisArg, args);
         RETURN_IF_EXCEPTION_WITH_TRAPS_DEFERRED(scope, { });
 
         scope.release();
@@ -1228,19 +1259,25 @@ ALWAYS_INLINE EncodedJSValue genericTypedArrayViewProtoFuncFindLast(VM& vm, JSGl
         return JSValue::encode(found);
     }
 
+    MarkedArgumentBuffer args;
+
     scope.release();
 
     JSValue found = jsUndefined();
     typedArrayViewForEachImpl<ForEachDirection::Backward>(globalObject, vm, thisObject, length, [&](JSValue element, size_t index, auto) ALWAYS_INLINE_LAMBDA -> IterationStatus {
         auto scope = DECLARE_THROW_SCOPE(vm);
 
-        auto args = WTF::toArray<EncodedJSValue>({
-            JSValue::encode(element),
-            JSValue::encode(jsNumber(index)),
-            JSValue::encode(thisObject),
-        });
+        args.clear();
 
-        JSValue result = call(globalObject, functorValue, callData, thisArg, ArgList { args.data(), args.size() });
+        args.append(element);
+        args.append(jsNumber(index));
+        args.append(thisObject);
+        if (args.hasOverflowed()) [[unlikely]] {
+            throwOutOfMemoryError(globalObject, scope);
+            return IterationStatus::Continue;
+        }
+
+        JSValue result = call(globalObject, functorValue, callData, thisArg, args);
         RETURN_IF_EXCEPTION_WITH_TRAPS_DEFERRED(scope, { });
 
         scope.release();
@@ -1295,19 +1332,25 @@ ALWAYS_INLINE EncodedJSValue genericTypedArrayViewProtoFuncFindLastIndex(VM& vm,
         return JSValue::encode(found);
     }
 
+    MarkedArgumentBuffer args;
+
     scope.release();
 
     JSValue found = jsNumber(-1);
     typedArrayViewForEachImpl<ForEachDirection::Backward>(globalObject, vm, thisObject, length, [&](JSValue element, size_t index, auto) ALWAYS_INLINE_LAMBDA -> IterationStatus {
         auto scope = DECLARE_THROW_SCOPE(vm);
 
-        auto args = WTF::toArray<EncodedJSValue>({
-            JSValue::encode(element),
-            JSValue::encode(jsNumber(index)),
-            JSValue::encode(thisObject),
-        });
+        args.clear();
 
-        JSValue result = call(globalObject, functorValue, callData, thisArg, ArgList { args.data(), args.size() });
+        args.append(element);
+        args.append(jsNumber(index));
+        args.append(thisObject);
+        if (args.hasOverflowed()) [[unlikely]] {
+            throwOutOfMemoryError(globalObject, scope);
+            return IterationStatus::Continue;
+        }
+
+        JSValue result = call(globalObject, functorValue, callData, thisArg, args);
         RETURN_IF_EXCEPTION_WITH_TRAPS_DEFERRED(scope, { });
 
         scope.release();
@@ -1362,19 +1405,25 @@ ALWAYS_INLINE EncodedJSValue genericTypedArrayViewProtoFuncEvery(VM& vm, JSGloba
         return JSValue::encode(condition);
     }
 
+    MarkedArgumentBuffer args;
+
     scope.release();
 
     JSValue condition = jsBoolean(true);
     typedArrayViewForEachImpl<ForEachDirection::Forward>(globalObject, vm, thisObject, length, [&](JSValue element, size_t index, auto) ALWAYS_INLINE_LAMBDA -> IterationStatus {
         auto scope = DECLARE_THROW_SCOPE(vm);
 
-        auto args = WTF::toArray<EncodedJSValue>({
-            JSValue::encode(element),
-            JSValue::encode(jsNumber(index)),
-            JSValue::encode(thisObject),
-        });
+        args.clear();
 
-        JSValue result = call(globalObject, functorValue, callData, thisArg, ArgList { args.data(), args.size() });
+        args.append(element);
+        args.append(jsNumber(index));
+        args.append(thisObject);
+        if (args.hasOverflowed()) [[unlikely]] {
+            throwOutOfMemoryError(globalObject, scope);
+            return IterationStatus::Continue;
+        }
+
+        JSValue result = call(globalObject, functorValue, callData, thisArg, args);
         RETURN_IF_EXCEPTION_WITH_TRAPS_DEFERRED(scope, { });
 
         scope.release();
@@ -1429,19 +1478,25 @@ ALWAYS_INLINE EncodedJSValue genericTypedArrayViewProtoFuncSome(VM& vm, JSGlobal
         return JSValue::encode(condition);
     }
 
+    MarkedArgumentBuffer args;
+
     scope.release();
 
     JSValue condition = jsBoolean(false);
     typedArrayViewForEachImpl<ForEachDirection::Forward>(globalObject, vm, thisObject, length, [&](JSValue element, size_t index, auto) ALWAYS_INLINE_LAMBDA -> IterationStatus {
         auto scope = DECLARE_THROW_SCOPE(vm);
 
-        auto args = WTF::toArray<EncodedJSValue>({
-            JSValue::encode(element),
-            JSValue::encode(jsNumber(index)),
-            JSValue::encode(thisObject),
-        });
+        args.clear();
 
-        JSValue result = call(globalObject, functorValue, callData, thisArg, ArgList { args.data(), args.size() });
+        args.append(element);
+        args.append(jsNumber(index));
+        args.append(thisObject);
+        if (args.hasOverflowed()) [[unlikely]] {
+            throwOutOfMemoryError(globalObject, scope);
+            return IterationStatus::Continue;
+        }
+
+        JSValue result = call(globalObject, functorValue, callData, thisArg, args);
         RETURN_IF_EXCEPTION_WITH_TRAPS_DEFERRED(scope, { });
 
         scope.release();
@@ -1497,6 +1552,8 @@ ALWAYS_INLINE EncodedJSValue genericTypedArrayViewProtoFuncReduce(VM& vm, JSGlob
         return JSValue::encode(accumulator);
     }
 
+    MarkedArgumentBuffer args;
+
     scope.release();
 
     typedArrayViewForEachImpl<ForEachDirection::Forward>(globalObject, vm, thisObject, length, [&](JSValue element, size_t index, auto) -> IterationStatus {
@@ -1508,15 +1565,19 @@ ALWAYS_INLINE EncodedJSValue genericTypedArrayViewProtoFuncReduce(VM& vm, JSGlob
             return IterationStatus::Continue;
         }
 
-        auto args = WTF::toArray<EncodedJSValue>({
-            JSValue::encode(accumulator),
-            JSValue::encode(element),
-            JSValue::encode(jsNumber(index)),
-            JSValue::encode(thisObject),
-        });
+        args.clear();
+
+        args.append(accumulator);
+        args.append(element);
+        args.append(jsNumber(index));
+        args.append(thisObject);
+        if (args.hasOverflowed()) [[unlikely]] {
+            throwOutOfMemoryError(globalObject, scope);
+            return IterationStatus::Continue;
+        }
 
         scope.release();
-        accumulator = call(globalObject, callback, callData, jsUndefined(), ArgList { args.data(), args.size() });
+        accumulator = call(globalObject, callback, callData, jsUndefined(), args);
         return IterationStatus::Continue;
     });
 
@@ -1567,6 +1628,8 @@ ALWAYS_INLINE EncodedJSValue genericTypedArrayViewProtoFuncReduceRight(VM& vm, J
         return JSValue::encode(accumulator);
     }
 
+    MarkedArgumentBuffer args;
+
     scope.release();
 
     typedArrayViewForEachImpl<ForEachDirection::Backward>(globalObject, vm, thisObject, length, [&](JSValue element, size_t index, auto) -> IterationStatus {
@@ -1578,15 +1641,19 @@ ALWAYS_INLINE EncodedJSValue genericTypedArrayViewProtoFuncReduceRight(VM& vm, J
             return IterationStatus::Continue;
         }
 
-        auto args = WTF::toArray<EncodedJSValue>({
-            JSValue::encode(accumulator),
-            JSValue::encode(element),
-            JSValue::encode(jsNumber(index)),
-            JSValue::encode(thisObject),
-        });
+        args.clear();
+
+        args.append(accumulator);
+        args.append(element);
+        args.append(jsNumber(index));
+        args.append(thisObject);
+        if (args.hasOverflowed()) [[unlikely]] {
+            throwOutOfMemoryError(globalObject, scope);
+            return IterationStatus::Continue;
+        }
 
         scope.release();
-        accumulator = call(globalObject, callback, callData, jsUndefined(), ArgList { args.data(), args.size() });
+        accumulator = call(globalObject, callback, callData, jsUndefined(), args);
         return IterationStatus::Continue;
     });
 
@@ -1698,20 +1765,25 @@ static ALWAYS_INLINE EncodedJSValue genericTypedArrayViewProtoFuncSortImpl(VM& v
         });
         RETURN_IF_EXCEPTION(scope, { });
     } else {
+        MarkedArgumentBuffer args;
         result = arrayStableSort<MergeStrategy::Simple>(vm, src, workingSet, [&](auto left, auto right) ALWAYS_INLINE_LAMBDA {
             auto scope = DECLARE_THROW_SCOPE(vm);
+
+            args.clear();
 
             JSValue leftValue = ViewClass::Adaptor::toJSValue(globalObject, left);
             RETURN_IF_EXCEPTION(scope, false);
             JSValue rightValue = ViewClass::Adaptor::toJSValue(globalObject, right);
             RETURN_IF_EXCEPTION(scope, false);
 
-            auto args = WTF::toArray<EncodedJSValue>({
-                JSValue::encode(leftValue),
-                JSValue::encode(rightValue),
-            });
+            args.append(leftValue);
+            args.append(rightValue);
+            if (args.hasOverflowed()) [[unlikely]] {
+                throwOutOfMemoryError(globalObject, scope);
+                return false;
+            }
 
-            JSValue jsResult = call(globalObject, comparatorValue, callData, jsUndefined(), ArgList { args.data(), args.size() });
+            JSValue jsResult = call(globalObject, comparatorValue, callData, jsUndefined(), args);
             RETURN_IF_EXCEPTION(scope, false);
             RELEASE_AND_RETURN(scope, coerceComparatorResultToBoolean(globalObject, jsResult));
         });
@@ -1883,9 +1955,9 @@ ALWAYS_INLINE EncodedJSValue genericTypedArrayViewProtoFuncSlice(VM& vm, JSGloba
             return ViewClass::create(globalObject, structure, length);
 
         return ViewClass::createUninitialized(globalObject, structure, length);
-    }, [&](auto& args) {
-        args[0] = JSValue::encode(jsNumber(length));
-        return 1;
+    }, [&](MarkedArgumentBuffer& args) {
+        args.append(jsNumber(length));
+        ASSERT(!args.hasOverflowed());
     }, length);
     RETURN_IF_EXCEPTION(scope, { });
 
@@ -2019,13 +2091,12 @@ ALWAYS_INLINE EncodedJSValue genericTypedArrayViewProtoFuncSubarray(VM& vm, JSGl
     return JSValue::encode(speciesConstruct(globalObject, thisObject, [&]() {
         Structure* structure = globalObject->typedArrayStructure(ViewClass::TypedArrayStorageType, arrayBuffer->isResizableOrGrowableShared());
         return ViewClass::create(globalObject, structure, WTF::move(arrayBuffer), newByteOffset, count);
-    }, [&](auto& args) {
-        args[0] = JSValue::encode(vm.m_typedArrayController->toJS(globalObject, thisObject->realm(), *arrayBuffer));
-        args[1] = JSValue::encode(jsNumber(newByteOffset));
-        if (!count)
-            return 2;
-        args[2] = JSValue::encode(jsNumber(count.value()));
-        return 3;
+    }, [&](MarkedArgumentBuffer& args) {
+        args.append(vm.m_typedArrayController->toJS(globalObject, thisObject->realm(), *arrayBuffer));
+        args.append(jsNumber(newByteOffset));
+        if (count)
+            args.append(jsNumber(count.value()));
+        ASSERT(!args.hasOverflowed());
     }, std::nullopt));
 }
 

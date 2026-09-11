@@ -35,6 +35,7 @@
 #include <JavaScriptCore/InspectorEnvironment.h>
 #include <JavaScriptCore/InspectorProtocolObjects.h>
 #include <JavaScriptCore/ScriptFunctionCall.h>
+#include <wtf/Expected.h>
 #include <wtf/Forward.h>
 #include <wtf/Function.h>
 #include <wtf/NakedPtr.h>
@@ -70,7 +71,7 @@ protected:
     bool hasAccessToInspectedScriptState() const;
 
     JSC::JSObject* NODELETE injectedScriptObject() const;
-    std::expected<JSC::JSValue, NakedPtr<JSC::Exception>> callFunctionWithEvalEnabled(ScriptFunctionCall&) const;
+    Expected<JSC::JSValue, NakedPtr<JSC::Exception>> callFunctionWithEvalEnabled(ScriptFunctionCall&) const;
     Ref<JSON::Value> makeCall(ScriptFunctionCall&);
     void makeEvalCall(Protocol::ErrorString&, ScriptFunctionCall&, RefPtr<Protocol::Runtime::RemoteObject>& resultObject, std::optional<bool>& wasThrown, std::optional<int>& savedResultIndex);
     void makeAsyncCall(ScriptFunctionCall&, AsyncCallCallback&&);

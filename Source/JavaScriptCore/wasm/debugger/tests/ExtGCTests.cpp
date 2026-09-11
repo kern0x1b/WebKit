@@ -30,7 +30,6 @@
 
 #include <wtf/DataLog.h>
 #include <wtf/text/MakeString.h>
-#include <wtf/text/StringConcatenateNumbers.h>
 
 using namespace JSC;
 using namespace JSC::Wasm;
@@ -174,9 +173,9 @@ void testAllExtGCOps()
 #undef TEST_EXTGC_OP
 
     TEST_ASSERT(opsTested == TOTAL_EXTGC_OPS,
-        makeString("Tested all "_s, TOTAL_EXTGC_OPS, " ExtGC ops"_s));
+        makeString("Tested all "_s, String::number(TOTAL_EXTGC_OPS), " ExtGC ops"_s).utf8().data());
     TEST_ASSERT(opsSucceeded == TOTAL_EXTGC_OPS,
-        makeString("All "_s, TOTAL_EXTGC_OPS, " ExtGC ops completed"_s));
+        makeString("All "_s, String::number(TOTAL_EXTGC_OPS), " ExtGC ops completed"_s).utf8().data());
 
     dataLogLn("  Successfully tested: ", opsSucceeded, " / ", opsTested, " ExtGC ops");
     dataLogLn("All ExtGC ops coverage testing completed");

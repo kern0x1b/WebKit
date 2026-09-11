@@ -30,7 +30,6 @@
 
 #include <wtf/DataLog.h>
 #include <wtf/text/MakeString.h>
-#include <wtf/text/StringConcatenateNumbers.h>
 
 using namespace JSC;
 using namespace JSC::Wasm;
@@ -468,9 +467,9 @@ void testAllSpecialOps()
 #undef TEST_SPECIAL_OP
 
     TEST_ASSERT(opsTested == TOTAL_SPECIAL_OPS,
-        makeString("Tested all "_s, TOTAL_SPECIAL_OPS, " special ops"_s));
+        makeString("Tested all "_s, String::number(TOTAL_SPECIAL_OPS), " special ops"_s).utf8().data());
     TEST_ASSERT(opsSucceeded == TOTAL_SPECIAL_OPS,
-        makeString("All "_s, TOTAL_SPECIAL_OPS, " special ops completed"_s));
+        makeString("All "_s, String::number(TOTAL_SPECIAL_OPS), " special ops completed"_s).utf8().data());
 
     dataLogLn("  Successfully tested: ", opsSucceeded, " / ", opsTested, " special ops");
     dataLogLn("All special ops coverage testing completed");

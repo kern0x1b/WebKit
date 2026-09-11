@@ -36,7 +36,11 @@ namespace JSC { namespace B3 {
 // platform-agnostic code. Note that a ConstPtrValue will behave like either a Const32Value or
 // Const64Value depending on platform.
 
+#if CPU(ADDRESS64)
 typedef Const64Value ConstPtrValueBase;
+#else
+typedef Const32Value ConstPtrValueBase;
+#endif
 
 class ConstPtrValue : public ConstPtrValueBase {
 public:

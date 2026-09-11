@@ -227,11 +227,11 @@ JSC_DEFINE_HOST_FUNCTION(mapProtoFuncGetOrInsertComputed, (JSGlobalObject* globa
             return cachedCall.callWithArguments(globalObject, jsUndefined(), key);
         }
 
-        auto args = WTF::toArray<EncodedJSValue>({
-            JSValue::encode(key),
-        });
+        MarkedArgumentBuffer args;
+        args.append(key);
+        ASSERT(!args.hasOverflowed());
 
-        return call(globalObject, valueCallback, callData, jsUndefined(), ArgList { args.data(), args.size() });
+        return call(globalObject, valueCallback, callData, jsUndefined(), args);
     })));
 }
 

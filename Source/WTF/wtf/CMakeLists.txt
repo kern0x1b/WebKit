@@ -89,6 +89,7 @@ set(WTF_PUBLIC_HEADERS
     EnumClassOperatorOverloads.h
     EnumSet.h
     EnumTraits.h
+    Expected.h
     EnumeratedArray.h
     EscapableByteSpan.h
     ExperimentalFeatureNames.h

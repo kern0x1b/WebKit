@@ -185,6 +185,7 @@ end
 
 macro doVMEntry(makeCall)
     functionPrologue()
+    pushCalleeSaves()
 
     const entry = a0
     const vm = a1
@@ -256,7 +257,7 @@ macro doVMEntry(makeCall)
         storeq t5, CodeBlock + (8 * 3)[sp]
     end
 
-    loadi LowWordOffset + ProtoCallFrame::argCountAndCodeOriginValue[protoCallFrame], t4
+    loadi PayloadOffset + ProtoCallFrame::argCountAndCodeOriginValue[protoCallFrame], t4
     subi 1, t4
     loadi ProtoCallFrame::paddedArgCount[protoCallFrame], t5
     subi 1, t5
@@ -316,6 +317,7 @@ macro doVMEntry(makeCall)
 
     subp cfr, CalleeRegisterSaveSize, sp
 
+    popCalleeSaves()
     functionEpilogue()
     ret
 end
@@ -340,6 +342,7 @@ _llint_throw_stack_overflow_error_from_vm_entry:
     move ValueUndefined, r0
 
     subp cfr, CalleeRegisterSaveSize, sp
+    popCalleeSaves()
     functionEpilogue()
     ret
 
@@ -373,7 +376,7 @@ macro makeHostFunctionCall(entry, protoCallFrame, temp1, temp2)
     loadp ProtoCallFrame::globalObject[protoCallFrame], a0
     move sp, a1
     if C_LOOP
-        storep lr, ReturnPC[sp]
+        storep lr, 8[sp]
         cloopCallNative temp1
     else
         call temp1, HostFunctionPtrTag
@@ -397,15 +400,18 @@ op(llint_handle_uncaught_exception, macro ()
     move ValueUndefined, r0
 
     subp cfr, CalleeRegisterSaveSize, sp
+    popCalleeSaves()
     functionEpilogue()
     ret
 end)
 
 op(llint_get_host_call_return_value, macro ()
     functionPrologue()
+    pushCalleeSaves()
     loadp Callee[cfr], t0
     convertJSCalleeToVM(t0)
     loadq VM::encodedHostCallReturnValue[t0], t0
+    popCalleeSaves()
     functionEpilogue()
     ret
 end)
@@ -710,7 +716,7 @@ end
 
 # Expects that CodeBlock is in t1, which is what prologue() leaves behind.
 macro functionArityCheck(opcodeName, doneLabel)
-    loadi LowWordOffset + ArgumentCountIncludingThis[cfr], t0
+    loadi PayloadOffset + ArgumentCountIncludingThis[cfr], t0
     loadi CodeBlock::m_numParameters[t1], t2
     biaeq t0, t2, doneLabel
 
@@ -753,7 +759,7 @@ macro functionArityCheck(opcodeName, doneLabel)
 .noError:
     move r1, t1 # r1 contains slotsToAdd.
     btiz t1, .continue
-    loadi LowWordOffset + ArgumentCountIncludingThis[cfr], t2
+    loadi PayloadOffset + ArgumentCountIncludingThis[cfr], t2
     addi CallFrameHeaderSlots, t2
 
     // Check if there are some unaligned slots we can use
@@ -844,31 +850,16 @@ _llint_op_enter:
     addq 1, t2
     btqnz t2, .opEnterLoop
 .opEnterDone:
-    loadp CodeBlock[cfr], t2
-    loadi CodeBlock::m_numberOfArgumentsToSkipAndCouldBeTainted[t2], t1
-    btis t1, .opEnterSlow
-    loadp CodeBlock::m_vm[t2], t0
-    loadb JSCell::m_cellState[t2], t1
-    loadi (constexpr (VM::offsetOfHeapBarrierThreshold()))[t0], t0
-    bibeq t1, t0, .opEnterSlow
-    loadis CodeBlock::m_scopeRegister[t2], t1
-    loadp Callee[cfr], t0
-    loadp JSCallee::m_scope[t0], t0
-    storeq t0, [cfr, t1, 8]
+    callSlowPath(_slow_path_enter)
 
-.opEnterDispatch:
     checkTraps(macro()
         dispatchOp(narrow, op_enter)
     end)
 
-.opEnterSlow:
-    callSlowPath(_slow_path_enter)
-    jmp .opEnterDispatch
-
 
 llintOpWithProfile(op_get_argument, OpGetArgument, macro (size, get, dispatch, return)
     get(m_index, t2)
-    loadi LowWordOffset + ArgumentCountIncludingThis[cfr], t0
+    loadi PayloadOffset + ArgumentCountIncludingThis[cfr], t0
     bilteq t0, t2, .opGetArgumentOutOfBounds
     loadq ThisArgumentOffset[cfr, t2, 8], t0
     return(t0)
@@ -879,7 +870,7 @@ end)
 
 
 llintOpWithReturn(op_argument_count, OpArgumentCount, macro (size, get, dispatch, return)
-    loadi LowWordOffset + ArgumentCountIncludingThis[cfr], t0
+    loadi PayloadOffset + ArgumentCountIncludingThis[cfr], t0
     subi 1, t0
     orq TagNumber, t0
     return(t0)
@@ -2496,7 +2487,7 @@ macro callHelper(opcodeName, opcodeStruct, dispatchAfterCall, valueProfileName, 
     negp t3
     addp cfr, t3
     getArgumentCountIncludingThis(t2)
-    storei t2, ArgumentCountIncludingThis + LowWordOffset[t3]
+    storei t2, ArgumentCountIncludingThis + PayloadOffset[t3]
 
     # Store location bits and |callee|, and configure sp.
     storePC()
@@ -2526,7 +2517,7 @@ macro callHelper(opcodeName, opcodeStruct, dispatchAfterCall, valueProfileName, 
     invokeCall(opcodeName, size, opcodeStruct, valueProfileName, dstVirtualRegister, dispatch, t5, t1, JSEntryPtrTag)
 
 .opCallSlow:
-    # t0 is callee
+    # 64bit:t0 32bit(t0,t1) is callee
     # t2 is CallLinkInfo*
     prepareCall(t2, t3, t4, t1, macro(address)
         storep 0, address
@@ -2566,7 +2557,17 @@ macro doCallVarargs(opcodeName, size, get, opcodeStruct, valueProfileName, dstVi
     callSlowPath(frameSlowPath)
     branchIfException(_llint_throw_from_slow_path_trampoline)
     # calleeFrame in r1
-    move r1, sp
+    if JSVALUE64
+        move r1, sp
+    else
+        # The calleeFrame is not stack aligned, move down by CallerFrameAndPCSize to align
+        if ARMv7
+            subp r1, CallerFrameAndPCSize, t2
+            move t2, sp
+        else
+            subp r1, CallerFrameAndPCSize, sp
+        end
+    end
     callCallSlowPath(
         slowPath,
         # Those parameters are r0 and r1
@@ -2600,7 +2601,7 @@ macro doCallVarargs(opcodeName, size, get, opcodeStruct, valueProfileName, dstVi
             invokeCall(opcodeName, size, opcodeStruct, valueProfileName, dstVirtualRegister, dispatch, t5, t1, JSEntryPtrTag)
 
         .opCallSlow:
-            # t0 is callee
+            # 64bit:t0 32bit(t0,t1) is callee
             # t2 is CallLinkInfo*
             prepareCall(t2, t3, t4, t1, macro(address)
                 storep 0, address
@@ -2992,7 +2993,7 @@ llintOpWithMetadata(op_put_to_scope, OpPutToScope, macro (size, get, dispatch, m
         loadConstantOrVariable(size, t0, t1)
         loadp OpPutToScope::Metadata::m_watchpointSet[t5], t2
         btpz t2, .noVariableWatchpointSet
-        notifyWrite(t2, t0, .pDynamic)
+        notifyWrite(t2, .pDynamic)
     .noVariableWatchpointSet:
         loadp OpPutToScope::Metadata::m_operand[t5], t0
         storeq t1, [t0]
@@ -3010,7 +3011,7 @@ llintOpWithMetadata(op_put_to_scope, OpPutToScope, macro (size, get, dispatch, m
         loadConstantOrVariable(size, t1, t2)
         loadp OpPutToScope::Metadata::m_watchpointSet[t5], t3
         btpz t3, .noVariableWatchpointSet
-        notifyWrite(t3, t1, .pDynamic)
+        notifyWrite(t3, .pDynamic)
     .noVariableWatchpointSet:
         loadp OpPutToScope::Metadata::m_operand[t5], t1
         storeq t2, JSLexicalEnvironment_variables[t0, t1, 8]
@@ -3460,7 +3461,7 @@ llintOpWithMetadata(op_async_iterator_next, OpAsyncIteratorNext, macro (size, ge
     end
 
     macro getArgumentIncludingThisCount(dst)
-        getArgumentIncludingThisCountForAsyncIteratorNext(size, dst)
+        move 1, dst
     end
 
     metadata(t5, t0)

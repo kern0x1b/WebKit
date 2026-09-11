@@ -101,7 +101,7 @@ private:
                 dataLogF("    ");
             dataLogF("% 8lld: %s (%lld stack top)\n",
                 static_cast<long long>(entry->value.count()),
-                entry->key.utf8().legacyCStringPointer(),
+                entry->key.utf8().data(),
                 static_cast<long long>(entry->value.count() - entry->value.childCount()));
 
             // Recursively dump the child nodes.
