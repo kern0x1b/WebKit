@@ -99,8 +99,7 @@ void JIT::emitSlow_op_new_object(const JSInstruction* currentInstruction, Vector
     auto bytecode = currentInstruction->as<OpNewObject>();
     VirtualRegister dst = bytecode.m_dst;
     callOperationNoExceptionCheck(operationNewObject, TrustedImmPtr(&vm()), structureReg);
-    boxCell(returnValueGPR, returnValueJSR);
-    emitPutVirtualRegister(dst, returnValueJSR);
+    emitPutVirtualRegister(dst, returnValueGPR);
 }
 
 void JIT::emit_op_is_empty(const JSInstruction* currentInstruction)
@@ -416,18 +415,18 @@ MacroAssemblerCodeRef<JITThunkPtrTag> JIT::valueIsFalseyGenerator(VM& vm)
     // CallFrame::codeBlock().
     CCallHelpers jit;
 
-    using BaselineJITRegisters::JFalse::valueJSR; // Incoming
+    using BaselineJITRegisters::JFalse::valueGPR; // Incoming
     constexpr GPRReg scratch1GPR = regT1;
-    constexpr GPRReg scratch2GPR = regT5;
+    constexpr GPRReg scratch2GPR = regT3;
     constexpr GPRReg globalObjectGPR = regT4;
-    static_assert(noOverlap(valueJSR, scratch1GPR, scratch2GPR, globalObjectGPR));
+    static_assert(noOverlap(valueGPR, scratch1GPR, scratch2GPR, globalObjectGPR));
 
     constexpr bool shouldCheckMasqueradesAsUndefined = true;
 
     jit.tagReturnAddress();
 
     jit.move(TrustedImm32(1), regT0);
-    auto isFalsey = jit.branchIfFalsey(vm, valueJSR, scratch1GPR, scratch2GPR, fpRegT0, fpRegT1, shouldCheckMasqueradesAsUndefined, CCallHelpers::LazyBaselineGlobalObject);
+    auto isFalsey = jit.branchIfFalsey(vm, valueGPR, scratch1GPR, scratch2GPR, fpRegT0, fpRegT1, shouldCheckMasqueradesAsUndefined, CCallHelpers::LazyBaselineGlobalObject);
     jit.move(TrustedImm32(0), regT0);
     isFalsey.link(&jit);
     jit.ret();
@@ -620,18 +619,18 @@ MacroAssemblerCodeRef<JITThunkPtrTag> JIT::valueIsTruthyGenerator(VM& vm)
     // CallFrame::codeBlock().
     CCallHelpers jit;
 
-    using BaselineJITRegisters::JTrue::valueJSR; // Incoming
+    using BaselineJITRegisters::JTrue::valueGPR; // Incoming
     constexpr GPRReg scratch1GPR = regT1;
-    constexpr GPRReg scratch2GPR = regT5;
+    constexpr GPRReg scratch2GPR = regT3;
     constexpr GPRReg globalObjectGPR = regT4;
-    static_assert(noOverlap(valueJSR, scratch1GPR, scratch2GPR, globalObjectGPR));
+    static_assert(noOverlap(valueGPR, scratch1GPR, scratch2GPR, globalObjectGPR));
 
     constexpr bool shouldCheckMasqueradesAsUndefined = true;
 
     jit.tagReturnAddress();
 
     jit.move(TrustedImm32(1), regT0);
-    auto isTruthy = jit.branchIfTruthy(vm, valueJSR, scratch1GPR, scratch2GPR, fpRegT0, fpRegT1, shouldCheckMasqueradesAsUndefined, CCallHelpers::LazyBaselineGlobalObject);
+    auto isTruthy = jit.branchIfTruthy(vm, valueGPR, scratch1GPR, scratch2GPR, fpRegT0, fpRegT1, shouldCheckMasqueradesAsUndefined, CCallHelpers::LazyBaselineGlobalObject);
     jit.move(TrustedImm32(0), regT0);
     isTruthy.link(&jit);
     jit.ret();
@@ -1377,10 +1376,10 @@ void JIT::emit_op_switch_string(const JSInstruction* currentInstruction)
     linkedTable.ensureCTITable(unlinkedTable);
 
     using BaselineJITRegisters::SwitchString::globalObjectGPR;
-    using BaselineJITRegisters::SwitchString::scrutineeJSR;
+    using BaselineJITRegisters::SwitchString::scrutineeGPR;
     using BaselineJITRegisters::SwitchString::scratch1GPR;
 
-    emitGetVirtualRegister(scrutinee, scrutineeJSR);
+    emitGetVirtualRegister(scrutinee, scrutineeGPR);
 
     // Fast path: if the scrutinee is an atom, dispatch inline using pointer comparison.
     // Switch keys are always atoms as asserted in BytecodeGenerator::endSwitch, and also here.
@@ -1397,9 +1396,9 @@ void JIT::emit_op_switch_string(const JSInstruction* currentInstruction)
         }
 
         JumpList slowCases;
-        slowCases.append(branchIfNotCell(scrutineeJSR));
-        slowCases.append(branchIfNotString(scrutineeJSR.payloadGPR()));
-        slowCases.append(loadCacheableIdentifierImpl(scrutineeJSR.payloadGPR(), scratch1GPR, /* propertyIsString */ true, /* propertyIsSymbol */ false));
+        slowCases.append(branchIfNotCell(scrutineeGPR));
+        slowCases.append(branchIfNotString(scrutineeGPR));
+        slowCases.append(loadCacheableIdentifierImpl(scrutineeGPR, scratch1GPR, /* propertyIsString */ true, /* propertyIsSymbol */ false));
 
         BinarySwitch binarySwitch(scratch1GPR, caseKeys.span(), BinarySwitch::IntPtr);
         while (binarySwitch.advance(*this))
@@ -1410,7 +1409,7 @@ void JIT::emit_op_switch_string(const JSInstruction* currentInstruction)
     }
 
     loadGlobalObject(globalObjectGPR);
-    callOperation(operationSwitchStringWithUnknownKeyType, globalObjectGPR, scrutineeJSR, tableIndex);
+    callOperation(operationSwitchStringWithUnknownKeyType, globalObjectGPR, scrutineeGPR, tableIndex);
     farJump(returnValueGPR, JSSwitchPtrTag);
 }
 
@@ -1504,7 +1503,7 @@ void JIT::emit_op_enter(const JSInstruction*)
 
     using BaselineJITRegisters::Enter::scratch1GPR;
     using BaselineJITRegisters::Enter::scratch2GPR;
-    using BaselineJITRegisters::Enter::scratch3JSR;
+    using BaselineJITRegisters::Enter::scratch3GPR;
 
     if (m_profiledCodeBlock->couldBeTainted())
         store8(TrustedImm32(1), vm().addressOfMightBeExecutingTaintedCode());

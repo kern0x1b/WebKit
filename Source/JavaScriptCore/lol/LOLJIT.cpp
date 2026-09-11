@@ -832,10 +832,10 @@ void LOLJIT::emit_op_mov(const JSInstruction* currentInstruction)
 {
     auto bytecode = currentInstruction->as<OpMov>();
     auto allocations = m_fastAllocator.allocate(*this, bytecode, m_bytecodeIndex);
-    auto [ sourceRegs ] = allocations.uses;
-    auto [ destRegs ] = allocations.defs;
+    auto [ sourceGPR ] = allocations.uses;
+    auto [ destGPR ] = allocations.defs;
 
-    moveValueRegs(sourceRegs, destRegs);
+    move(sourceGPR, destGPR);
 
     m_fastAllocator.releaseScratches(allocations);
 }
@@ -844,9 +844,9 @@ void LOLJIT::emit_op_ret(const JSInstruction* currentInstruction)
 {
     auto bytecode = currentInstruction->as<OpRet>();
     auto allocations = m_fastAllocator.allocate(*this, bytecode, m_bytecodeIndex);
-    auto [ valueRegs ] = allocations.uses;
+    auto [ valueGPR ] = allocations.uses;
 
-    moveValueRegs(valueRegs, returnValueJSR);
+    move(valueGPR, returnValueGPR);
     jumpThunk(CodeLocationLabel { vm().getCTIStub(CommonJITThunkID::ReturnFromBaseline).retaggedCode<NoPtrTag>() });
 
     m_fastAllocator.releaseScratches(allocations);
@@ -859,12 +859,12 @@ void LOLJIT::emit_op_eq(const JSInstruction* currentInstruction)
 {
     auto bytecode = currentInstruction->as<OpEq>();
     auto allocations = m_fastAllocator.allocate(*this, bytecode, m_bytecodeIndex);
-    auto [ leftRegs, rightRegs ] = allocations.uses;
-    auto [ destRegs ] = allocations.defs;
+    auto [ leftGPR, rightGPR ] = allocations.uses;
+    auto [ destGPR ] = allocations.defs;
 
-    emitJumpSlowCaseIfNotInt(leftRegs.gpr(), rightRegs.gpr(), s_scratch);
-    compare32(Equal, leftRegs.gpr(), rightRegs.gpr(), destRegs.gpr());
-    boxBoolean(destRegs.gpr(), destRegs);
+    emitJumpSlowCaseIfNotInt(leftGPR, rightGPR, s_scratch);
+    compare32(Equal, leftGPR, rightGPR, destGPR);
+    boxBoolean(destGPR, destGPR);
 
     m_fastAllocator.releaseScratches(allocations);
 }
@@ -1292,13 +1292,13 @@ void LOLJIT::emitStrictEqJumpSlowImpl(const JSInstruction* currentInstruction, R
     auto bytecode = currentInstruction->as<Op>();
     unsigned target = jumpTarget(currentInstruction, bytecode.m_targetLabel);
     auto allocations = m_replayAllocator.allocate(*this, bytecode, m_bytecodeIndex);
-    auto [ lhsRegs, rhsRegs ] = allocations.uses;
+    auto [ lhsGPR, rhsGPR ] = allocations.uses;
 
     linkAllSlowCases(iter);
 
     ASSERT(m_replayAllocator.allocatedRegisters().isEmpty());
     loadGlobalObject(s_scratch);
-    callOperation(operationCompareStrictEq, s_scratch, lhsRegs, rhsRegs);
+    callOperation(operationCompareStrictEq, s_scratch, lhsGPR, rhsGPR);
 
     emitJumpSlowToHot(branchTest32(condition, returnValueGPR), target);
 
@@ -1374,7 +1374,7 @@ void LOLJIT::emit_op_to_number(const JSInstruction* currentInstruction)
     if (arithProfile && shouldEmitProfiling())
         arithProfile->emitUnconditionalSet(*this, UnaryArithProfile::observedNumberBits());
     isInt32.link(this);
-    moveValueRegs(operand, dst);
+    move(operand, dst);
 
     m_fastAllocator.releaseScratches(allocations);
 }
@@ -1420,7 +1420,7 @@ void LOLJIT::emit_op_to_numeric(const JSInstruction* currentInstruction)
         arithProfile->emitUnconditionalSet(*this, s_scratch);
 
     isInt32.link(this);
-    moveValueRegs(operandRegs, dstRegs);
+    move(operandGPR, dstGPR);
 
     m_fastAllocator.releaseScratches(allocations);
 }
@@ -1498,7 +1498,7 @@ void LOLJIT::emit_op_create_lexical_environment(const JSInstruction* currentInst
 {
     auto bytecode = currentInstruction->as<OpCreateLexicalEnvironment>();
     auto allocations = m_fastAllocator.allocate(*this, bytecode, m_bytecodeIndex);
-    auto [ scopeRegs, symbolTableRegs ] = allocations.uses;
+    auto [ scopeGPR, symbolTableGPR ] = allocations.uses;
 
     VirtualRegister dst = bytecode.m_dst;
     VirtualRegister initialValue = bytecode.m_initialValue;
@@ -1646,7 +1646,7 @@ void LOLJIT::emitNewFuncCommon(const JSInstruction* currentInstruction)
         ASSERT(opcodeID == op_new_async_generator_func);
         function = operationNewAsyncGeneratorFunction;
     }
-    callOperationNoExceptionCheck(function, dst, globalObjectGPR, scopeGPR, functionDeclGPR);
+    callOperationNoExceptionCheck(function, dst, globalObjectArgumentGPR, scopeArgumentGPR, functionDeclArgumentGPR);
 
     m_fastAllocator.releaseScratches(allocations);
 }
@@ -1749,7 +1749,7 @@ void LOLJIT::emit_op_new_object(const JSInstruction* currentInstruction)
     load8(Address(structureReg, Structure::inlineCapacityOffset()), s_scratch);
     emitInitializeInlineStorage(resultReg, s_scratch);
     mutatorFence(*m_vm);
-    boxCell(resultReg, dstRegs);
+    move(resultReg, dstGPR);
 
     addSlowCase(slowCases);
 
@@ -1787,8 +1787,7 @@ void LOLJIT::emit_op_new_reg_exp(const JSInstruction* currentInstruction)
 
     loadGlobalObject(globalObjectGPR);
     callOperation(operationNewRegExp, globalObjectGPR, TrustedImmPtr(uncheckedDowncast<RegExp>(m_unlinkedCodeBlock->getConstant(regexp))));
-    boxCell(returnValueGPR, returnValueJSR);
-    emitPutVirtualRegister(dst, returnValueJSR);
+    emitPutVirtualRegister(dst, returnValueGPR);
 
     m_fastAllocator.releaseScratches(allocations);
 }
@@ -1851,11 +1850,11 @@ void LOLJIT::emit_op_is_empty(const JSInstruction* currentInstruction)
 {
     auto bytecode = currentInstruction->as<OpIsEmpty>();
     auto allocations = m_fastAllocator.allocate(*this, bytecode, m_bytecodeIndex);
-    auto [ operandRegs ] = allocations.uses;
-    auto [ dstRegs ] = allocations.defs;
+    auto [ operandGPR ] = allocations.uses;
+    auto [ dstGPR ] = allocations.defs;
 
-    isEmpty(operandRegs.gpr(), dstRegs.gpr());
-    boxBoolean(dstRegs.gpr(), dstRegs);
+    isEmpty(operandGPR, dstGPR);
+    boxBoolean(dstGPR, dstGPR);
 
     m_fastAllocator.releaseScratches(allocations);
 }
@@ -1910,14 +1909,14 @@ void LOLJIT::emit_op_is_undefined_or_null(const JSInstruction* currentInstructio
 {
     auto bytecode = currentInstruction->as<OpIsUndefinedOrNull>();
     auto allocations = m_fastAllocator.allocate(*this, bytecode, m_bytecodeIndex);
-    auto [ operandRegs ] = allocations.uses;
-    auto [ dstRegs ] = allocations.defs;
+    auto [ operandGPR ] = allocations.uses;
+    auto [ dstGPR ] = allocations.defs;
 
-    moveValueRegs(operandRegs, dstRegs);
-    emitTurnUndefinedIntoNull(dstRegs);
-    isNull(dstRegs, dstRegs.gpr());
+    move(operandGPR, dstGPR);
+    emitTurnUndefinedIntoNull(dstGPR);
+    isNull(dstGPR, dstGPR);
 
-    boxBoolean(dstRegs.gpr(), dstRegs);
+    boxBoolean(dstGPR, dstGPR);
 
     m_fastAllocator.releaseScratches(allocations);
 }
@@ -2087,14 +2086,14 @@ void LOLJIT::emitSlow_op_jeq(const JSInstruction* currentInstruction, Vector<Slo
     auto bytecode = currentInstruction->as<OpJeq>();
     unsigned target = jumpTarget(currentInstruction, bytecode.m_targetLabel);
     auto allocations = m_replayAllocator.allocate(*this, bytecode, m_bytecodeIndex);
-    auto [ lhsRegs, rhsRegs ] = allocations.uses;
+    auto [ lhsGPR, rhsGPR ] = allocations.uses;
 
     linkAllSlowCases(iter);
 
     // We don't need to spill here since the allocator flushed all registers already
     ASSERT(m_replayAllocator.allocatedRegisters().isEmpty());
     loadGlobalObject(s_scratch);
-    callOperation(operationCompareEq, s_scratch, lhsRegs, rhsRegs);
+    callOperation(operationCompareEq, s_scratch, lhsGPR, rhsGPR);
 
     emitJumpSlowToHot(branchTest32(NonZero, returnValueGPR), target);
 
@@ -2333,12 +2332,12 @@ void LOLJIT::emit_op_throw(const JSInstruction* currentInstruction)
     uint32_t bytecodeOffset = m_bytecodeIndex.offset();
 
     auto allocations = m_fastAllocator.allocate(*this, bytecode, m_bytecodeIndex);
-    auto [ thrownValueRegs ] = allocations.uses;
+    auto [ valueGPR ] = allocations.uses;
 
-    using BaselineJITRegisters::Throw::thrownValueJSR;
+    using BaselineJITRegisters::Throw::thrownValueGPR;
     using BaselineJITRegisters::Throw::bytecodeOffsetGPR;
 
-    moveValueRegs(thrownValueRegs, thrownValueJSR);
+    move(valueGPR, thrownValueGPR);
     move(TrustedImm32(bytecodeOffset), bytecodeOffsetGPR);
     jumpThunk(CodeLocationLabel { vm().getCTIStub(op_throw_handlerGenerator).retaggedCode<NoPtrTag>() });
 
@@ -2351,14 +2350,14 @@ void LOLJIT::emit_op_switch_imm(const JSInstruction* currentInstruction)
     size_t tableIndex = bytecode.m_tableIndex;
 
     auto allocations = m_fastAllocator.allocate(*this, bytecode, m_bytecodeIndex);
-    auto [ scrutineeRegs ] = allocations.uses;
+    auto [ scrutineeGPR ] = allocations.uses;
 
     const UnlinkedSimpleJumpTable& unlinkedTable = m_unlinkedCodeBlock->unlinkedSwitchJumpTable(tableIndex);
     int32_t defaultOffset = unlinkedTable.defaultOffset();
     SimpleJumpTable& linkedTable = m_switchJumpTables[tableIndex];
     m_switches.append(SwitchRecord(tableIndex, m_bytecodeIndex, defaultOffset, SwitchRecord::Immediate));
 
-    auto notInt32 = branchIfNotInt32(scrutineeRegs);
+    auto notInt32 = branchIfNotInt32(scrutineeGPR);
 
     auto dispatch = label();
     if (unlinkedTable.isList()) {
@@ -2479,12 +2478,9 @@ void LOLJIT::emit_op_switch_string(const JSInstruction* currentInstruction)
     m_switches.append(SwitchRecord(tableIndex, m_bytecodeIndex, defaultOffset, SwitchRecord::String));
     linkedTable.ensureCTITable(unlinkedTable);
 
-    using BaselineJITRegisters::SwitchString::globalObjectGPR;
-    using BaselineJITRegisters::SwitchString::scrutineeJSR;
-
-    moveValueRegs(scrutineeRegs, scrutineeJSR);
-    loadGlobalObject(globalObjectGPR);
-    callOperation(operationSwitchStringWithUnknownKeyType, globalObjectGPR, scrutineeJSR, tableIndex);
+    move(scrutineeGPR, BaselineJITRegisters::SwitchString::scrutineeGPR);
+    loadGlobalObject(BaselineJITRegisters::SwitchString::globalObjectGPR);
+    callOperation(operationSwitchStringWithUnknownKeyType, BaselineJITRegisters::SwitchString::globalObjectGPR, BaselineJITRegisters::SwitchString::scrutineeGPR, tableIndex);
     farJump(returnValueGPR, JSSwitchPtrTag);
 
     m_fastAllocator.releaseScratches(allocations);
@@ -2512,7 +2508,7 @@ void LOLJIT::emitRightShiftFastPath(const JSInstruction* currentInstruction, JIT
 
     RELEASE_ASSERT(!leftOperand.isConst() || !rightOperand.isConst());
 
-    JITRightShiftGenerator gen(leftOperand, rightOperand, destRegs, leftRegs, rightRegs, fpRegT0, s_scratch, snippetShiftType);
+    JITRightShiftGenerator gen(leftOperand, rightOperand, destGPR, leftGPR, rightGPR, fpRegT0, s_scratch, snippetShiftType);
 
     gen.generateFastPath(*this);
 
@@ -2554,7 +2550,7 @@ void LOLJIT::emit_op_lshift(const JSInstruction* currentInstruction)
 
     RELEASE_ASSERT(!leftOperand.isConst() || !rightOperand.isConst());
 
-    JITLeftShiftGenerator gen(leftOperand, rightOperand, destRegs, leftRegs, rightRegs);
+    JITLeftShiftGenerator gen(leftOperand, rightOperand, destGPR, leftGPR, rightGPR);
 
     gen.generateFastPath(*this);
 
@@ -2571,8 +2567,8 @@ void LOLJIT::emitBitBinaryOpFastPath(const JSInstruction* currentInstruction)
 {
     auto bytecode = currentInstruction->as<Op>();
     auto allocations = m_fastAllocator.allocate(*this, bytecode, m_bytecodeIndex);
-    auto [ leftRegs, rightRegs ] = allocations.uses;
-    auto [ resultRegs ] = allocations.defs;
+    auto [ leftGPR, rightGPR ] = allocations.uses;
+    auto [ resultGPR ] = allocations.defs;
 
     VirtualRegister op1 = bytecode.m_lhs;
     VirtualRegister op2 = bytecode.m_rhs;
@@ -2594,9 +2590,9 @@ void LOLJIT::emitBitBinaryOpFastPath(const JSInstruction* currentInstruction)
 
     SnippetGenerator gen = [&] {
         if constexpr (SnippetGenerator::needsScratchGPR)
-            return SnippetGenerator(leftOperand, rightOperand, resultRegs, leftRegs, rightRegs, s_scratch);
+            return SnippetGenerator(leftOperand, rightOperand, resultGPR, leftGPR, rightGPR, s_scratch);
         else
-            return SnippetGenerator(leftOperand, rightOperand, resultRegs, leftRegs, rightRegs);
+            return SnippetGenerator(leftOperand, rightOperand, resultGPR, leftGPR, rightGPR);
     }();
 
     gen.generateFastPath(*this);
@@ -2645,7 +2641,7 @@ void LOLJIT::emitMathICFast(JITBinaryMathIC<Generator>* mathIC, const JSInstruct
 
     RELEASE_ASSERT(!leftOperand.isConst() || !rightOperand.isConst());
 
-    mathIC->m_generator = Generator(leftOperand, rightOperand, destRegs, leftRegs, rightRegs, fpRegT0, fpRegT1, s_scratch);
+    mathIC->m_generator = Generator(leftOperand, rightOperand, destGPR, leftGPR, rightGPR, fpRegT0, fpRegT1, s_scratch);
 
     ASSERT(!(Generator::isLeftOperandValidConstant(leftOperand) && Generator::isRightOperandValidConstant(rightOperand)));
 
@@ -2662,10 +2658,10 @@ void LOLJIT::emitMathICFast(JITBinaryMathIC<Generator>* mathIC, const JSInstruct
         silentSpill(m_fastAllocator, allocations);
         loadGlobalObject(s_scratch);
         if (arithProfile && shouldEmitProfiling())
-            callOperationWithResult(profiledFunction, destRegs, s_scratch, leftRegs, rightRegs, TrustedImmPtr(arithProfile));
+            callOperationWithResult(profiledFunction, destGPR, s_scratch, leftGPR, rightGPR, TrustedImmPtr(arithProfile));
         else
-            callOperationWithResult(nonProfiledFunction, destRegs, s_scratch, leftRegs, rightRegs);
-        silentFill(m_fastAllocator, destRegs.gpr());
+            callOperationWithResult(nonProfiledFunction, destGPR, s_scratch, leftGPR, rightGPR);
+        silentFill(m_fastAllocator, destGPR);
     } else
         addSlowCase(mathICGenerationState.slowPathJumps);
 
@@ -2721,13 +2717,13 @@ void LOLJIT::emitMathICSlow(JITBinaryMathIC<Generator>* mathIC, const JSInstruct
     loadGlobalObject(s_scratch);
     if (arithProfile && shouldEmitProfiling()) {
         if (mathICGenerationState.shouldSlowPathRepatch)
-            mathICGenerationState.slowPathCall = callOperationWithResult(std::bit_cast<J_JITOperation_GJJMic>(profiledRepatchFunction), destRegs, s_scratch, leftRegs, rightRegs, TrustedImmPtr(mathIC));
+            mathICGenerationState.slowPathCall = callOperationWithResult(std::bit_cast<J_JITOperation_GJJMic>(profiledRepatchFunction), destGPR, s_scratch, leftGPR, rightGPR, TrustedImmPtr(mathIC));
         else
-            mathICGenerationState.slowPathCall = callOperationWithResult(profiledFunction, destRegs, s_scratch, leftRegs, rightRegs, TrustedImmPtr(arithProfile));
+            mathICGenerationState.slowPathCall = callOperationWithResult(profiledFunction, destGPR, s_scratch, leftGPR, rightGPR, TrustedImmPtr(arithProfile));
     } else
-        mathICGenerationState.slowPathCall = callOperationWithResult(std::bit_cast<J_JITOperation_GJJMic>(repatchFunction), destRegs, s_scratch, leftRegs, rightRegs, TrustedImmPtr(mathIC));
+        mathICGenerationState.slowPathCall = callOperationWithResult(std::bit_cast<J_JITOperation_GJJMic>(repatchFunction), destGPR, s_scratch, leftGPR, rightGPR, TrustedImmPtr(mathIC));
 
-    silentFill(m_replayAllocator, destRegs.gpr());
+    silentFill(m_replayAllocator, destGPR);
 
 #if ENABLE(MATH_IC_STATS)
     auto slowPathEnd = label();
@@ -2750,14 +2746,14 @@ void LOLJIT::emitMathICFast(JITUnaryMathIC<Generator>* mathIC, const JSInstructi
 {
     auto bytecode = currentInstruction->as<Op>();
     auto allocations = m_fastAllocator.allocate(*this, bytecode, m_bytecodeIndex);
-    auto [ srcRegs ] = allocations.uses;
-    auto [ destRegs ] = allocations.defs;
+    auto [ srcGPR ] = allocations.uses;
+    auto [ destGPR ] = allocations.defs;
 
 #if ENABLE(MATH_IC_STATS)
     auto inlineStart = label();
 #endif
 
-    mathIC->m_generator = Generator(destRegs, srcRegs, s_scratch);
+    mathIC->m_generator = Generator(destGPR, srcGPR, s_scratch);
 
     MathICGenerationState& mathICGenerationState = m_instructionToMathICGenerationState.add(currentInstruction, makeUniqueRef<MathICGenerationState>()).iterator->value.get();
 
@@ -2768,10 +2764,10 @@ void LOLJIT::emitMathICFast(JITUnaryMathIC<Generator>* mathIC, const JSInstructi
         silentSpill(m_fastAllocator, allocations);
         loadGlobalObject(s_scratch);
         if (arithProfile && shouldEmitProfiling())
-            callOperationWithResult(profiledFunction, destRegs, s_scratch, srcRegs, TrustedImmPtr(arithProfile));
+            callOperationWithResult(profiledFunction, destGPR, s_scratch, srcGPR, TrustedImmPtr(arithProfile));
         else
-            callOperationWithResult(nonProfiledFunction, destRegs, s_scratch, srcRegs);
-        silentFill(m_fastAllocator, destRegs.gpr());
+            callOperationWithResult(nonProfiledFunction, destGPR, s_scratch, srcGPR);
+        silentFill(m_fastAllocator, destGPR);
     } else
         addSlowCase(mathICGenerationState.slowPathJumps);
 
@@ -2814,13 +2810,13 @@ void LOLJIT::emitMathICSlow(JITUnaryMathIC<Generator>* mathIC, const JSInstructi
     loadGlobalObject(s_scratch);
     if (arithProfile && shouldEmitProfiling()) {
         if (mathICGenerationState.shouldSlowPathRepatch)
-            mathICGenerationState.slowPathCall = callOperationWithResult(reinterpret_cast<J_JITOperation_GJMic>(profiledRepatchFunction), destRegs, s_scratch, srcRegs, TrustedImmPtr(mathIC));
+            mathICGenerationState.slowPathCall = callOperationWithResult(reinterpret_cast<J_JITOperation_GJMic>(profiledRepatchFunction), destGPR, s_scratch, srcGPR, TrustedImmPtr(mathIC));
         else
-            mathICGenerationState.slowPathCall = callOperationWithResult(profiledFunction, destRegs, s_scratch, srcRegs, TrustedImmPtr(arithProfile));
+            mathICGenerationState.slowPathCall = callOperationWithResult(profiledFunction, destGPR, s_scratch, srcGPR, TrustedImmPtr(arithProfile));
     } else
-        mathICGenerationState.slowPathCall = callOperationWithResult(reinterpret_cast<J_JITOperation_GJMic>(repatchFunction), destRegs, s_scratch, srcRegs, TrustedImmPtr(mathIC));
+        mathICGenerationState.slowPathCall = callOperationWithResult(reinterpret_cast<J_JITOperation_GJMic>(repatchFunction), destGPR, s_scratch, srcGPR, TrustedImmPtr(mathIC));
 
-    silentFill(m_replayAllocator, destRegs.gpr());
+    silentFill(m_replayAllocator, destGPR);
 
 #if ENABLE(MATH_IC_STATS)
     auto slowPathEnd = label();
@@ -2949,13 +2945,13 @@ void LOLJIT::emit_op_mod(const JSInstruction* currentInstruction)
     // Make sure we're not accidentally producing a positive zero when it should be a negative zero.
     Jump numeratorPositive = branch32(GreaterThanOrEqual, dividendGPR, TrustedImm32(0));
     Jump nonZeroRemainder = branchTest32(NonZero, quotientThenRemainderGPR);
-    moveValue(jsDoubleNumber(-0.0), dstRegs);
+    moveValue(jsDoubleNumber(-0.0), dstGPR);
     Jump done = jump();
 
     numeratorPositive.link(this);
     nonZeroRemainder.link(this);
 
-    boxInt32(quotientThenRemainderGPR, dstRegs);
+    boxInt32(quotientThenRemainderGPR, dstGPR);
     done.link(this);
 
     m_fastAllocator.releaseScratches(allocations);
@@ -3210,17 +3206,17 @@ void LOLJIT::emit_op_get_from_scope(const JSInstruction* currentInstruction)
             }
             move(TrustedImm32(bytecodeOffset), thunkBytecodeOffsetGPR);
             nearCallThunk(CodeLocationLabel { code.retaggedCode<NoPtrTag>() });
-            // Thunk returns result in returnValueJSR, move to the allocated register
+            // Thunk returns result in returnValueGPR, move to the allocated register
 
-            moveValueRegs(returnValueJSR, destRegs);
-            silentFill(m_fastAllocator, destRegs.gpr());
+            move(returnValueGPR, destGPR);
+            silentFill(m_fastAllocator, destGPR);
             break;
         }
         }
     }
 
     setFastPathResumePoint();
-    emitValueProfilingSite(bytecode, destRegs);
+    emitValueProfilingSite(bytecode, destGPR);
     m_fastAllocator.releaseScratches(allocations);
 }
 
@@ -3228,8 +3224,8 @@ void LOLJIT::emitSlow_op_get_from_scope(const JSInstruction* currentInstruction,
 {
     auto bytecode = currentInstruction->as<OpGetFromScope>();
     auto allocations = m_replayAllocator.allocate(*this, bytecode, m_bytecodeIndex);
-    auto [ scopeRegs ] = allocations.uses;
-    auto [ destRegs ] = allocations.defs;
+    auto [ scopeGPR ] = allocations.uses;
+    auto [ destGPR ] = allocations.defs;
 
     if (!hasAnySlowCases(iter)) {
         m_replayAllocator.releaseScratches(allocations);
@@ -3272,9 +3268,9 @@ void LOLJIT::emitSlow_op_get_from_scope(const JSInstruction* currentInstruction,
     addPtr(TrustedImm32(metadataOffset), GPRInfo::metadataTableRegister, thunkMetadataGPR);
     move(TrustedImm32(bytecodeOffset), thunkBytecodeOffsetGPR);
     nearCallThunk(CodeLocationLabel { code.retaggedCode<NoPtrTag>() });
-    // Thunk returns result in returnValueJSR, move to allocated register
-    moveValueRegs(returnValueJSR, destRegs);
-    silentFill(m_replayAllocator, destRegs.gpr());
+    // Thunk returns result in returnValueGPR, move to allocated register
+    move(returnValueGPR, destGPR);
+    silentFill(m_replayAllocator, destGPR);
     m_replayAllocator.releaseScratches(allocations);
 }
 
@@ -3330,7 +3326,7 @@ MacroAssemblerCodeRef<JITThunkPtrTag> LOLJIT::generateOpGetFromScopeThunk(VM& vm
 
             jit.loadPtr(Address(scopeGPR, JSObject::butterflyOffset()), scopeGPR);
             jit.negPtr(scratch1GPR);
-            jit.loadValue(BaseIndex(scopeGPR, scratch1GPR, TimesEight, (firstOutOfLineOffset - 2) * sizeof(EncodedJSValue)), returnValueJSR);
+            jit.loadValue(BaseIndex(scopeGPR, scratch1GPR, TimesEight, (firstOutOfLineOffset - 2) * sizeof(EncodedJSValue)), returnValueGPR);
             break;
         }
         case GlobalVar:
@@ -3339,15 +3335,15 @@ MacroAssemblerCodeRef<JITThunkPtrTag> LOLJIT::generateOpGetFromScopeThunk(VM& vm
         case GlobalLexicalVarWithVarInjectionChecks:
             doVarInjectionCheck(needsVarInjectionChecks(resolveType));
             jit.loadPtr(Address(metadataGPR, Metadata::offsetOfOperand()), scratch1GPR);
-            jit.loadValue(Address(scratch1GPR), returnValueJSR);
+            jit.loadValue(Address(scratch1GPR), returnValueGPR);
             if (resolveType == GlobalLexicalVar || resolveType == GlobalLexicalVarWithVarInjectionChecks) // TDZ check.
-                slowCase.append(jit.branchIfEmpty(returnValueJSR));
+                slowCase.append(jit.branchIfEmpty(returnValueGPR));
             break;
         case ClosureVar:
         case ClosureVarWithVarInjectionChecks:
             doVarInjectionCheck(needsVarInjectionChecks(resolveType));
             jit.loadPtr(Address(metadataGPR,  Metadata::offsetOfOperand()), scratch1GPR);
-            jit.loadValue(BaseIndex(scopeGPR, scratch1GPR, TimesEight, JSLexicalEnvironment::offsetOfVariables()), returnValueJSR);
+            jit.loadValue(BaseIndex(scopeGPR, scratch1GPR, TimesEight, JSLexicalEnvironment::offsetOfVariables()), returnValueGPR);
             break;
         case Dynamic:
             slowCase.append(jit.jump());
@@ -3494,8 +3490,8 @@ void LOLJIT::emit_op_put_to_scope(const JSInstruction* currentInstruction)
             loadPtr(Address(scopeGPR, JSObject::butterflyOffset()), s_scratch);
             loadPtr(operandAddress, metadataGPR);
             negPtr(metadataGPR);
-            storeValue(valueRegs, BaseIndex(s_scratch, metadataGPR, TimesEight, (firstOutOfLineOffset - 2) * sizeof(EncodedJSValue)));
-            emitWriteBarrier(m_fastAllocator, allocations, scopeRegs, valueRegs, s_scratch, ShouldFilterValue);
+            storeValue(valueGPR, BaseIndex(s_scratch, metadataGPR, TimesEight, (firstOutOfLineOffset - 2) * sizeof(EncodedJSValue)));
+            emitWriteBarrier(m_fastAllocator, allocations, scopeGPR, valueGPR, s_scratch, ShouldFilterValue);
             break;
         }
         case GlobalVar:
@@ -3514,13 +3510,13 @@ void LOLJIT::emit_op_put_to_scope(const JSInstruction* currentInstruction)
 
             if (!isInitialization(bytecode.m_getPutInfo.initializationMode()) && (resolveType == GlobalLexicalVar || resolveType == GlobalLexicalVarWithVarInjectionChecks)) {
                 // We need to do a TDZ check here because we can't always prove we need to emit TDZ checks statically.
-                loadValue(Address(s_scratch), metadataRegs);
-                addSlowCase(branchIfEmpty(metadataRegs));
+                loadValue(Address(s_scratch), metadataGPR);
+                addSlowCase(branchIfEmpty(metadataGPR));
             }
 
-            storeValue(valueRegs, Address(s_scratch));
+            storeValue(valueGPR, Address(s_scratch));
 
-            emitWriteBarrier(m_fastAllocator, allocations, scopeRegs, valueRegs, s_scratch, ShouldFilterValue);
+            emitWriteBarrier(m_fastAllocator, allocations, scopeGPR, valueGPR, s_scratch, ShouldFilterValue);
             break;
         }
         case ResolvedClosureVar:
@@ -3603,7 +3599,7 @@ void LOLJIT::emitSlow_op_put_to_scope(const JSInstruction* currentInstruction, V
 
     auto bytecode = currentInstruction->as<OpPutToScope>();
     auto allocations = m_replayAllocator.allocate(*this, bytecode, m_bytecodeIndex);
-    auto [ scopeRegs, valueRegs ] = allocations.uses;
+    auto [ scopeGPR, valueGPR ] = allocations.uses;
 
     ResolveType profiledResolveType = bytecode.metadata(m_profiledCodeBlock).m_getPutInfo.resolveType();
     silentSpill(m_replayAllocator, allocations);
@@ -3626,12 +3622,12 @@ void LOLJIT::emitSlow_op_put_to_scope(const JSInstruction* currentInstruction, V
 void LOLJIT::emit_op_resolve_scope(const JSInstruction* currentInstruction)
 {
     auto bytecode = currentInstruction->as<OpResolveScope>();
-    // TODO: This should only allocate scopeRegs when profiledResolveType == ClosureVar as that's the only case that uses it and its static otherwise.
+    // TODO: This should only allocate scopeGPR when profiledResolveType == ClosureVar as that's the only case that uses it and its static otherwise.
     // Perhaps we should have a ResolveClosureScope instruction instead as that would use less operands for every other case.
     auto allocations = m_fastAllocator.allocate(*this, bytecode, m_bytecodeIndex);
-    auto [ scopeRegs ] = allocations.uses;
-    auto [ destRegs ] = allocations.defs;
-    auto [ metadataRegs ] = allocations.scratches;
+    auto [ scopeGPR ] = allocations.uses;
+    auto [ destGPR ] = allocations.defs;
+    auto [ metadataGPR ] = allocations.scratches;
 
     ResolveType profiledResolveType = bytecode.metadata(m_profiledCodeBlock).m_resolveType;
     uint32_t bytecodeOffset = m_bytecodeIndex.offset();

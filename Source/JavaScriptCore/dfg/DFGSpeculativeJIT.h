@@ -1525,7 +1525,7 @@ public:
     void compileLoadMapValue(Node*);
     void compileIsEmptyStorage(Node*);
     void compileMapIteratorNext(Node*);
-    void loadMapEntryData(bool isMap, GPRReg storageGPR, GPRReg entryGPR, GPRReg scratchGPR, JSValueRegs resultRegs, int32_t indexAdjust);
+    void loadMapEntryData(bool isMap, GPRReg storageGPR, GPRReg entryGPR, GPRReg scratchGPR, GPRReg resultGPR, int32_t indexAdjust);
     void compileMapIteratorKey(Node*);
     void compileMapIteratorValue(Node*);
     void compileMapStorage(Node*);
@@ -1741,7 +1741,7 @@ public:
     void compileRegExpMatchFastGlobal(Node*);
     void compileRegExpSplitFast(Node*);
     void compileRegExpTest(Node*);
-    bool tryEmitRegExpTestFirstCharacterFilter(Node*, GPRReg globalObjectGPR, GPRReg baseGPR, JSValueRegs argumentRegs, Edge baseEdge, Edge argumentEdge);
+    void emitRegExpTestWithFilter(Node*, GPRReg globalObjectGPR, GPRReg baseGPR, GPRReg argumentGPR, Edge baseEdge, Edge argumentEdge);
     void compileRegExpTestInline(Node*);
     void compileRegExpSearch(Node*);
     void compileRegExpStringIteratorNext(Node*);
@@ -2561,6 +2561,7 @@ private:
 // These classes lock the result of a call to a C++ helper function.
 
 class GPRFlushedCallResult : public GPRTemporary {
+    WTF_MAKE_SEQUESTERED_ARENA_ALLOCATED(GPRFlushedCallResult);
 public:
     GPRFlushedCallResult(SpeculativeJIT* jit)
         : GPRTemporary(jit, GPRInfo::returnValueGPR)
@@ -2569,6 +2570,7 @@ public:
 };
 
 class GPRFlushedCallResult2 : public GPRTemporary {
+    WTF_MAKE_SEQUESTERED_ARENA_ALLOCATED(GPRFlushedCallResult2);
 public:
     GPRFlushedCallResult2(SpeculativeJIT* jit)
         : GPRTemporary(jit, GPRInfo::returnValueGPR2)
@@ -2577,6 +2579,7 @@ public:
 };
 
 class FPRResult : public FPRTemporary {
+    WTF_MAKE_SEQUESTERED_ARENA_ALLOCATED(FPRResult);
 public:
     FPRResult(SpeculativeJIT* jit)
         : FPRTemporary(jit, lockedResult(jit))

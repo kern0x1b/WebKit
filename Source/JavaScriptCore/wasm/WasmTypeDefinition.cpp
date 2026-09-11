@@ -1058,9 +1058,8 @@ bool Type::definitelyIsWasmGCObjectOrNull() const
     if (!isRefType(*this))
         return false;
 
-    TypeIndex typeIndex = index();
-    if (isAbstractTypeIndex(typeIndex)) {
-        switch (typeIndexAsTypeKind(typeIndex)) {
+    if (typeIndexIsType(index)) {
+        switch (static_cast<TypeKind>(index)) {
         case TypeKind::Arrayref:
         case TypeKind::Structref:
             return true;
@@ -1104,7 +1103,7 @@ void RTT::ensureArgumINTBytecode(const CallInformation& callCC) const
     constexpr static int NUM_ARGUMINT_GPRS = 8;
     constexpr static int NUM_ARGUMINT_FPRS = 8;
 
-    ASSERT_UNUSED(NUM_ARGUMINT_GPRS, wasmCallingConvention().jsrArgs.size() <= NUM_ARGUMINT_GPRS);
+    ASSERT_UNUSED(NUM_ARGUMINT_GPRS, wasmCallingConvention().gprArgs.size() <= NUM_ARGUMINT_GPRS);
     ASSERT_UNUSED(NUM_ARGUMINT_FPRS, wasmCallingConvention().fprArgs.size() <= NUM_ARGUMINT_FPRS);
 
     m_argumINTBytecode.ensure([&] {
@@ -1118,8 +1117,14 @@ void RTT::ensureArgumINTBytecode(const CallInformation& callCC) const
                 const ValueLocation& loc = argLoc.location;
 
                 if (loc.isGPR()) {
+#if USE(JSVALUE64)
                     ASSERT_UNUSED(NUM_ARGUMINT_GPRS, GPRInfo::toArgumentIndex(loc.jsr().gpr()) < NUM_ARGUMINT_GPRS);
                     return static_cast<uint8_t>(IPInt::ArgumINTBytecode::ArgGPR) + GPRInfo::toArgumentIndex(loc.jsr().gpr());
+#elif USE(JSVALUE32_64)
+                    ASSERT_UNUSED(NUM_ARGUMINT_GPRS, GPRInfo::toArgumentIndex(loc.jsr().payloadGPR()) < NUM_ARGUMINT_GPRS);
+                    ASSERT_UNUSED(NUM_ARGUMINT_GPRS, GPRInfo::toArgumentIndex(loc.jsr().tagGPR()) < NUM_ARGUMINT_GPRS);
+                    return static_cast<uint8_t>(IPInt::ArgumINTBytecode::ArgGPR) + GPRInfo::toArgumentIndex(loc.jsr().gpr(WhichValueWord::PayloadWord)) / 2;
+#endif
                 }
 
                 if (loc.isFPR()) {
@@ -1151,7 +1156,7 @@ void RTT::ensureUINTBytecode(const CallInformation& returnCC) const
     // uINT: the interpreter smaller than mINT
     constexpr static int NUM_UINT_GPRS = 8;
     constexpr static int NUM_UINT_FPRS = 8;
-    ASSERT_UNUSED(NUM_UINT_GPRS, wasmCallingConvention().jsrArgs.size() <= NUM_UINT_GPRS);
+    ASSERT_UNUSED(NUM_UINT_GPRS, wasmCallingConvention().gprArgs.size() <= NUM_UINT_GPRS);
     ASSERT_UNUSED(NUM_UINT_FPRS, wasmCallingConvention().fprArgs.size() <= NUM_UINT_FPRS);
 
     m_uINTBytecode.ensure([&] {
@@ -1167,8 +1172,14 @@ void RTT::ensureUINTBytecode(const CallInformation& returnCC) const
             const ValueLocation& loc = argLoc.location;
 
             if (loc.isGPR()) {
+#if USE(JSVALUE64)
                 ASSERT_UNUSED(NUM_UINT_GPRS, GPRInfo::toArgumentIndex(loc.jsr().gpr()) < NUM_UINT_GPRS);
                 return static_cast<uint8_t>(IPInt::UINTBytecode::RetGPR) + GPRInfo::toArgumentIndex(loc.jsr().gpr());
+#elif USE(JSVALUE32_64)
+                ASSERT_UNUSED(NUM_UINT_GPRS, GPRInfo::toArgumentIndex(loc.jsr().payloadGPR()) < NUM_UINT_GPRS);
+                ASSERT_UNUSED(NUM_UINT_GPRS, GPRInfo::toArgumentIndex(loc.jsr().tagGPR()) < NUM_UINT_GPRS);
+                return static_cast<uint8_t>(IPInt::UINTBytecode::RetGPR) + GPRInfo::toArgumentIndex(loc.jsr().gpr(WhichValueWord::PayloadWord));
+#endif
             }
 
             if (loc.isFPR()) {
@@ -1212,7 +1223,7 @@ static Vector<uint8_t, 16> buildCallArgumentBytecode(const CallInformation& call
 {
     constexpr static int NUM_MINT_CALL_GPRS = 8;
     constexpr static int NUM_MINT_CALL_FPRS = 8;
-    ASSERT_UNUSED(NUM_MINT_CALL_GPRS, wasmCallingConvention().jsrArgs.size() <= NUM_MINT_CALL_GPRS);
+    ASSERT_UNUSED(NUM_MINT_CALL_GPRS, wasmCallingConvention().gprArgs.size() <= NUM_MINT_CALL_GPRS);
     ASSERT_UNUSED(NUM_MINT_CALL_FPRS, wasmCallingConvention().fprArgs.size() <= NUM_MINT_CALL_FPRS);
 
     auto toBytecodeUint8 = [](IPInt::CallArgumentBytecode bytecode) {
@@ -1240,8 +1251,14 @@ static Vector<uint8_t, 16> buildCallArgumentBytecode(const CallInformation& call
             const ValueLocation& loc = argLoc.location;
 
             if (loc.isGPR()) {
+#if USE(JSVALUE64)
                 ASSERT_UNUSED(NUM_MINT_CALL_GPRS, GPRInfo::toArgumentIndex(loc.jsr().gpr()) < NUM_MINT_CALL_GPRS);
                 return static_cast<uint8_t>(IPInt::CallArgumentBytecode::ArgumentGPR) + GPRInfo::toArgumentIndex(loc.jsr().gpr());
+#elif USE(JSVALUE32_64)
+                ASSERT_UNUSED(NUM_MINT_CALL_GPRS, GPRInfo::toArgumentIndex(loc.jsr().payloadGPR()) < NUM_MINT_CALL_GPRS);
+                ASSERT_UNUSED(NUM_MINT_CALL_GPRS, GPRInfo::toArgumentIndex(loc.jsr().tagGPR()) < NUM_MINT_CALL_GPRS);
+                return static_cast<uint8_t>(IPInt::CallArgumentBytecode::ArgumentGPR) + GPRInfo::toArgumentIndex(loc.jsr().gpr(WhichValueWord::PayloadWord));
+#endif
             }
 
             if (loc.isFPR()) {
@@ -1285,7 +1302,7 @@ static intptr_t buildCallResultBytecode(Vector<uint8_t, 16>& results, const Call
 {
     constexpr static int NUM_MINT_RET_GPRS = 8;
     constexpr static int NUM_MINT_RET_FPRS = 8;
-    ASSERT_UNUSED(NUM_MINT_RET_GPRS, wasmCallingConvention().jsrArgs.size() <= NUM_MINT_RET_GPRS);
+    ASSERT_UNUSED(NUM_MINT_RET_GPRS, wasmCallingConvention().gprArgs.size() <= NUM_MINT_RET_GPRS);
     ASSERT_UNUSED(NUM_MINT_RET_FPRS, wasmCallingConvention().fprArgs.size() <= NUM_MINT_RET_FPRS);
 
     intptr_t firstStackResultSPOffset = 0;
@@ -1299,7 +1316,11 @@ static intptr_t buildCallResultBytecode(Vector<uint8_t, 16>& results, const Call
 
             if (loc.isGPR()) {
                 ASSERT_UNUSED(NUM_MINT_RET_GPRS, GPRInfo::toArgumentIndex(loc.jsr().payloadGPR()) < NUM_MINT_RET_GPRS);
+#if USE(JSVALUE64)
                 return static_cast<uint8_t>(IPInt::CallResultBytecode::ResultGPR) + GPRInfo::toArgumentIndex(loc.jsr().gpr());
+#elif USE(JSVALUE32_64)
+                return static_cast<uint8_t>(IPInt::CallResultBytecode::ResultGPR) + GPRInfo::toArgumentIndex(loc.jsr().gpr(WhichValueWord::PayloadWord));
+#endif
             }
 
             if (loc.isFPR()) {

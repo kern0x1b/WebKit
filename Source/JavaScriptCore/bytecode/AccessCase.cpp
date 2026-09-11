@@ -224,18 +224,31 @@ RefPtr<AccessCase> AccessCase::createTransition(
     // Skip optimizing the case where we need a realloc, if we don't have
     // enough registers to make it happen.
     if (oldStructure->outOfLineCapacity() != newStructure->outOfLineCapacity()) {
-        // 1 register for value.
+        // In 64 bits jsc uses 1 register for value, and it uses 2 registers in 32 bits
         size_t requiredRegisters = 1; // propertyCache.valueRegs()
-
-        // 1 register for the property.
+#if USE(JSVALUE32_64)
         ++requiredRegisters;
+#endif
 
-        // 1 register for the base.
+        // 1 register for the property in 64 bits
         ++requiredRegisters;
-
-        if (propertyCache.propertyCacheGPR() != InvalidGPRReg)
+#if USE(JSVALUE32_64)
+        // In 32 bits, jsc uses may use one extra register, if it is not a Cell
+        if (propertyCache.propertyRegs().tagGPR() != InvalidGPRReg)
             ++requiredRegisters;
-        if (propertyCache.arrayProfileGPR() != InvalidGPRReg)
+#endif
+
+        // 1 register for the base in 64 bits
+        ++requiredRegisters;
+#if USE(JSVALUE32_64)
+        // In 32 bits, jsc uses may use one extra register, if it is not a Cell
+        if (propertyCache.baseRegs().tagGPR() != InvalidGPRReg)
+            ++requiredRegisters;
+#endif
+
+        if (propertyCache.m_propertyCacheGPR != InvalidGPRReg)
+            ++requiredRegisters;
+        if (propertyCache.m_arrayProfileGPR != InvalidGPRReg)
             ++requiredRegisters;
 
         // One extra register for scratchGPR

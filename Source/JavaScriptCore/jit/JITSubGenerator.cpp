@@ -53,8 +53,8 @@ JITMathICInlineResult JITSubGenerator::generateInline(CCallHelpers& jit, MathICG
             state.slowPathJumps.append(jit.branchIfNotNumber(m_right));
         state.slowPathJumps.append(jit.branchIfInt32(m_left));
         state.slowPathJumps.append(jit.branchIfInt32(m_right));
-        jit.unboxDoubleNonDestructive(m_left, m_leftFPR, m_scratchGPR);
-        jit.unboxDoubleNonDestructive(m_right, m_rightFPR, m_scratchGPR);
+        jit.unboxDouble(m_left, m_scratchGPR, m_leftFPR);
+        jit.unboxDouble(m_right, m_scratchGPR, m_rightFPR);
         jit.subDouble(m_rightFPR, m_leftFPR);
         jit.boxDouble(m_leftFPR, m_result);
 
@@ -82,6 +82,10 @@ bool JITSubGenerator::generateFastPath(CCallHelpers& jit, CCallHelpers::JumpList
     ASSERT(m_scratchGPR != InvalidGPRReg);
     ASSERT(m_scratchGPR != m_left.payloadGPR());
     ASSERT(m_scratchGPR != m_right.payloadGPR());
+#if USE(JSVALUE32_64)
+    ASSERT(m_scratchGPR != m_left.tagGPR());
+    ASSERT(m_scratchGPR != m_right.tagGPR());
+#endif
 
     CCallHelpers::Jump leftNotInt = jit.branchIfNotInt32(m_left);
     CCallHelpers::Jump rightNotInt = jit.branchIfNotInt32(m_right);
@@ -98,9 +102,9 @@ bool JITSubGenerator::generateFastPath(CCallHelpers& jit, CCallHelpers::JumpList
 
     leftNotInt.link(&jit);
     if (!m_leftOperand.definitelyIsNumber())
-        slowPathJumpList.append(jit.branchIfNotNumber(m_left));
+        slowPathJumpList.append(jit.branchIfNotNumber(m_left, m_scratchGPR));
     if (!m_rightOperand.definitelyIsNumber())
-        slowPathJumpList.append(jit.branchIfNotNumber(m_right));
+        slowPathJumpList.append(jit.branchIfNotNumber(m_right, m_scratchGPR));
 
     jit.unboxDoubleNonDestructive(m_left, m_leftFPR, m_scratchGPR);
     CCallHelpers::Jump rightIsDouble = jit.branchIfNotInt32(m_right);
@@ -110,7 +114,7 @@ bool JITSubGenerator::generateFastPath(CCallHelpers& jit, CCallHelpers::JumpList
 
     rightNotInt.link(&jit);
     if (!m_rightOperand.definitelyIsNumber())
-        slowPathJumpList.append(jit.branchIfNotNumber(m_right));
+        slowPathJumpList.append(jit.branchIfNotNumber(m_right, m_scratchGPR));
 
     jit.convertInt32ToDouble(m_left.payloadGPR(), m_leftFPR);
 
