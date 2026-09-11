@@ -2270,7 +2270,12 @@ macro getArgumentIncludingThisCountForAsyncIteratorNext(size, dst)
     addi 1, dst
 end
 
-include LowLevelInterpreter64
+# Value-representation-specific code.
+if JSVALUE64
+    include LowLevelInterpreter64
+else
+    include LowLevelInterpreter32_64
+end
 
 
 

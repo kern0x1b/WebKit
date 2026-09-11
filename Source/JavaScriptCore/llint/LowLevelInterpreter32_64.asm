@@ -53,9 +53,9 @@ end
 macro storeJSValueConcurrent(store, tag, payload)
     if JIT
         store(InvalidTag, TagOffset)
-        writefence
+        fence
         store(payload, PayloadOffset)
-        writefence
+        fence
         store(tag, TagOffset)
     else
         store(payload, PayloadOffset)
