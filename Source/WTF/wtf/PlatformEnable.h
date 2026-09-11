@@ -292,9 +292,15 @@
 #define ENABLE_IOS_TOUCH_EVENTS 0
 #endif
 
+#if !defined(ENABLE_ISO18013_DOCUMENT_REQUEST_INFO)
+#define ENABLE_ISO18013_DOCUMENT_REQUEST_INFO 0
+#endif
+
 #if !defined(ENABLE_IPC_TESTING_API)
 /* Enable IPC testing on all ASAN builds and debug builds. Enable it in GLib ports when assertions are enabled. */
-#if ((ASAN_ENABLED || !defined(NDEBUG)) && PLATFORM(COCOA)) || (ASSERT_ENABLED && (PLATFORM(GTK) || PLATFORM(WPE)))
+/* In GLib ports, only enable for GCC builds, as this is what we currently test in EWS and clang-18 is significantly */
+/* slow to build when IPC testing is enabled. */
+#if ((ASAN_ENABLED || !defined(NDEBUG)) && PLATFORM(COCOA)) || (ASSERT_ENABLED && (PLATFORM(GTK) || PLATFORM(WPE)) && COMPILER(GCC))
 #define ENABLE_IPC_TESTING_API 1
 #endif
 #endif
@@ -545,6 +551,10 @@
 #define ENABLE_SPELLCHECK 0
 #endif
 
+#if !defined(ENABLE_TEXT_AUTOSIZING)
+#define ENABLE_TEXT_AUTOSIZING 0
+#endif
+
 #if !defined(ENABLE_TEXT_CARET)
 #define ENABLE_TEXT_CARET 1
 #endif
@@ -629,7 +639,7 @@
 #define ENABLE_WEBGPU PLATFORM(COCOA)
 #endif
 
-#if !defined(ENABLE_WEBGPU_BY_DEFAULT) && ((PLATFORM(MAC) && __MAC_OS_X_VERSION_MIN_REQUIRED >= 260000) || PLATFORM(IOS) || PLATFORM(VISION) || PLATFORM(WATCHOS))
+#if !defined(ENABLE_WEBGPU_BY_DEFAULT) && ((PLATFORM(MAC) && __MAC_OS_X_VERSION_MIN_REQUIRED >= 260000) || PLATFORM(IOS) || PLATFORM(VISION))
 #define ENABLE_WEBGPU_BY_DEFAULT 1
 #endif
 
@@ -715,13 +725,25 @@
 #define ENABLE_JIT 1
 #endif
 
+#if USE(JSVALUE32_64)
+/* iOS 6 port: 2.54 removed the ARMv7 escape hatch that 2.52 still had, so every
+   32-bit build is forced onto CLoop here. The 2.52 predicate was
+   CPU(ARM_THUMB2) && CPU(ARM_HARDFP) && OS(LINUX); we widen it to Darwin and
+   drop the hardfp term deliberately. Rationale for dropping it: clang does not
+   define __ARM_PCS_VFP for armv7-apple-ios6.0 (Apple uses the softfp calling
+   convention), so CPU(ARM_HARDFP) is 0 for us -- and grepping Source/JavaScriptCore
+   and Source/WTF shows ARM_HARDFP has no references outside PlatformCPU.h, so no
+   assembler or calling-convention code actually branches on it. The term is
+   vestigial, and gating on it would exclude us for no functional reason. */
 #if CPU(ARM_THUMB2) && (OS(LINUX) || OS(DARWIN))
 #if !defined(ENABLE_JIT)
 #define ENABLE_JIT 1
 #endif
-#elif !CPU(ADDRESS64)
+#else
+/* Disable JIT on all other 32bit architectures. */
 #undef ENABLE_JIT
 #define ENABLE_JIT 0
+#endif
 #endif
 
 #if CPU(RISCV64)
@@ -741,13 +763,15 @@
 #endif
 #endif
 
-#if !defined(ENABLE_JUMP_ISLANDS) && ENABLE(JIT) && CPU(ARM64) && CPU(ADDRESS64)
+#if !defined(ENABLE_JUMP_ISLANDS) && ENABLE(JIT)
+#if (CPU(ARM64) && CPU(ADDRESS64)) || CPU(ARM_THUMB2)
 #define ENABLE_JUMP_ISLANDS 1
+#endif
 #endif
 
 /* FIXME: This should be turned into an #error invariant */
 /* The FTL *does not* work on 32-bit platforms. Disable it even if someone asked us to enable it. */
-#if !CPU(ADDRESS64)
+#if USE(JSVALUE32_64)
 #undef ENABLE_FTL_JIT
 #define ENABLE_FTL_JIT 0
 /* iOS 6 port: 2.54 widened this block to take the DFG down with the FTL, though the
@@ -813,7 +837,7 @@
 #define ENABLE_CONCURRENT_JS 1
 #endif
 
-#if ENABLE(JIT) && (CPU(X86_64) || CPU(ARM64)) && HAVE(FAST_TLS)
+#if (CPU(X86_64) || CPU(ARM64)) && HAVE(FAST_TLS)
 #define ENABLE_FAST_TLS_JIT 1
 #endif
 
@@ -913,6 +937,26 @@
 #define ENABLE_YARR_JIT_DEBUG 0
 #endif
 
+/* Enable JIT'ing Regular Expressions that have nested parenthesis . */
+#if ENABLE(YARR_JIT) && (CPU(ARM64) || CPU(X86_64) || CPU(RISCV64))
+#define ENABLE_YARR_JIT_ALL_PARENS_EXPRESSIONS 1
+#define ENABLE_YARR_JIT_REGEXP_TEST_INLINE 1
+#endif
+
+/* Enable JIT'ing Regular Expressions that have back references. */
+#if ENABLE(YARR_JIT) && (CPU(ARM64) || CPU(X86_64) || CPU(RISCV64))
+#define ENABLE_YARR_JIT_BACKREFERENCES 1
+#if CPU(ARM64) || CPU(X86_64)
+#define ENABLE_YARR_JIT_BACKREFERENCES_FOR_16BIT_EXPRS 1
+#else
+#define ENABLE_YARR_JIT_BACKREFERENCES_FOR_16BIT_EXPRS 0
+#endif
+#endif
+
+#if ENABLE(YARR_JIT) && (CPU(ARM64) || CPU(X86_64) || CPU(RISCV64))
+#define ENABLE_YARR_JIT_UNICODE_EXPRESSIONS 1
+#endif
+
 /* Enables an optimiztion to advance two codepoints when we fail to match a non-BMP character */
 #if ENABLE(YARR_JIT) && CPU(ARM64)
 #define ENABLE_YARR_JIT_UNICODE_CAN_INCREMENT_INDEX_FOR_NON_BMP 1
@@ -957,7 +1001,7 @@
 #endif
 
 #if ENABLE(JIT)
-#if CPU(ARM64)
+#if CPU(ARM_THUMB2) || CPU(ARM64)
 #define ENABLE_BRANCH_COMPACTION 1
 #endif
 #endif
@@ -974,28 +1018,11 @@
 #define ENABLE_GC_VALIDATION 1
 #endif
 
-#if OS(DARWIN) && ENABLE(JIT) && USE(APPLE_INTERNAL_SDK) && CPU(ARM64E) && HAVE(JIT_CAGE)
-#if    HAVE(JIT_CAGE_RELAXATION) && !(PLATFORM(MAC) || PLATFORM(MACCATALYST))
+#if OS(DARWIN) && ENABLE(JIT) && USE(APPLE_INTERNAL_SDK) && CPU(ARM64E) && HAVE(JIT_CAGE) && !PLATFORM(MAC) && !PLATFORM(MACCATALYST)
 #define ENABLE_JIT_CAGE 1
-// FIXME: rdar://183646426
-#define ENABLE_JIT_CAGE_RELAXATION 0
-#elif  HAVE(JIT_CAGE_RELAXATION) &&  (PLATFORM(MAC) || PLATFORM(MACCATALYST))
-#define ENABLE_JIT_CAGE 0
-// FIXME: rdar://183649352
-#define ENABLE_JIT_CAGE_RELAXATION 0
-#elif !HAVE(JIT_CAGE_RELAXATION) && !(PLATFORM(MAC) || PLATFORM(MACCATALYST))
-#define ENABLE_JIT_CAGE 1
-#define ENABLE_JIT_CAGE_RELAXATION 0
-#elif !HAVE(JIT_CAGE_RELAXATION) &&  (PLATFORM(MAC) || PLATFORM(MACCATALYST))
-#define ENABLE_JIT_CAGE 0
-#define ENABLE_JIT_CAGE_RELAXATION 0
-#else
-#error "Should not be reached"
 #endif
-#endif // OS(DARWIN) && ENABLE(JIT) && USE(APPLE_INTERNAL_SDK) && CPU(ARM64E) && HAVE(JIT_CAGE)
 
-#if !ENABLE(JIT_CAGE_RELAXATION) && (ENABLE(JIT_CAGE) \
-    || (ENABLE(JIT) && OS(DARWIN) && CPU(ADDRESS64) && ASSERT_ENABLED))
+#if OS(DARWIN) && CPU(ADDRESS64) && ENABLE(JIT) && (ENABLE(JIT_CAGE) || ASSERT_ENABLED)
 #define ENABLE_JIT_OPERATION_VALIDATION 1
 #endif
 
@@ -1023,7 +1050,7 @@
    that executes each opcode. It cannot be supported by the CLoop since there's no way to embed the
    OpcodeID word in the CLoop's switch statement cases. It is also currently not implemented for MSVC.
 */
-#if !defined(ENABLE_LLINT_EMBEDDED_OPCODE_ID) && !ENABLE(C_LOOP) && (CPU(X86) || CPU(X86_64) || CPU(ARM64) || CPU(RISCV64))
+#if !defined(ENABLE_LLINT_EMBEDDED_OPCODE_ID) && !ENABLE(C_LOOP) && (CPU(X86) || CPU(X86_64) || CPU(ARM64) || (CPU(ARM_THUMB2) && OS(DARWIN)) || CPU(RISCV64))
 #define ENABLE_LLINT_EMBEDDED_OPCODE_ID 1
 #endif
 

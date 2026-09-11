@@ -71,14 +71,20 @@ CallFrameShuffler::CallFrameShuffler(CCallHelpers& jit, const CallFrameShuffleDa
             continue;
 
         if (reg.isGPR()) {
+#if USE(JSVALUE64)
+            addNew(JSValueRegs(reg.gpr()), data.registers[reg]);
+#elif USE(JSVALUE32_64)
             addNew(reg.gpr(), data.registers[reg]);
+#endif
         } else
             addNew(reg.fpr(), data.registers[reg]);
     }
 
+#if USE(JSVALUE64)
     m_numberTagRegister = data.numberTagRegister;
     if (m_numberTagRegister != InvalidGPRReg)
         lockGPR(m_numberTagRegister);
+#endif
 }
 
 WTF_ALLOW_UNSAFE_BUFFER_USAGE_BEGIN
@@ -176,8 +182,22 @@ void CallFrameShuffler::dump(PrintStream& out) const
             out.printf("         %8s                  ", str.data());
         } else
             out.print(emptySpace);
+#if USE(JSVALUE32_64)
+        if (newCachedRecovery) {
+            JSValueRegs wantedJSValueRegs { newCachedRecovery->wantedJSValueRegs() };
+            if (reg.isFPR())
+                out.print(reg, " <- ", newCachedRecovery->recovery());
+            else {
+                if (reg.gpr() == wantedJSValueRegs.tagGPR())
+                    out.print(reg.gpr(), " <- tag(", newCachedRecovery->recovery(), ")");
+                else
+                    out.print(reg.gpr(), " <- payload(", newCachedRecovery->recovery(), ")");
+            }
+        }
+#else
         if (newCachedRecovery)
             out.print("         ", reg, " <- ", newCachedRecovery->recovery());
+#endif
         out.print("\n");
     }
     out.print("  Locked registers: ");
@@ -198,8 +218,10 @@ void CallFrameShuffler::dump(PrintStream& out) const
         out.print("   Old frame offset is ", m_oldFrameOffset, "\n");
     if (m_newFrameOffset)
         out.print("   New frame offset is ", m_newFrameOffset, "\n");
+#if USE(JSVALUE64)
     if (m_numberTagRegister != InvalidGPRReg)
         out.print("   NumberTag is currently in ", m_numberTagRegister, "\n");
+#endif
 }
 WTF_ALLOW_UNSAFE_BUFFER_USAGE_END
 
@@ -210,6 +232,12 @@ CachedRecovery* CallFrameShuffler::getCachedRecovery(ValueRecovery recovery)
         return m_registers[recovery.gpr()];
     if (recovery.isInFPR())
         return m_registers[recovery.fpr()];
+#if USE(JSVALUE32_64)
+    if (recovery.technique() == InPair) {
+        ASSERT(m_registers[recovery.tagGPR()] == m_registers[recovery.payloadGPR()]);
+        return m_registers[recovery.payloadGPR()];
+    }
+#endif
     ASSERT(recovery.isInJSStack());
     return getOld(recovery.virtualRegister());
 }
@@ -221,6 +249,12 @@ CachedRecovery* CallFrameShuffler::setCachedRecovery(ValueRecovery recovery, Cac
         return m_registers[recovery.gpr()] = cachedRecovery;
     if (recovery.isInFPR())
         return m_registers[recovery.fpr()] = cachedRecovery;
+#if USE(JSVALUE32_64)
+    if (recovery.technique() == InPair) {
+        m_registers[recovery.tagGPR()] = cachedRecovery;
+        return m_registers[recovery.payloadGPR()] = cachedRecovery;
+    }
+#endif
     ASSERT(recovery.isInJSStack());
     setOld(recovery.virtualRegister(), cachedRecovery);
     return cachedRecovery;
@@ -347,7 +381,18 @@ void CallFrameShuffler::prepareForTailCall()
     m_oldFrameBase = MacroAssembler::stackPointerRegister;
     m_oldFrameOffset = numLocals();
     m_newFrameBase = acquireGPR();
-#if CPU(ARM64) || CPU(RISCV64)
+#if CPU(ARM_THUMB2)
+    // We load the frame pointer and link register
+    // manually. We could ask the algorithm to load them for us,
+    // and it would allow us to use the link register as an extra
+    // temporary - but it'd mean that the frame pointer can also
+    // be used as an extra temporary, so we keep the link register
+    // locked instead.
+
+    // sp will point to head1 since the callee's prologue pushes
+    // the call frame and link register.
+    m_newFrameOffset = -1;
+#elif CPU(ARM64) || CPU(RISCV64)
     // We load the frame pointer and link register manually. We
     // could ask the algorithm to load the link register for us
     // (which would allow for its use as an extra temporary), but
@@ -377,7 +422,7 @@ void CallFrameShuffler::prepareForTailCall()
     // old frame (taking into account an argument count higher than
     // the number of parameters), then substracting to it the aligned
     // new frame size (adjusted).
-    m_jit.load32(MacroAssembler::Address(GPRInfo::callFrameRegister, CallFrameSlot::argumentCountIncludingThis * static_cast<int>(sizeof(Register)) + LowWordOffset), m_newFrameBase);
+    m_jit.load32(MacroAssembler::Address(GPRInfo::callFrameRegister, CallFrameSlot::argumentCountIncludingThis * static_cast<int>(sizeof(Register)) + PayloadOffset), m_newFrameBase);
     MacroAssembler::Jump argumentCountOK =
         m_jit.branch32(MacroAssembler::BelowOrEqual, m_newFrameBase,
             MacroAssembler::TrustedImm32(m_numParameters));
@@ -398,7 +443,7 @@ void CallFrameShuffler::prepareForTailCall()
         m_newFrameBase);
 
     // We load the link register manually for architectures that have one
-#if CPU(ARM64) || CPU(RISCV64)
+#if CPU(ARM_THUMB2) || CPU(ARM64) || CPU(RISCV64)
     m_jit.loadPtr(MacroAssembler::Address(MacroAssembler::framePointerRegister, CallFrame::returnPCOffset()),
         MacroAssembler::linkRegister);
 #if CPU(ARM64E)
@@ -435,7 +480,7 @@ bool CallFrameShuffler::tryWrites(CachedRecovery& cachedRecovery)
         && cachedRecovery.targets().size() == 1
         && newAsOld(cachedRecovery.targets()[0]) == cachedRecovery.recovery().virtualRegister()) {
         cachedRecovery.clearTargets();
-        if (cachedRecovery.wantedGPR() == InvalidGPRReg && cachedRecovery.wantedFPR() == InvalidFPRReg)
+        if (!cachedRecovery.wantedJSValueRegs() && cachedRecovery.wantedFPR() == InvalidFPRReg)
             clearCachedRecovery(cachedRecovery.recovery());
         return true;
     }
@@ -461,7 +506,7 @@ bool CallFrameShuffler::tryWrites(CachedRecovery& cachedRecovery)
     if (verbose)
         dataLog("\n");
     cachedRecovery.clearTargets();
-    if (cachedRecovery.wantedGPR() == InvalidGPRReg && cachedRecovery.wantedFPR() == InvalidFPRReg)
+    if (!cachedRecovery.wantedJSValueRegs() && cachedRecovery.wantedFPR() == InvalidFPRReg)
         clearCachedRecovery(cachedRecovery.recovery());
 
     return true;
@@ -502,7 +547,7 @@ bool CallFrameShuffler::performSafeWrites()
                 }
                 continue;
             }
-            if (cachedRecovery->wantedGPR() != InvalidGPRReg) {
+            if (cachedRecovery->wantedJSValueRegs()) {
                 if (verbose) {
                     dataLog("   - ", cachedRecovery->recovery(), " writes to NEW ", reg,
                         " but is also needed in registers.\n");
@@ -540,7 +585,7 @@ bool CallFrameShuffler::performSafeWrites()
                     continue;
 
                 ASSERT(hasOnlySafeWrites(*cachedRecovery)
-                    && cachedRecovery->wantedGPR() == InvalidGPRReg
+                    && !cachedRecovery->wantedJSValueRegs()
                     && cachedRecovery->wantedFPR() == InvalidFPRReg);
                 if (!tryWrites(*cachedRecovery))
                     stillFailing.append(failed);
@@ -606,7 +651,7 @@ void CallFrameShuffler::prepareAny()
         }
 
         if (canLoadAndBox(*cachedRecovery) && hasOnlySafeWrites(*cachedRecovery)
-            && cachedRecovery->wantedGPR() == InvalidGPRReg
+            && !cachedRecovery->wantedJSValueRegs()
             && cachedRecovery->wantedFPR() == InvalidFPRReg) {
             emitLoad(*cachedRecovery);
             emitBox(*cachedRecovery);
@@ -654,8 +699,10 @@ void CallFrameShuffler::prepareAny()
         ASSERT_UNUSED(writesOK, writesOK);
     }
 
+#if USE(JSVALUE64)
     if (m_numberTagRegister != InvalidGPRReg && m_newRegisters[m_numberTagRegister])
         releaseGPR(m_numberTagRegister);
+#endif
 
     // Handle 2) by loading all registers. We don't have to do any
     // writes, since they have been taken care of above.
@@ -671,8 +718,10 @@ void CallFrameShuffler::prepareAny()
         ASSERT(cachedRecovery->targets().isEmpty());
     }
 
+#if USE(JSVALUE64)
     if (m_numberTagRegister != InvalidGPRReg)
         releaseGPR(m_numberTagRegister);
+#endif
 
     // At this point, we have read everything we cared about from the
     // stack, and written everything we had to to the stack.
@@ -694,8 +743,13 @@ void CallFrameShuffler::prepareAny()
         dataLog("   * Storing the argument count into ", VirtualRegister { CallFrameSlot::argumentCountIncludingThis }, "\n");
     RELEASE_ASSERT(m_numPassedArgs != UINT_MAX);
 
-    // Initialize CallFrameSlot::argumentCountIncludingThis's HighWordOffset and LowWordOffset with 0 and m_numPassedArgs.
+#if USE(JSVALUE64)
+    // Initialize CallFrameSlot::argumentCountIncludingThis's TagOffset and PayloadOffset with 0 and m_numPassedArgs.
     m_jit.store64(MacroAssembler::TrustedImm32(m_numPassedArgs), addressForNew(VirtualRegister { CallFrameSlot::argumentCountIncludingThis }));
+#else
+    m_jit.store32(MacroAssembler::TrustedImm32(0), addressForNew(VirtualRegister { CallFrameSlot::argumentCountIncludingThis }).withOffset(TagOffset));
+    m_jit.store32(MacroAssembler::TrustedImm32(m_numPassedArgs), addressForNew(VirtualRegister { CallFrameSlot::argumentCountIncludingThis }).withOffset(PayloadOffset));
+#endif
 
     if (!isSlowPath()) {
         ASSERT(m_newFrameBase != MacroAssembler::stackPointerRegister);

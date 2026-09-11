@@ -122,6 +122,9 @@ void StackmapSpecial::forEachArgImpl(
             case ValueRep::LateColdAny:
                 role = Arg::LateColdUse;
                 break;
+#if USE(JSVALUE32_64)
+            case ValueRep::RegisterPair:
+#endif
             case ValueRep::SomeEarlyRegister:
                 RELEASE_ASSERT_NOT_REACHED();
                 break;
@@ -270,6 +273,9 @@ bool StackmapSpecial::isArgValidForRep(Air::Code& code, const Air::Arg& arg, con
                 return true;
         }
         return false;
+#if USE(JSVALUE32_64)
+    case ValueRep::RegisterPair:
+#endif
     case ValueRep::Stack:
     case ValueRep::Constant:
         RELEASE_ASSERT_NOT_REACHED();

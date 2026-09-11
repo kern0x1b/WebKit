@@ -95,12 +95,6 @@ public:
         m_size--;
     }
 
-    void shrink(size_t newSize)
-    {
-        ASSERT(newSize <= m_size);
-        m_size = newSize;
-    }
-
     template<typename Visitor> static void markLists(Visitor&, ListSet&);
 
     void overflowCheckNotNeeded() { clearNeedsOverflowCheck(); }
@@ -381,7 +375,7 @@ public:
     void append(T v)
     {
         ASSERT(m_size <= m_capacity);
-        if (m_size == m_capacity || (mallocBase() && !m_markSet)) {
+        if (m_size == m_capacity || mallocBase()) {
             if (slowAppend<T>(v) == Status::Overflowed)
                 this->overflowed();
             return;
@@ -462,7 +456,11 @@ public:
         // This clearing does not need to consider about concurrent marking from GC since MarkedVector
         // gets marked only while mutator is stopping. So, while clearing in the mutator, concurrent
         // marker will not see the buffer.
+#if USE(JSVALUE64)
         zeroSpan(unsafeMakeSpan(std::bit_cast<uint8_t*>(buffer), sizeof(T) * count));
+#else
+        clearBuffer(buffer, count);
+#endif
 
         func(buffer);
     }
@@ -491,6 +489,23 @@ public:
 
 private:
     bool isUsingInlineBuffer() const { return m_buffer == m_inlineBuffer; }
+
+#if USE(JSVALUE32_64)
+    template<typename U>
+    requires std::is_pointer_v<U>
+    static void clearBuffer(U* buffer, size_t count)
+    {
+        zeroSpan(unsafeMakeSpan(buffer, count));
+    }
+
+    template<typename U>
+    requires std::is_same_v<U, JSValue>
+    static void clearBuffer(U* buffer, size_t count)
+    {
+        for (unsigned i = 0; i < count; ++i)
+            buffer[i] = JSValue();
+    }
+#endif
 
     template<typename U>
     requires std::is_pointer_v<U>

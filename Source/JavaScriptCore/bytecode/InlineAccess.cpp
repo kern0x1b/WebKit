@@ -40,28 +40,32 @@ namespace JSC {
 
 void InlineAccess::dumpCacheSizesAndCrash()
 {
-    GPRReg baseGPR = GPRInfo::regT0;
-    GPRReg valueGPR = GPRInfo::regT1;
-    GPRReg resultGPR = baseGPR;
+    GPRReg base = GPRInfo::regT0;
+    GPRReg value = GPRInfo::regT1;
+#if USE(JSVALUE32_64)
+    JSValueRegs regs(base, value);
+#else
+    JSValueRegs regs(base);
+#endif
     {
         CCallHelpers jit;
 
-        GPRReg scratchGPR = valueGPR;
+        GPRReg scratchGPR = value;
         jit.patchableBranch8(
             CCallHelpers::NotEqual,
-            CCallHelpers::Address(baseGPR, JSCell::typeInfoTypeOffset()),
+            CCallHelpers::Address(base, JSCell::typeInfoTypeOffset()),
             CCallHelpers::TrustedImm32(StringType));
 
-        jit.loadPtr(CCallHelpers::Address(baseGPR, JSString::offsetOfValue()), scratchGPR);
+        jit.loadPtr(CCallHelpers::Address(base, JSString::offsetOfValue()), scratchGPR);
         auto isRope = jit.branchIfRopeStringImpl(scratchGPR);
-        jit.load32(CCallHelpers::Address(scratchGPR, StringImpl::lengthMemoryOffset()), resultGPR);
+        jit.load32(CCallHelpers::Address(scratchGPR, StringImpl::lengthMemoryOffset()), regs.payloadGPR());
         auto done = jit.jump();
 
         isRope.link(&jit);
-        jit.load32(CCallHelpers::Address(baseGPR, JSRopeString::offsetOfLength()), resultGPR);
+        jit.load32(CCallHelpers::Address(base, JSRopeString::offsetOfLength()), regs.payloadGPR());
 
         done.link(&jit);
-        jit.boxInt32(resultGPR, resultGPR);
+        jit.boxInt32(regs.payloadGPR(), regs);
 
         dataLog("string length size: ", jit.m_assembler.buffer().codeSize(), "\n");
     }
@@ -69,14 +73,14 @@ void InlineAccess::dumpCacheSizesAndCrash()
     {
         CCallHelpers jit;
 
-        GPRReg scratchGPR = valueGPR;
-        jit.load8(CCallHelpers::Address(baseGPR, JSCell::indexingTypeAndMiscOffset()), valueGPR);
-        jit.and32(CCallHelpers::TrustedImm32(IsArray | IndexingShapeMask), valueGPR);
+        GPRReg scratchGPR = value;
+        jit.load8(CCallHelpers::Address(base, JSCell::indexingTypeAndMiscOffset()), value);
+        jit.and32(CCallHelpers::TrustedImm32(IsArray | IndexingShapeMask), value);
         jit.patchableBranch32(
-            CCallHelpers::NotEqual, valueGPR, CCallHelpers::TrustedImm32(IsArray | ContiguousShape));
-        jit.loadPtr(CCallHelpers::Address(baseGPR, JSObject::butterflyOffset()), valueGPR);
-        jit.load32(CCallHelpers::Address(valueGPR, ArrayStorage::lengthOffset()), valueGPR);
-        jit.boxInt32(scratchGPR, resultGPR);
+            CCallHelpers::NotEqual, value, CCallHelpers::TrustedImm32(IsArray | ContiguousShape));
+        jit.loadPtr(CCallHelpers::Address(base, JSObject::butterflyOffset()), value);
+        jit.load32(CCallHelpers::Address(value, ArrayStorage::lengthOffset()), value);
+        jit.boxInt32(scratchGPR, regs);
 
         dataLog("array length size: ", jit.m_assembler.buffer().codeSize(), "\n");
     }
@@ -86,14 +90,14 @@ void InlineAccess::dumpCacheSizesAndCrash()
 
         jit.patchableBranch32(
             MacroAssembler::NotEqual,
-            MacroAssembler::Address(baseGPR, JSCell::structureIDOffset()),
+            MacroAssembler::Address(base, JSCell::structureIDOffset()),
             MacroAssembler::TrustedImm32(0x000ab21ca));
         jit.loadPtr(
-            CCallHelpers::Address(baseGPR, JSObject::butterflyOffset()),
-            valueGPR);
-        GPRReg storageGPR = valueGPR;
+            CCallHelpers::Address(base, JSObject::butterflyOffset()),
+            value);
+        GPRReg storageGPR = value;
         jit.loadValue(
-            CCallHelpers::Address(storageGPR, 0x000ab21ca), resultGPR);
+            CCallHelpers::Address(storageGPR, 0x000ab21ca), regs);
 
         dataLog("out of line offset cache size: ", jit.m_assembler.buffer().codeSize(), "\n");
     }
@@ -103,10 +107,10 @@ void InlineAccess::dumpCacheSizesAndCrash()
 
         jit.patchableBranch32(
             MacroAssembler::NotEqual,
-            MacroAssembler::Address(baseGPR, JSCell::structureIDOffset()),
+            MacroAssembler::Address(base, JSCell::structureIDOffset()),
             MacroAssembler::TrustedImm32(0x000ab21ca));
         jit.loadValue(
-            MacroAssembler::Address(baseGPR, 0x000ab21ca), resultGPR);
+            MacroAssembler::Address(base, 0x000ab21ca), regs);
 
         dataLog("inline offset cache size: ", jit.m_assembler.buffer().codeSize(), "\n");
     }
@@ -116,11 +120,11 @@ void InlineAccess::dumpCacheSizesAndCrash()
 
         jit.patchableBranch32(
             MacroAssembler::NotEqual,
-            MacroAssembler::Address(baseGPR, JSCell::structureIDOffset()),
+            MacroAssembler::Address(base, JSCell::structureIDOffset()),
             MacroAssembler::TrustedImm32(0x000ab21ca));
 
         jit.storeValue(
-            resultGPR, MacroAssembler::Address(baseGPR, 0x000ab21ca));
+            regs, MacroAssembler::Address(base, 0x000ab21ca));
 
         dataLog("replace cache size: ", jit.m_assembler.buffer().codeSize(), "\n");
     }
@@ -130,13 +134,13 @@ void InlineAccess::dumpCacheSizesAndCrash()
 
         jit.patchableBranch32(
             MacroAssembler::NotEqual,
-            MacroAssembler::Address(baseGPR, JSCell::structureIDOffset()),
+            MacroAssembler::Address(base, JSCell::structureIDOffset()),
             MacroAssembler::TrustedImm32(0x000ab21ca));
 
-        jit.loadPtr(MacroAssembler::Address(baseGPR, JSObject::butterflyOffset()), valueGPR);
+        jit.loadPtr(MacroAssembler::Address(base, JSObject::butterflyOffset()), value);
         jit.storeValue(
-            resultGPR,
-            MacroAssembler::Address(baseGPR, 120342));
+            regs,
+            MacroAssembler::Address(base, 120342));
 
         dataLog("replace out of line cache size: ", jit.m_assembler.buffer().codeSize(), "\n");
     }
@@ -181,19 +185,19 @@ bool InlineAccess::generateSelfPropertyAccess(PropertyInlineCache& propertyCache
 
     CCallHelpers jit;
 
-    GPRReg base = propertyCache.baseGPR();
-    GPRReg value = propertyCache.valueGPR();
+    GPRReg base = propertyCache.m_baseGPR;
+    JSValueRegs value = propertyCache.valueRegs();
 
     jit.patchableBranch32(
         MacroAssembler::NotEqual,
         MacroAssembler::Address(base, JSCell::structureIDOffset()),
-        MacroAssembler::TrustedImm32(std::bit_cast<uint32_t>(structure->id()))).linkThunk(repatchingIC->slowPathStartLocation, &jit);
+        MacroAssembler::TrustedImm32(std::bit_cast<uint32_t>(structure->id()))).linkThunk(propertyCache.slowPathStartLocation, &jit);
     GPRReg storage;
     if (isInlineOffset(offset))
         storage = base;
     else {
-        jit.loadPtr(CCallHelpers::Address(base, JSObject::butterflyOffset()), value);
-        storage = value;
+        jit.loadPtr(CCallHelpers::Address(base, JSObject::butterflyOffset()), value.payloadGPR());
+        storage = value.payloadGPR();
     }
 
     jit.loadValue(
@@ -205,13 +209,18 @@ bool InlineAccess::generateSelfPropertyAccess(PropertyInlineCache& propertyCache
 ALWAYS_INLINE static GPRReg getScratchRegister(PropertyInlineCache& propertyCache)
 {
     ScratchRegisterAllocator allocator(propertyCache.usedRegisters().toRegisterSet());
-    auto registers = propertyCache.registers();
-    allocator.lock(registers.baseGPR);
-    allocator.lock(registers.valueGPR);
-    allocator.lock(registers.extraGPR);
-    allocator.lock(registers.extra2GPR);
-    allocator.lock(registers.propertyCacheGPR);
-    allocator.lock(registers.arrayProfileGPR);
+    allocator.lock(propertyCache.m_baseGPR);
+    allocator.lock(propertyCache.m_valueGPR);
+    allocator.lock(propertyCache.m_extraGPR);
+    allocator.lock(propertyCache.m_extra2GPR);
+#if USE(JSVALUE32_64)
+    allocator.lock(propertyCache.m_baseTagGPR);
+    allocator.lock(propertyCache.m_valueTagGPR);
+    allocator.lock(propertyCache.m_extraTagGPR);
+    allocator.lock(propertyCache.m_extra2TagGPR);
+#endif
+    allocator.lock(propertyCache.m_propertyCacheGPR);
+    allocator.lock(propertyCache.m_arrayProfileGPR);
     GPRReg scratch = allocator.allocateScratchGPR();
     if (allocator.didReuseRegisters())
         return InvalidGPRReg;
@@ -250,13 +259,13 @@ bool InlineAccess::generateSelfPropertyReplace(PropertyInlineCache& propertyCach
 
     CCallHelpers jit;
 
-    GPRReg base = propertyCache.baseGPR();
-    GPRReg value = propertyCache.valueGPR();
+    GPRReg base = propertyCache.m_baseGPR;
+    JSValueRegs value = propertyCache.valueRegs();
 
     jit.patchableBranch32(
         MacroAssembler::NotEqual,
         MacroAssembler::Address(base, JSCell::structureIDOffset()),
-        MacroAssembler::TrustedImm32(std::bit_cast<uint32_t>(structure->id()))).linkThunk(repatchingIC->slowPathStartLocation, &jit);
+        MacroAssembler::TrustedImm32(std::bit_cast<uint32_t>(structure->id()))).linkThunk(propertyCache.slowPathStartLocation, &jit);
 
     GPRReg storage;
     if (isInlineOffset(offset))
@@ -302,17 +311,17 @@ bool InlineAccess::generateArrayLength(PropertyInlineCache& propertyCache, JSArr
 
     CCallHelpers jit;
 
-    GPRReg base = propertyCache.baseGPR();
-    GPRReg value = propertyCache.valueGPR();
+    GPRReg base = propertyCache.m_baseGPR;
+    JSValueRegs value = propertyCache.valueRegs();
     GPRReg scratch = getScratchRegister(propertyCache);
 
     jit.load8(CCallHelpers::Address(base, JSCell::indexingTypeAndMiscOffset()), scratch);
     jit.and32(CCallHelpers::TrustedImm32(IndexingTypeMask), scratch);
     jit.patchableBranch32(
-        CCallHelpers::NotEqual, scratch, CCallHelpers::TrustedImm32(array->indexingType())).linkThunk(repatchingIC->slowPathStartLocation, &jit);
-    jit.loadPtr(CCallHelpers::Address(base, JSObject::butterflyOffset()), value);
-    jit.load32(CCallHelpers::Address(value, ArrayStorage::lengthOffset()), value);
-    jit.boxInt32(value, value);
+        CCallHelpers::NotEqual, scratch, CCallHelpers::TrustedImm32(array->indexingType())).linkThunk(propertyCache.slowPathStartLocation, &jit);
+    jit.loadPtr(CCallHelpers::Address(base, JSObject::butterflyOffset()), value.payloadGPR());
+    jit.load32(CCallHelpers::Address(value.payloadGPR(), ArrayStorage::lengthOffset()), value.payloadGPR());
+    jit.boxInt32(value.payloadGPR(), value);
 
     return linkCodeInline("array length", jit, *repatchingIC);
 }
@@ -341,25 +350,25 @@ bool InlineAccess::generateStringLength(PropertyInlineCache& propertyCache)
 
     CCallHelpers jit;
 
-    GPRReg base = propertyCache.baseGPR();
-    GPRReg value = propertyCache.valueGPR();
+    GPRReg base = propertyCache.m_baseGPR;
+    JSValueRegs value = propertyCache.valueRegs();
     GPRReg scratch = getScratchRegister(propertyCache);
 
     jit.patchableBranch8(
         CCallHelpers::NotEqual,
         CCallHelpers::Address(base, JSCell::typeInfoTypeOffset()),
-        CCallHelpers::TrustedImm32(StringType)).linkThunk(repatchingIC->slowPathStartLocation, &jit);
+        CCallHelpers::TrustedImm32(StringType)).linkThunk(propertyCache.slowPathStartLocation, &jit);
 
     jit.loadPtr(CCallHelpers::Address(base, JSString::offsetOfValue()), scratch);
     auto isRope = jit.branchIfRopeStringImpl(scratch);
-    jit.load32(CCallHelpers::Address(scratch, StringImpl::lengthMemoryOffset()), value);
+    jit.load32(CCallHelpers::Address(scratch, StringImpl::lengthMemoryOffset()), value.payloadGPR());
     auto done = jit.jump();
 
     isRope.link(&jit);
-    jit.load32(CCallHelpers::Address(base, JSRopeString::offsetOfLength()), value);
+    jit.load32(CCallHelpers::Address(base, JSRopeString::offsetOfLength()), value.payloadGPR());
 
     done.link(&jit);
-    jit.boxInt32(value, value);
+    jit.boxInt32(value.payloadGPR(), value);
 
     return linkCodeInline("string length", jit, *repatchingIC);
 }
@@ -376,13 +385,13 @@ bool InlineAccess::generateSelfInAccess(PropertyInlineCache& propertyCache, Stru
     if (!repatchingIC)
         return false;
 
-    GPRReg base = propertyCache.baseGPR();
-    GPRReg value = propertyCache.valueGPR();
+    GPRReg base = propertyCache.m_baseGPR;
+    JSValueRegs value = propertyCache.valueRegs();
 
     jit.patchableBranch32(
         MacroAssembler::NotEqual,
         MacroAssembler::Address(base, JSCell::structureIDOffset()),
-        MacroAssembler::TrustedImm32(std::bit_cast<uint32_t>(structure->id()))).linkThunk(repatchingIC->slowPathStartLocation, &jit);
+        MacroAssembler::TrustedImm32(std::bit_cast<uint32_t>(structure->id()))).linkThunk(propertyCache.slowPathStartLocation, &jit);
     jit.boxBoolean(true, value);
 
     return linkCodeInline("in access", jit, *repatchingIC);

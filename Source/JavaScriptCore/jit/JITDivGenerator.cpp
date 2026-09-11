@@ -34,7 +34,7 @@
 
 namespace JSC {
 
-void JITDivGenerator::loadOperand(CCallHelpers& jit, SnippetOperand& opr, GPRReg oprGPR, FPRReg destFPR)
+void JITDivGenerator::loadOperand(CCallHelpers& jit, SnippetOperand& opr, JSValueRegs oprRegs, FPRReg destFPR)
 {
     if (opr.isConstInt32()) {
         // FIXME: this does not looks right.
@@ -43,17 +43,19 @@ void JITDivGenerator::loadOperand(CCallHelpers& jit, SnippetOperand& opr, GPRReg
         //     -On ARM64 we also have FMOV that can load small immediates.
         jit.move(CCallHelpers::Imm32(opr.asConstInt32()), m_scratchGPR);
         jit.convertInt32ToDouble(m_scratchGPR, destFPR);
+#if USE(JSVALUE64)
     } else if (opr.isConstDouble()) {
         jit.move(CCallHelpers::Imm64(opr.asRawBits()), m_scratchGPR);
         jit.move64ToDouble(m_scratchGPR, destFPR);
+#endif
     } else {
         if (!opr.definitelyIsNumber())
-            m_slowPathJumpList.append(jit.branchIfNotNumber(oprGPR));
-        CCallHelpers::Jump notInt32 = jit.branchIfNotInt32(oprGPR);
-        jit.convertInt32ToDouble(oprGPR, destFPR);
+            m_slowPathJumpList.append(jit.branchIfNotNumber(oprRegs, m_scratchGPR));
+        CCallHelpers::Jump notInt32 = jit.branchIfNotInt32(oprRegs);
+        jit.convertInt32ToDouble(oprRegs.payloadGPR(), destFPR);
         CCallHelpers::Jump oprIsLoaded = jit.jump();
         notInt32.link(&jit);
-        jit.unboxDouble(oprGPR, m_scratchGPR, destFPR);
+        jit.unboxDoubleNonDestructive(oprRegs, destFPR, m_scratchGPR);
         oprIsLoaded.link(&jit);
     }
 }
@@ -61,8 +63,13 @@ void JITDivGenerator::loadOperand(CCallHelpers& jit, SnippetOperand& opr, GPRReg
 void JITDivGenerator::generateFastPath(CCallHelpers& jit)
 {
     ASSERT(m_scratchGPR != InvalidGPRReg);
-    ASSERT(m_scratchGPR != m_left);
-    ASSERT(m_scratchGPR != m_right);
+    ASSERT(m_scratchGPR != m_left.payloadGPR());
+    ASSERT(m_scratchGPR != m_right.payloadGPR());
+#if USE(JSVALUE32_64)
+    ASSERT(m_scratchGPR != m_left.tagGPR());
+    ASSERT(m_scratchGPR != m_right.tagGPR());
+    ASSERT(m_scratchFPR != InvalidFPRReg);
+#endif
 
     ASSERT(!m_didEmitFastPath);
     if (!m_leftOperand.mightBeNumber() || !m_rightOperand.mightBeNumber())
@@ -72,6 +79,7 @@ void JITDivGenerator::generateFastPath(CCallHelpers& jit)
     m_didEmitFastPath = true;
     loadOperand(jit, m_leftOperand, m_left, m_leftFPR);
 
+#if USE(JSVALUE64)
     std::optional<double> safeReciprocal;
     if (m_rightOperand.isConst()) {
         double constant = m_rightOperand.asConstNumber();
@@ -84,6 +92,7 @@ void JITDivGenerator::generateFastPath(CCallHelpers& jit)
 
         jit.mulDouble(m_rightFPR, m_leftFPR);
     } else
+#endif
     {
         loadOperand(jit, m_rightOperand, m_right, m_rightFPR);
 
@@ -109,12 +118,14 @@ void JITDivGenerator::generateFastPath(CCallHelpers& jit)
     m_endJumpList.append(jit.jump());
 
     notInt32.link(&jit);
+#if USE(JSVALUE64)
     jit.moveDoubleTo64(m_leftFPR, m_scratchGPR);
     CCallHelpers::Jump notDoubleZero = jit.branchTest64(CCallHelpers::NonZero, m_scratchGPR);
-    jit.move(GPRInfo::numberTagRegister, m_result);
+    jit.move(GPRInfo::numberTagRegister, m_result.payloadGPR());
     m_endJumpList.append(jit.jump());
 
     notDoubleZero.link(&jit);
+#endif
     if (m_arithProfile)
         m_arithProfile->emitUnconditionalSet(jit, BinaryArithProfile::specialFastPathBit);
     jit.boxDouble(m_leftFPR, m_result);

@@ -138,10 +138,14 @@ public:
     Bag<OptimizingCallLinkInfo> m_callLinkInfos;
     Bag<DirectCallLinkInfo> m_directCallLinkInfos;
     Yarr::YarrBoyerMooreData m_boyerMooreData;
-
+    
     ScratchBuffer* catchOSREntryBuffer;
     RefPtr<Profiler::Compilation> compilation;
-
+    
+#if USE(JSVALUE32_64)
+    Bag<double> doubleConstants;
+#endif
+    
     unsigned frameRegisterCount { std::numeric_limits<unsigned>::max() };
     unsigned requiredRegisterCountForExit { std::numeric_limits<unsigned>::max() };
 
