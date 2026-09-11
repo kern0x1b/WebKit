@@ -55,8 +55,8 @@ bool canUseForLineLayout(const RenderBlockFlow& rootContainer)
 bool canUseForIntrinsicWidthComputation(const RenderBlockFlow& blockContainer)
 {
     for (auto walker = InlineWalker(blockContainer); !walker.atEnd(); walker.advance()) {
-        auto& renderer = *walker.current();
-        if (!renderer.isInFlow())
+        CheckedRef renderer = *walker.current();
+        if (!renderer->isInFlow())
             return false;
 
         auto isFullySupportedInFlowRenderer = isAnyOf<RenderText, RenderLineBreak, RenderInline, RenderListOutsideMarker>(renderer);
@@ -75,8 +75,8 @@ bool canUseForIntrinsicWidthComputation(const RenderBlockFlow& blockContainer)
             continue;
         }
 
-        auto& unsupportedRenderElement = downcast<RenderElement>(renderer);
-        if (!unsupportedRenderElement.writingMode().isHorizontal() || !unsupportedRenderElement.style().logicalWidth().isFixed())
+        CheckedRef unsupportedRenderElement = downcast<RenderElement>(renderer.get());
+        if (!unsupportedRenderElement->writingMode().isHorizontal() || !unsupportedRenderElement->style().logicalWidth().isFixed())
             return false;
 
         auto isNonSupportedFixedWidthContent = [&] {
@@ -86,7 +86,7 @@ bool canUseForIntrinsicWidthComputation(const RenderBlockFlow& blockContainer)
                 return true;
             // FIXME: See RenderReplaced::computeIntrinsicLogicalWidthContributions where m_minContentLogicalWidthContribution is set to 0.
             auto isReplacedWithSpecialIntrinsicWidth = [&] {
-                if (auto* renderReplaced = dynamicDowncast<RenderReplaced>(unsupportedRenderElement))
+                if (auto* renderReplaced = dynamicDowncast<RenderReplaced>(unsupportedRenderElement.get()))
                     return renderReplaced->style().logicalMaxWidth().isPercentOrCalculated();
                 return false;
             };

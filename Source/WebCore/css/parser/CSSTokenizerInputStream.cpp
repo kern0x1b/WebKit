@@ -42,13 +42,6 @@ CSSTokenizerInputStream::CSSTokenizerInputStream(StringView string)
     , m_stringLength(string.length())
     , m_string(string)
 {
-    if (!m_stringLength)
-        return;
-    m_is8Bit = m_string->is8Bit();
-    if (m_is8Bit)
-        m_characters8 = m_string->span8().data();
-    else
-        m_characters16 = m_string->span16().data();
 }
 
 void CSSTokenizerInputStream::advanceUntilNonWhitespace()

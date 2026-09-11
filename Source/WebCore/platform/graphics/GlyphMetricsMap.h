@@ -46,11 +46,6 @@ public:
         return locatePage(glyph / GlyphMetricsPage::size).metricsForGlyph(glyph);
     }
 
-    T& metricsSlotForGlyph(Glyph glyph)
-    {
-        return locatePage(glyph / GlyphMetricsPage::size).metricsSlotForGlyph(glyph);
-    }
-
     const T& existingMetricsForGlyph(Glyph glyph)
     {
         return locatePage(glyph / GlyphMetricsPage::size).existingMetricsForGlyph(glyph);
@@ -79,7 +74,6 @@ private:
         }
 
         T metricsForGlyph(Glyph glyph) const { return m_metrics[glyph % size]; }
-        T& metricsSlotForGlyph(Glyph glyph) { return m_metrics[glyph % size]; }
         const T& existingMetricsForGlyph(Glyph glyph) const { return m_metrics[glyph % size]; }
         void setMetricsForGlyph(Glyph glyph, const T& metrics)
         {
@@ -95,31 +89,19 @@ private:
         std::array<T, size> m_metrics;
     };
     
-    // A page holds 16 glyphs, so only glyphs 0-15 reach m_primaryPage; every other Latin
-    // glyph used to cost a HashMap probe on each width or bounds query, i.e. once per
-    // character measured or painted. Pages 1-15 (glyph indices 16-255, which is where the
-    // Latin repertoire of the system fonts lives) get a direct-mapped slot instead.
-    static constexpr unsigned directMappedPageCount = 16;
-
     GlyphMetricsPage& locatePage(unsigned pageNumber)
     {
-        if (!pageNumber) {
-            if (m_filledPrimaryPage)
-                return m_primaryPage;
-        } else if (pageNumber < directMappedPageCount) {
-            if (auto* page = m_directMappedPages[pageNumber - 1].get())
-                return *page;
-        }
+        if (!pageNumber && m_filledPrimaryPage)
+            return m_primaryPage;
         return locatePageSlowCase(pageNumber);
     }
 
     GlyphMetricsPage& locatePageSlowCase(unsigned pageNumber);
-
+    
     static T unknownMetrics();
 
     bool m_filledPrimaryPage { false };
     GlyphMetricsPage m_primaryPage; // We optimize for the page that contains glyph indices 0-255.
-    std::array<std::unique_ptr<GlyphMetricsPage>, directMappedPageCount - 1> m_directMappedPages;
     HashMap<int, std::unique_ptr<GlyphMetricsPage>> m_pages;
 };
 
@@ -148,13 +130,6 @@ template<class T> typename GlyphMetricsMap<T>::GlyphMetricsPage& GlyphMetricsMap
         m_primaryPage.fill(unknownMetrics());
         m_filledPrimaryPage = true;
         return m_primaryPage;
-    }
-
-    if (pageNumber < directMappedPageCount) {
-        auto& page = m_directMappedPages[pageNumber - 1];
-        ASSERT(!page);
-        page = makeUnique<GlyphMetricsPage>(unknownMetrics());
-        return *page;
     }
 
     return *m_pages.ensure(pageNumber, [] {

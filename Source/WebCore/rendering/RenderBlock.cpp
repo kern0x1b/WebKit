@@ -571,8 +571,8 @@ static EnumSet<LogicalBoxAxis> sizesAffectedByScrollbarsForSubtreeRoot(const Ren
     if (computedLogicalWidth.isIntrinsic() || computedLogicalWidth.isMinIntrinsic())
         return LogicalBoxAxis::Inline;
 
-    if (style.display().isFlexibleBox() && renderBlock.isBlockLevelBox() && (computedLogicalHeight.isAuto() || computedLogicalHeight.isIntrinsic()))
-        sizesAffected.add(LogicalBoxAxis::Block);
+    if (renderBlock.sizesLogicalWidthToFitContent())
+        return LogicalBoxAxis::Inline;
 
     return { };
 }

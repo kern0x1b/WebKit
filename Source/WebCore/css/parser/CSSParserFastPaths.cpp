@@ -106,62 +106,11 @@ std::optional<CSS::Range> CSSParserFastPaths::lengthValueRangeForPropertiesSuppo
     }
 }
 
-// Up to 15 decimal digits fit exactly in a double's 53 bit integer range, and 10^k is exactly
-// representable for k <= 22, so mantissa / 10^fractionDigits is the correctly rounded value of
-// the literal: bit for bit what charactersToDouble() returns, without entering strtod.
-template<typename CharacterType> static inline std::optional<double> parseExactDecimal(std::span<const CharacterType> characters)
-{
-    constexpr unsigned maximumExactDigits = 15;
-    static constexpr std::array<double, maximumExactDigits + 1> powersOfTen {
-        1e0, 1e1, 1e2, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9, 1e10, 1e11, 1e12, 1e13, 1e14, 1e15
-    };
-
-    size_t position = 0;
-    bool negative = false;
-    if (position < characters.size() && (characters[position] == '+' || characters[position] == '-')) {
-        negative = characters[position] == '-';
-        ++position;
-    }
-
-    uint64_t mantissa = 0;
-    unsigned digits = 0;
-    unsigned fractionDigits = 0;
-    while (position < characters.size() && isASCIIDigit(characters[position])) {
-        mantissa = mantissa * 10 + static_cast<unsigned>(characters[position] - '0');
-        ++digits;
-        ++position;
-        if (digits > maximumExactDigits)
-            return std::nullopt;
-    }
-    if (position < characters.size() && characters[position] == '.') {
-        ++position;
-        while (position < characters.size() && isASCIIDigit(characters[position])) {
-            mantissa = mantissa * 10 + static_cast<unsigned>(characters[position] - '0');
-            ++digits;
-            ++fractionDigits;
-            ++position;
-            if (digits > maximumExactDigits)
-                return std::nullopt;
-        }
-    }
-
-    // Anything else (exponent, leading space, trailing junk, no digits at all) is left to the general path.
-    if (!digits || position != characters.size())
-        return std::nullopt;
-
-    double result = static_cast<double>(mantissa);
-    if (fractionDigits)
-        result /= powersOfTen[fractionDigits];
-    return negative ? -result : result;
-}
-
 template<typename CharacterType> static inline std::optional<double> parseCSSNumber(std::span<const CharacterType> characters)
 {
     // The charactersToDouble() function allows a trailing '.' but that is not allowed in CSS number values.
     if (!characters.empty() && characters.back() == '.')
         return std::nullopt;
-    if (auto number = parseExactDecimal(characters))
-        return number;
     // FIXME: If we don't want to skip over leading spaces, we should use parseDouble, not charactersToDouble.
     bool ok;
     auto number = charactersToDouble(characters, &ok);
@@ -170,10 +119,8 @@ template<typename CharacterType> static inline std::optional<double> parseCSSNum
     return number;
 }
 
-enum class AllowFontRelativeUnits : bool { No, Yes };
-
 template <typename CharacterType>
-static inline bool parseSimpleLength(std::span<const CharacterType> characters, CSSUnitType& unit, double& number, AllowFontRelativeUnits allowFontRelativeUnits = AllowFontRelativeUnits::No)
+static inline bool parseSimpleLength(std::span<const CharacterType> characters, CSSUnitType& unit, double& number)
 {
     if (characters.size() > 2 && isASCIIAlphaCaselessEqual(characters[characters.size() - 2], 'p') && isASCIIAlphaCaselessEqual(characters[characters.size() - 1], 'x')) {
         dropLast(characters, 2);
@@ -246,10 +193,10 @@ static RefPtr<CSSValue> parseSimpleLengthValue(StringView string, CSSParserMode 
     auto unit = CSSUnitType::Number;
 
     if (string.is8Bit()) {
-        if (!parseSimpleLength(string.span8(), unit, number, AllowFontRelativeUnits::Yes))
+        if (!parseSimpleLength(string.span8(), unit, number))
             return nullptr;
     } else {
-        if (!parseSimpleLength(string.span16(), unit, number, AllowFontRelativeUnits::Yes))
+        if (!parseSimpleLength(string.span16(), unit, number))
             return nullptr;
     }
 
@@ -785,34 +732,37 @@ std::optional<SRGBA<uint8_t>> CSSParserFastPaths::parseNamedColor(StringView str
     return parseNamedColorInternal(string.span16());
 }
 
-// A CSS identifier never starts with a digit, a '.' or a '+', so those strings can be rejected
-// before paying for the lowercasing copy and hash lookup inside cssValueKeywordID().
-template<typename CharacterType> static inline bool couldBeIdentifierStart(CharacterType character)
+static bool isUniversalKeyword(StringView string)
 {
-    return !isASCIIDigit(character) && character != '.' && character != '+';
+    // These keywords can be used for all properties.
+    return equalLettersIgnoringASCIICase(string, "initial"_s)
+        || equalLettersIgnoringASCIICase(string, "inherit"_s)
+        || equalLettersIgnoringASCIICase(string, "unset"_s)
+        || equalLettersIgnoringASCIICase(string, "revert"_s)
+        || equalLettersIgnoringASCIICase(string, "revert-layer"_s)
+        || equalLettersIgnoringASCIICase(string, "revert-rule"_s);
 }
 
 static RefPtr<CSSValue> parseKeywordValue(CSSPropertyID property, StringView string, CSS::PropertyParserState& state)
 {
     ASSERT(!string.isEmpty());
 
-    if (string.isEmpty() || !couldBeIdentifierStart(string[0]))
-        return nullptr;
+    if (!CSSPropertyParsing::isKeywordFastPathEligibleStyleProperty(property)) {
+        // All properties, including non-keyword properties, accept the CSS-wide keywords.
+        if (!isUniversalKeyword(string))
+            return nullptr;
+
+        // Leave shorthands to parse CSS-wide keywords using CSSPropertyParser.
+        if (shorthandForProperty(property).length())
+            return nullptr;
+    }
 
     auto valueID = cssValueKeywordID(string);
     if (!valueID)
         return nullptr;
 
-    if (isCSSWideKeyword(valueID)) {
-        // All properties, including non-keyword properties, accept the CSS-wide keywords, but
-        // shorthands are left to CSSPropertyParser, which expands them to their longhands.
-        if (!CSSPropertyParsing::isKeywordFastPathEligibleStyleProperty(property) && shorthandForProperty(property).length())
-            return nullptr;
+    if (isCSSWideKeyword(valueID))
         return CSSKeywordValue::create(valueID);
-    }
-
-    if (!CSSPropertyParsing::isKeywordFastPathEligibleStyleProperty(property))
-        return nullptr;
 
     if (CSSPropertyParsing::isKeywordValidForStyleProperty(property, valueID, state))
         return CSSKeywordValue::create(valueID);
@@ -1079,54 +1029,6 @@ static RefPtr<CSSValue> parseOpacity(StringView string)
     return CSSPrimitiveValue::create(number, CSSUnitType::Number);
 }
 
-// Matches the <integer> production the way the tokenizer does: an optional sign then digits,
-// with no decimal point and no exponent (those produce a NumberToken the integer consumers
-// reject). Nine digits keeps the result inside the int range the general parser narrows to;
-// longer runs fall back so the two paths cannot disagree.
-template<typename CharacterType> static inline bool parseSimpleInteger(std::span<const CharacterType> characters, double& number)
-{
-    constexpr unsigned maximumDigits = 9;
-
-    size_t position = 0;
-    bool negative = false;
-    if (position < characters.size() && (characters[position] == '+' || characters[position] == '-')) {
-        negative = characters[position] == '-';
-        ++position;
-    }
-
-    unsigned value = 0;
-    unsigned digits = 0;
-    while (position < characters.size() && isASCIIDigit(characters[position])) {
-        value = value * 10 + static_cast<unsigned>(characters[position] - '0');
-        ++digits;
-        ++position;
-        if (digits > maximumDigits)
-            return false;
-    }
-
-    if (!digits || position != characters.size())
-        return false;
-
-    // Going through int, as the general parser does, so that "-0" yields 0 and not -0.
-    number = negative ? -static_cast<int>(value) : static_cast<int>(value);
-    return true;
-}
-
-static RefPtr<CSSValue> parseSimpleIntegerValue(StringView string)
-{
-    ASSERT(!string.isEmpty());
-
-    double number;
-    if (string.is8Bit()) {
-        if (!parseSimpleInteger(string.span8(), number))
-            return nullptr;
-    } else {
-        if (!parseSimpleInteger(string.span16(), number))
-            return nullptr;
-    }
-    return CSSPrimitiveValue::createInteger(number);
-}
-
 static RefPtr<CSSValue> parseColorWithAuto(StringView string, const CSSParserContext& context)
 {
     ASSERT(!string.isEmpty());
@@ -1150,13 +1052,6 @@ RefPtr<CSSValue> CSSParserFastPaths::maybeParseValue(CSSPropertyID property, Str
         return parseOpacity(string);
     case CSSPropertyTransform:
         return parseSimpleTransform(string);
-    case CSSPropertyOrder:
-    case CSSPropertyZIndex:
-        // Both are a bare unbounded <integer> plus, for z-index, the "auto" keyword, which the
-        // keyword fast path below still handles.
-        if (auto result = parseSimpleIntegerValue(string))
-            return result;
-        break;
     case CSSPropertyCaretColor:
     case CSSPropertyAccentColor:
         if (isExposed(property, &state.context.propertySettings))
@@ -1167,14 +1062,10 @@ RefPtr<CSSValue> CSSParserFastPaths::maybeParseValue(CSSPropertyID property, Str
     }
 
     if (CSSProperty::isColorProperty(property)) {
-        // Copying the context is only needed when the mode actually has to be overridden; it
-        // carries a URL and the whole property settings block.
-        if (state.context.mode != HTMLStandardMode && !CSSProperty::acceptsQuirkyColor(property)) {
-            CSSParserContext context = state.context;
+        auto context = state.context;
+        if (!CSSProperty::acceptsQuirkyColor(property))
             context.mode = HTMLStandardMode;
-            return parseColor(string, context);
-        }
-        return parseColor(string, state.context);
+        return parseColor(string, context);
     }
 
     if (auto valueRange = lengthValueRangeForPropertiesSupportingSimpleLengths(property)) {

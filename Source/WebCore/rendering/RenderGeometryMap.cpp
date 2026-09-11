@@ -103,7 +103,7 @@ FloatPoint RenderGeometryMap::mapToContainer(const FloatPoint& p, const RenderLa
     FloatPoint rendererMappedResult = m_mapping.last().m_renderer->localToAbsolute(p, m_mapCoordinatesFlags);
 #endif
 
-    if (canMapWithOffsetOnly(container)) {
+    if (!hasFixedPositionStep() && !hasTransformStep() && !hasNonUniformStep() && (!container || (m_mapping.size() && container == m_mapping[0].m_renderer))) {
         result = p;
         result.move(m_accumulatedOffset);
         ASSERT(m_accumulatedOffsetMightBeSaturated || areEssentiallyEqual(rendererMappedResult, result));
@@ -121,7 +121,7 @@ FloatQuad RenderGeometryMap::mapToContainer(const FloatRect& rect, const RenderL
 {
     FloatQuad result;
     
-    if (canMapWithOffsetOnly(container)) {
+    if (!hasFixedPositionStep() && !hasTransformStep() && !hasNonUniformStep() && (!container || (m_mapping.size() && container == m_mapping[0].m_renderer))) {
         result = rect;
         result.move(m_accumulatedOffset);
     } else {
@@ -137,7 +137,7 @@ void RenderGeometryMap::pushMappingsToAncestor(const RenderElement* rendererArg,
 {
     // We need to push mappings in reverse order here, so do insertions rather than appends.
     SetForScope positionChange(m_insertionPosition, m_mapping.size());
-    SUPPRESS_UNCHECKED_LOCAL const RenderElement* renderer = rendererArg;
+    CheckedPtr renderer = rendererArg;
     do {
         renderer = renderer->pushMappingToContainer(ancestorRenderer, *this);
     } while (renderer && renderer != ancestorRenderer);
@@ -148,15 +148,17 @@ void RenderGeometryMap::pushMappingsToAncestor(const RenderElement* rendererArg,
 static bool NODELETE canMapBetweenRenderersViaLayers(const RenderLayerModelObject& renderer, const RenderLayerModelObject& ancestor)
 {
     for (const RenderElement* current = &renderer; ; current = current->parent()) {
-        // The bitfield tests all read one word of the RenderObject we have just touched;
-        // reaching into the style is a second cache line, so it goes last.
-        if (current->isFixedPositioned()
-            || current->hasTransformOrPerspective()
-            || current->isRenderFragmentedFlow()
-            || current->isLegacyRenderSVGRoot())
+        const Style::ComputedStyle& style = current->style();
+        if (current->isFixedPositioned() || style.writingMode().isBlockFlipped())
             return false;
 
-        if (current->style().writingMode().isBlockFlipped())
+        if (current->hasTransformOrPerspective())
+            return false;
+        
+        if (current->isRenderFragmentedFlow())
+            return false;
+
+        if (current->isLegacyRenderSVGRoot())
             return false;
 
         if (current == &ancestor)
@@ -173,10 +175,10 @@ void RenderGeometryMap::pushMappingsToAncestor(const RenderLayer* layerArg, cons
         pushMappingsToAncestor(&layerArg->renderer().view(), nullptr);
 
         SetForScope positionChange(m_insertionPosition, m_mapping.size());
-        SUPPRESS_UNCHECKED_LOCAL const RenderLayer* layer = layerArg;
-        while (const RenderLayer* parent = layer->parent()) {
-            pushMappingsToAncestor(layer, parent, respectTransforms);
-            layer = parent;
+        CheckedPtr layer = layerArg;
+        while (layer->parent()) {
+            pushMappingsToAncestor(layer, layer->parent(), respectTransforms);
+            layer = layer->parent();
         }
         ASSERT(m_mapping[0].m_renderer->isRenderView());
         return;

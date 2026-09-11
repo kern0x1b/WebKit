@@ -182,7 +182,7 @@ public:
     void commitPropertyChange(SVGAnimatedPropertyBase&);
 
     const SVGElement* attributeContextElement() const override { return this; }
-    SVGPropertyAnimatorFactory& propertyAnimatorFactory() LIFETIME_BOUND;
+    SVGPropertyAnimatorFactory& propertyAnimatorFactory() LIFETIME_BOUND { return m_propertyAnimatorFactory; }
     RefPtr<SVGAttributeAnimator> createAnimator(const QualifiedName&, AnimationMode, CalcMode, bool isAccumulated, bool isAdditive);
     void animatorWillBeDeleted(const QualifiedName&);
 
@@ -247,7 +247,7 @@ private:
     bool m_hasInitializedRelativeLengthsState { false };
     mutable TriState m_isInSVGResourceContainer { TriState::Indeterminate };
 
-    std::unique_ptr<SVGPropertyAnimatorFactory> m_propertyAnimatorFactory;
+    const UniqueRef<SVGPropertyAnimatorFactory> m_propertyAnimatorFactory;
 
     const UniqueRef<SVGPropertyRegistry> m_propertyRegistry;
     const Ref<SVGAnimatedString> m_className;

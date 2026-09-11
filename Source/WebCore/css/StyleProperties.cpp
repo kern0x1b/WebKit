@@ -71,7 +71,7 @@ String serializeLonghandValue(const CSS::SerializationContext& context, CSSPrope
     if (auto* list = dynamicDowncast<CSSValueList>(value); list && list->separator() == CSSValueList::ValueSeparator::Comma) {
         StringBuilder result;
         auto separator = ""_s;
-        for (auto& individualValue : *list)
+        for (Ref individualValue : *list)
             result.append(std::exchange(separator, ", "_s), serializeLonghandValue(context, property, individualValue));
         return result.toString();
     }
@@ -363,8 +363,7 @@ bool StyleProperties::propertyMatches(CSSPropertyID propertyID, const CSSValue* 
     int foundPropertyIndex = findPropertyIndex(propertyID);
     if (foundPropertyIndex == -1)
         return false;
-    auto* value = propertyAt(foundPropertyIndex).value();
-    return value == propertyValue || protect(value)->equals(*propertyValue);
+    return protect(propertyAt(foundPropertyIndex).value())->equals(*propertyValue);
 }
 
 Ref<MutableStyleProperties> StyleProperties::mutableCopy() const

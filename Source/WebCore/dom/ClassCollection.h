@@ -76,10 +76,8 @@ inline bool ClassCollection::elementMatches(Element& element) const
 {
     if (!element.hasClass())
         return false;
-    if (m_classNames.isEmpty()) [[unlikely]]
+    if (m_classNames.isEmpty())
         return false;
-    if (m_classNames.size() == 1) [[likely]]
-        return element.classNames().contains(m_classNames[0]);
     return element.classNames().containsAll(m_classNames);
 }
 

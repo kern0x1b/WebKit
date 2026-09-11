@@ -157,21 +157,17 @@ void AudioHardwareListenerMac::processIsRunningChanged()
     if (activity == hardwareActivity())
         return;
     setHardwareActivity(activity);
-
-    RefPtr client = this->client();
-    if (!client)
-        return;
+    
     if (hardwareActivity() == AudioHardwareActivityType::IsActive)
-        client->audioHardwareDidBecomeActive();
+        m_client.audioHardwareDidBecomeActive();
     else if (hardwareActivity() == AudioHardwareActivityType::IsInactive)
-        client->audioHardwareDidBecomeInactive();
+        m_client.audioHardwareDidBecomeInactive();
 }
 
 void AudioHardwareListenerMac::outputDeviceChanged()
 {
     setSupportedBufferSizes(currentDeviceSupportedBufferSizes());
-    if (RefPtr client = this->client())
-        client->audioOutputDeviceChanged();
+    m_client.audioOutputDeviceChanged();
 }
 
 }

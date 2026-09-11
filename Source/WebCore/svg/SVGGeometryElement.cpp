@@ -152,7 +152,8 @@ void SVGGeometryElement::attributeChanged(const QualifiedName& name, const AtomS
 
 void SVGGeometryElement::svgAttributeChanged(const QualifiedName& attrName)
 {
-    if (attrName.matches(SVGNames::pathLengthAttr)) {
+    if (PropertyRegistry::isKnownAttribute(attrName)) {
+        ASSERT(attrName == SVGNames::pathLengthAttr);
         InstanceInvalidationGuard guard(*this);
         updateSVGRendererForElementChange();
         return;

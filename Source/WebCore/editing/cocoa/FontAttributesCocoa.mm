@@ -116,19 +116,8 @@ RetainPtr<NSTextList> TextList::createTextList() const
 RetainPtr<NSDictionary> FontAttributes::createDictionary() const
 {
     NSMutableDictionary *attributes = [NSMutableDictionary dictionary];
-    if (RetainPtr cocoaFont = font ? bridge_cast(font->ctFont()) : nil) {
-#if PLATFORM(IOS_FAMILY)
-        // Consumers of this key expect a UIFont and send it -pointSize.
-        Class fontClass = PAL::getUIFontClassSingleton();
-        RetainPtr<CFStringRef> postScriptName = adoptCF(CTFontCopyPostScriptName(font->ctFont()));
-        id uiFont = postScriptName ? [fontClass fontWithName:(NSString *)postScriptName.get() size:CTFontGetSize(font->ctFont())] : nil;
-        if (!uiFont)
-            uiFont = [fontClass systemFontOfSize:CTFontGetSize(font->ctFont())];
-        attributes[NSFontAttributeName] = uiFont ?: cocoaFont.get();
-#else
+    if (RetainPtr cocoaFont = font ? bridge_cast(font->ctFont()) : nil)
         attributes[NSFontAttributeName] = cocoaFont.get();
-#endif
-    }
 
     if (foregroundColor.isValid())
         attributes[NSForegroundColorAttributeName] = cocoaColor(foregroundColor).get();
@@ -169,7 +158,7 @@ RetainPtr<NSDictionary> FontAttributes::createDictionary() const
         break;
     }
 
-    if (!textLists.isEmpty() && [style respondsToSelector:@selector(setTextLists:)]) {
+    if (!textLists.isEmpty()) {
         [style setTextLists:createNSArray(textLists, [] (auto& textList) {
             return textList.createTextList();
         }).get()];

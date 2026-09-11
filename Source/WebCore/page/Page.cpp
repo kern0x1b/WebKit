@@ -2730,7 +2730,7 @@ void Page::doAfterUpdateRendering()
 #if defined(WEBKIT_IOS6)
     ASSERT(!settings().siteIsolationEnabled());
 #else
-    if (mainFrame().tree().containsRemoteFrame())
+    if (settings().siteIsolationEnabled())
         syncLocalFrameInfoToRemote();
 #endif
 }

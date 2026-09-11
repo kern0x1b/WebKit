@@ -61,7 +61,6 @@ private:
     std::array<AlignedStorage<CSSPrimitiveValue>, maximumCacheableIntegerValue + 1> m_pixelValues;
     std::array<AlignedStorage<CSSPrimitiveValue>, maximumCacheableIntegerValue + 1> m_percentageValues;
     std::array<AlignedStorage<CSSPrimitiveValue>, maximumCacheableIntegerValue + 1> m_numberValues;
-    std::array<AlignedStorage<CSSPrimitiveValue>, maximumCacheableIntegerValue + 1> m_integerValues;
     std::array<AlignedStorage<CSSKeywordValue>, numCSSValueKeywords> m_identifierValues;
 };
 

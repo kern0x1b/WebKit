@@ -594,7 +594,7 @@ void SubresourceLoader::didReceiveBuffer(const FragmentedSharedBuffer& buffer, l
 
     ResourceLoader::didReceiveBuffer(buffer, encodedDataLength, dataPayloadType);
 
-    if (!m_loadingMultipartContent && resource->needsProgressiveData()) {
+    if (!m_loadingMultipartContent) {
         if (RefPtr resourceData = this->resourceData())
             resource->updateBuffer(*resourceData);
         else

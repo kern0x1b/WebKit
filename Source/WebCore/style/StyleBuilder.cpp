@@ -479,8 +479,8 @@ void Builder::applyProperty(CSSPropertyID id, CSSValue& value, SelectorChecker::
     if (valueType == ApplyValueType::Inherit && !isInheritedProperty())
         style.setHasExplicitlyInheritedProperties();
 
-    if (RefPtr paintImageValue = dynamicDowncast<CSSPaintImageValue>(valueToApply.get())) {
-        auto& name = paintImageValue->name().value;
+    if (RefPtr paintImageValue = dynamicDowncast<CSSPaintImageValue>(valueToApply)) {
+        auto name = toStyle(paintImageValue->name(), m_state).value;
         if (RefPtr paintWorklet = const_cast<Document&>(m_state->document()).paintWorkletGlobalScopeForName(name)) {
             Locker locker { paintWorklet->paintDefinitionLock() };
             if (auto* registration = paintWorklet->paintDefinitionMap().get(name)) {
@@ -490,20 +490,12 @@ void Builder::applyProperty(CSSPropertyID id, CSSValue& value, SelectorChecker::
         }
     }
 
-    if (id == CSSPropertyPageSize && valueType == ApplyValueType::Value) [[unlikely]] {
-        applyPageSizeDescriptor(valueToApply.get());
+    if (id == CSSPropertySize && valueType == ApplyValueType::Value) [[unlikely]] {
+        applyPageSizeDescriptor(valueToApply);
         return;
     }
 
-    auto apply = [&](ApplyValueType valueType) {
-        if (m_state->isBuildingHighlightStyle()) {
-            BuilderGenerated::applyHighlightProperty(id, m_state, valueToApply.get(), valueType);
-            return;
-        }
-        BuilderGenerated::applyProperty(id, m_state, valueToApply.get(), valueType);
-    };
-
-    apply(valueType);
+    BuilderGenerated::applyProperty(id, m_state, valueToApply, valueType);
 
     if (!isAnyRevert)
         m_state->disableNativeAppearanceIfNeeded(id, cascadeOrigin);
@@ -514,7 +506,7 @@ void Builder::applyProperty(CSSPropertyID id, CSSValue& value, SelectorChecker::
         // When this happens, the computed value is one of the following...
         // Otherwise: Either the property’s inherited value or its initial value depending on whether the property
         // is inherited or not, respectively, as if the property’s value had been specified as the unset keyword
-        apply(unsetValueType());
+        BuilderGenerated::applyProperty(id, m_state, valueToApply, unsetValueType());
     }
 }
 

@@ -29,12 +29,10 @@
 #if ENABLE(SPEECH_SYNTHESIS)
 
 #include <WebCore/PlatformSpeechSynthesisVoice.h>
-#include <wtf/AbstractRefCountedAndCanMakeWeakPtr.h>
 #include <wtf/RefCountedAndCanMakeWeakPtr.h>
 #include <wtf/RefPtr.h>
 #include <wtf/TZoneMalloc.h>
 #include <wtf/Vector.h>
-#include <wtf/WeakPtr.h>
 
 #if PLATFORM(COCOA)
 #include <wtf/RetainPtr.h>
@@ -58,7 +56,7 @@ class GstSpeechSynthesisWrapper;
 #endif
 class PlatformSpeechSynthesisUtterance;
 
-class PlatformSpeechSynthesizerClient : public AbstractRefCountedAndCanMakeWeakPtr<PlatformSpeechSynthesizerClient> {
+class PlatformSpeechSynthesizerClient {
 public:
     virtual void didStartSpeaking(PlatformSpeechSynthesisUtterance&) = 0;
     virtual void didFinishSpeaking(PlatformSpeechSynthesisUtterance&) = 0;
@@ -88,7 +86,7 @@ public:
     virtual void resetState();
     virtual void voicesDidChange();
 
-    RefPtr<PlatformSpeechSynthesizerClient> client() const;
+    PlatformSpeechSynthesizerClient& client() const { return m_speechSynthesizerClient; }
 
 protected:
     explicit PlatformSpeechSynthesizer(PlatformSpeechSynthesizerClient&);
@@ -103,7 +101,7 @@ private:
 #endif
 
     bool m_voiceListIsInitialized { false };
-    WeakPtr<PlatformSpeechSynthesizerClient> m_speechSynthesizerClient;
+    PlatformSpeechSynthesizerClient& m_speechSynthesizerClient;
 
 #if PLATFORM(COCOA)
     RetainPtr<WebSpeechSynthesisWrapper> m_platformSpeechWrapper;

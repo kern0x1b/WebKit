@@ -76,7 +76,6 @@ static std::optional<std::array<CGFloat, 4>> NODELETE ios6DeviceRGBComponents(co
 #endif
 
 static void setCGFillColor(CGContextRef context, const Color& color, const DestinationColorSpace& colorSpace)
-static void setCGFillColor(CGContextRef context, const Color& color, const ColorSpace& colorSpace)
 {
 #if defined(WEBKIT_IOS6)
     if (auto components = ios6DeviceRGBComponents(color)) {
@@ -391,10 +390,6 @@ void GraphicsContextCG::drawNativeImage(const NativeImage& nativeImage, const Fl
 
     RetainPtr<CGImageRef> retainedSubImage;
     auto subImage = image.get();
-    auto oldInterpolationQuality = imageInterpolationQuality();
-    auto interpolationQuality = imageInterpolationQualityForOptions(options);
-
-    auto subImage = image;
 
     auto adjustedDestRect = normalizedDestRect;
 
@@ -491,9 +486,6 @@ void GraphicsContextCG::drawNativeImage(const NativeImage& nativeImage, const Fl
 #endif
         if (blendModeChanged)
             setCGBlendMode(context, oldCompositeOperator, oldBlendMode);
-        setCGBlendMode(context, oldCompositeOperator, oldBlendMode);
-        if (interpolationQuality != oldInterpolationQuality)
-            CGContextSetInterpolationQuality(context, toCGInterpolationQuality(oldInterpolationQuality));
 #if HAVE(SUPPORT_HDR_DISPLAY_APIS)
         CGContextSetContentToneMappingInfo(context, oldToneMappingInfo);
         CGContextSetEDRTargetHeadroom(context, oldHeadroom);
@@ -1318,8 +1310,6 @@ void GraphicsContextCG::didUpdateState(GraphicsContextState& state)
 
         case GraphicsContextState::Change::StrokeBrush:
             setCGStrokeColor(context, state.strokeBrush().color(), colorSpace());
-            if (!state.strokeBrush().hasPatternOrGradient())
-                CGContextSetStrokeColorWithColor(context, cachedCGColorInDestinationStandardRange(state.strokeBrush().color(), colorSpace()).get());
             break;
 
         case GraphicsContextState::Change::CompositeMode:

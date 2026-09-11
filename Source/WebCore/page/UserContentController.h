@@ -46,12 +46,6 @@ public:
 
     WEBCORE_EXPORT void removeAllUserContent();
 
-#if ENABLE(CONTENT_EXTENSIONS)
-    WEBCORE_EXPORT bool addContentRuleList(const String& identifier, const String& ruleJSON);
-    WEBCORE_EXPORT void removeContentRuleList(const String& identifier);
-    WEBCORE_EXPORT void removeAllContentRuleLists();
-#endif
-
 private:
     UserContentController();
 

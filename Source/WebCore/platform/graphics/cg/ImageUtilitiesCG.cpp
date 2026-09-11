@@ -24,7 +24,6 @@
  */
 
 #include "config.h"
-#include "DestinationColorSpace.h"
 #include "ImageUtilities.h"
 
 #include "BitmapImage.h"
@@ -344,10 +343,7 @@ RefPtr<SharedBuffer> createIconDataFromBitmaps(Vector<Ref<ShareableBitmap>>&& bi
 
     constexpr auto icoUTI = "com.microsoft.ico"_s;
     RetainPtr cfUTI = icoUTI.createCFString();
-    // CGColorSpaceCreateWithName answers nothing on every release this port
-    // runs on, and a null colour space writes an empty image; the engine's own
-    // sRGB singleton is the same space and always exists.
-    RetainPtr colorSpace = DestinationColorSpace::SRGB().platformColorSpace();
+    RetainPtr colorSpace = adoptCF(CGColorSpaceCreateWithName(kCGColorSpaceSRGB));
     RetainPtr destinationData = adoptCF(CFDataCreateMutable(0, 0));
     RetainPtr destination = adoptCF(CGImageDestinationCreateWithData(destinationData.get(), cfUTI.get(), bitmaps.size(), nullptr));
 

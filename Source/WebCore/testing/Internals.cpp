@@ -1908,8 +1908,7 @@ void Internals::simulateSpeechSynthesizerVoiceListChange()
     if (m_platformSpeechSynthesizer) {
         m_platformSpeechSynthesizer->setInitialVoiceListToEmpty(false);
         m_platformSpeechSynthesizer->initializeVoiceList();
-        if (RefPtr client = m_platformSpeechSynthesizer->client())
-            client->voicesDidChange();
+        m_platformSpeechSynthesizer->client().voicesDidChange();
         return;
     }
 

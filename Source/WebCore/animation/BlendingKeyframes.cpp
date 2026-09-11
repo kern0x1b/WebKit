@@ -58,7 +58,6 @@ void BlendingKeyframes::clear()
     m_usesRelativeFontWeight = false;
     m_containsSubstitutionFunctions = false;
     m_usesAnchorFunctions = false;
-    m_usesTreeCountingFunctions = false;
 }
 
 bool BlendingKeyframes::operator==(const BlendingKeyframes& o) const
@@ -298,6 +297,15 @@ bool BlendingKeyframes::usesViewportUnits() const
     return false;
 }
 
+bool BlendingKeyframes::usesTreeCountingFunctions() const
+{
+    for (auto& keyframe : m_keyframes) {
+        if (keyframe.style()->useTreeCountingFunctions())
+            return true;
+    }
+    return false;
+}
+
 void BlendingKeyframes::addProperty(const AnimatableCSSProperty& property)
 {
     ASSERT(!std::holds_alternative<CSSPropertyID>(property) || std::get<CSSPropertyID>(property) != CSSPropertyCustom);
@@ -418,12 +426,6 @@ void BlendingKeyframes::analyzeKeyframe(const BlendingKeyframe& keyframe)
             m_animatesOffsetDistanceToPercentOrCalculated = style->offsetDistance().isPercentOrCalculated();
     };
 
-    auto analyzeTreeCountingFunctions = [&] {
-        if (!m_usesTreeCountingFunctions && style->useTreeCountingFunctions())
-            m_usesTreeCountingFunctions = true;
-    };
-
-    analyzeTreeCountingFunctions();
     analyzeSizeDependentTransform();
     analyzeDiscreteTransformInterval();
     analyzeExplicitlyInheritedKeyframeProperty();

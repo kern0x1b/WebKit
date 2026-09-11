@@ -82,9 +82,9 @@ std::optional<InlineLayoutUnit> AbstractLineBuilder::overflowWidthAsLeadingForNe
         return { };
     }
     if (isFirstFormattedLineCandidate()) {
-        auto& usedStyle = overflowingRun.style;
-        auto& style = overflowingRun.inlineItem.style();
-        if (&usedStyle != &style && !usedStyle.fontCascadeEqual(style)) {
+        CheckedRef usedStyle = overflowingRun.style;
+        CheckedRef style = overflowingRun.inlineItem.style();
+        if (usedStyle.ptr() != style.ptr() && !usedStyle->fontCascadeEqual(style)) {
             // We may have the incorrect text width when styles differ. Just re-measure the text content when we place it on the next line.
             return { };
         }

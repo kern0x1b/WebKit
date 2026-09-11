@@ -179,8 +179,7 @@ static float getAVSpeechUtteranceMaximumSpeechRate()
         if (!protectedSynthesizerObject)
             return;
 
-        if (RefPtr client = protectedSynthesizerObject->client())
-            client->didStartSpeaking(Ref { *m_utterance });
+        protectedSynthesizerObject->client().didStartSpeaking(Ref { *m_utterance });
     }
 #endif
 
@@ -235,8 +234,7 @@ static float getAVSpeechUtteranceMaximumSpeechRate()
     if (!protectedSynthesizerObject)
         return;
 
-    if (RefPtr client = protectedSynthesizerObject->client())
-        client->didStartSpeaking(Ref { *m_utterance });
+    protectedSynthesizerObject->client().didStartSpeaking(Ref { *m_utterance });
 }
 
 - (void)speechSynthesizer:(AVSpeechSynthesizer *)synthesizer didFinishSpeechUtterance:(AVSpeechUtterance *)utterance
@@ -253,8 +251,7 @@ static float getAVSpeechUtteranceMaximumSpeechRate()
     RefPtr<WebCore::PlatformSpeechSynthesisUtterance> protectedUtterance = m_utterance;
     m_utterance = nullptr;
 
-    if (RefPtr client = protectedSynthesizerObject->client())
-        client->didFinishSpeaking(*protectedUtterance);
+    protectedSynthesizerObject->client().didFinishSpeaking(*protectedUtterance);
 }
 
 - (void)speechSynthesizer:(AVSpeechSynthesizer *)synthesizer didPauseSpeechUtterance:(AVSpeechUtterance *)utterance
@@ -267,8 +264,7 @@ static float getAVSpeechUtteranceMaximumSpeechRate()
     if (!protectedSynthesizerObject)
         return;
 
-    if (RefPtr client = protectedSynthesizerObject->client())
-        client->didPauseSpeaking(Ref { *m_utterance });
+    protectedSynthesizerObject->client().didPauseSpeaking(Ref { *m_utterance });
 }
 
 - (void)speechSynthesizer:(AVSpeechSynthesizer *)synthesizer didContinueSpeechUtterance:(AVSpeechUtterance *)utterance
@@ -281,8 +277,7 @@ static float getAVSpeechUtteranceMaximumSpeechRate()
     if (!protectedSynthesizerObject)
         return;
 
-    if (RefPtr client = protectedSynthesizerObject->client())
-        client->didResumeSpeaking(Ref { *m_utterance });
+    protectedSynthesizerObject->client().didResumeSpeaking(Ref { *m_utterance });
 }
 
 - (void)speechSynthesizer:(AVSpeechSynthesizer *)synthesizer didCancelSpeechUtterance:(AVSpeechUtterance *)utterance
@@ -299,8 +294,7 @@ static float getAVSpeechUtteranceMaximumSpeechRate()
     RefPtr<WebCore::PlatformSpeechSynthesisUtterance> protectedUtterance = m_utterance;
     m_utterance = nullptr;
 
-    if (RefPtr client = protectedSynthesizerObject->client())
-        client->didFinishSpeaking(*protectedUtterance);
+    protectedSynthesizerObject->client().didFinishSpeaking(*protectedUtterance);
 }
 
 - (void)speechSynthesizer:(AVSpeechSynthesizer *)synthesizer willSpeakRangeOfSpeechString:(NSRange)characterRange utterance:(AVSpeechUtterance *)utterance
@@ -314,8 +308,7 @@ static float getAVSpeechUtteranceMaximumSpeechRate()
         return;
 
     // AVSpeechSynthesizer only supports word boundaries.
-    if (RefPtr client = protectedSynthesizerObject->client())
-        client->boundaryEventOccurred(Ref { *m_utterance }, WebCore::SpeechBoundary::SpeechWordBoundary, characterRange.location, characterRange.length);
+    protectedSynthesizerObject->client().boundaryEventOccurred(Ref { *m_utterance }, WebCore::SpeechBoundary::SpeechWordBoundary, characterRange.location, characterRange.length);
 }
 
 @end
@@ -367,8 +360,7 @@ void PlatformSpeechSynthesizer::initializeVoiceList()
                 return;
 
             protectedThis->appendVoices(voices.get());
-            if (RefPtr client = protectedThis->client())
-                client->voicesDidChange();
+            protectedThis->m_speechSynthesizerClient.voicesDidChange();
             END_BLOCK_OBJC_EXCEPTIONS
         });
     }];

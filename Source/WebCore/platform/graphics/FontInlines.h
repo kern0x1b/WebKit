@@ -42,17 +42,16 @@ ALWAYS_INLINE FloatRect Font::boundsForGlyph(Glyph glyph) const
     if (isZeroWidthSpaceGlyph(glyph))
         return FloatRect();
 
+    FloatRect bounds;
     if (m_glyphToBoundsMap) {
-        FloatRect& boundsSlot = m_glyphToBoundsMap->metricsSlotForGlyph(glyph);
-        if (boundsSlot.width() != cGlyphSizeUnknown)
-            return boundsSlot;
-        auto bounds = platformBoundsForGlyph(glyph);
-        boundsSlot = bounds;
-        return bounds;
+        bounds = m_glyphToBoundsMap->metricsForGlyph(glyph);
+        if (bounds.width() != cGlyphSizeUnknown)
+            return bounds;
     }
 
-    auto bounds = platformBoundsForGlyph(glyph);
-    m_glyphToBoundsMap = makeUnique<GlyphMetricsMap<FloatRect>>();
+    bounds = platformBoundsForGlyph(glyph);
+    if (!m_glyphToBoundsMap)
+        m_glyphToBoundsMap = makeUnique<GlyphMetricsMap<FloatRect>>();
     m_glyphToBoundsMap->setMetricsForGlyph(glyph, bounds);
     return bounds;
 }
@@ -118,8 +117,7 @@ ALWAYS_INLINE float Font::widthForGlyph(Glyph glyph, SyntheticBoldInclusion Synt
     if (isZeroWidthSpaceGlyph(glyph) && !isInterstitial())
         return 0;
 
-    float& widthSlot = m_glyphToWidthMap.metricsSlotForGlyph(glyph);
-    float width = widthSlot;
+    float width = m_glyphToWidthMap.metricsForGlyph(glyph);
     if (width != cGlyphSizeUnknown)
         return width + (SyntheticBoldInclusion == SyntheticBoldInclusion::Incorporate ? syntheticBoldOffset() : 0);
 
@@ -130,7 +128,7 @@ ALWAYS_INLINE float Font::widthForGlyph(Glyph glyph, SyntheticBoldInclusion Synt
 #endif
         width = platformWidthForGlyph(glyph);
 
-    widthSlot = width;
+    m_glyphToWidthMap.setMetricsForGlyph(glyph, width);
     return width + (SyntheticBoldInclusion == SyntheticBoldInclusion::Incorporate ? syntheticBoldOffset() : 0);
 }
 

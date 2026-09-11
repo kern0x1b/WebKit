@@ -46,7 +46,7 @@ public:
     // end of the stream.
     char16_t nextInputChar() const
     {
-        if (m_offset >= m_stringLength) [[unlikely]]
+        if (m_offset >= m_stringLength)
             return kEndOfFileMarker;
         return m_string[m_offset];
     }
@@ -55,8 +55,7 @@ public:
     // return NUL (kEndOfFileMarker) if the stream position is at the end.
     char16_t peek(unsigned lookaheadOffset) const
     {
-        size_t index = m_offset + lookaheadOffset;
-        if (index >= m_stringLength) [[unlikely]]
+        if ((m_offset + lookaheadOffset) >= m_stringLength)
             return kEndOfFileMarker;
         return m_string[m_offset + lookaheadOffset];
     }
@@ -70,12 +69,8 @@ public:
 
     double getDouble(unsigned start, unsigned end) const;
 
-    // Advances offset past every character satisfying the predicate and returns the new offset.
-    // The end bound and the buffer pointer are hoisted out of the loop, and the predicate is
-    // instantiated on the concrete character type, so the Latin-1 path is one indexed byte load
-    // per character with no is8Bit test and no widening to char16_t.
-    template<typename Predicate>
-    unsigned skipWhile(unsigned offset, Predicate predicate) const
+    template<bool characterPredicate(char16_t)>
+    unsigned skipWhilePredicate(unsigned offset)
     {
         if (m_string.is8Bit()) {
             auto characters8 = m_string.span8();
@@ -86,14 +81,7 @@ public:
             while ((m_offset + offset) < m_stringLength && characterPredicate(characters16[m_offset + offset]))
                 ++offset;
         }
-        return offset + static_cast<unsigned>(index - start);
-    }
-
-    // Number of characters from the current position for which the predicate holds.
-    template<typename Predicate>
-    unsigned countWhile(Predicate predicate) const
-    {
-        return skipWhile(0, predicate);
+        return offset;
     }
 
     void advanceUntilNonWhitespace();
@@ -109,11 +97,6 @@ public:
     }
 
 private:
-    char16_t characterAt(size_t index) const
-    {
-        return m_is8Bit ? m_characters8[index] : m_characters16[index];
-    }
-
     size_t m_offset;
     const size_t m_stringLength;
     StringView m_string;

@@ -291,15 +291,13 @@ void LegacyRenderSVGShape::strokeShape(const Style::ComputedStyle& style, Graphi
 
 void LegacyRenderSVGShape::fillStrokeMarkers(PaintInfo& childPaintInfo)
 {
-    auto& style = this->style();
-    auto& context = childPaintInfo.context();
-    for (auto type : style.paintOrder()) {
+    for (auto type : style().paintOrder()) {
         switch (type) {
         case Style::PaintType::Fill:
-            fillShape(style, context);
+            fillShape(style(), childPaintInfo.context());
             break;
         case Style::PaintType::Stroke:
-            strokeShape(style, context);
+            strokeShape(style(), childPaintInfo.context());
             break;
         case Style::PaintType::Markers:
             drawMarkers(childPaintInfo);
@@ -548,8 +546,10 @@ float LegacyRenderSVGShape::strokeWidthForMarkerUnits() const
 
 Path& LegacyRenderSVGShape::ensurePath()
 {
-    if (!hasPath())
+    if (!hasPath()) {
         m_path = createPath();
+        m_path->setNotTransient();
+    }
     return path();
 }
 

@@ -427,7 +427,8 @@ static void prepend(Vector<char16_t, 1024>& buffer, StringView string)
     unsigned length = string.length();
     buffer.grow(oldSize + length);
     memmoveSpan(buffer.mutableSpan().subspan(length), buffer.span().first(oldSize));
-    string.getCharacters(buffer.mutableSpan().first(length));
+    for (unsigned i = 0; i < length; ++i)
+        buffer[i] = string[i];
 }
 
 static void prependRepeatedCharacter(Vector<char16_t, 1024>& buffer, char16_t character, unsigned count)
@@ -484,9 +485,7 @@ unsigned backwardSearchForBoundaryWithTextIterator(SimplifiedBackwardsTextIterat
     unsigned next = 0;
     bool needMoreContext = false;
     while (!it.atEnd()) {
-        auto* node = it.node();
-        auto* renderer = node ? node->renderer() : nullptr;
-        bool inTextSecurityMode = renderer && renderer->style().textSecurity() != TextSecurity::None;
+        bool inTextSecurityMode = it.node() && it.node()->renderer() && it.node()->renderer()->style().textSecurity() != TextSecurity::None;
         // iterate to get chunks until the searchFunction returns a non-zero value.
         if (!inTextSecurityMode)
             prepend(string, it.text());
@@ -516,9 +515,7 @@ unsigned forwardSearchForBoundaryWithTextIterator(TextIterator& it, Vector<char1
     unsigned next = 0;
     bool needMoreContext = false;
     while (!it.atEnd()) {
-        auto* node = it.node();
-        auto* renderer = node ? node->renderer() : nullptr;
-        bool inTextSecurityMode = renderer && renderer->style().textSecurity() != TextSecurity::None;
+        bool inTextSecurityMode = it.node() && it.node()->renderer() && it.node()->renderer()->style().textSecurity() != TextSecurity::None;
         // Keep asking the iterator for chunks until the search function
         // returns an end value not equal to the length of the string passed to it.
         if (!inTextSecurityMode)
@@ -1151,24 +1148,24 @@ RefPtr<Node> findStartOfParagraph(Node* startNode, Node* highestRoot, Node* star
             if (!n || !n->isDescendantOf(highestRoot))
                 break;
         }
-        auto* r = n->renderer();
+        CheckedPtr r = n->renderer();
         if (!r) {
             n = NodeTraversal::previousPostOrder(*n, startBlock);
             continue;
         }
-        auto& style = r->style();
-        if (style.visibility() != Visibility::Visible) {
+        CheckedRef style = r->style();
+        if (style->visibility() != Visibility::Visible) {
             n = NodeTraversal::previousPostOrder(*n, startBlock);
             continue;
         }
-
+        
         if (r->isBR() || isBlock(*n))
             break;
 
-        if (auto* renderText = dynamicDowncast<RenderText>(*r); renderText && renderText->hasRenderedText()) {
+        if (CheckedPtr renderText = dynamicDowncast<RenderText>(*r); renderText && renderText->hasRenderedText()) {
             ASSERT_WITH_SECURITY_IMPLICATION(is<Text>(*n));
             type = Position::PositionIsOffsetInAnchor;
-            if (style.preserveNewline()) {
+            if (style->preserveNewline()) {
                 auto& text = renderText->text();
                 int i = text.length();
                 int o = offset;
@@ -1210,26 +1207,26 @@ RefPtr<Node> findEndOfParagraph(Node* startNode, Node* highestRoot, Node* stayIn
                 break;
         }
 
-        auto* r = n->renderer();
+        CheckedPtr r = n->renderer();
         if (!r) {
             n = NodeTraversal::next(*n, stayInsideBlock);
             continue;
         }
-        auto& style = r->style();
-        if (style.visibility() != Visibility::Visible) {
+        CheckedRef style = r->style();
+        if (style->visibility() != Visibility::Visible) {
             n = NodeTraversal::next(*n, stayInsideBlock);
             continue;
         }
-
+        
         // FIXME: This is wrong when startNode is a block. We should return a position after the block.
         if (r->isBR() || is<HTMLBRElement>(*n) || isBlock(*n))
             break;
 
         // FIXME: We avoid returning a position where the renderer can't accept the caret.
-        if (auto* renderText = dynamicDowncast<RenderText>(*r); renderText && renderText->hasRenderedText()) {
+        if (CheckedPtr renderText = dynamicDowncast<RenderText>(*r); renderText && renderText->hasRenderedText()) {
             ASSERT_WITH_SECURITY_IMPLICATION(is<Text>(*n));
             type = Position::PositionIsOffsetInAnchor;
-            if (style.preserveNewline()) {
+            if (style->preserveNewline()) {
                 auto& text = renderText->text();
                 int o = n == startNode ? offset : 0;
                 int length = text.length();

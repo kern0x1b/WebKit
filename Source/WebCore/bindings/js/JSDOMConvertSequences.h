@@ -133,9 +133,8 @@ struct NumericSequenceConverterImpl {
     static Result convertArray(JSC::JSGlobalObject& lexicalGlobalObject, JSC::ThrowScope& scope, JSC::JSArray* array, unsigned length, JSC::IndexingType indexingType, SequenceType&& sequence)
     {
         if (indexingType == JSC::Int32Shape) {
-            auto storage = array->butterfly()->contiguousInt32();
             for (unsigned i = 0; i < length; i++) {
-                auto indexValue = JSC::loadElementUnordered(storage.at(array, i));
+                auto indexValue = array->butterfly()->contiguousInt32().at(array, i).get();
                 ASSERT(!indexValue || indexValue.isInt32());
                 if (!indexValue)
                     sequence.append(0);
@@ -147,9 +146,8 @@ struct NumericSequenceConverterImpl {
 
         ASSERT(indexingType == JSC::DoubleShape);
         ASSERT(JSC::Options::allowDoubleShape());
-        auto doubleStorage = array->butterfly()->contiguousDouble();
         for (unsigned i = 0; i < length; i++) {
-            double doubleValue = doubleStorage.at(array, i);
+            double doubleValue = array->butterfly()->contiguousDouble().at(array, i);
             if (std::isnan(doubleValue))
                 sequence.append(0);
             else {
@@ -261,9 +259,8 @@ struct SequenceConverterImpl {
         JSC::IndexingType indexingType = array->indexingType() & JSC::IndexingShapeMask;
 
         if (indexingType == JSC::ContiguousShape) {
-            auto storage = array->butterfly()->contiguous();
             for (unsigned i = 0; i < length; i++) {
-                auto indexValue = JSC::loadElementUnordered(storage.at(array, i));
+                auto indexValue = array->butterfly()->contiguous().at(array, i).get();
                 if (!indexValue)
                     indexValue = JSC::jsUndefined();
 
@@ -297,34 +294,32 @@ struct SequenceConverterImpl {
         }
 
         JSC::JSObject* object = JSC::asObject(value);
-        if constexpr (Converter<InnerTypeIDL>::conversionHasSideEffects)
+        if (Converter<InnerTypeIDL>::conversionHasSideEffects)
             RELEASE_AND_RETURN(scope, (GenericConverter::convert(lexicalGlobalObject, object)));
-        else {
-            if (!JSC::isJSArray(object))
-                RELEASE_AND_RETURN(scope, (GenericConverter::convert(lexicalGlobalObject, object)));
 
-            JSC::JSArray* array = JSC::asArray(object);
-            if (!WebCore::isIteratorProtocolFastAndNonObservable(array))
-                RELEASE_AND_RETURN(scope, (GenericConverter::convert(lexicalGlobalObject, object)));
+        if (!JSC::isJSArray(object))
+            RELEASE_AND_RETURN(scope, (GenericConverter::convert(lexicalGlobalObject, object)));
 
-            RELEASE_AND_RETURN(scope, (convertArray(lexicalGlobalObject, array)));
-        }
+        JSC::JSArray* array = JSC::asArray(object);
+        if (!WebCore::isIteratorProtocolFastAndNonObservable(array))
+            RELEASE_AND_RETURN(scope, (GenericConverter::convert(lexicalGlobalObject, object)));
+
+        RELEASE_AND_RETURN(scope, (convertArray(lexicalGlobalObject, array)));
     }
 
     static Result convert(JSC::JSGlobalObject& lexicalGlobalObject, JSC::JSObject* object, JSC::JSValue method)
     {
-        if constexpr (Converter<InnerTypeIDL>::conversionHasSideEffects)
+        if (Converter<InnerTypeIDL>::conversionHasSideEffects)
             return GenericConverter::convert(lexicalGlobalObject, object, method);
-        else {
-            if (!JSC::isJSArray(object))
-                return GenericConverter::convert(lexicalGlobalObject, object, method);
 
-            JSC::JSArray* array = JSC::asArray(object);
-            if (!WebCore::isIteratorProtocolFastAndNonObservable(array))
-                return GenericConverter::convert(lexicalGlobalObject, object, method);
+        if (!JSC::isJSArray(object))
+            return GenericConverter::convert(lexicalGlobalObject, object, method);
 
-            return convertArray(lexicalGlobalObject, array);
-        }
+        JSC::JSArray* array = JSC::asArray(object);
+        if (!WebCore::isIteratorProtocolFastAndNonObservable(array))
+            return GenericConverter::convert(lexicalGlobalObject, object, method);
+
+        return convertArray(lexicalGlobalObject, array);
     }
 };
 

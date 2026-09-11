@@ -102,7 +102,6 @@ private:
     std::unique_ptr<CustomElementQueue> m_customElementQueue;
     bool m_processingBackupElementQueue { false };
 
-    bool m_maybeHasPendingIdleCallbacks { false };
     MonotonicTime m_lastIdlePeriodStartTime;
     Seconds m_expectedIdleCallbackDuration { 4_ms };
 };

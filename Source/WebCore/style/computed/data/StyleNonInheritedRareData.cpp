@@ -322,6 +322,7 @@ bool NonInheritedRareData::operator==(const NonInheritedRareData& o) const
         && columnGap == o.columnGap
         && rowGap == o.rowGap
         && offsetPath == o.offsetPath
+        && offsetDistance == o.offsetDistance
         && offsetPosition == o.offsetPosition
         && offsetAnchor == o.offsetAnchor
         && offsetRotate == o.offsetRotate

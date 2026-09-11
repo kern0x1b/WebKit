@@ -63,7 +63,6 @@ NativeImage::NativeImage(PlatformImagePtr&& platformImage, std::optional<GainMap
     : m_platformImage(WTF::move(platformImage))
     , m_gainMap(WTF::move(gainMap))
 {
-    cacheSize();
     computeHeadroom();
 }
 #endif
@@ -95,8 +94,6 @@ void NativeImage::replacePlatformImage(PlatformImagePtr&& platformImage) const
     ASSERT(platformImage);
     Locker locker { m_lock };
     m_platformImage = WTF::move(platformImage);
-    cacheSize();
-    computeHeadroom();
     // Intention is that the contents do not change, so properties are not recomputed.
 }
 
@@ -110,9 +107,6 @@ void NativeImage::computeHeadroom() const
 {
 }
 
-void NativeImage::cacheSize() const
-{
-}
 RefPtr<NativeImage> NativeImage::rotatedImage(ImageOrientation orientation)
 {
     IntSize sizeForRotation = orientation.usesWidthAsHeight() ? size().transposedSize() : size();

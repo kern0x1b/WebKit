@@ -74,21 +74,18 @@ Ref<SurroundData> SurroundData::copy() const
 
 bool SurroundData::operator==(const SurroundData& o) const
 {
-    unsigned packedDelta = (hasExplicitlySetBorderBottomLeftRadius ^ o.hasExplicitlySetBorderBottomLeftRadius)
-        | (hasExplicitlySetBorderBottomRightRadius ^ o.hasExplicitlySetBorderBottomRightRadius)
-        | (hasExplicitlySetBorderTopLeftRadius ^ o.hasExplicitlySetBorderTopLeftRadius)
-        | (hasExplicitlySetBorderTopRightRadius ^ o.hasExplicitlySetBorderTopRightRadius)
-        | (hasExplicitlySetPaddingBottom ^ o.hasExplicitlySetPaddingBottom)
-        | (hasExplicitlySetPaddingLeft ^ o.hasExplicitlySetPaddingLeft)
-        | (hasExplicitlySetPaddingRight ^ o.hasExplicitlySetPaddingRight)
-        | (hasExplicitlySetPaddingTop ^ o.hasExplicitlySetPaddingTop);
-    if (packedDelta)
-        return false;
-
     return inset == o.inset
         && margin == o.margin
         && padding == o.padding
-        && border == o.border;
+        && border == o.border
+        && hasExplicitlySetBorderBottomLeftRadius == o.hasExplicitlySetBorderBottomLeftRadius
+        && hasExplicitlySetBorderBottomRightRadius == o.hasExplicitlySetBorderBottomRightRadius
+        && hasExplicitlySetBorderTopLeftRadius == o.hasExplicitlySetBorderTopLeftRadius
+        && hasExplicitlySetBorderTopRightRadius == o.hasExplicitlySetBorderTopRightRadius
+        && hasExplicitlySetPaddingBottom == o.hasExplicitlySetPaddingBottom
+        && hasExplicitlySetPaddingLeft == o.hasExplicitlySetPaddingLeft
+        && hasExplicitlySetPaddingRight == o.hasExplicitlySetPaddingRight
+        && hasExplicitlySetPaddingTop == o.hasExplicitlySetPaddingTop;
 }
 
 #if !LOG_DISABLED

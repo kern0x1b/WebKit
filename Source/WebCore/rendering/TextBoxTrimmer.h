@@ -43,11 +43,9 @@ private:
     void adjustTextBoxTrimStatusAfterLayout();
     void handleTextBoxTrimNoneBeforeLayout();
 
-    const RenderBlockFlow* m_blockContainer;
-    LocalFrameViewLayoutContext* m_layoutContext { nullptr };
+    CheckedPtr<const RenderBlockFlow> m_blockContainer;
     std::optional<LocalFrameViewLayoutContext::TextBoxTrim> m_previousTextBoxTrimStatus { };
     bool m_shouldRestoreTextBoxTrimStatus { false };
-    bool m_isNoOp { false };
 };
 
 class TextBoxTrimStartDisabler {

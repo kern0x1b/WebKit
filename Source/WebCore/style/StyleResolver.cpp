@@ -126,8 +126,7 @@ public:
 
         auto& document = element.document();
         auto* documentElement = document.documentElement();
-        m_isDocumentElement = documentElement == &element;
-        if (!documentElement || m_isDocumentElement)
+        if (!documentElement || documentElement == &element)
             m_rootElementStyle = document.initialContainingBlockStyle();
         else if (documentElementStyle)
             m_rootElementStyle = documentElementStyle;
@@ -138,7 +137,6 @@ public:
     }
 
     const Element* NODELETE element() const { return m_element; }
-    bool isDocumentElement() const { return m_isDocumentElement; }
 
     void setStyle(std::unique_ptr<Style::ComputedStyle> style) { m_style = WTF::move(style); }
     Style::ComputedStyle* NODELETE style() const { return m_style.get(); }
@@ -153,7 +151,7 @@ public:
     const Style::ComputedStyle* NODELETE parentHighlightStyle() const { return m_parentHighlightStyle; }
     const Style::ComputedStyle* NODELETE rootElementStyle() const { return m_rootElementStyle; }
 
-    TreeResolutionState* NODELETE treeResolutionState() const { return m_treeResolutionState; }
+    CheckedPtr<TreeResolutionState> NODELETE treeResolutionState() { return m_treeResolutionState; }
 
 private:
     const Element* m_element { };
@@ -163,8 +161,7 @@ private:
     std::unique_ptr<const Style::ComputedStyle> m_ownedParentStyle;
     const Style::ComputedStyle* m_rootElementStyle { };
 
-    TreeResolutionState* m_treeResolutionState { };
-    bool m_isDocumentElement { false };
+    CheckedPtr<TreeResolutionState> m_treeResolutionState;
 };
 
 Ref<Resolver> Resolver::create(Document& document, ScopeType scopeType)
@@ -261,7 +258,7 @@ auto Resolver::initializeStateAndStyle(const Element& element, const ResolutionC
         state.setStyle(WTF::move(initialStyle));
     else if (state.parentStyle()) {
         state.setStyle(Style::ComputedStyle::createPtrWithRegisteredInitialValues(document().customPropertyRegistry()));
-        if (state.isDocumentElement() && !context.isSVGUseTreeRoot) {
+        if (&element == document().documentElement() && !context.isSVGUseTreeRoot) {
             // Initial values for custom properties are inserted to the document element style. Don't overwrite them.
             state.style()->inheritIgnoringCustomPropertiesFrom(*state.parentStyle());
         } else
@@ -322,10 +319,7 @@ UnadjustedStyle Resolver::unadjustedStyleForElement(Element& element, const Reso
     if (matchedPseudoElements)
         style.setHasPseudoStyles(matchedPseudoElements);
 
-    // With no relations the callee walks nothing and returns null, so skip the out-of-line call.
-    std::unique_ptr<Relations> elementStyleRelations;
-    if (!collector.styleRelations().isEmpty())
-        elementStyleRelations = commitRelationsToRenderStyle(style, element, collector.styleRelations());
+    auto elementStyleRelations = commitRelationsToRenderStyle(style, element, collector.styleRelations());
 
     applyMatchedProperties(state, collector.matchResult(), PropertyCascade::normalProperties());
 
@@ -700,6 +694,8 @@ Vector<Ref<const StyleRule>> Resolver::pseudoStyleRulesForElement(const Element*
     if (!element)
         return { };
 
+    auto state = State(*element, nullptr, nullptr, nullptr);
+
     ElementRuleCollector collector(*element, m_ruleSets, nullptr, SelectorChecker::Mode::CollectingRules);
     if (pseudoElementIdentifier)
         collector.setPseudoElementRequest(*pseudoElementIdentifier);
@@ -735,15 +731,13 @@ void Resolver::applyMatchedProperties(State& state, const MatchResult& matchResu
 {
     auto& style = *state.style();
     auto& parentStyle = *state.parentStyle();
-    auto& element = *state.element();
+    Ref element = *state.element();
 
-    auto& parentInheritedCustomProperties = parentStyle.inheritedCustomProperties();
+    unsigned cacheHash = MatchedDeclarationsCache::computeHash(matchResult, parentStyle.inheritedCustomProperties());
 
-    unsigned cacheHash = MatchedDeclarationsCache::computeHash(matchResult, parentInheritedCustomProperties);
+    auto cacheResult = m_matchedDeclarationsCache.find(cacheHash, matchResult, parentStyle.inheritedCustomProperties(), parentStyle);
 
-    auto cacheResult = m_matchedDeclarationsCache.find(cacheHash, matchResult, parentInheritedCustomProperties, parentStyle);
-
-    auto hasUsableEntry = cacheResult && MatchedDeclarationsCache::isCacheable(element, style, parentStyle);
+    auto hasUsableEntry = cacheResult && MatchedDeclarationsCache::isCacheable(element.get(), style, parentStyle);
     if (hasUsableEntry) {
         auto& cacheEntry = cacheResult->entry;
         bool inheritedEqual = cacheResult->inheritedEqual;

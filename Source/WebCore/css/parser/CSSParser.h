@@ -130,6 +130,7 @@ public:
 private:
     struct NestingContext {
         // FIXME: Can we build StylePropertySets directly?
+        // FIXME: Investigate using a smaller inline buffer
         ParsedPropertyVector m_parsedProperties;
         Vector<Ref<StyleRuleBase>> m_parsedRules;
     };
@@ -223,9 +224,7 @@ private:
     // https://bugs.webkit.org/show_bug.cgi?id=265566
     unsigned m_ruleListNestingLevel { 0 };
     Vector<CSSParserEnum::NestedContextType, 16> m_ancestorRuleTypeStack;
-    // NestingContext embeds a ParsedPropertyVector, so every inline slot here is paid for on the
-    // stack for the whole parse. Nesting deeper than four is rare enough to grow onto the heap.
-    Vector<NestingContext, 4> m_nestingContextStack { NestingContext { } };
+    Vector<NestingContext, 16> m_nestingContextStack { NestingContext { } };
 
     std::optional<CSSParserEnum::NestedContextType> lastAncestorRuleType() const
     {

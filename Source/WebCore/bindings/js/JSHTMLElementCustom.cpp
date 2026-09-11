@@ -147,7 +147,7 @@ JSScope* JSHTMLElement::pushEventHandlerScope(JSGlobalObject* lexicalGlobalObjec
 
 JSValue toJS(JSGlobalObject*, JSDOMGlobalObject* globalObject, HTMLElement& element)
 {
-    if (auto* wrapper = getCachedWrapper(*globalObject, element))
+    if (auto* wrapper = getCachedWrapper(globalObject->world(), element))
         return wrapper;
     return createJSHTMLWrapper(globalObjectForNode(element, globalObject), element);
 }
@@ -155,7 +155,7 @@ JSValue toJS(JSGlobalObject*, JSDOMGlobalObject* globalObject, HTMLElement& elem
 JSValue toJSNewlyCreated(JSGlobalObject*, JSDOMGlobalObject* globalObject, Ref<HTMLElement>&& element)
 {
     if (element->isDefinedCustomElement()) {
-        JSValue result = getCachedWrapper(*globalObject, element.get());
+        JSValue result = getCachedWrapper(globalObject->world(), element);
         if (result)
             return result;
         ASSERT(!globalObject->vm().exceptionForInspection());

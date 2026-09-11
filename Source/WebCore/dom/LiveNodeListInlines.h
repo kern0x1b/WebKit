@@ -58,7 +58,7 @@ ALWAYS_INLINE bool shouldInvalidateTypeOnAttributeChange(NodeListInvalidationTyp
 
 inline void LiveNodeList::invalidateCache() const
 {
-    SUPPRESS_UNCOUNTED_ARG invalidateCacheForDocument(document());
+    invalidateCacheForDocument(protect(document()).get());
 }
 
 ALWAYS_INLINE void LiveNodeList::invalidateCacheForAttribute(const QualifiedName& attributeName) const

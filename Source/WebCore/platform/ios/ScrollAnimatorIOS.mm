@@ -34,15 +34,8 @@
 #import "ScrollingEffectsController.h"
 #import <wtf/TZoneMallocInlines.h>
 
-#if ENABLE(TOUCH_EVENTS) && PLATFORM(IOS_FAMILY) && USE(APPLE_INTERNAL_SDK)
+#if ENABLE(TOUCH_EVENTS)
 #import "PlatformTouchEventIOS.h"
-#elif ENABLE(TOUCH_EVENTS)
-// See PlatformEventFactoryIOS.h for the full reasoning: this is the portable
-// header GTK, WPE and (without the internal SDK) this port all build with.
-// Angle brackets for the same reason as MouseEvent.h: quoted only reliably
-// resolves for a consumer inside WebCore's own compilation, and there is no
-// reason to assume this file will always stay one.
-#import <WebCore/PlatformTouchEvent.h>
 #endif
 
 namespace WebCore {
@@ -64,12 +57,8 @@ ScrollAnimatorIOS::~ScrollAnimatorIOS() = default;
 #if ENABLE(TOUCH_EVENTS)
 bool ScrollAnimatorIOS::handleTouchEvent(const PlatformTouchEvent& touchEvent)
 {
-    // touchCount()/touchLocationInRootViewAtIndex() are Apple's modern API and
-    // do not exist on the portable PlatformTouchEvent this build uses instead
-    // (see PlatformEventFactoryIOS.h); touchPoints().size() and
-    // touchPoints()[0].pos() are the same two facts under the portable names.
-    if (touchEvent.type() == PlatformEvent::Type::TouchStart && touchEvent.touchPoints().size() == 1) {
-        m_firstTouchPoint = IntPoint(touchEvent.touchPoints()[0].pos());
+    if (touchEvent.type() == PlatformEvent::Type::TouchStart && touchEvent.touchCount() == 1) {
+        m_firstTouchPoint = IntPoint(touchEvent.touchLocationInRootViewAtIndex(0));
         m_lastTouchPoint = m_firstTouchPoint;
         m_inTouchSequence = true;
         m_committedToScrollAxis = false;
@@ -92,7 +81,7 @@ bool ScrollAnimatorIOS::handleTouchEvent(const PlatformTouchEvent& touchEvent)
 
     // If a second touch appears, assume that the user is trying to zoom, and bail on the scrolling sequence.
     // FIXME: if that second touch is inside the scrollable area, should we keep scrolling?
-    if (touchEvent.touchPoints().size() != 1) {
+    if (touchEvent.touchCount() != 1) {
         m_inTouchSequence = false;
         m_scrollableAreaForTouchSequence = 0;
         if (m_startedScroll)
@@ -100,7 +89,7 @@ bool ScrollAnimatorIOS::handleTouchEvent(const PlatformTouchEvent& touchEvent)
         return false;
     }
     
-    IntPoint currentPoint = IntPoint(touchEvent.touchPoints()[0].pos());
+    IntPoint currentPoint = IntPoint(touchEvent.touchLocationInRootViewAtIndex(0));
 
     IntSize touchDelta = m_lastTouchPoint - currentPoint;
     m_lastTouchPoint = currentPoint;

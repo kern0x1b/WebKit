@@ -89,10 +89,9 @@ bool InlineTextItem::isZeroWidthSpaceSeparator() const
 
 bool InlineTextItem::isQuirkNonBreakingSpace() const
 {
-    if (!m_length || inlineTextBox().content()[start()] != noBreakSpace)
+    if (style().nbspMode() != NBSPMode::Space || style().textWrapMode() == TextWrapMode::NoWrap || style().whiteSpaceCollapse() == WhiteSpaceCollapse::BreakSpaces)
         return false;
-    auto& style = this->style();
-    return style.nbspMode() == NBSPMode::Space && style.textWrapMode() != TextWrapMode::NoWrap && style.whiteSpaceCollapse() != WhiteSpaceCollapse::BreakSpaces;
+    return m_length && inlineTextBox().content()[start()] == noBreakSpace;
 }
 
 bool InlineTextItem::isFullyTrimmable() const

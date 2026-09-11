@@ -245,7 +245,6 @@ void CanvasRenderingContext::updateMemoryCost(size_t newMemoryCost) const
         s_activeCanvasPixelMemory.fetch_sub(oldMemoryCost - newMemoryCost, std::memory_order_relaxed);
 #endif
     if (newMemoryCost) {
-    if (newMemoryCost > oldMemoryCost) {
         if (RefPtr scriptExecutionContext = protect(canvasBase())->scriptExecutionContext()) {
             JSC::JSLockHolder lock(scriptExecutionContext->vm());
             scriptExecutionContext->vm().heap.reportExtraMemoryAllocated(static_cast<JSCell*>(nullptr), newMemoryCost - oldMemoryCost);

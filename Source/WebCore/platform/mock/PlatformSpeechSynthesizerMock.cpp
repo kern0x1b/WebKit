@@ -52,8 +52,7 @@ void PlatformSpeechSynthesizerMock::speakingFinished()
     RefPtr<PlatformSpeechSynthesisUtterance> protect(m_utterance);
     m_utterance = nullptr;
 
-    if (RefPtr client = this->client())
-        client->didFinishSpeaking(*protect);
+    client().didFinishSpeaking(*protect);
 }
 
 void PlatformSpeechSynthesizerMock::initializeVoiceList()
@@ -69,13 +68,11 @@ void PlatformSpeechSynthesizerMock::speak(RefPtr<PlatformSpeechSynthesisUtteranc
 {
     ASSERT(!m_utterance);
     m_utterance = utterance;
-    if (RefPtr client = this->client()) {
-        client->didStartSpeaking(*utterance);
+    client().didStartSpeaking(*utterance);
 
-        // Fire a fake word and then sentence boundary event. Since the entire sentence is the full length, pick arbitrary (3) length for the word.
-        client->boundaryEventOccurred(*utterance, SpeechBoundary::SpeechWordBoundary, 0, 3);
-        client->boundaryEventOccurred(*utterance, SpeechBoundary::SpeechSentenceBoundary, 0, utterance->text().length());
-    }
+    // Fire a fake word and then sentence boundary event. Since the entire sentence is the full length, pick arbitrary (3) length for the word.
+    client().boundaryEventOccurred(*utterance, SpeechBoundary::SpeechWordBoundary, 0, 3);
+    client().boundaryEventOccurred(*utterance, SpeechBoundary::SpeechSentenceBoundary, 0, utterance->text().length());
 
     // Give the fake speech job some time so that pause and other functions have time to be called.
     m_speakingFinishedTimer.startOneShot(m_utteranceDuration);
@@ -92,25 +89,20 @@ void PlatformSpeechSynthesizerMock::cancel()
     // This allows new utterances to be queued before the callback fires.
     RefPtr utterance = std::exchange(m_utterance, nullptr);
     callOnMainThread([protectedThis = Ref { *this }, utterance]() {
-        if (RefPtr client = protectedThis->client())
-            client->speakingErrorOccurred(*utterance);
+        protectedThis->client().speakingErrorOccurred(*utterance);
     });
 }
 
 void PlatformSpeechSynthesizerMock::pause()
 {
-    if (RefPtr utterance = m_utterance) {
-        if (RefPtr client = this->client())
-            client->didPauseSpeaking(*utterance);
-    }
+    if (RefPtr utterance = m_utterance)
+        client().didPauseSpeaking(*utterance);
 }
 
 void PlatformSpeechSynthesizerMock::resume()
 {
-    if (RefPtr utterance = m_utterance) {
-        if (RefPtr client = this->client())
-            client->didResumeSpeaking(*utterance);
-    }
+    if (RefPtr utterance = m_utterance)
+        client().didResumeSpeaking(*utterance);
 }
 
 } // namespace WebCore

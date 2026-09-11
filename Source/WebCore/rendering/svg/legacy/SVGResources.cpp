@@ -30,7 +30,6 @@
 #include "LegacyRenderSVGResourceMarkerInlines.h"
 #include "LegacyRenderSVGResourceMaskerInlines.h"
 #include "LegacyRenderSVGRoot.h"
-#include "NodeName.h"
 #include "PathOperation.h"
 #include "RenderElementInlines.h"
 #include "SVGDocumentExtensions.h"
@@ -57,114 +56,106 @@ WTF_MAKE_TZONE_ALLOCATED_IMPL(SVGResources);
 
 SVGResources::SVGResources() = default;
 
-static inline bool NODELETE supportsClipperFilterMaskerElement(ElementName elementName)
+static MemoryCompactLookupOnlyRobinHoodHashSet<AtomString> tagSet(std::span<decltype(SVGNames::aTag)* const> tags)
 {
-    switch (elementName) {
-    // "container elements": http://www.w3.org/TR/SVG11/intro.html#TermContainerElement
-    // "graphics elements" : http://www.w3.org/TR/SVG11/intro.html#TermGraphicsElement
-    case ElementNames::SVG::a:
-    case ElementNames::SVG::circle:
-    case ElementNames::SVG::ellipse:
-    case ElementNames::SVG::glyph:
-    case ElementNames::SVG::g:
-    case ElementNames::SVG::image:
-    case ElementNames::SVG::line:
-    case ElementNames::SVG::marker:
-    case ElementNames::SVG::mask:
-    case ElementNames::SVG::missing_glyph:
-    case ElementNames::SVG::path:
-    case ElementNames::SVG::polygon:
-    case ElementNames::SVG::polyline:
-    case ElementNames::SVG::rect:
-    case ElementNames::SVG::svg:
-    case ElementNames::SVG::switch_:
-    case ElementNames::SVG::text:
-    case ElementNames::SVG::use:
-
-    // Not listed in the definitions is the clipPath element, the SVG spec says though:
-    // The "clipPath" element or any of its children can specify property "clip-path".
-    // So we have to add clipPath here, otherwise clip-path on clipPath will fail.
-    // (Already mailed SVG WG, waiting for a solution)
-    case ElementNames::SVG::clipPath:
-
-    // Not listed in the definitions are the text content elements, though filter/clipper/masker on tspan/text/.. is allowed.
-    // (Already mailed SVG WG, waiting for a solution)
-    case ElementNames::SVG::altGlyph:
-    case ElementNames::SVG::textPath:
-    case ElementNames::SVG::tref:
-    case ElementNames::SVG::tspan:
-
-    // Not listed in the definitions is the foreignObject element, but clip-path
-    // is a supported attribute.
-    case ElementNames::SVG::foreignObject:
-        return true;
-
-    // Elements that we ignore, as it doesn't make any sense.
-    // defs, pattern (FIXME: Mail SVG WG about these)
-    // symbol (is converted to a svg element, when referenced by use, we can safely ignore it.)
-    default:
-        return false;
-    }
+    MemoryCompactLookupOnlyRobinHoodHashSet<AtomString> set;
+    set.reserveInitialCapacity(tags.size());
+    for (auto& tag : tags)
+        set.add(tag->get().localName());
+    return set;
 }
 
-static inline bool NODELETE supportsMarkerElement(ElementName elementName)
+static const MemoryCompactLookupOnlyRobinHoodHashSet<AtomString>& clipperFilterMaskerTags()
 {
-    switch (elementName) {
-    case ElementNames::SVG::line:
-    case ElementNames::SVG::path:
-    case ElementNames::SVG::polygon:
-    case ElementNames::SVG::polyline:
-        return true;
-    default:
-        return false;
-    }
+    static constexpr std::array tags {
+        // "container elements": http://www.w3.org/TR/SVG11/intro.html#TermContainerElement
+        // "graphics elements" : http://www.w3.org/TR/SVG11/intro.html#TermGraphicsElement
+        &SVGNames::aTag,
+        &SVGNames::circleTag,
+        &SVGNames::ellipseTag,
+        &SVGNames::glyphTag,
+        &SVGNames::gTag,
+        &SVGNames::imageTag,
+        &SVGNames::lineTag,
+        &SVGNames::markerTag,
+        &SVGNames::maskTag,
+        &SVGNames::missing_glyphTag,
+        &SVGNames::pathTag,
+        &SVGNames::polygonTag,
+        &SVGNames::polylineTag,
+        &SVGNames::rectTag,
+        &SVGNames::svgTag,
+        &SVGNames::switchTag,
+        &SVGNames::textTag,
+        &SVGNames::useTag,
+
+        // Not listed in the definitions is the clipPath element, the SVG spec says though:
+        // The "clipPath" element or any of its children can specify property "clip-path".
+        // So we have to add clipPathTag here, otherwise clip-path on clipPath will fail.
+        // (Already mailed SVG WG, waiting for a solution)
+        &SVGNames::clipPathTag,
+
+        // Not listed in the definitions are the text content elements, though filter/clipper/masker on tspan/text/.. is allowed.
+        // (Already mailed SVG WG, waiting for a solution)
+        &SVGNames::altGlyphTag,
+        &SVGNames::textPathTag,
+        &SVGNames::trefTag,
+        &SVGNames::tspanTag,
+
+        // Not listed in the definitions is the foreignObject element, but clip-path
+        // is a supported attribute.
+        &SVGNames::foreignObjectTag,
+
+        // Elements that we ignore, as it doesn't make any sense.
+        // defs, pattern (FIXME: Mail SVG WG about these)
+        // symbol (is converted to a svg element, when referenced by use, we can safely ignore it.)
+    };
+    static NeverDestroyed set = tagSet(tags);
+    return set;
 }
 
-static inline bool NODELETE supportsFillAndStrokeElement(ElementName elementName)
+static const MemoryCompactLookupOnlyRobinHoodHashSet<AtomString>& markerTags()
 {
-    switch (elementName) {
-    case ElementNames::SVG::altGlyph:
-    case ElementNames::SVG::circle:
-    case ElementNames::SVG::ellipse:
-    case ElementNames::SVG::line:
-    case ElementNames::SVG::path:
-    case ElementNames::SVG::polygon:
-    case ElementNames::SVG::polyline:
-    case ElementNames::SVG::rect:
-    case ElementNames::SVG::text:
-    case ElementNames::SVG::textPath:
-    case ElementNames::SVG::tref:
-    case ElementNames::SVG::tspan:
-        return true;
-    default:
-        return false;
-    }
+    static constexpr std::array tags {
+        &SVGNames::lineTag,
+        &SVGNames::pathTag,
+        &SVGNames::polygonTag,
+        &SVGNames::polylineTag,
+    };
+    static NeverDestroyed set = tagSet(tags);
+    return set;
 }
 
-static inline bool NODELETE isChainableResourceElement(ElementName elementName)
+static const MemoryCompactLookupOnlyRobinHoodHashSet<AtomString>& fillAndStrokeTags()
 {
-    switch (elementName) {
-    case ElementNames::SVG::linearGradient:
-    case ElementNames::SVG::filter:
-    case ElementNames::SVG::pattern:
-    case ElementNames::SVG::radialGradient:
-        return true;
-    default:
-        return false;
-    }
+    static constexpr std::array tags {
+        &SVGNames::altGlyphTag,
+        &SVGNames::circleTag,
+        &SVGNames::ellipseTag,
+        &SVGNames::lineTag,
+        &SVGNames::pathTag,
+        &SVGNames::polygonTag,
+        &SVGNames::polylineTag,
+        &SVGNames::rectTag,
+        &SVGNames::textTag,
+        &SVGNames::textPathTag,
+        &SVGNames::trefTag,
+        &SVGNames::tspanTag,
+    };
+    static NeverDestroyed set = tagSet(tags);
+    return set;
 }
 
-// Superset of the conditions that make any of the resource lookups below produce a
-// result. Lets the overwhelmingly common case -- a shape with a plain paint and no
-// clip/filter/mask/marker -- bail out before resolving tree scopes.
-static inline bool NODELETE styleCanReferenceSVGResource(const Style::ComputedStyle& style)
+static const MemoryCompactLookupOnlyRobinHoodHashSet<AtomString>& chainableResourceTags()
 {
-    return WTF::holdsAlternative<Style::ReferencePath>(style.clipPath())
-        || !style.filter().isNone()
-        || style.hasPositionedMask()
-        || style.hasMarkers()
-        || style.fill().hasURL()
-        || style.stroke().hasURL();
+    static constexpr std::array tags {
+        &SVGNames::linearGradientTag,
+        &SVGNames::filterTag,
+        &SVGNames::patternTag,
+        &SVGNames::radialGradientTag,
+    };
+    static NeverDestroyed set = tagSet(tags);
+    return set;
 }
 
 static inline String targetReferenceFromResource(SVGElement& element)
@@ -244,13 +235,12 @@ std::unique_ptr<SVGResources> SVGResources::buildCachedResources(const RenderEle
 
     Ref element = downcast<SVGElement>(*renderer.element());
 
-    auto elementName = element->elementName();
-    bool chainableResourceElement = isChainableResourceElement(elementName);
-    if (!chainableResourceElement && !styleCanReferenceSVGResource(style))
-        return nullptr;
-
     Ref treeScope = element->treeScopeForSVGReferences();
     Ref document = treeScope->documentScope();
+
+    const AtomString& tagName = element->localName();
+    if (tagName.isNull())
+        return nullptr;
 
     auto ensureResources = [](std::unique_ptr<SVGResources>& resources) -> SVGResources& {
         if (!resources)
@@ -259,7 +249,7 @@ std::unique_ptr<SVGResources> SVGResources::buildCachedResources(const RenderEle
     };
 
     std::unique_ptr<SVGResources> foundResources;
-    if (supportsClipperFilterMaskerElement(elementName)) {
+    if (clipperFilterMaskerTags().contains(tagName)) {
         WTF::switchOn(style.clipPath(),
             [&](const Style::ReferencePath& clipPath) {
                 if (auto externalDocument = document->svgExtensions().externalResourceDocument(clipPath.url().resolved)) {
@@ -309,7 +299,7 @@ std::unique_ptr<SVGResources> SVGResources::buildCachedResources(const RenderEle
         }
     }
 
-    if (supportsMarkerElement(elementName) && style.hasMarkers()) {
+    if (markerTags().contains(tagName) && style.hasMarkers()) {
         auto buildCachedMarkerResource = [&](const Style::SVGMarkerResource& markerResource, bool (SVGResources::*setMarker)(LegacyRenderSVGResourceMarker*)) {
             if (auto markerURL = markerResource.tryURL()) {
                 if (auto externalDocument = document->svgExtensions().externalResourceDocument(markerURL->resolved)) {
@@ -332,7 +322,7 @@ std::unique_ptr<SVGResources> SVGResources::buildCachedResources(const RenderEle
         buildCachedMarkerResource(style.markerEnd(), &SVGResources::setMarkerEnd);
     }
 
-    if (supportsFillAndStrokeElement(elementName)) {
+    if (fillAndStrokeTags().contains(tagName)) {
         if (!style.fill().isNone()) {
             bool hasPendingResource = false;
             AtomString id;
@@ -352,7 +342,7 @@ std::unique_ptr<SVGResources> SVGResources::buildCachedResources(const RenderEle
         }
     }
 
-    if (chainableResourceElement) {
+    if (chainableResourceTags().contains(tagName)) {
         AtomString id(targetReferenceFromResource(element));
         auto* linkedResource = getRenderSVGResourceContainerById(document, id);
         if (!linkedResource)

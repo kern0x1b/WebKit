@@ -37,7 +37,6 @@ typedef struct _WAKObject WAKObject;
 typedef struct _WAKObject *WAKObjectRef;
 typedef struct WKControl* WKControlRef;
 typedef struct _WKView* WKViewRef;
-typedef struct WKWindow* WKWindowRef;
 
 #ifdef __cplusplus
 }

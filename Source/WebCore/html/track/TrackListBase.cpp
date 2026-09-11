@@ -33,7 +33,6 @@
 #include "EventNames.h"
 #include "ScriptExecutionContext.h"
 #include "TrackEvent.h"
-#include "TrackOpaqueRoot.h"
 #include <wtf/TZoneMallocInlines.h>
 
 namespace WebCore {
@@ -59,17 +58,11 @@ void TrackListBase::didMoveToNewDocument(Document& newDocument)
         track->didMoveToNewDocument(newDocument);
 }
 
-void TrackListBase::setOpaqueRoot(TrackOpaqueRoot& trackOpaqueRoot)
-{
-    m_trackOpaqueRoot = &trackOpaqueRoot;
-    for (Ref track : m_inbandTracks)
-        track->setOpaqueRoot(trackOpaqueRoot);
-}
-
 WebCoreOpaqueRoot TrackListBase::opaqueRoot() const
 {
-    if (RefPtr trackOpaqueRoot = m_trackOpaqueRoot)
-        return trackOpaqueRoot->opaqueRoot();
+    // Cannot ref the observer as this gets called on a GC thread.
+    SUPPRESS_UNCOUNTED_LOCAL if (auto* rootObserver = m_opaqueRootObserver.get())
+        return (*rootObserver)();
     return WebCoreOpaqueRoot { const_cast<TrackListBase*>(this) };
 }
 

@@ -485,7 +485,54 @@ static std::optional<LayoutRect> computeClippedRectInRootContentsSpace(const Lay
     return computeClippedRectInRootContentsSpace(*absoluteClippedRect, targetSecurityOrigin, enclosingFrame.get(), WTF::move(scrollMargin));
 }
 
-auto IntersectionObserver::computeIntersectionState(const IntersectionObserverRegistration& registration, FrameView& hostFrameView, Element& target, ApplyRootMargin applyRootMargin) const -> IntersectionObservationState
+// Equivalent to FrameView::convertFromContainingView.
+static FloatRect convertFromContainingView(const FrameView& frameView, const FrameView& parentView, FloatRect rect)
+{
+    if (is<LocalFrameView>(parentView)) {
+        // If we can compute it the old way, do so.
+        return frameView.convertFromContainingView(rect);
+    }
+
+    rect = parentView.viewToContents(rect);
+
+    auto transform = parentView.absoluteToChildFrameOwnerLocalTransform(frameView.frame());
+    FloatRect transformed = transform.projectQuad(rect).boundingBox();
+    transformed.moveBy(-parentView.childFrameOwnerContentBoxLocation(frameView.frame()));
+
+    return transformed;
+}
+
+// Equivalent to Widget::convertFromRootView.
+static FloatRect convertFromRootView(const FrameView& frameView, FloatRect rect)
+{
+    auto parentView = [&frameView] () -> RefPtr<const FrameView> {
+        if (RefPtr parent = dynamicDowncast<FrameView>(frameView.parent()))
+            return parent;
+
+        // When Site Isolation is enabled, Widget::m_parent is not populated if
+        // frameView is RemoteFrameView. Workaround this by using the frame tree parent.
+        // FIXME: fix the underlying issue instead.
+        if (RefPtr parent = frameView.frame().tree().parent())
+            return parent->virtualView();
+
+        return nullptr;
+    }();
+
+    if (parentView) {
+        FloatRect parentRect = convertFromRootView(*parentView, rect);
+        return convertFromContainingView(frameView, *parentView, parentRect);
+    }
+
+    return rect;
+}
+
+// Equivalent to rootViewToContents.
+static FloatRect mainFrameViewToContents(const FrameView& targetFrameView, FloatRect rect)
+{
+    return targetFrameView.viewToContents(convertFromRootView(targetFrameView, rect));
+}
+
+auto IntersectionObserver::computeIntersectionRootState(FrameView& hostFrameView) const -> IntersectionRootState
 {
     IntersectionRootState rootState;
 
@@ -724,19 +771,39 @@ auto IntersectionObserver::updateObservations(const Frame& hostFrame) -> NeedNot
 
     auto needNotify = NeedNotify::No;
 
-    // Cache Document::isFullyActive() because it's expensive, and it's likely that observation
-    // targets all belong to a handful of documents.
-    auto isDocumentFullyActive = [cache = WeakHashMap<Document, bool, WeakPtrImplWithEventTargetData> { }] (const Document &document) mutable {
-        auto isFullyActive = cache.ensure(document, [&] () {
-            return document.isFullyActive();
-        }).iterator->value;
+#if defined(WEBKIT_IOS6)
+    if (m_observationTargetsSnapshotIsStale) {
+        m_observationTargetsSnapshot.shrink(0);
+        m_observationTargetsSnapshot.reserveCapacity(m_observationTargets.computeSize());
+        for (auto& target : m_observationTargets)
+            m_observationTargetsSnapshot.append(target);
+        m_observationTargetsSnapshotIsStale = false;
+    }
+    auto& observationTargets = m_observationTargetsSnapshot;
+#else
+    Vector<WeakPtr<Element, WeakPtrImplWithEventTargetData>, 16> observationTargets;
+    for (auto& target : m_observationTargets)
+        observationTargets.append(target);
+#endif
 
-        // Invariant: the fully active status of a document can't change when updating observations.
-        ASSERT(isFullyActive == document.isFullyActive());
-        return isFullyActive;
-    };
+    auto rootState = computeIntersectionRootState(*hostFrameView);
 
-    for (const auto& target : copyToVectorOf<Ref<Element>>(m_observationTargets)) {
+    RefPtr hostFrameSecurityOrigin = hostFrame.frameDocumentSecurityOrigin();
+    // Targets of one observer nearly always share a document, and the origin comparison is a
+    // string compare, so remember the answer for the document we last asked about.
+    const Document* lastSameOriginDocument = nullptr;
+    bool lastSameOriginResult = false;
+
+    for (auto& weakTarget : observationTargets) {
+        RefPtr protectedTarget = weakTarget.get();
+        if (!protectedTarget) {
+#if defined(WEBKIT_IOS6)
+            m_observationTargetsSnapshotIsStale = true;
+#endif
+            continue;
+        }
+        Ref target = protectedTarget.releaseNonNull();
+
         // Per HTML spec, "update the rendering" step (which includes "run the update intersection
         // observations") only occurs for fully active documents. Hence skip updating the target if
         // its document is not fully active.

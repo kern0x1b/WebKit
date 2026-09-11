@@ -115,6 +115,7 @@ private:
     void heapDeleteMin();
     void heapIncreaseKey();
     void heapInsert();
+    void heapPop();
     void heapPopMin();
     static void heapDeleteNullMin(ThreadTimerHeap&);
 
@@ -190,17 +191,8 @@ private:
 
 inline void TimerBase::stop()
 {
-    // A timer that has run once keeps its heap item for reuse, so testing the
-    // item alone sent every stop() of an already-stopped timer through
-    // setNextFireTime(). An inactive timer has a zero fire time and a zero
-    // unaligned fire time, so the only thing the slow case would still do to it
-    // is clear the repeat interval.
-    if (auto* item = m_heapItemWithBitfields.pointer()) {
-        if (item->time)
-            stopSlowCase();
-        else
-            m_repeatInterval = 0_s;
-    }
+    if (m_heapItemWithBitfields.pointer())
+        stopSlowCase();
 }
 
 inline bool TimerBase::isActive() const

@@ -241,7 +241,7 @@ PositionWithAffinity RenderSVGInlineText::positionForPoint(const LayoutPoint& po
 void RenderSVGInlineText::updateScaledFont()
 {
     if (computeNewScaledFontForStyle(*this, style(), m_scalingFactor, m_scaledFont))
-        setCanUseSimplifiedTextMeasuring({ });
+        m_canUseSimplifiedTextMeasuring = { };
 }
 
 float RenderSVGInlineText::computeScalingFactorForRenderer(const RenderObject& renderer)

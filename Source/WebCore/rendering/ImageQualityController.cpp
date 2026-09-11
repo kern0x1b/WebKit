@@ -144,8 +144,7 @@ InterpolationQuality ImageQualityController::chooseInterpolationQuality(Graphics
 
     // Make sure to use the unzoomed image size, since if a full page zoom is in effect, the image
     // is actually being scaled.
-    auto sourceSize = image.size();
-    IntSize imageSize(sourceSize.width(), sourceSize.height());
+    IntSize imageSize(image.width(), image.height());
 
     // Look ourselves up in the hashtables.
     auto i = m_objectLayerSizeMap.find(object);
@@ -182,7 +181,7 @@ InterpolationQuality ImageQualityController::chooseInterpolationQuality(Graphics
 
     // There is no need to hash scaled images that always use low quality mode when the page demands it. This is the iChat case.
     if (m_renderView->page().inLowQualityImageInterpolationMode()) {
-        double totalPixels = static_cast<double>(sourceSize.width()) * static_cast<double>(sourceSize.height());
+        double totalPixels = static_cast<double>(image.width()) * static_cast<double>(image.height());
         if (totalPixels > cInterpolationCutoff)
             return InterpolationQuality::Low;
     }

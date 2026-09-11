@@ -65,7 +65,7 @@ void RenderingUpdateScheduler::adjustRenderingUpdateFrequency()
     } else
         m_useTimer = true;
 
-    if (isTimerActive()) {
+    if (m_refreshTimer) {
         clearScheduled();
         scheduleRenderingUpdate();
     }
@@ -96,28 +96,21 @@ void RenderingUpdateScheduler::scheduleRenderingUpdate()
 
 bool RenderingUpdateScheduler::isScheduled() const
 {
-    return isTimerActive() || DisplayRefreshMonitorClient::isScheduled();
+    return m_refreshTimer || DisplayRefreshMonitorClient::isScheduled();
 }
     
 void RenderingUpdateScheduler::startTimer(Seconds delay)
 {
     LOG_WITH_STREAM(EventLoop, stream << "RenderingUpdateScheduler for page " << m_page.ptr() << " startTimer(" << delay << ")");
 
-    ASSERT(!isTimerActive());
-    if (!m_refreshTimer)
-        m_refreshTimer = makeUnique<Timer>(*this, &RenderingUpdateScheduler::displayRefreshFired);
+    ASSERT(!m_refreshTimer);
+    m_refreshTimer = makeUnique<Timer>(*this, &RenderingUpdateScheduler::displayRefreshFired);
     m_refreshTimer->startOneShot(delay);
 }
 
 void RenderingUpdateScheduler::clearScheduled()
 {
-    if (m_refreshTimer)
-        m_refreshTimer->stop();
-}
-
-bool RenderingUpdateScheduler::isTimerActive() const
-{
-    return m_refreshTimer && m_refreshTimer->isActive();
+    m_refreshTimer = nullptr;
 }
 
 DisplayRefreshMonitorFactory* RenderingUpdateScheduler::displayRefreshMonitorFactory() const

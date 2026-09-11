@@ -385,7 +385,7 @@ void JSDOMGlobalObject::finishCreation(VM& vm, JSObject* thisValue)
 
 ScriptExecutionContext* JSDOMGlobalObject::scriptExecutionContext() const
 {
-    if (auto* window = dynamicDowncast<const JSDOMWindowBase>(this)) [[likely]]
+    if (auto* window = dynamicDowncast<const JSDOMWindowBase>(this))
         return window->scriptExecutionContext();
     if (auto* worker = dynamicDowncast<const JSWorkerGlobalScopeBase>(this))
         return &worker->wrapped();

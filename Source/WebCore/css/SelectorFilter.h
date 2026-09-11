@@ -51,9 +51,7 @@ public:
     bool fastRejectSelector(const Hashes&) const;
     static Hashes collectHashes(const CSSSelector&);
 
-    using IdentifierHashes = Vector<unsigned, 8>;
     static void collectElementIdentifierHashes(const Element&, Vector<unsigned, 4>&);
-    static void collectElementIdentifierHashes(const Element&, IdentifierHashes&);
 
     struct CollectedSelectorHashes {
         using HashVector = Vector<unsigned, 8>;
@@ -76,7 +74,7 @@ private:
         ParentStackFrame() : element(0) { }
         ParentStackFrame(Element* element) : element(element) { }
         Element* element;
-        IdentifierHashes identifierHashes;
+        Vector<unsigned, 4> identifierHashes;
     };
     Vector<ParentStackFrame, 20> m_parentStack;
 
@@ -87,26 +85,13 @@ private:
 
 inline bool SelectorFilter::fastRejectSelector(const Hashes& hashes) const
 {
-    unsigned h = hashes[0];
-    if (!h)
-        return false;
-    if (!m_ancestorIdentifierFilter.mayContain(h))
-        return true;
-
-    h = hashes[1];
-    if (!h)
-        return false;
-    if (!m_ancestorIdentifierFilter.mayContain(h))
-        return true;
-
-    h = hashes[2];
-    if (!h)
-        return false;
-    if (!m_ancestorIdentifierFilter.mayContain(h))
-        return true;
-
-    h = hashes[3];
-    return h && !m_ancestorIdentifierFilter.mayContain(h);
+    for (auto& hash : hashes) {
+        if (!hash)
+            return false;
+        if (!m_ancestorIdentifierFilter.mayContain(hash))
+            return true;
+    }
+    return false;
 }
 
 } // namespace WebCore

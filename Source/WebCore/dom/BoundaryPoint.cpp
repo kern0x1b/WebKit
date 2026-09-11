@@ -68,27 +68,24 @@ static bool NODELETE isOffsetBeforeChild(ContainerNode& container, unsigned offs
 
 template<TreeType treeType> std::partial_ordering treeOrderInternal(const BoundaryPoint& a, const BoundaryPoint& b)
 {
-    SUPPRESS_UNCOUNTED_LOCAL Node* aContainer = a.container.ptr();
-    SUPPRESS_UNCOUNTED_LOCAL Node* bContainer = b.container.ptr();
-
-    if (aContainer == bContainer)
+    if (a.container.ptr() == b.container.ptr())
         return a.offset <=> b.offset;
 
-    for (SUPPRESS_UNCOUNTED_LOCAL Node* ancestor = bContainer; ancestor; ) {
-        SUPPRESS_UNCOUNTED_LOCAL ContainerNode* nextAncestor = parent<treeType>(*ancestor);
-        if (nextAncestor == aContainer)
+    for (RefPtr ancestor = b.container.copyRef(); ancestor; ) {
+        RefPtr nextAncestor = parent<treeType>(*ancestor);
+        if (nextAncestor == a.container.ptr())
             return isOffsetBeforeChild(*nextAncestor, a.offset, *ancestor) ? std::strong_ordering::less : std::strong_ordering::greater;
-        ancestor = nextAncestor;
+        ancestor = WTF::move(nextAncestor);
     }
 
-    for (SUPPRESS_UNCOUNTED_LOCAL Node* ancestor = aContainer; ancestor; ) {
-        SUPPRESS_UNCOUNTED_LOCAL ContainerNode* nextAncestor = parent<treeType>(*ancestor);
-        if (nextAncestor == bContainer)
+    for (RefPtr ancestor = a.container.copyRef(); ancestor; ) {
+        RefPtr nextAncestor = parent<treeType>(*ancestor);
+        if (nextAncestor == b.container.ptr())
             return isOffsetBeforeChild(*nextAncestor, b.offset, *ancestor) ? std::strong_ordering::greater : std::strong_ordering::less;
-        ancestor = nextAncestor;
+        ancestor = WTF::move(nextAncestor);
     }
 
-    return treeOrder<treeType>(*aContainer, *bContainer);
+    return treeOrder<treeType>(a.container, b.container);
 }
 
 template<TreeType treeType> std::partial_ordering treeOrder(const BoundaryPoint& a, const BoundaryPoint& b)

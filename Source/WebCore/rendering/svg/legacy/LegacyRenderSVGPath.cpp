@@ -54,17 +54,16 @@ void LegacyRenderSVGPath::updateShapeFromElement()
 {
     clearPath();
     m_shapeType = ShapeType::Empty;
-    auto& shapePath = ensurePath();
-    m_fillBoundingBox = shapePath.boundingRect();
+    m_fillBoundingBox = ensurePath().boundingRect();
     m_strokeBoundingBox = std::nullopt;
     m_approximateStrokeBoundingBox = std::nullopt;
     processMarkerPositions();
     updateZeroLengthSubpaths();
 
     ASSERT(hasPath());
-    if (shapePath.isEmpty())
+    if (path().isEmpty())
         return;
-    if (shapePath.definitelySingleLine())
+    if (path().definitelySingleLine())
         m_shapeType = ShapeType::Line;
     else
         m_shapeType = ShapeType::Path;
@@ -170,7 +169,7 @@ void LegacyRenderSVGPath::updateZeroLengthSubpaths()
 {
     m_zeroLengthLinecapLocations.clear();
 
-    if (!shouldStrokeZeroLengthSubpath() || !strokeWidth())
+    if (!strokeWidth() || !shouldStrokeZeroLengthSubpath())
         return;
 
     SVGSubpathData subpathData(m_zeroLengthLinecapLocations);

@@ -89,8 +89,6 @@ CSSPrimitiveValue::CSSPrimitiveValue(CSS::UnevaluatedCalcBase&& value)
 
 CSSPrimitiveValue::~CSSPrimitiveValue()
 {
-    // Every unit but CSS_CALC owns nothing, so the seventy-case switch this replaces always
-    // reached the same empty body. One compare replaces the jump table.
     auto type = primitiveUnitType();
     switch (type) {
     case CSSUnitType::Calc:
@@ -176,17 +174,15 @@ CSSPrimitiveValue::~CSSPrimitiveValue()
     }
 }
 
-static ALWAYS_INLINE CSSPrimitiveValue* valueFromPool(std::span<AlignedStorage<CSSPrimitiveValue>> pool, double value)
+static CSSPrimitiveValue* valueFromPool(std::span<AlignedStorage<CSSPrimitiveValue>> pool, double value)
 {
-    // The range test comes first: it is one compare pair and it rejects every value the pool
-    // cannot hold (negatives, NaN, anything past the last entry) before doing any conversion.
-    if (!(value >= 0 && value < pool.size()))
-        return nullptr;
-    unsigned poolIndex = static_cast<unsigned>(value);
-    // Bit comparison rather than ==, so that -0.0 keeps its own non-pooled value as before.
-    if (std::bit_cast<uint64_t>(static_cast<double>(poolIndex)) != std::bit_cast<uint64_t>(value))
-        return nullptr;
-    return pool[poolIndex].get();
+    // Casting to a signed integer first since casting a negative floating point value to an unsigned
+    // integer is undefined behavior.
+    unsigned poolIndex = static_cast<unsigned>(static_cast<int>(value));
+    double roundTripValue = poolIndex;
+    if (equalSpans(asByteSpan(value), asByteSpan(roundTripValue)) && poolIndex < pool.size())
+        return pool[poolIndex].get();
+    return nullptr;
 }
 
 Ref<CSSPrimitiveValue> CSSPrimitiveValue::create(double value)
@@ -379,8 +375,7 @@ String CSSPrimitiveValue::customCSSText(const CSS::SerializationContext& context
 
 bool CSSPrimitiveValue::equals(const CSSPrimitiveValue& other) const
 {
-    auto type = primitiveUnitType();
-    if (type != other.primitiveUnitType())
+    if (primitiveUnitType() != other.primitiveUnitType())
         return false;
 
     switch (primitiveUnitType()) {
@@ -459,16 +454,14 @@ bool CSSPrimitiveValue::equals(const CSSPrimitiveValue& other) const
     case CSSUnitType::CalcPercentageWithLength:
         // FIXME: seems like these should be handled.
         ASSERT_NOT_REACHED();
-        return false;
-    default:
-        return m_value.number == other.m_value.number;
+        break;
     }
+    return false;
 }
 
 bool CSSPrimitiveValue::addDerivedHash(Hasher& hasher) const
 {
-    auto type = primitiveUnitType();
-    add(hasher, type);
+    add(hasher, primitiveUnitType());
 
     switch (primitiveUnitType()) {
     case CSSUnitType::Unknown:
@@ -548,9 +541,6 @@ bool CSSPrimitiveValue::addDerivedHash(Hasher& hasher) const
     case CSSUnitType::CalcPercentageWithLength:
         ASSERT_NOT_REACHED();
         return false;
-    default:
-        add(hasher, m_value.number);
-        break;
     }
     return true;
 }

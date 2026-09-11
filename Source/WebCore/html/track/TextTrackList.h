@@ -46,8 +46,6 @@ public:
     }
     virtual ~TextTrackList();
 
-    void setOpaqueRoot(TrackOpaqueRoot&) final;
-
     bool isSupportedPropertyIndex(unsigned index) const { return index < length(); }
     unsigned length() const final;
     int getTrackIndex(TextTrack&);

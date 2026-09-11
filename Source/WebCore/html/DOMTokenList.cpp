@@ -229,9 +229,7 @@ void DOMTokenList::updateTokensFromAttributeValue(const AtomString& value)
     // Clear tokens but not capacity.
     m_tokens.shrink(0);
 
-    static constexpr unsigned linearDuplicateScanLimit = 8;
     HashSet<AtomString> addedTokens;
-    bool addedTokensIsAuthoritative = false;
     // https://dom.spec.whatwg.org/#ordered%20sets
     for (unsigned start = 0; ; ) {
         while (start < value.length() && isASCIIWhitespace(value[start]))
@@ -248,28 +246,10 @@ void DOMTokenList::updateTokensFromAttributeValue(const AtomString& value)
         }
 
         auto tokenView = StringView { value }.substring(start, end - start);
-        bool alreadyAdded;
-        if (addedTokensIsAuthoritative) [[unlikely]]
-            alreadyAdded = addedTokens.contains<StringViewHashTranslator>(tokenView);
-        else {
-            alreadyAdded = false;
-            for (auto& existingToken : m_tokens) {
-                if (tokenView == StringView { existingToken }) {
-                    alreadyAdded = true;
-                    break;
-                }
-            }
-        }
-        if (!alreadyAdded) {
+        if (!addedTokens.contains<StringViewHashTranslator>(tokenView)) {
             auto token = tokenView.toAtomString();
             m_tokens.append(token);
-            if (addedTokensIsAuthoritative) [[unlikely]]
-                addedTokens.add(WTF::move(token));
-            else if (m_tokens.size() > linearDuplicateScanLimit) [[unlikely]] {
-                for (auto& existingToken : m_tokens)
-                    addedTokens.add(existingToken);
-                addedTokensIsAuthoritative = true;
-            }
+            addedTokens.add(WTF::move(token));
         }
 
         start = end + 1;

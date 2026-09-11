@@ -1196,10 +1196,6 @@ bool RenderGrid::isStackingAxis(Style::GridTrackSizingDirection direction) const
     if (auto* parentGrid = dynamicDowncast<RenderGrid>(parent()); parentGrid && tracks.subgrid)
         return parentGrid->isMasonry(direction);
 #endif
-    // isSubgrid will return false if the stacking axis matches. Need to check style if we are a subgrid
-    auto& tracks = style().gridTemplateList(direction);
-    if (auto* parentGrid = dynamicDowncast<RenderGrid>(parent()); parentGrid && tracks.subgrid)
-        return parentGrid->isStackingAxis(direction);
     if (style().display() != Style::DisplayType::BlockGridLanes && style().display() != Style::DisplayType::InlineGridLanes)
         return false;
     return (direction == Style::GridTrackSizingDirection::Columns) == style().gridAutoFlow().isColumn();
@@ -1986,9 +1982,6 @@ void RenderGrid::applyStretchAlignmentToGridItemIfNeeded(RenderBox& gridItem, Re
             gridItem.setLogicalHeight(0_lu);
             gridItem.setNeedsLayout(MarkingBehavior::MarkOnlyThis);
         }
-        auto gridAreaSize = GridLayoutFunctions::overridingContainingBlockContentSizeForGridItem(gridItem, gridItemBlockDirection);
-        ASSERT(gridAreaSize && *gridAreaSize);
-        stretchBlockSizeForGridItem(gridItem, gridAreaSize->value(), gridLayoutState);
     } else if (!willStretchBlockSize && willStretchItem(gridItem, LogicalBoxAxis::Inline)) {
         auto gridItemInlineDirection = Style::orthogonalDirection(gridItemBlockDirection);
         auto gridAreaSize = GridLayoutFunctions::overridingContainingBlockContentSizeForGridItem(gridItem, gridItemInlineDirection);
@@ -2346,7 +2339,6 @@ bool RenderGrid::isSubgrid(Style::GridTrackSizingDirection direction) const
         return false;
     return !renderGrid->isMasonry(direction);
 #endif
-    return !renderGrid->isStackingAxis(direction);
 }
 
 bool RenderGrid::isSubgridInParentDirection(Style::GridTrackSizingDirection parentDirection) const

@@ -31,15 +31,7 @@ namespace WebCore {
 
 inline bool isTokenizerWhitespace(char16_t character)
 {
-    constexpr unsigned firstTokenizerWhitespace = '\x09';
-    constexpr unsigned lastTokenizerWhitespace = ' ';
-    constexpr unsigned tokenizerWhitespaceMask = (1u << ('\x09' - firstTokenizerWhitespace))
-        | (1u << ('\x0A' - firstTokenizerWhitespace))
-        | (1u << ('\x0C' - firstTokenizerWhitespace))
-        | (1u << (' ' - firstTokenizerWhitespace));
-
-    unsigned offset = character - firstTokenizerWhitespace;
-    return offset <= (lastTokenizerWhitespace - firstTokenizerWhitespace) && ((tokenizerWhitespaceMask >> offset) & 1);
+    return character == ' ' || character == '\x0A' || character == '\x09' || character == '\x0C';
 }
 
 #define BEGIN_STATE(stateName)                                  \

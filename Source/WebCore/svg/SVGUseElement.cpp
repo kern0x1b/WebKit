@@ -296,22 +296,16 @@ void SVGUseElement::updateUserAgentShadowTree()
     }
 
     RELEASE_ASSERT(!isDescendantOf(target.get()));
-    bool sawEventListeners = false;
     {
         Ref shadowRoot = ensureUserAgentShadowRoot();
         ScriptDisallowedScope::EventAllowedScope eventAllowedScope { shadowRoot };
-        cloneTarget(shadowRoot, *target, &sawEventListeners);
-        // cloneTarget() strips every <symbol> below the clone root, so the only <symbol> the
-        // symbol pass can find is the clone root itself -- unless expanding a nested <use>
-        // introduced a fresh clone root.
-        bool expandedUseElement = expandUseElementsInShadowTree(&sawEventListeners);
-        if (expandedUseElement || is<SVGSymbolElement>(shadowRoot->firstChild()))
-            expandSymbolElementsInShadowTree();
+        cloneTarget(shadowRoot, *target);
+        expandUseElementsInShadowTree();
+        expandSymbolElementsInShadowTree();
         updateRelativeLengthsInformation();
     }
 
-    if (sawEventListeners)
-        transferEventListenersToShadowTree();
+    transferEventListenersToShadowTree();
 
     // When we invalidate the other shadow trees, it's important that we don't
     // follow any cycles and invalidate ourselves. To avoid that, we temporarily
@@ -442,28 +436,25 @@ static void removeDisallowedElementsFromSubtree(SVGElement& subtree)
     disassociateAndRemoveClones(disallowedElements);
 }
 
-// Symbol elements inside the subtree should not be cloned for two reasons: 1) They are invisible and
-// don't need to be cloned to get correct rendering. 2) expandSymbolElementsInShadowTree will turn them
-// into <svg> elements, which is correct for symbol elements directly referenced by use elements,
-// but incorrect for ones that just happen to be in a subtree.
-static void removeDisallowedAndSymbolElementsFromSubtree(SVGElement& subtree)
+static void removeSymbolElementsFromSubtree(SVGElement& subtree)
 {
-    ASSERT(!subtree.isConnected());
-
-    Vector<Ref<Element>> elementsToRemove;
+    // Symbol elements inside the subtree should not be cloned for two reasons: 1) They are invisible and
+    // don't need to be cloned to get correct rendering. 2) expandSymbolElementsInShadowTree will turn them
+    // into <svg> elements, which is correct for symbol elements directly referenced by use elements,
+    // but incorrect for ones that just happen to be in a subtree.
+    Vector<Ref<Element>> symbolElements;
     for (auto it = descendantsOfType<Element>(subtree).begin(); it; ) {
-        if (isDisallowedElement(*it) || is<SVGSymbolElement>(*it)) {
-            elementsToRemove.append(protect(*it));
+        if (is<SVGSymbolElement>(*it)) {
+            symbolElements.append(protect(*it));
             it.traverseNextSkippingChildren();
             continue;
         }
         ++it;
     }
-
-    disassociateAndRemoveClones(elementsToRemove);
+    disassociateAndRemoveClones(symbolElements);
 }
 
-static void associateClonesWithOriginals(SVGElement& clone, SVGElement& original, bool* sawEventListeners = nullptr)
+static void associateClonesWithOriginals(SVGElement& clone, SVGElement& original)
 {
     // This assertion checks that we don't call this with the arguments backwards.
     // The clone is new and so it's not installed in a parent yet.
@@ -472,13 +463,8 @@ static void associateClonesWithOriginals(SVGElement& clone, SVGElement& original
     // The loop below works because we are associating these clones immediately, before
     // doing transformations like removing disallowed elements or expanding elements.
     clone.setCorrespondingElement(&original);
-    if (sawEventListeners && original.hasEventTargetData())
-        *sawEventListeners = true;
-    for (auto pair : descendantsOfType<SVGElement>(clone, original)) {
+    for (auto pair : descendantsOfType<SVGElement>(clone, original))
         protect(pair.first)->setCorrespondingElement(Ref { pair.second }.ptr());
-        if (sawEventListeners && !*sawEventListeners && pair.second.hasEventTargetData())
-            *sawEventListeners = true;
-    }
 }
 
 static void associateReplacementCloneWithOriginal(SVGElement& replacementClone, SVGElement& originalClone)
@@ -539,12 +525,13 @@ RefPtr<SVGElement> SVGUseElement::findTarget(AtomString* targetID) const
     return target;
 }
 
-void SVGUseElement::cloneTarget(ContainerNode& container, SVGElement& target, bool* sawEventListeners) const
+void SVGUseElement::cloneTarget(ContainerNode& container, SVGElement& target) const
 {
     Ref targetClone = downcast<SVGElement>(target.cloneElementWithChildren(protect(document()), nullptr));
     ScriptDisallowedScope::EventAllowedScope eventAllowedScope { targetClone };
-    associateClonesWithOriginals(targetClone.get(), target, sawEventListeners);
-    removeDisallowedAndSymbolElementsFromSubtree(targetClone.get());
+    associateClonesWithOriginals(targetClone.get(), target);
+    removeDisallowedElementsFromSubtree(targetClone.get());
+    removeSymbolElementsFromSubtree(targetClone.get());
     transferSizeAttributesToTargetClone(targetClone.get());
     container.appendChild(targetClone);
 }
@@ -561,12 +548,10 @@ static void cloneDataAndChildren(SVGElement& replacementClone, SVGElement& origi
     removeDisallowedElementsFromSubtree(replacementClone);
 }
 
-bool SVGUseElement::expandUseElementsInShadowTree(bool* sawEventListeners) const
+void SVGUseElement::expandUseElementsInShadowTree() const
 {
-    bool expandedAny = false;
     auto descendants = descendantsOfType<SVGUseElement>(*userAgentShadowRoot());
     for (auto it = descendants.begin(); it; ) {
-        expandedAny = true;
         Ref originalClone = *it;
         it.dropAssertions();
 
@@ -588,14 +573,13 @@ bool SVGUseElement::expandUseElementsInShadowTree(bool* sawEventListeners) const
         replacementClone->removeAttribute(XLinkNames::hrefAttr);
 
         if (target)
-            originalClone->cloneTarget(replacementClone.get(), *target, sawEventListeners);
+            originalClone->cloneTarget(replacementClone.get(), *target);
 
         protect(originalClone->parentNode())->replaceChild(replacementClone, originalClone);
 
         // Resume iterating, starting just inside the replacement clone.
         it = descendants.from(replacementClone.get());
     }
-    return expandedAny;
 }
 
 void SVGUseElement::expandSymbolElementsInShadowTree() const

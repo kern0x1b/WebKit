@@ -156,9 +156,6 @@ public:
     void copyKeyframes(const BlendingKeyframes&);
     bool hasImplicitKeyframes() const;
     bool hasImplicitKeyframeForProperty(AnimatableCSSProperty) const;
-    // True if any animated property lacks an explicit 0% or 100% keyframe, and an implicit
-    // keyframe therefore stands in for it when the interval endpoints are computed.
-    bool mayHaveImplicitKeyframeForAnyProperty() const { return m_properties.size() != m_explicitFromProperties.size() || m_properties.size() != m_explicitToProperties.size(); }
     void fillImplicitKeyframes(const KeyframeEffect&, const Style::ComputedStyle& elementStyle);
 
     auto begin() const LIFETIME_BOUND { return m_keyframes.begin(); }
@@ -166,7 +163,7 @@ public:
 
     bool NODELETE usesContainerUnits() const;
     bool usesViewportUnits() const;
-    bool usesTreeCountingFunctions() const { return m_usesTreeCountingFunctions; }
+    bool NODELETE usesTreeCountingFunctions() const;
     bool usesRelativeFontWeight() const { return m_usesRelativeFontWeight; }
     bool hasSubstitutionFunctions() const { return m_containsSubstitutionFunctions; }
     bool hasColorSetToCurrentColor() const;
@@ -210,7 +207,6 @@ private:
     bool m_hasKeyframeNotUsingRangeOffset : 1 { false };
     bool m_hasPropertiesWithRevertRuleOrLayer : 1 { false };
     bool m_animatesOffsetDistanceToPercentOrCalculated : 1 { false };
-    bool m_usesTreeCountingFunctions : 1 { false };
 };
 
 } // namespace WebCore

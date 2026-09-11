@@ -448,8 +448,11 @@ static PseudoClassInvalidationKey makePseudoClassInvalidationKey(CSSSelector::Ps
         if (simpleSelector->match() == CSSSelector::Match::Tag)
             tagName = simpleSelector->tagLowercaseLocalName();
 
-        if (simpleSelector->isAttributeSelector() && !simpleSelector->isEquivalentToClassSelector() && !unlikelyToHaveSelectorForAttribute(simpleSelector->attribute().localNameLowercase()))
-            attributeName = simpleSelector->attribute().localNameLowercase();
+        if (simpleSelector->isAttributeSelector()) {
+            auto& lowercaseName = simpleSelector->attribute().localNameLowercase();
+            if (!unlikelyToHaveSelectorForAttribute(lowercaseName))
+                attributeName = lowercaseName;
+        }
     }
     if (!attributeName.isEmpty())
         return makePseudoClassInvalidationKey(pseudoClass, InvalidationKeyType::Attribute, attributeName);

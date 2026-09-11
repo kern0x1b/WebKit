@@ -210,18 +210,6 @@ static String normalize(const String& string)
     return string;
 }
 
-ALWAYS_INLINE static size_t computeUTF8ByteLength(const String& string)
-{
-    if (string.isEmpty())
-        return 0;
-    if (string.is8Bit()) {
-        auto span = string.span8();
-        if (charactersAreAllASCII(span))
-            return span.size();
-    }
-    return string.utf8().length();
-}
-
 static bool containsInvalidCharacters(const String& string)
 {
     // The invalid characters are specified at https://cookiestore.spec.whatwg.org/#set-a-cookie.
@@ -397,7 +385,8 @@ void CookieStore::set(CookieInit&& options, Ref<DeferredPromise>&& promise)
             return;
     }
 
-    if (computeUTF8ByteLength(cookie.name) + computeUTF8ByteLength(cookie.value) > maximumNameValuePairSize) {
+    // FIXME: <rdar://85515842> Obtain the encoded length without allocating and encoding.
+    if (cookie.name.utf8().length() + cookie.value.utf8().length() > maximumNameValuePairSize) {
         promise->reject(Exception { ExceptionCode::TypeError, makeString("The size of the cookie name and value must not be greater than "_s, maximumNameValuePairSize, " bytes"_s) });
         return;
     }
@@ -421,7 +410,8 @@ void CookieStore::set(CookieInit&& options, Ref<DeferredPromise>&& promise)
             return;
         }
 
-        if (computeUTF8ByteLength(cookie.domain) > maximumAttributeValueSize) {
+        // FIXME: <rdar://85515842> Obtain the encoded length without allocating and encoding.
+        if (cookie.domain.utf8().length() > maximumAttributeValueSize) {
             promise->reject(Exception { ExceptionCode::TypeError, makeString("The size of the domain must not be greater than "_s, maximumAttributeValueSize, " bytes"_s) });
             return;
         }
@@ -448,7 +438,8 @@ void CookieStore::set(CookieInit&& options, Ref<DeferredPromise>&& promise)
         return;
     }
 
-    if (computeUTF8ByteLength(cookie.path) > maximumAttributeValueSize) {
+    // FIXME: <rdar://85515842> Obtain the encoded length without allocating and encoding.
+    if (cookie.path.utf8().length() > maximumAttributeValueSize) {
         promise->reject(Exception { ExceptionCode::TypeError, makeString("The size of the path must not be greater than "_s, maximumAttributeValueSize, " bytes"_s) });
         return;
     }

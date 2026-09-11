@@ -36,7 +36,7 @@ namespace CSS {
 struct PropertyParserState;
 
 struct PropertyParserResult {
-    ParsedPropertyVector& parsedProperties;
+    Vector<CSSProperty, 256>& parsedProperties;
 
     void addProperty(CSSProperty&&);
 

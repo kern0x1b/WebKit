@@ -112,8 +112,6 @@ private:
 
 inline bool TagCollection::elementMatches(Element& element) const
 {
-    if (!element.tagQName().hasPrefix()) [[likely]]
-        return m_qualifiedName == element.tagQName().localName();
     return m_qualifiedName == element.tagQName().toString();
 }
 
@@ -126,13 +124,8 @@ inline bool TagCollectionNS::elementMatches(Element& element) const
 
 inline bool HTMLTagCollection::elementMatches(Element& element) const
 {
-    if (element.isHTMLElement()) {
-        if (!element.tagQName().hasPrefix()) [[likely]]
-            return m_loweredQualifiedName == element.tagQName().localName();
+    if (element.isHTMLElement())
         return m_loweredQualifiedName == element.tagQName().toString();
-    }
-    if (!element.tagQName().hasPrefix()) [[likely]]
-        return m_qualifiedName == element.tagQName().localName();
     return m_qualifiedName == element.tagQName().toString();
 }
 

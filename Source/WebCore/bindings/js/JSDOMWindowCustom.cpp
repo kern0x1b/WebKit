@@ -222,12 +222,10 @@ bool JSDOMWindow::getOwnPropertySlot(JSObject* object, JSGlobalObject* lexicalGl
         return false;
 
 #if ENABLE(USER_MESSAGE_HANDLERS)
-    if (propertyName == builtinNames(lexicalGlobalObject->vm()).webkitPublicName()) [[unlikely]] {
-        RefPtr localDOMWindow = dynamicDowncast<LocalDOMWindow>(window.get());
-        if (localDOMWindow && localDOMWindow->shouldHaveWebKitNamespaceForWorld(thisObject->world(), lexicalGlobalObject)) {
-            slot.setCacheableCustom(thisObject, JSC::PropertyAttribute::DontDelete | JSC::PropertyAttribute::ReadOnly, jsDOMWindow_webkit);
-            return true;
-        }
+    RefPtr localDOMWindow = dynamicDowncast<LocalDOMWindow>(window.get());
+    if (propertyName == builtinNames(lexicalGlobalObject->vm()).webkitPublicName() && localDOMWindow && localDOMWindow->shouldHaveWebKitNamespaceForWorld(thisObject->world(), lexicalGlobalObject)) {
+        slot.setCacheableCustom(thisObject, JSC::PropertyAttribute::DontDelete | JSC::PropertyAttribute::ReadOnly, jsDOMWindow_webkit);
+        return true;
     }
 #endif
 

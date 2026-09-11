@@ -124,11 +124,10 @@ bool TileGrid::setNeedsDisplayIfEDRHeadroomExceeds(float headroom)
 
 void TileGrid::setNeedsDisplay()
 {
-    const IntRect gridBounds = gridBoundsInTileCoords();
     for (auto& entry : m_tiles) {
         TileIndex tileIndex = entry.key;
         TileInfo& tileInfo = entry.value;
-        IntRect tileRect = rectForTileIndex(tileIndex, gridBounds);
+        IntRect tileRect = rectForTileIndex(tileIndex);
 
         if (tileRect.intersects(m_primaryTileCoverageRect) && tileInfo.layer->superlayer()) {
             tileInfo.layer->setNeedsDisplay();
@@ -148,7 +147,6 @@ void TileGrid::setNeedsDisplayInRect(const IntRect& rect)
     IntRect repaintRectInTileCoords(enclosingIntRectPreservingEmptyRects(scaledRect));
 
     IntSize tileSize = m_tileSize;
-    const IntRect gridBounds = gridBoundsInTileCoords();
 
     // For small invalidations, lookup the covered tiles.
     if (repaintRectInTileCoords.height() < 2 * tileSize.height() && repaintRectInTileCoords.width() < 2 * tileSize.width()) {
@@ -160,7 +158,7 @@ void TileGrid::setNeedsDisplayInRect(const IntRect& rect)
                     TileIndex tileIndex(x, y);
                     auto it = m_tiles.find(tileIndex);
                     if (it != m_tiles.end())
-                        setTileNeedsDisplayInRect(tileIndex, it->value, repaintRectInTileCoords, m_primaryTileCoverageRect, gridBounds);
+                        setTileNeedsDisplayInRect(tileIndex, it->value, repaintRectInTileCoords, m_primaryTileCoverageRect);
                 }
             }
         }
@@ -168,7 +166,7 @@ void TileGrid::setNeedsDisplayInRect(const IntRect& rect)
     }
 
     for (auto& entry : m_tiles)
-        setTileNeedsDisplayInRect(entry.key, entry.value, repaintRectInTileCoords, m_primaryTileCoverageRect, gridBounds);
+        setTileNeedsDisplayInRect(entry.key, entry.value, repaintRectInTileCoords, m_primaryTileCoverageRect);
 }
 
 void TileGrid::dropTilesInRect(const IntRect& rect)
@@ -182,22 +180,19 @@ void TileGrid::dropTilesInRect(const IntRect& rect)
 
     Vector<TileIndex> tilesToRemove;
 
-    const IntRect gridBounds = gridBoundsInTileCoords();
     for (auto& index : m_tiles.keys()) {
-        if (rectForTileIndex(index, gridBounds).intersects(dropRectInTileCoords))
+        if (rectForTileIndex(index).intersects(dropRectInTileCoords))
             tilesToRemove.append(index);
     }
 
     removeTiles(tilesToRemove);
 }
 
-void TileGrid::setTileNeedsDisplayInRect(const TileIndex& tileIndex, TileInfo& tileInfo, const IntRect& repaintRectInTileCoords, const IntRect& coverageRectInTileCoords, const IntRect& gridBounds)
+void TileGrid::setTileNeedsDisplayInRect(const TileIndex& tileIndex, TileInfo& tileInfo, const IntRect& repaintRectInTileCoords, const IntRect& coverageRectInTileCoords)
 {
-    // The map owns the reference for the whole of this call, so taking a second
-    // one here was a retain and a release per tile per invalidation.
-    PlatformCALayer* tileLayer = tileInfo.layer.get();
+    RefPtr tileLayer = tileInfo.layer.get();
 
-    IntRect tileRect = rectForTileIndex(tileIndex, gridBounds);
+    IntRect tileRect = rectForTileIndex(tileIndex);
     FloatRect tileRepaintRect = tileRect;
     tileRepaintRect.intersect(repaintRectInTileCoords);
     if (tileRepaintRect.isEmpty())
@@ -274,27 +269,17 @@ bool TileGrid::prepopulateRect(const FloatRect& rect)
     return true;
 }
 
-IntRect TileGrid::gridBoundsInTileCoords() const
-{
-    IntRect scaledBounds(m_controller->bounds());
-    scaledBounds.scale(m_scale);
-    return scaledBounds;
-}
-
-IntRect TileGrid::rectForTileIndex(const TileIndex& tileIndex, const IntRect& gridBounds) const
+IntRect TileGrid::rectForTileIndex(const TileIndex& tileIndex) const
 {
     // FIXME: calculating the scaled size here should match with the rest of calculated sizes where we use the combination of
     // enclosingIntRect, expandedIntSize (floor vs ceil).
     // However enclosing this size could reveal gap on root layer's background. see RenderView::backgroundRect()
     IntSize tileSize = m_tileSize;
     IntRect rect(tileIndex.x() * tileSize.width(), tileIndex.y() * tileSize.height(), tileSize.width(), tileSize.height());
-    rect.intersect(gridBounds);
+    IntRect scaledBounds(m_controller->bounds());
+    scaledBounds.scale(m_scale);
+    rect.intersect(scaledBounds);
     return rect;
-}
-
-IntRect TileGrid::rectForTileIndex(const TileIndex& tileIndex) const
-{
-    return rectForTileIndex(tileIndex, gridBoundsInTileCoords());
 }
 
 bool TileGrid::getTileIndexRangeForRect(const IntRect& rect, TileIndex& topLeft, TileIndex& bottomRight) const
@@ -421,14 +406,12 @@ void TileGrid::revalidateTiles(OptionSet<ValidationPolicyFlag> validationPolicy)
     m_scaleAtLastRevalidation = m_scale;
 
     // Move tiles newly outside the coverage rect into the cohort map.
-    const IntRect gridBounds = gridBoundsInTileCoords();
-    const bool aggressivelyRetainTiles = m_controller->shouldAggressivelyRetainTiles();
     for (auto& entry : m_tiles) {
         TileInfo& tileInfo = entry.value;
         TileIndex tileIndex = entry.key;
 
-        PlatformCALayer* tileLayer = tileInfo.layer.get();
-        IntRect tileRect = rectForTileIndex(tileIndex, gridBounds);
+        RefPtr tileLayer = tileInfo.layer.get();
+        IntRect tileRect = rectForTileIndex(tileIndex);
 
         if (tileRect.intersects(coverageRectInTileCoords)) {
             tileInfo.cohort = visibleTileCohort;
@@ -445,7 +428,7 @@ void TileGrid::revalidateTiles(OptionSet<ValidationPolicyFlag> validationPolicy)
                 ++tilesInCohort;
                 m_controller->willRemoveTile(*this, tileIndex);
                 tileLayer->removeFromSuperlayer();
-            } else if (aggressivelyRetainTiles && tileLayer->superlayer()) {
+            } else if (m_controller->shouldAggressivelyRetainTiles() && tileLayer->superlayer()) {
                 // Aggressive tile retention means we'll never remove cohorts, but we need to make sure they're unparented.
                 // We can't immediately unparent cohorts comprised of secondary tiles that never touch the primary coverage rect,
                 // because that would defeat the usefulness of prepopulateRect(); instead, age prepopulated tiles out as if they were being removed.
@@ -469,7 +452,7 @@ void TileGrid::revalidateTiles(OptionSet<ValidationPolicyFlag> validationPolicy)
     if (needsDelayedTileRevalidation)
         m_controller->scheduleTileRevalidation(minimumRevalidationTimerDuration);
 
-    if (!aggressivelyRetainTiles) {
+    if (!m_controller->shouldAggressivelyRetainTiles()) {
         if (m_controller->shouldTemporarilyRetainTileCohorts())
             scheduleCohortRemoval();
         else if (tilesInCohort) {
@@ -626,13 +609,11 @@ IntRect TileGrid::ensureTilesForRect(const FloatRect& rect, HashSet<TileIndex>& 
 
     IntRect coverageRect;
 
-    const IntRect gridBounds = gridBoundsInTileCoords();
-    const bool reportsTilesNeedingDisplay = m_controller->hasClient();
     for (int y = topLeft.y(); y <= bottomRight.y(); ++y) {
         for (int x = topLeft.x(); x <= bottomRight.x(); ++x) {
             TileIndex tileIndex(x, y);
 
-            IntRect tileRect = rectForTileIndex(tileIndex, gridBounds);
+            IntRect tileRect = rectForTileIndex(tileIndex);
 
             HashMap<TileIndex, TileInfo>::iterator it;
             constexpr size_t kMaxTileCountPerGrid = 6 * 1024;
@@ -668,7 +649,7 @@ IntRect TileGrid::ensureTilesForRect(const FloatRect& rect, HashSet<TileIndex>& 
                 ++tilesInCohort;
             }
 
-            if (reportsTilesNeedingDisplay && tileInfo.layer->needsDisplay())
+            if (tileInfo.layer->needsDisplay())
                 tilesNeedingDisplay.add(tileIndex);
 
             if (!tileInfo.layer->superlayer())

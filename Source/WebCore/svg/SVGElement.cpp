@@ -90,6 +90,7 @@ WTF_MAKE_TZONE_ALLOCATED_IMPL(SVGElement);
 
 SVGElement::SVGElement(const QualifiedName& tagName, Document& document, UniqueRef<SVGPropertyRegistry>&& propertyRegistry, OptionSet<TypeFlag> typeFlags)
     : StyledElement(tagName, document, typeFlags | TypeFlag::IsSVGElement | TypeFlag::HasCustomStyleResolveCallbacks)
+    , m_propertyAnimatorFactory(makeUniqueRef<SVGPropertyAnimatorFactory>())
     , m_propertyRegistry(WTF::move(propertyRegistry))
     , m_className(SVGAnimatedString::create(this))
 {
@@ -110,8 +111,8 @@ SVGElement::~SVGElement()
         m_svgRareData = nullptr;
     }
 
-    if (CheckedPtr extensions = document().svgExtensionsIfExists())
-        extensions->removeElementToRebuild(*this);
+    Ref<Document> document = this->document();
+    protect(document->svgExtensions())->removeElementToRebuild(*this);
 
     if (hasPendingResources()) {
         protect(treeScopeForSVGReferences())->removeElementFromPendingSVGResources(*this);
@@ -648,10 +649,8 @@ bool SVGElement::isAnimatedStyleAttribute(const QualifiedName& attributeName) co
 RefPtr<SVGAttributeAnimator> SVGElement::createAnimator(const QualifiedName& attributeName, AnimationMode animationMode, CalcMode calcMode, bool isAccumulated, bool isAdditive)
 {
     // Property animator, e.g. "fill" or "fill-opacity".
-    if (SVGPropertyAnimatorFactory::isKnownAttribute(attributeName)) {
-        if (auto animator = propertyAnimatorFactory().createAnimator(attributeName, animationMode, calcMode, isAccumulated, isAdditive))
-            return animator;
-    }
+    if (auto animator = propertyAnimatorFactory().createAnimator(attributeName, animationMode, calcMode, isAccumulated, isAdditive))
+        return animator;
 
     // Animated property animator.
     RefPtr animator = propertyRegistry().createAnimator(attributeName, animationMode, calcMode, isAccumulated, isAdditive);
@@ -662,18 +661,9 @@ RefPtr<SVGAttributeAnimator> SVGElement::createAnimator(const QualifiedName& att
     return animator;
 }
 
-SVGPropertyAnimatorFactory& SVGElement::propertyAnimatorFactory()
-{
-    if (!m_propertyAnimatorFactory)
-        m_propertyAnimatorFactory = makeUnique<SVGPropertyAnimatorFactory>();
-    return *m_propertyAnimatorFactory;
-}
-
 void SVGElement::animatorWillBeDeleted(const QualifiedName& attributeName)
 {
-    if (!m_propertyAnimatorFactory)
-        return;
-    m_propertyAnimatorFactory->animatorWillBeDeleted(attributeName);
+    propertyAnimatorFactory().animatorWillBeDeleted(attributeName);
 }
 
 std::optional<Style::UnadjustedStyle> SVGElement::resolveCustomStyle(const Style::ResolutionContext& resolutionContext, const Style::ComputedStyle*)
@@ -1133,8 +1123,8 @@ Node::NeedsPostConnectionSteps SVGElement::insertionSteps(InsertionType insertio
 
     hideNonce();
 
-    if (const AtomString& id = getIdAttribute(); !id.isEmpty() && needsPendingResourceHandling() && insertionType.connectedToDocument && !isInShadowTree()) {
-        if (protect(treeScopeForSVGReferences())->isIdOfPendingSVGResource(id))
+    if (needsPendingResourceHandling() && insertionType.connectedToDocument && !isInShadowTree()) {
+        if (protect(treeScopeForSVGReferences())->isIdOfPendingSVGResource(getIdAttribute()))
             return NeedsPostConnectionSteps::Yes;
     }
 
@@ -1274,7 +1264,7 @@ bool SVGElement::accessKeyAction(bool sendMouseEvents)
 
 void SVGElement::invalidateInstances()
 {
-    if (!m_svgRareData || m_svgRareData->instanceUpdatesBlocked())
+    if (instanceUpdatesBlocked())
         return;
 
     for (auto& instance : copyToVectorOf<Ref<SVGElement>>(instances())) {

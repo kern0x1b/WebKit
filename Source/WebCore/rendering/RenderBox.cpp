@@ -3545,8 +3545,8 @@ void RenderBox::updateLogicalHeight()
     if (shouldApplySizeContainment() && !isRenderGrid())
         overrideLogicalHeightForSizeContainment();
 
-    if (CheckedPtr flexContainer = dynamicDowncast<RenderFlexibleBox>(parent()))
-        flexContainer->setFlexItemContentLogicalHeightFromLayout(*this, contentBoxLogicalHeight());
+    if (SUPPRESS_UNCHECKED_LOCAL auto* flexContainer = dynamicDowncast<RenderFlexibleBox>(parent()))
+        flexContainer->setFlexItemContentLogicalHeightIfNeeded(*this, contentBoxLogicalHeight());
     auto computedValues = computeLogicalHeight(logicalHeight(), logicalTop());
     setLogicalHeight(computedValues.extent);
     setLogicalTop(computedValues.position);
@@ -4344,9 +4344,37 @@ void RenderBox::computeBlockDirectionMargins(const RenderBlock& containingBlock,
     ASSERT(!isRenderTableCol());
 
     // Margins are calculated with respect to the logical width of the containing block (8.3)
-    auto availableSpace = containingBlockLogicalWidthForContent();
-    marginBefore = Style::evaluateMinimum<LayoutUnit>(style().marginBefore(containingBlock.writingMode()), availableSpace, style().usedZoomForLength());
-    marginAfter = Style::evaluateMinimum<LayoutUnit>(style().marginAfter(containingBlock.writingMode()), availableSpace, style().usedZoomForLength());
+    auto constrainBlockMarginInAvailableSpaceOrTrim = [&](auto marginSideInBlockDirection) {
+        ASSERT(marginSideInBlockDirection == Style::MarginTrimSide::BlockStart || marginSideInBlockDirection == Style::MarginTrimSide::BlockEnd);
+        if (containingBlock.shouldTrimChildMargin(marginSideInBlockDirection, *this)) {
+            // FIXME(255434): This should be set when the margin is being trimmed
+            // within the context of its layout system (block, flex, grid) and should not
+            // be done at this level within RenderBox. We should be able to leave the
+            // trimming responsibility to each of those contexts and not need to
+            // do any of it here (trimming the margin and setting the rare data bit)
+            if (isGridItem())
+                const_cast<RenderBox&>(*this).markMarginAsTrimmed(marginSideInBlockDirection);
+            return 0_lu;
+        }
+
+#if defined(WEBKIT_IOS6)
+        auto&& margin = marginSideInBlockDirection == Style::MarginTrimSide::BlockStart
+            ? style().marginBefore(containingBlock.writingMode())
+            : style().marginAfter(containingBlock.writingMode());
+        LayoutUnit availableSpace;
+        if (margin.isPercentOrCalculated()) [[unlikely]]
+            availableSpace = containingBlockLogicalWidthForContent();
+        return Style::evaluateMinimum<LayoutUnit>(margin, availableSpace, style().usedZoomForLength());
+#else
+        auto availableSpace = containingBlockLogicalWidthForContent();
+        return marginSideInBlockDirection == Style::MarginTrimSide::BlockStart
+            ? Style::evaluateMinimum<LayoutUnit>(style().marginBefore(containingBlock.writingMode()), availableSpace, style().usedZoomForLength())
+            : Style::evaluateMinimum<LayoutUnit>(style().marginAfter(containingBlock.writingMode()), availableSpace, style().usedZoomForLength());
+#endif
+    };
+
+    marginBefore = constrainBlockMarginInAvailableSpaceOrTrim(Style::MarginTrimSide::BlockStart);
+    marginAfter = constrainBlockMarginInAvailableSpaceOrTrim(Style::MarginTrimSide::BlockEnd);
 }
 
 void RenderBox::computeAndSetBlockDirectionMargins(const RenderBlock& containingBlock)
@@ -5156,7 +5184,7 @@ LayoutUnit RenderBox::lineHeight() const
     auto shouldUseLineHeightFromStyle = [&] {
         if (is<RenderBlock>(*this))
             return true;
-        if (CheckedPtr listMarkerRenderer = dynamicDowncast<RenderListOutsideMarker>(*this))
+        if (SUPPRESS_UNCHECKED_LOCAL auto* listMarkerRenderer = dynamicDowncast<RenderListMarker>(*this))
             return !listMarkerRenderer->isImage();
         return false;
     };

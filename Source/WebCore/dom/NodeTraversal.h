@@ -76,10 +76,10 @@ WEBCORE_EXPORT Node* NODELETE deepLastChild(Node&);
 template <class NodeType>
 inline Node* traverseNextTemplate(NodeType& current)
 {
-    if (auto* child = current.firstChild())
-        return child;
-    if (auto* sibling = current.nextSibling())
-        return sibling;
+    if (current.firstChild())
+        return current.firstChild();
+    if (current.nextSibling())
+        return current.nextSibling();
     return nextAncestorSibling(current);
 }
 inline Node* next(const Node& current) { return traverseNextTemplate(current); }
@@ -88,12 +88,12 @@ inline Node* next(const ContainerNode& current) { return traverseNextTemplate(cu
 template <class NodeType>
 inline Node* traverseNextTemplate(NodeType& current, const Node* stayWithin)
 {
-    if (auto* child = current.firstChild())
-        return child;
+    if (current.firstChild())
+        return current.firstChild();
     if (&current == stayWithin)
         return nullptr;
-    if (auto* sibling = current.nextSibling())
-        return sibling;
+    if (current.nextSibling())
+        return current.nextSibling();
     return nextAncestorSibling(current, stayWithin);
 }
 inline Node* next(const Node& current, const Node* stayWithin) { return traverseNextTemplate(current, stayWithin); }
@@ -101,8 +101,8 @@ inline Node* next(const ContainerNode& current, const Node* stayWithin) { return
 
 inline Node* nextSkippingChildren(const Node& current)
 {
-    if (auto* sibling = current.nextSibling())
-        return sibling;
+    if (current.nextSibling())
+        return current.nextSibling();
     return nextAncestorSibling(current);
 }
 
@@ -110,8 +110,8 @@ inline Node* nextSkippingChildren(const Node& current, const Node* stayWithin)
 {
     if (&current == stayWithin)
         return nullptr;
-    if (auto* sibling = current.nextSibling())
-        return sibling;
+    if (current.nextSibling())
+        return current.nextSibling();
     return nextAncestorSibling(current, stayWithin);
 }
 

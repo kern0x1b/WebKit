@@ -46,52 +46,28 @@ static bool NODELETE isExcludedAttribute(const AtomString& name)
     return name == HTMLNames::classAttr->localName() || name == HTMLNames::idAttr->localName() || name == HTMLNames::styleAttr->localName();
 }
 
-template<size_t inlineCapacity>
-static void collectElementIdentifierHashesImpl(const Element& element, Vector<unsigned, inlineCapacity>& identifierHashes)
+void SelectorFilter::collectElementIdentifierHashes(const Element& element, Vector<unsigned, 4>& identifierHashes)
 {
-    auto& id = element.idForStyleResolution();
-    bool hasClass = element.hasClass();
-    bool hasAttributes = element.hasAttributesWithoutUpdate();
-
-    identifierHashes.reserveCapacity(identifierHashes.size() + 1
-        + (id.isNull() ? 0 : 1)
-        + (hasClass ? element.classNames().size() : 0)
-        + (hasAttributes ? element.attributeCount() : 0));
-
     identifierHashes.append(element.localNameLowercase().impl()->existingHash() * TagNameSalt);
 
+    auto& id = element.idForStyleResolution();
     if (!id.isNull())
         identifierHashes.append(id.impl()->existingHash() * IdSalt);
 
-    if (hasClass) {
+    if (element.hasClass()) {
         identifierHashes.appendContainerWithMapping(element.classNames(), [](auto& className) {
             return className.impl()->existingHash() * ClassSalt;
         });
     }
-
-    if (hasAttributes) {
-        bool isHTMLElement = element.isHTMLElement();
-        auto* classImpl = HTMLNames::classAttr->localName().impl();
-        auto* idImpl = HTMLNames::idAttr->localName().impl();
-        auto* styleImpl = HTMLNames::styleAttr->localName().impl();
-
+    
+    if (element.hasAttributesWithoutUpdate()) {
         for (auto& attribute : element.attributes()) {
-            auto* attributeName = (isHTMLElement ? attribute.localName() : attribute.localNameLowercase()).impl();
-            if (attributeName == classImpl || attributeName == idImpl || attributeName == styleImpl)
+            auto& attributeName = element.isHTMLElement() ? attribute.localName() : attribute.localNameLowercase();
+            if (isExcludedAttribute(attributeName))
                 continue;
-            identifierHashes.append(attributeName->existingHash() * AttributeSalt);
+            identifierHashes.append(attributeName.impl()->existingHash() * AttributeSalt);
         }
     }
-}
-
-void SelectorFilter::collectElementIdentifierHashes(const Element& element, Vector<unsigned, 4>& identifierHashes)
-{
-    collectElementIdentifierHashesImpl(element, identifierHashes);
-}
-
-void SelectorFilter::collectElementIdentifierHashes(const Element& element, IdentifierHashes& identifierHashes)
-{
-    collectElementIdentifierHashesImpl(element, identifierHashes);
 }
 
 bool SelectorFilter::parentStackIsConsistent(const ContainerNode* parentNode) const
@@ -121,8 +97,9 @@ void SelectorFilter::pushParent(Element* parent)
     // Mix tags, class names and ids into some sort of weird bouillabaisse.
     // The filter is used for fast rejection of child and descendant selectors.
     collectElementIdentifierHashes(*parent, parentFrame.identifierHashes);
-    for (auto hash : parentFrame.identifierHashes.span())
-        m_ancestorIdentifierFilter.add(hash);
+    size_t count = parentFrame.identifierHashes.size();
+    for (size_t i = 0; i < count; ++i)
+        m_ancestorIdentifierFilter.add(parentFrame.identifierHashes[i]);
 }
 
 void SelectorFilter::pushParentInitializingIfNeeded(Element& parent)
@@ -138,8 +115,9 @@ void SelectorFilter::popParent()
 {
     ASSERT(!m_parentStack.isEmpty());
     const ParentStackFrame& parentFrame = m_parentStack.last();
-    for (auto hash : parentFrame.identifierHashes.span())
-        m_ancestorIdentifierFilter.remove(hash);
+    size_t count = parentFrame.identifierHashes.size();
+    for (size_t i = 0; i < count; ++i)
+        m_ancestorIdentifierFilter.remove(parentFrame.identifierHashes[i]);
     m_parentStack.removeLast();
     if (m_parentStack.isEmpty()) {
         ASSERT(m_ancestorIdentifierFilter.likelyEmpty());

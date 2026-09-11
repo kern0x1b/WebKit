@@ -36,7 +36,8 @@
 #include "SVGPoint.h"
 #include "Settings.h"
 #include "StyleComputedStyle+GettersInlines.h"
-#include "StylePropertiesInlines.h"
+#include <algorithm>
+#include <cstdlib>
 #include <wtf/TZoneMallocInlines.h>
 #include <wtf/text/MakeString.h>
 
@@ -44,7 +45,34 @@ namespace WebCore {
 
 WTF_MAKE_TZONE_ALLOCATED_IMPL(SVGPathElement);
 
-class PathCache {
+static uint64_t svgPathSegListCacheMaxSizeInBytes()
+{
+    static const uint64_t maxSize = [] -> uint64_t {
+        if (const char* override = getenv("WEBKIT_IOS6_SVG_PATH_CACHE_KB")) {
+            int parsed = atoi(override);
+            if (parsed > 0)
+                return static_cast<uint64_t>(parsed) * 1024;
+        }
+        return 150 * 1024;
+    }();
+    return maxSize;
+}
+
+static uint64_t svgPathSegListCacheMaxItemSizeInBytes()
+{
+    static const uint64_t maxItemSize = [] -> uint64_t {
+        uint64_t requested = 5 * 1024;
+        if (const char* override = getenv("WEBKIT_IOS6_SVG_PATH_CACHE_ITEM_KB")) {
+            int parsed = atoi(override);
+            if (parsed > 0)
+                requested = static_cast<uint64_t>(parsed) * 1024;
+        }
+        return std::min(requested, svgPathSegListCacheMaxSizeInBytes());
+    }();
+    return maxItemSize;
+}
+
+class PathSegListCache {
 public:
     static PathCache& NODELETE singleton();
 
@@ -115,15 +143,18 @@ Ref<SVGPathElement> SVGPathElement::create(const QualifiedName& tagName, Documen
 void SVGPathElement::attributeChanged(const QualifiedName& name, const AtomString& oldValue, const AtomString& newValue, AttributeModificationReason attributeModificationReason)
 {
     if (name == SVGNames::dAttr) {
-        auto& cache = PathCache::singleton();
+        Ref pathSegList { m_pathSegList };
         if (newValue.isEmpty())
-            protect(m_path)->baseVal()->clearByteStreamData();
-        else if (auto data = cache.get(newValue))
-            protect(m_path)->baseVal()->updateByteStreamData(WTF::move(data.value()));
-        else if (protect(m_path)->baseVal()->parse(newValue))
-            cache.add(newValue, protect(m_path)->baseVal()->existingPathByteStream().data());
-        else
-            protect(protect(document())->svgExtensions())->reportError(makeString("Problem parsing d=\""_s, newValue, "\""_s));
+            pathSegList->baseVal()->clearByteStreamData();
+        else {
+            auto& cache = PathSegListCache::singleton();
+            if (auto data = cache.get(newValue))
+                pathSegList->baseVal()->updateByteStreamData(WTF::move(data.value()));
+            else if (pathSegList->baseVal()->parse(newValue))
+                cache.add(newValue, pathSegList->baseVal()->existingPathByteStream().data());
+            else
+                protect(protect(document())->svgExtensions())->reportError(makeString("Problem parsing d=\""_s, newValue, "\""_s));
+        }
     }
 
     SVGGeometryElement::attributeChanged(name, oldValue, newValue, attributeModificationReason);

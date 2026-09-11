@@ -169,22 +169,22 @@ inline decltype(auto) ComputedStyle::usedBorderWidths() const
 
 inline Style::LineWidth ComputedStyle::usedBorderBottomWidth() const
 {
-    return UsedBorderWidthsAccessor<BoxSide::Bottom>::get(border());
+    return usedBorderWidths().bottom();
 }
 
 inline Style::LineWidth ComputedStyle::usedBorderLeftWidth() const
 {
-    return UsedBorderWidthsAccessor<BoxSide::Left>::get(border());
+    return usedBorderWidths().left();
 }
 
 inline Style::LineWidth ComputedStyle::usedBorderRightWidth() const
 {
-    return UsedBorderWidthsAccessor<BoxSide::Right>::get(border());
+    return usedBorderWidths().right();
 }
 
 inline Style::LineWidth ComputedStyle::usedBorderTopWidth() const
 {
-    return UsedBorderWidthsAccessor<BoxSide::Top>::get(border());
+    return usedBorderWidths().top();
 }
 
 inline Style::LineWidth ComputedStyle::usedBorderWidthStart(WritingMode writingMode) const

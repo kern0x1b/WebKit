@@ -52,12 +52,10 @@ public:
     virtual bool isCustomEffect() const { return false; }
     virtual bool isKeyframeEffect() const { return false; }
 
-    enum class ComputedTimingSerializedProperties : bool { Exclude, Include };
-
     EffectTiming getBindingsTiming() const;
     BasicEffectTiming getBasicTiming();
     ComputedEffectTiming getBindingsComputedTiming();
-    ComputedEffectTiming getComputedTiming(UseCachedCurrentTime = UseCachedCurrentTime::Yes, EndpointInclusiveActiveInterval = EndpointInclusiveActiveInterval::No, ComputedTimingSerializedProperties = ComputedTimingSerializedProperties::Exclude);
+    ComputedEffectTiming getComputedTiming(UseCachedCurrentTime = UseCachedCurrentTime::Yes, EndpointInclusiveActiveInterval = EndpointInclusiveActiveInterval::No);
     ExceptionOr<void> bindingsUpdateTiming(Document&, const OptionalEffectTiming&);
     ExceptionOr<void> updateTiming(Document&, const OptionalEffectTiming&);
 

@@ -111,28 +111,47 @@ String TextCodecLatin1::decode(std::span<const uint8_t> bytes, bool, bool, bool&
     String result = String::createUninitialized(bytes.size(), characters);
 
     auto source = bytes;
+    const uint8_t* alignedEnd = WTF::alignToMachineWord(std::to_address(source.end()));
     auto destination = characters;
 
     while (!source.empty()) {
         if (isASCII(source[0])) {
             // Fast path for ASCII. Most Latin-1 text will be ASCII.
-            size_t asciiLength = copyLeadingASCII(destination, source);
-            skip(source, asciiLength);
-            skip(destination, asciiLength);
-            if (source.empty())
-                break;
-        }
-        char16_t character = latin1ConversionTable[source[0]];
-        if (!isLatin1(character))
-            goto upConvertTo16Bit;
+            if (WTF::isAlignedToMachineWord(source.data())) {
+                while (source.data() < alignedEnd) {
+                    auto chunk = reinterpretCastSpanStartTo<WTF::MachineWord>(source);
 
-        destination[0] = character;
+                    if (!WTF::containsOnlyASCII<Latin1Character>(chunk))
+                        goto useLookupTable;
+
+                    copyASCIIMachineWord(destination, source);
+                    skip(source, sizeof(WTF::MachineWord));
+                    skip(destination, sizeof(WTF::MachineWord));
+                }
+
+                if (source.empty())
+                    break;
+
+                // *source may not be ASCII anymore if source moves inside the loop of the fast code path
+                if (!isASCII(source[0]))
+                    goto useLookupTable;
+            }
+            destination[0] = source[0];
+        } else {
+useLookupTable:
+            auto sourceCharacter = source[0];
+            if (!isLatin1(latin1ConversionTable[sourceCharacter]))
+                goto upConvertTo16Bit;
+
+            destination[0] = latin1ConversionTable[sourceCharacter];
+        }
+
         skip(source, 1);
         skip(destination, 1);
     }
 
     return result;
-
+    
 upConvertTo16Bit:
     std::span<char16_t> characters16;
     String result16 = String::createUninitialized(bytes.size(), characters16);
@@ -140,9 +159,8 @@ upConvertTo16Bit:
     auto destination16 = characters16;
 
     // Zero extend and copy already processed 8 bit data
-    size_t charactersToCopy = destination.data() - characters.data();
-    StringImpl::copyCharacters(destination16.first(charactersToCopy), characters.first(charactersToCopy));
-    skip(destination16, charactersToCopy);
+    for (auto character : characters.first(destination.data() - characters.data()))
+        consume(destination16) = character;
 
     // Handle the character that triggered the 16 bit path
     consume(destination16) = latin1ConversionTable[consume(source)];
@@ -150,17 +168,35 @@ upConvertTo16Bit:
     while (!source.empty()) {
         if (isASCII(source[0])) {
             // Fast path for ASCII. Most Latin-1 text will be ASCII.
-            size_t asciiLength = copyLeadingASCII(destination16, source);
-            skip(source, asciiLength);
-            skip(destination16, asciiLength);
-            if (source.empty())
-                break;
+            if (WTF::isAlignedToMachineWord(source.data())) {
+                while (source.data() < alignedEnd) {
+                    auto chunk = reinterpretCastSpanStartTo<WTF::MachineWord>(source);
+                    
+                    if (!WTF::containsOnlyASCII<Latin1Character>(chunk))
+                        goto useLookupTable16;
+                    
+                    copyASCIIMachineWord(destination16, source);
+                    skip(source, sizeof(WTF::MachineWord));
+                    skip(destination16, sizeof(WTF::MachineWord));
+                }
+                
+                if (source.empty())
+                    break;
+
+                // *source may not be ASCII anymore if source moves inside the loop of the fast code path
+                if (!isASCII(source[0]))
+                    goto useLookupTable16;
+            }
+            destination16[0] = source[0];
+        } else {
+useLookupTable16:
+            destination16[0] = latin1ConversionTable[source[0]];
         }
-        destination16[0] = latin1ConversionTable[source[0]];
+        
         skip(source, 1);
         skip(destination16, 1);
     }
-
+    
     return result16;
 }
 

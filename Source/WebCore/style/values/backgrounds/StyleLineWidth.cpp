@@ -44,6 +44,43 @@ namespace Style {
 
 // MARK: - Conversion
 
+static float snapLengthAsBorderWidth(float length, float deviceScaleFactor)
+{
+    // A border of no width stays a border of no width whatever the device
+    // scale is, and the overwhelming majority of boxes on a page have no
+    // border at all. Taking the arithmetic below for those means a call to
+    // floorf per edge per box per layout - on armv7 that is a real libm call,
+    // there being no rounding instruction on this VFP unit - and it measured
+    // as the single hottest thing in a layout of an ordinary page.
+    if (!length)
+        return 0;
+
+    // https://drafts.csswg.org/css-values-4/#snap-a-length-as-a-border-width
+
+    // 1. Assert: `length` is non-negative.
+    // NOTE: Not asserted, but checked in step 3.
+
+    // 2. If `length` is an integer number of device pixels, do nothing.
+    // NOTE: Handled by step 4 without explicitly checking here.
+
+    // 3. If `length` is greater than zero, but less than 1 device pixel, round `length` up to 1 device pixel.
+    if (auto singleDevicePixelLength = 1.0f / deviceScaleFactor; length > 0.0f && length < singleDevicePixelLength)
+        return singleDevicePixelLength;
+
+    // 4. If `length` is greater than 1 device pixel, round it down to the nearest integer number of device pixels.
+    return std::floor(length * deviceScaleFactor) / deviceScaleFactor;
+}
+
+LineWidth::Length LineWidth::snapLengthAsBorderWidth(float length, float deviceScaleFactor)
+{
+    return LineWidth::Length { Style::snapLengthAsBorderWidth(length, deviceScaleFactor) };
+}
+
+LineWidth::Length LineWidth::snapLengthAsBorderWidth(LineWidth::Length length, float deviceScaleFactor)
+{
+    return LineWidth::Length { Style::snapLengthAsBorderWidth(length.unresolvedValue(), deviceScaleFactor) };
+}
+
 auto CSSValueConversion<LineWidth>::operator()(BuilderState& state, const CSSValue& value) -> LineWidth
 {
     if (RefPtr keywordValue = dynamicDowncast<CSSKeywordValue>(value)) {

@@ -60,7 +60,6 @@
 #include "SourceBufferPrivate.h"
 #include "TextTrackList.h"
 #include "TimeRanges.h"
-#include "TrackOpaqueRoot.h"
 #include "VideoTrack.h"
 #include "VideoTrackList.h"
 #include "VideoTrackPrivate.h"
@@ -182,7 +181,7 @@ SourceBuffer::SourceBuffer(Ref<SourceBufferPrivate>&& sourceBufferPrivate, Media
     , m_private(WTF::move(sourceBufferPrivate))
     , m_client(SourceBufferClientImpl::create(*this))
     , m_source(&source)
-    , m_trackOpaqueRoot(TrackOpaqueRoot::create(opaqueRoot()))
+    , m_opaqueRootProvider(Observer<WebCoreOpaqueRoot()>::create([opaqueRoot = WebCoreOpaqueRoot { this }] { return opaqueRoot; }))
     , m_appendWindowStart(MediaTime::zeroTime())
     , m_appendWindowEnd(MediaTime::positiveInfiniteTime())
     , m_appendState(WaitingForSegment)
@@ -202,7 +201,6 @@ SourceBuffer::~SourceBuffer()
 {
     ASSERT(isRemoved());
     ALWAYS_LOG(LOGIDENTIFIER);
-    m_trackOpaqueRoot->clear();
 }
 
 ExceptionOr<Ref<TimeRanges>> SourceBuffer::buffered()
@@ -736,7 +734,7 @@ VideoTrackList& SourceBuffer::videoTracks()
     if (!m_videoTracks) {
         Ref videoTracks = VideoTrackList::create(protect(scriptExecutionContext()).get());
         m_videoTracks = videoTracks.copyRef();
-        videoTracks->setOpaqueRoot(m_trackOpaqueRoot);
+        videoTracks->setOpaqueRootObserver(m_opaqueRootProvider);
     }
     return *m_videoTracks;
 }
@@ -746,7 +744,7 @@ AudioTrackList& SourceBuffer::audioTracks()
     if (!m_audioTracks) {
         Ref audioTracks = AudioTrackList::create(protect(scriptExecutionContext()).get());
         m_audioTracks = audioTracks.copyRef();
-        audioTracks->setOpaqueRoot(m_trackOpaqueRoot);
+        audioTracks->setOpaqueRootObserver(m_opaqueRootProvider);
     }
     return *m_audioTracks;
 }
@@ -756,7 +754,7 @@ TextTrackList& SourceBuffer::textTracks()
     if (!m_textTracks) {
         Ref textTracks = TextTrackList::create(protect(scriptExecutionContext()).get());
         m_textTracks = textTracks.copyRef();
-        textTracks->setOpaqueRoot(m_trackOpaqueRoot);
+        textTracks->setOpaqueRootObserver(m_opaqueRootProvider);
     }
     return *m_textTracks;
 }

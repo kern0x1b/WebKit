@@ -131,9 +131,9 @@ static inline void invalidateElement(const std::optional<const Styleable>& style
     if (!styleable)
         return;
 
-    auto& element = styleable->element;
-    if (!element.document().inStyleRecalc())
-        element.invalidateStyleForAnimation();
+    Ref element = styleable->element;
+    if (!element->document().inStyleRecalc())
+        element->invalidateStyleForAnimation();
 }
 
 String KeyframeEffect::CSSPropertyIDToIDLAttributeName(CSSPropertyID property)
@@ -1653,10 +1653,8 @@ OptionSet<AnimationImpact> KeyframeEffect::apply(Style::ComputedStyle& targetSty
         impact.add(AnimationImpact::RequiresRecomposite);
     }
 
-    if (InspectorInstrumentation::hasFrontends()) [[unlikely]] {
-        if (auto target = targetStyleable())
-            InspectorInstrumentation::willApplyKeyframeEffect(*target, *this, computedTiming);
-    }
+    if (auto target = targetStyleable())
+        InspectorInstrumentation::willApplyKeyframeEffect(*target, *this, computedTiming);
 
     if (!computedTiming.progress)
         return impact;
@@ -1869,24 +1867,10 @@ void KeyframeEffect::setAnimatedPropertiesInStyle(Style::ComputedStyle& targetSt
     if (m_blendingKeyframes.isEmpty())
         return;
 
-    BlendingKeyframe propertySpecificKeyframeWithZeroOffset(0_css_percentage, nullptr);
-    BlendingKeyframe propertySpecificKeyframeWithOneOffset(100_css_percentage, nullptr);
+    BlendingKeyframe propertySpecificKeyframeWithZeroOffset(0_css_percentage, Style::ComputedStyle::clonePtr(targetStyle));
+    BlendingKeyframe propertySpecificKeyframeWithOneOffset(100_css_percentage, Style::ComputedStyle::clonePtr(targetStyle));
 
-    // The two keyframes above stand in for the implicit 0% and 100% keyframes. They hold a copy of
-    // the underlying style, which has to be taken before any property is blended into targetStyle,
-    // so it is taken up front whenever the keyframes may be needed at all, and lazily otherwise to
-    // cover the case where a computed offset moved after the explicit-endpoint bookkeeping was done.
-    auto materializeImplicitKeyframeStyles = [&] {
-        if (!propertySpecificKeyframeWithZeroOffset.style())
-            propertySpecificKeyframeWithZeroOffset.setStyle(Style::ComputedStyle::clonePtr(targetStyle));
-        if (!propertySpecificKeyframeWithOneOffset.style())
-            propertySpecificKeyframeWithOneOffset.setStyle(Style::ComputedStyle::clonePtr(targetStyle));
-    };
-
-    if (m_blendingKeyframes.mayHaveImplicitKeyframeForAnyProperty())
-        materializeImplicitKeyframeStyles();
-
-    for (const auto& property : properties) {
+    for (auto property : properties) {
         auto interval = interpolationKeyframes(property, iterationProgress, propertySpecificKeyframeWithZeroOffset, propertySpecificKeyframeWithOneOffset);
         if (interval.endpoints.isEmpty())
             continue;
@@ -1899,29 +1883,10 @@ void KeyframeEffect::setAnimatedPropertiesInStyle(Style::ComputedStyle& targetSt
             continue;
         }
 
-        if (!startBlendingKeyframe->style() || !endBlendingKeyframe->style())
-            materializeImplicitKeyframeStyles();
+        auto startKeyframeStyle = Style::ComputedStyle::clone(*startBlendingKeyframe->style());
+        auto endKeyframeStyle = Style::ComputedStyle::clone(*endBlendingKeyframe->style());
 
-        auto composesOrAccumulates = [&] {
-            if (!isPropertyAdditiveOrCumulative(property))
-                return false;
-            if (iterationCompositeOperation() == IterationCompositeOperation::Accumulate && currentIteration)
-                return true;
-            return startBlendingKeyframe->compositeOperation().value_or(compositeOperation()) != CompositeOperation::Replace
-                || endBlendingKeyframe->compositeOperation().value_or(compositeOperation()) != CompositeOperation::Replace;
-        }();
-
-        std::unique_ptr<Style::ComputedStyle> composedStartKeyframeStyle;
-        std::unique_ptr<Style::ComputedStyle> composedEndKeyframeStyle;
-        if (composesOrAccumulates) {
-            composedStartKeyframeStyle = Style::ComputedStyle::clonePtr(*startBlendingKeyframe->style());
-            composedEndKeyframeStyle = Style::ComputedStyle::clonePtr(*endBlendingKeyframe->style());
-        }
-
-        auto& startKeyframeStyle = composesOrAccumulates ? *composedStartKeyframeStyle : *startBlendingKeyframe->style();
-        auto& endKeyframeStyle = composesOrAccumulates ? *composedEndKeyframeStyle : *endBlendingKeyframe->style();
-
-        auto composeProperty = [&] (const KeyframeInterpolation::Keyframe& keyframe, CompositeOperation compositeOperation) {
+        KeyframeInterpolation::CompositionCallback composeProperty = [&] (const KeyframeInterpolation::Keyframe& keyframe, CompositeOperation compositeOperation) {
             auto* blendingKeyframe = dynamicDowncast<BlendingKeyframe>(keyframe);
             if (!blendingKeyframe) {
                 ASSERT_NOT_REACHED();
@@ -1929,12 +1894,12 @@ void KeyframeEffect::setAnimatedPropertiesInStyle(Style::ComputedStyle& targetSt
             }
 
             if (blendingKeyframe->offset() == startBlendingKeyframe->offset())
-                Style::Interpolation::interpolate(property, *composedStartKeyframeStyle, targetStyle, *blendingKeyframe->style(), 1, compositeOperation, *this);
+                Style::Interpolation::interpolate(property, startKeyframeStyle, targetStyle, *blendingKeyframe->style(), 1, compositeOperation, *this);
             else
-                Style::Interpolation::interpolate(property, *composedEndKeyframeStyle, targetStyle, *blendingKeyframe->style(), 1, compositeOperation, *this);
+                Style::Interpolation::interpolate(property, endKeyframeStyle, targetStyle, *blendingKeyframe->style(), 1, compositeOperation, *this);
         };
 
-        auto accumulateProperty = [&](const KeyframeInterpolation::Keyframe& keyframe) {
+        KeyframeInterpolation::AccumulationCallback accumulateProperty = [&](const KeyframeInterpolation::Keyframe& keyframe) {
             auto* blendingKeyframe = dynamicDowncast<BlendingKeyframe>(keyframe);
             if (!blendingKeyframe) {
                 ASSERT_NOT_REACHED();
@@ -1942,24 +1907,20 @@ void KeyframeEffect::setAnimatedPropertiesInStyle(Style::ComputedStyle& targetSt
             }
 
             if (blendingKeyframe->offset() == startBlendingKeyframe->offset())
-                Style::Interpolation::interpolate(property, *composedStartKeyframeStyle, *endBlendingKeyframe->style(), *composedStartKeyframeStyle, 1, CompositeOperation::Accumulate, *this);
+                Style::Interpolation::interpolate(property, startKeyframeStyle, *endBlendingKeyframe->style(), startKeyframeStyle, 1, CompositeOperation::Accumulate, *this);
             else
-                Style::Interpolation::interpolate(property, *composedEndKeyframeStyle, *endBlendingKeyframe->style(), *composedEndKeyframeStyle, 1, CompositeOperation::Accumulate, *this);
+                Style::Interpolation::interpolate(property, endKeyframeStyle, *endBlendingKeyframe->style(), endKeyframeStyle, 1, CompositeOperation::Accumulate, *this);
         };
 
-        auto interpolateProperty = [&](double intervalProgress, double currentIteration, IterationCompositeOperation iterationCompositeOperation) {
+        KeyframeInterpolation::InterpolationCallback interpolateProperty = [&](double intervalProgress, double currentIteration, IterationCompositeOperation iterationCompositeOperation) {
             Style::Interpolation::interpolate(property, targetStyle, startKeyframeStyle, endKeyframeStyle, intervalProgress, CompositeOperation::Replace, iterationCompositeOperation, currentIteration, *this);
         };
 
-        auto requiresInterpolationForAccumulativeIterationCallback = [&]() {
+        KeyframeInterpolation::RequiresInterpolationForAccumulativeIterationCallback requiresInterpolationForAccumulativeIterationCallback = [&]() {
             return Style::Interpolation::requiresInterpolationForAccumulativeIteration(property, startKeyframeStyle, endKeyframeStyle, *this);
         };
 
-        interpolateKeyframes(property, interval, iterationProgress, currentIteration, iterationDuration(), before,
-            scopedLambdaRef<void(const KeyframeInterpolation::Keyframe&, CompositeOperation)>(composeProperty),
-            scopedLambdaRef<void(const KeyframeInterpolation::Keyframe&)>(accumulateProperty),
-            scopedLambdaRef<void(double, double, IterationCompositeOperation)>(interpolateProperty),
-            scopedLambdaRef<bool()>(requiresInterpolationForAccumulativeIterationCallback));
+        interpolateKeyframes(property, interval, iterationProgress, currentIteration, iterationDuration(), before, composeProperty, accumulateProperty, interpolateProperty, requiresInterpolationForAccumulativeIterationCallback);
     }
 
     // In case one of the animated properties has its value set to "inherit" in one of the keyframes,
@@ -2102,16 +2063,18 @@ void KeyframeEffect::updateAcceleratedActions()
         return;
 #endif
 
-    auto* renderer = this->renderer();
+    CheckedPtr renderer = this->renderer();
     if (!renderer || !renderer->isComposited())
         return;
 
     if (!canBeAccelerated())
         return;
 
+    auto computedTiming = getComputedTiming();
+
     // If we're not already running accelerated, the only thing we're interested in is whether we need to start the animation
     // which we need to do once we're in the active phase. Otherwise, there's no change in accelerated state to consider.
-    bool isActive = getBasicTiming().phase == AnimationEffectPhase::Active;
+    bool isActive = computedTiming.phase == AnimationEffectPhase::Active;
     if (m_runningAccelerated == RunningAccelerated::NotStarted) {
         if (isActive && protect(animation())->playState() == WebAnimation::PlayState::Running)
             addPendingAcceleratedAction(AcceleratedAction::Play);
@@ -2322,9 +2285,11 @@ std::optional<KeyframeEffect::RecomputationReason> KeyframeEffect::recomputeKeyf
         return false;
     }();
 
-    if (logicalPropertyChanged || m_blendingKeyframes.usesAnchorFunctions() || m_blendingKeyframes.hasPropertiesWithRevertRuleOrLayer()
-        || hasPropertyExplicitlySetToInherit() || fontSizeChanged() || fontWeightChanged() || cssVariableChanged()
-        || propertySetToCurrentColorChanged() || m_blendingKeyframes.usesTreeCountingFunctions()) {
+    auto usesAnchorFunctions = m_blendingKeyframes.usesAnchorFunctions();
+    auto usesTreeCountingFunctions = m_blendingKeyframes.usesTreeCountingFunctions();
+    auto hasPropertiesWithRevert = m_blendingKeyframes.hasPropertiesWithRevertRuleOrLayer();
+
+    if (logicalPropertyChanged || fontSizeChanged() || fontWeightChanged() || cssVariableChanged() || hasPropertyExplicitlySetToInherit() || propertySetToCurrentColorChanged() || usesAnchorFunctions || usesTreeCountingFunctions || hasPropertiesWithRevert) {
         switch (m_animationType) {
         case WebAnimationType::CSSTransition:
             ASSERT_NOT_REACHED();
@@ -2437,7 +2402,7 @@ void KeyframeEffect::applyPendingAcceleratedActionsOrUpdateTimingProperties()
 #endif
 
     if (m_pendingAcceleratedActions.isEmpty()) {
-        if (!canBeAccelerated() || getBasicTiming().phase != AnimationEffectPhase::Active)
+        if (!canBeAccelerated() || getComputedTiming().phase != AnimationEffectPhase::Active)
             return;
         m_pendingAcceleratedActions.append(AcceleratedAction::UpdateProperties);
         m_lastRecordedAcceleratedAction = AcceleratedAction::Play;
@@ -3391,11 +3356,11 @@ bool KeyframeEffect::isPropertyAdditiveOrCumulative(KeyframeInterpolation::Prope
 
 RefPtr<const ScrollTimeline> KeyframeEffect::activeScrollTimeline() const
 {
-    auto* animation = this->animation();
+    RefPtr animation = this->animation();
     if (!animation)
         return nullptr;
 
-    auto* scrollTimeline = dynamicDowncast<ScrollTimeline>(animation->timeline());
+    RefPtr scrollTimeline = dynamicDowncast<ScrollTimeline>(animation->timeline());
     if (scrollTimeline && scrollTimeline->currentTime())
         return scrollTimeline;
 

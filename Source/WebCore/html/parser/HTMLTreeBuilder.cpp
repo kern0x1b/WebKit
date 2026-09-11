@@ -381,15 +381,10 @@ void HTMLTreeBuilder::updateTokenizerForAdjustedCurrentNode()
     //   replace U+0000 NULL with U+FFFD), which treats integration points as HTML content and thus
     //   excludes them.
     //   https://html.spec.whatwg.org/multipage/parsing.html#tree-construction
-    bool adjustedCurrentNodeIsForeign = false;
-    bool inForeignContent = false;
-    if (!m_tree.isEmpty()) {
-        HTMLStackItem& adjustedCurrentNode = adjustedCurrentStackItem();
-        adjustedCurrentNodeIsForeign = !isInHTMLNamespace(adjustedCurrentNode);
-        inForeignContent = adjustedCurrentNodeIsForeign
-            && !HTMLElementStack::isHTMLIntegrationPoint(adjustedCurrentNode)
-            && !HTMLElementStack::isMathMLTextIntegrationPoint(adjustedCurrentNode);
-    }
+    bool adjustedCurrentNodeIsForeign = !m_tree.isEmpty() && !isInHTMLNamespace(adjustedCurrentStackItem());
+    bool inForeignContent = adjustedCurrentNodeIsForeign
+        && !HTMLElementStack::isHTMLIntegrationPoint(adjustedCurrentStackItem())
+        && !HTMLElementStack::isMathMLTextIntegrationPoint(adjustedCurrentStackItem());
 
     m_parser->tokenizer().setForceNullCharacterReplacement(m_insertionMode == InsertionMode::Text || inForeignContent);
     m_parser->tokenizer().setShouldAllowCDATA(adjustedCurrentNodeIsForeign);

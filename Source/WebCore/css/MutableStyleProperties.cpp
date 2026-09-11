@@ -136,7 +136,7 @@ bool MutableStyleProperties::removeCustomProperty(const String& propertyName, St
     return removePropertyAtIndex(findCustomPropertyIndex(propertyName), returnText);
 }
 
-bool MutableStyleProperties::setProperty(CSSPropertyID propertyID, const String& value, const CSSParserContext& parserContext, IsImportant important, bool* didFailParsing)
+bool MutableStyleProperties::setProperty(CSSPropertyID propertyID, const String& value, CSSParserContext parserContext, IsImportant important, bool* didFailParsing)
 {
     if (!isExposed(propertyID, &parserContext.propertySettings) && !isInternal(propertyID)) {
         // Allow internal properties as we use them to handle certain DOM-exposed values
@@ -151,22 +151,11 @@ bool MutableStyleProperties::setProperty(CSSPropertyID propertyID, const String&
 
     // When replacing an existing property value, this moves the property to the end of the list.
     // Firefox preserves the position, and MSIE moves the property to the beginning.
-    auto parse = [&](const CSSParserContext& context) {
-        auto parseResult = CSSParser::parseValue(*this, propertyID, value, important, context);
-        if (didFailParsing)
-            *didFailParsing = parseResult == CSSParser::ParseResult::Error;
-        return parseResult == CSSParser::ParseResult::Changed;
-    };
-
-    // The callers that matter (CSSOM property setters) hand us a context whose mode already
-    // matches, so only copy the context - which carries a URL and the property settings - when
-    // the mode actually has to be overridden.
-    if (parserContext.mode == cssParserMode()) [[likely]]
-        return parse(parserContext);
-
-    CSSParserContext contextWithDeclarationMode = parserContext;
-    contextWithDeclarationMode.mode = cssParserMode();
-    return parse(contextWithDeclarationMode);
+    parserContext.mode = cssParserMode();
+    auto parseResult = CSSParser::parseValue(*this, propertyID, value, important, parserContext);
+    if (didFailParsing)
+        *didFailParsing = parseResult == CSSParser::ParseResult::Error;
+    return parseResult == CSSParser::ParseResult::Changed;
 }
 
 bool MutableStyleProperties::setProperty(CSSPropertyID propertyID, const String& value, IsImportant important, bool* didFailParsing)
@@ -175,7 +164,7 @@ bool MutableStyleProperties::setProperty(CSSPropertyID propertyID, const String&
     return setProperty(propertyID, value, parserContext, important, didFailParsing);
 }
 
-bool MutableStyleProperties::setCustomProperty(const String& propertyName, const String& value, const CSSParserContext& parserContext, IsImportant important)
+bool MutableStyleProperties::setCustomProperty(const String& propertyName, const String& value, CSSParserContext parserContext, IsImportant important)
 {
     // Setting the value to an empty string just removes the property in both IE and Gecko.
     // Setting it to null seems to produce less consistent results, but we treat it just the same.
@@ -184,12 +173,8 @@ bool MutableStyleProperties::setCustomProperty(const String& propertyName, const
 
     // When replacing an existing property value, this moves the property to the end of the list.
     // Firefox preserves the position, and MSIE moves the property to the beginning.
-    if (parserContext.mode == cssParserMode()) [[likely]]
-        return CSSParser::parseCustomPropertyValue(*this, AtomString { propertyName }, value, important, parserContext) == CSSParser::ParseResult::Changed;
-
-    CSSParserContext contextWithDeclarationMode = parserContext;
-    contextWithDeclarationMode.mode = cssParserMode();
-    return CSSParser::parseCustomPropertyValue(*this, AtomString { propertyName }, value, important, contextWithDeclarationMode) == CSSParser::ParseResult::Changed;
+    parserContext.mode = cssParserMode();
+    return CSSParser::parseCustomPropertyValue(*this, AtomString { propertyName }, value, important, parserContext) == CSSParser::ParseResult::Changed;
 }
 
 void MutableStyleProperties::setProperty(CSSPropertyID propertyID, Ref<CSSValue>&& value, IsImportant important)
@@ -234,9 +219,7 @@ bool MutableStyleProperties::setProperty(const CSSProperty& property, CSSPropert
     }
     if (toReplace) {
         if (canUpdateInPlace(property, toReplace)) {
-            // Pooled and shared values make the "set to what it already is" case a pointer
-            // compare, which skips the virtual-ish dispatch inside CSSValue::equals().
-            if (toReplace->metadata() == property.metadata() && (toReplace->value() == property.value() || toReplace->value()->equals(*property.value())))
+            if (*toReplace == property)
                 return false;
             *toReplace = property;
             return true;
@@ -253,36 +236,19 @@ bool MutableStyleProperties::setProperty(CSSPropertyID propertyID, CSSValueID id
     return setProperty(CSSProperty(propertyID, CSSKeywordValue::create(identifier), important));
 }
 
-bool MutableStyleProperties::parseDeclaration(const String& styleDeclaration, const CSSParserContext& context)
+bool MutableStyleProperties::parseDeclaration(const String& styleDeclaration, CSSParserContext context)
 {
     auto oldProperties = WTF::move(m_propertyVector);
     m_propertyVector.clear();
 
-    if (context.mode == cssParserMode()) [[likely]] {
-        CSSParser::parseDeclarationList(*this, styleDeclaration, context);
-    } else {
-        CSSParserContext contextWithDeclarationMode = context;
-        contextWithDeclarationMode.mode = cssParserMode();
-        CSSParser::parseDeclarationList(*this, styleDeclaration, contextWithDeclarationMode);
-    }
+    context.mode = cssParserMode();
+    CSSParser::parseDeclarationList(*this, styleDeclaration, context);
 
     // We could do better. Just changing property order does not require style invalidation.
-    // Rewriting a style attribute usually reproduces the very same pooled values, so compare
-    // value pointers before falling back to the full CSSValue::equals() dispatch.
-    if (oldProperties.size() != m_propertyVector.size())
-        return true;
-    for (size_t i = 0; i < oldProperties.size(); ++i) {
-        auto& oldProperty = oldProperties[i];
-        auto& newProperty = m_propertyVector[i];
-        if (!(oldProperty.metadata() == newProperty.metadata()))
-            return true;
-        if (oldProperty.value() != newProperty.value() && !oldProperty.value()->equals(*newProperty.value()))
-            return true;
-    }
-    return false;
+    return oldProperties != m_propertyVector;
 }
 
-bool MutableStyleProperties::addParsedProperties(std::span<const CSSProperty> properties)
+bool MutableStyleProperties::addParsedProperties(const ParsedPropertyVector& properties)
 {
     bool anyChanged = false;
     m_propertyVector.reserveCapacity(m_propertyVector.size() + properties.size());
@@ -321,15 +287,12 @@ bool MutableStyleProperties::removeProperties(std::span<const CSSPropertyID> pro
     if (m_propertyVector.isEmpty())
         return false;
 
-    // The span is always a shorthand's longhand list, so it is a handful of entries; a linear
-    // scan over it beats building and hashing into a HashSet on every call.
-    return m_propertyVector.removeAllMatching([&](const CSSProperty& property) {
-        auto id = property.id();
-        for (auto candidate : properties) {
-            if (candidate == id)
-                return true;
-        }
-        return false;
+    // FIXME: This is always used with static sets and in that case constructing the hash repeatedly is pretty pointless.
+    HashSet<CSSPropertyID> toRemove;
+    toRemove.addAll(properties);
+
+    return m_propertyVector.removeAllMatching([&toRemove](const CSSProperty& property) {
+        return toRemove.contains(property.id());
     }) > 0;
 }
 
@@ -337,11 +300,9 @@ int MutableStyleProperties::findPropertyIndex(CSSPropertyID propertyID) const
 {
     // Convert here propertyID into an uint16_t to compare it with the metadata's m_propertyID to avoid
     // the compiler converting it to an int multiple times in the loop.
-    // The span is taken once: indexing the Vector re-loads its buffer pointer on every iteration,
-    // because the loop body is opaque enough that the compiler cannot prove it unchanged.
-    auto properties = m_propertyVector.span();
+    auto& properties = m_propertyVector;
     uint16_t id = std::to_underlying(propertyID);
-    for (int n = static_cast<int>(properties.size()) - 1 ; n >= 0; --n) {
+    for (int n = m_propertyVector.size() - 1 ; n >= 0; --n) {
         if (properties[n].metadata().m_propertyID == id)
             return n;
     }
@@ -350,8 +311,8 @@ int MutableStyleProperties::findPropertyIndex(CSSPropertyID propertyID) const
 
 int MutableStyleProperties::findCustomPropertyIndex(StringView propertyName) const
 {
-    auto properties = m_propertyVector.span();
-    for (int n = static_cast<int>(properties.size()) - 1 ; n >= 0; --n) {
+    auto& properties = m_propertyVector;
+    for (int n = m_propertyVector.size() - 1 ; n >= 0; --n) {
         if (properties[n].metadata().m_propertyID == CSSPropertyCustom) {
             // We found a custom property. See if the name matches.
             if (!properties[n].value())

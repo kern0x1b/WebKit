@@ -101,12 +101,12 @@ inline void HTMLCollection::invalidateCacheForAttribute(const QualifiedName& att
     if (shouldInvalidateTypeOnAttributeChange(invalidationType(), attributeName))
         invalidateCache();
     else if (hasNamedElementCache() && (attributeName == HTMLNames::idAttr || attributeName == HTMLNames::nameAttr))
-        SUPPRESS_UNCOUNTED_ARG invalidateNamedElementCache(document());
+        invalidateNamedElementCache(protect(document()).get());
 }
 
 inline void HTMLCollection::invalidateCache()
 {
-    SUPPRESS_UNCOUNTED_ARG invalidateCacheForDocument(document());
+    invalidateCacheForDocument(protect(document()).get());
 }
 
 inline bool HTMLCollection::hasNamedElementCache() const

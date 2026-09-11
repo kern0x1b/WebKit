@@ -47,8 +47,8 @@ public: // DOM
     float currentScale() const;
     void setCurrentScale(float);
 
-    SVGPoint& currentTranslate();
-    FloatPoint currentTranslateValue() const { return m_currentTranslate ? m_currentTranslate->value() : FloatPoint { }; }
+    SVGPoint& currentTranslate() { return m_currentTranslate; }
+    FloatPoint currentTranslateValue() const { return m_currentTranslate->value(); }
 
     bool useCurrentView() const { return m_useCurrentView; }
     SVGViewSpec& currentView();
@@ -93,7 +93,8 @@ public:
     using SVGGraphicsElement::ref;
     using SVGGraphicsElement::deref;
 
-    SMILTimeContainer& timeContainer();
+    SMILTimeContainer& timeContainer() { return m_timeContainer.get(); }
+    const SMILTimeContainer& timeContainer() const { return m_timeContainer.get(); }
 
     void setCurrentTranslate(const FloatPoint&); // Used to pan.
     void updateCurrentTranslate();
@@ -162,15 +163,13 @@ private:
     SVGSVGElement* NODELETE findRootAnchor(const SVGViewElement*) const;
     SVGSVGElement* findRootAnchor(StringView) const;
 
-    static const SVGLengthValue& fullViewportLength(SVGLengthMode);
-
     bool m_useCurrentView { false };
-    RefPtr<SMILTimeContainer> m_timeContainer;
+    const Ref<SMILTimeContainer> m_timeContainer;
     RefPtr<SVGViewSpec> m_viewSpec;
     RefPtr<SVGViewElement> m_currentViewElement;
     String m_currentViewFragmentIdentifier;
 
-    RefPtr<SVGPoint> m_currentTranslate;
+    Ref<SVGPoint> m_currentTranslate { SVGPoint::create() };
 
     mutable std::optional<FloatSize> m_cachedViewportSizeExcludingZoom;
     mutable std::optional<FloatSize> m_cachedViewportSizeForLengthResolution;
@@ -179,8 +178,8 @@ private:
 
     const Ref<SVGAnimatedLength> m_x { SVGAnimatedLength::create(this, SVGLengthMode::Width) };
     const Ref<SVGAnimatedLength> m_y { SVGAnimatedLength::create(this, SVGLengthMode::Height) };
-    const Ref<SVGAnimatedLength> m_width { SVGAnimatedLength::create(this, fullViewportLength(SVGLengthMode::Width)) };
-    const Ref<SVGAnimatedLength> m_height { SVGAnimatedLength::create(this, fullViewportLength(SVGLengthMode::Height)) };
+    const Ref<SVGAnimatedLength> m_width { SVGAnimatedLength::create(this, SVGLengthMode::Width, "100%"_s) };
+    const Ref<SVGAnimatedLength> m_height { SVGAnimatedLength::create(this, SVGLengthMode::Height, "100%"_s) };
 };
 
 } // namespace WebCore

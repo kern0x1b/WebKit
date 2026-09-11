@@ -173,11 +173,7 @@ private:
     Ref<CSSValue> m_value;
 };
 
-// sizeof(CSSProperty) is 8 on 32-bit, so 32 entries is a 256-byte inline buffer. Over the whole
-// set of user-agent sheets 95% of declaration blocks hold ten declarations or fewer; 32 leaves
-// room for the shorthands those expand into without putting a 2 KB buffer on the stack, and this
-// vector is embedded in every CSSParser::NestingContext. Larger blocks still grow onto the heap.
-typedef Vector<CSSProperty, 32> ParsedPropertyVector;
+typedef Vector<CSSProperty, 256> ParsedPropertyVector;
 
 } // namespace WebCore
 

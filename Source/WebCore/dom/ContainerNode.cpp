@@ -734,8 +734,7 @@ ExceptionOr<void> ContainerNode::insertBefore(Node& newChild, RefPtr<Node>&& ref
         }
     }
 
-    if (InspectorInstrumentationPublic::hasFrontends()) [[unlikely]]
-        InspectorInstrumentation::willInsertDOMNode(protect(document()), *this);
+    InspectorInstrumentation::willInsertDOMNode(protect(document()), *this);
 
     executeNodeInsertionWithScriptAssertion(*this, targets, next.ptr(), ChildChange::Source::API, ReplacedAllChildren::No, [&](Node& child) {
         child.setTreeScopeRecursively(treeScope());
@@ -878,8 +877,7 @@ ExceptionOr<void> ContainerNode::replaceChild(Node& newChild, Node& oldChild)
         }
     }
 
-    if (InspectorInstrumentationPublic::hasFrontends()) [[unlikely]]
-        InspectorInstrumentation::willInsertDOMNode(protect(document()), *this);
+    InspectorInstrumentation::willInsertDOMNode(protect(document()), *this);
 
     executeNodeInsertionWithScriptAssertion(*this, targets, refChild.get(), ChildChange::Source::API, ReplacedAllChildren::No, [&](Node& child) {
         child.setTreeScopeRecursively(treeScope());
@@ -927,8 +925,7 @@ ExceptionOr<void> ContainerNode::removeChild(Node& oldChild)
 
 void ContainerNode::removeBetween(Node* previousChild, Node* nextChild, Node& oldChild)
 {
-    if (InspectorInstrumentationPublic::hasFrontends()) [[unlikely]]
-        InspectorInstrumentation::didRemoveDOMNode(Ref<Document> { oldChild.document() }, oldChild);
+    InspectorInstrumentation::didRemoveDOMNode(Ref<Document> { oldChild.document() }, oldChild);
 
     ScriptDisallowedScope::InMainThread scriptDisallowedScope;
 
@@ -984,8 +981,7 @@ void ContainerNode::replaceAll(Node* node)
         return;
     }
 
-    if (InspectorInstrumentationPublic::hasFrontends()) [[unlikely]]
-        InspectorInstrumentation::willInsertDOMNode(protect(document()), *this);
+    InspectorInstrumentation::willInsertDOMNode(protect(document()), *this);
 
     Ref protectedThis { *this };
     ChildListMutationScope mutation(*this);
@@ -1072,8 +1068,7 @@ ExceptionOr<void> ContainerNode::appendChildWithoutPreInsertionValidityCheck(Nod
         }
     }
 
-    if (InspectorInstrumentationPublic::hasFrontends()) [[unlikely]]
-        InspectorInstrumentation::willInsertDOMNode(protect(document()), *this);
+    InspectorInstrumentation::willInsertDOMNode(protect(document()), *this);
 
     executeNodeInsertionWithScriptAssertion(*this, targets, nullptr, ChildChange::Source::API, ReplacedAllChildren::No, [&](Node& child) {
         child.setTreeScopeRecursively(treeScope());
@@ -1113,8 +1108,7 @@ ExceptionOr<void> ContainerNode::insertChildrenBeforeWithoutPreInsertionValidity
         }
     }
 
-    if (InspectorInstrumentationPublic::hasFrontends()) [[unlikely]]
-        InspectorInstrumentation::willInsertDOMNode(protect(document()), *this);
+    InspectorInstrumentation::willInsertDOMNode(protect(document()), *this);
 
     executeNodeInsertionWithScriptAssertion(*this, newChildren, refChild.get(), ChildChange::Source::API, ReplacedAllChildren::No, [&](auto& child) {
         child->setTreeScopeRecursively(treeScope());
@@ -1184,26 +1178,17 @@ ExceptionOr<void> ContainerNode::appendChild(ChildChange::Source source, Node& n
 
 void ContainerNode::childrenChanged(const ChildChange& change)
 {
-    SUPPRESS_UNCOUNTED_LOCAL auto& document = this->document();
-    document.incDOMTreeVersion();
+    Ref<Document> document = this->document();
+    document->incDOMTreeVersion();
 
     if (change.affectsElements == ChildChange::AffectsElements::Yes)
-        document.invalidateAccessKeyCache();
+        document->invalidateAccessKeyCache();
 
-    // Parser-inserted nodes skip range updates since the parser builds structure sequentially
-    // and ranges are not valid until parsing completes. API mutations must update ranges except
-    // for pure text changes (TextChanged/TextInserted/TextRemoved don't restructure the tree).
-    if (change.source == ChildChange::Source::API) {
-        switch (change.type) {
-        case ChildChange::Type::TextChanged:
-        case ChildChange::Type::TextInserted:
-        case ChildChange::Type::TextRemoved:
-            break;
-        default:
-            document.updateRangesAfterChildrenChanged(*this);
-            break;
-        }
-    }
+    // FIXME: Unclear why it's always safe to skip this when parser is adding children.
+    // FIXME: Seems like it's equally safe to skip for TextInserted and TextRemoved as for TextChanged.
+    // FIXME: Should use switch for change type so we remember to update when adding new types.
+    if (change.source == ChildChange::Source::API && change.type != ChildChange::Type::TextChanged)
+        document->updateRangesAfterChildrenChanged(*this);
 
     if (change.isMutationBySetInnerHTML == IsMutationBySetInnerHTML::No)
         setDidMutateSubtreeAfterSetInnerHTMLOnAncestors();
@@ -1216,7 +1201,7 @@ void ContainerNode::childrenChanged(const ChildChange& change)
         }
     }
 
-    if (CheckedPtr cache = document.existingAXObjectCache())
+    if (CheckedPtr cache = document->existingAXObjectCache())
         cache->childrenChanged(*this);
 }
 
@@ -1308,24 +1293,18 @@ Node* ContainerNode::traverseToChildAt(unsigned index) const
 
 static void dispatchChildInsertionEvents(Node& child)
 {
-    Document& unprotectedDocument = child.document();
-    if (child.isInShadowTree() || unprotectedDocument.shouldNotFireMutationEvents())
+    Ref document = child.document();
+    if (child.isInShadowTree() || document->shouldNotFireMutationEvents())
         return;
 
     ASSERT_WITH_SECURITY_IMPLICATION(ScriptDisallowedScope::InMainThread::isEventDispatchAllowedInSubtree(child));
 
-    bool hasInsertedListener = unprotectedDocument.hasListenerType(Document::ListenerType::DOMNodeInserted);
-    bool hasInsertedIntoDocumentListener = unprotectedDocument.hasListenerType(Document::ListenerType::DOMNodeInsertedIntoDocument);
-    if (!hasInsertedListener && !hasInsertedIntoDocumentListener) [[likely]]
-        return;
-
-    Ref protectedDocument = unprotectedDocument;
     RefPtr c = child;
-    if (c->parentNode() && hasInsertedListener)
+    if (c->parentNode() && document->hasListenerType(Document::ListenerType::DOMNodeInserted))
         c->dispatchScopedEvent(MutationEvent::create(eventNames().DOMNodeInsertedEvent, Event::CanBubble::Yes, protect(c->parentNode()).get()));
 
     // dispatch the DOMNodeInsertedIntoDocument event to all descendants
-    if (c->isConnected() && hasInsertedIntoDocumentListener) {
+    if (c->isConnected() && document->hasListenerType(Document::ListenerType::DOMNodeInsertedIntoDocument)) {
         for (; c; c = NodeTraversal::next(*c, &child))
             c->dispatchScopedEvent(MutationEvent::create(eventNames().DOMNodeInsertedIntoDocumentEvent, Event::CanBubble::No));
     }
@@ -1334,27 +1313,19 @@ static void dispatchChildInsertionEvents(Node& child)
 static void dispatchChildRemovalEvents(Ref<Node>& child)
 {
     ASSERT_WITH_SECURITY_IMPLICATION(ScriptDisallowedScope::InMainThread::isEventDispatchAllowedInSubtree(child));
-    Document& unprotectedDocument = child->document();
-    if (InspectorInstrumentationPublic::hasFrontends()) [[unlikely]]
-        InspectorInstrumentation::willRemoveDOMNode(protect(unprotectedDocument), child.get());
+    Ref<Document> document = child->document();
+    InspectorInstrumentation::willRemoveDOMNode(document, child.get());
 
-    if (child->isInShadowTree() || unprotectedDocument.shouldNotFireMutationEvents())
+    if (child->isInShadowTree() || document->shouldNotFireMutationEvents())
         return;
-
-    bool hasRemovedListener = unprotectedDocument.hasListenerType(Document::ListenerType::DOMNodeRemoved);
-    bool hasRemovedFromDocumentListener = unprotectedDocument.hasListenerType(Document::ListenerType::DOMNodeRemovedFromDocument);
-    if (!hasRemovedListener && !hasRemovedFromDocumentListener) [[likely]]
-        return;
-
-    Ref<Document> protectedDocument = unprotectedDocument;
 
     // dispatch pre-removal mutation events
-    if (child->parentNode() && hasRemovedListener)
+    if (child->parentNode() && document->hasListenerType(Document::ListenerType::DOMNodeRemoved))
         child->dispatchScopedEvent(MutationEvent::create(eventNames().DOMNodeRemovedEvent, Event::CanBubble::Yes, protect(child->parentNode()).get()));
 
     // dispatch the DOMNodeRemovedFromDocument event to all descendants
-    if (child->isConnected() && hasRemovedFromDocumentListener) {
-        for (auto* currentNode = child.ptr(); currentNode; currentNode = NodeTraversal::next(*currentNode, child.ptr()))
+    if (child->isConnected() && document->hasListenerType(Document::ListenerType::DOMNodeRemovedFromDocument)) {
+        for (RefPtr currentNode = child.copyRef(); currentNode; currentNode = NodeTraversal::next(*currentNode, child.ptr()))
             currentNode->dispatchScopedEvent(MutationEvent::create(eventNames().DOMNodeRemovedFromDocumentEvent, Event::CanBubble::No));
     }
 }

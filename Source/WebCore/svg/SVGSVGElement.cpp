@@ -61,26 +61,16 @@
 #include "TransformState.h"
 #include "TreeScopeInlines.h"
 #include "TypedElementDescendantIteratorInlines.h"
-#include <wtf/NeverDestroyed.h>
 #include <wtf/TZoneMallocInlines.h>
 
 namespace WebCore {
 
 WTF_MAKE_TZONE_ALLOCATED_IMPL(SVGSVGElement);
 
-const SVGLengthValue& SVGSVGElement::fullViewportLength(SVGLengthMode mode)
-{
-    if (mode == SVGLengthMode::Height) {
-        static NeverDestroyed<SVGLengthValue> height { SVGLengthMode::Height, "100%"_s };
-        return height.get();
-    }
-    static NeverDestroyed<SVGLengthValue> width { SVGLengthMode::Width, "100%"_s };
-    return width.get();
-}
-
 inline SVGSVGElement::SVGSVGElement(const QualifiedName& tagName, Document& document)
     : SVGGraphicsElement(tagName, document, makeUniqueRef<PropertyRegistry>(*this), TypeFlag::HasDidMoveToNewDocument)
     , SVGFitToViewBox(this)
+    , m_timeContainer(SMILTimeContainer::create(*this))
 {
     ASSERT(hasTagName(SVGNames::svgTag));
     document.registerForDocumentSuspensionCallbacks(*this);
@@ -111,8 +101,7 @@ SVGSVGElement::~SVGSVGElement()
         viewSpec->resetContextElement();
     Ref<Document> document = this->document();
     document->unregisterForDocumentSuspensionCallbacks(*this);
-    if (CheckedPtr extensions = document->svgExtensionsIfExists())
-        extensions->removeTimeContainer(*this);
+    protect(document->svgExtensions())->removeTimeContainer(*this);
 }
 
 void SVGSVGElement::didMoveToNewDocument(Document& oldDocument, Document& newDocument)
@@ -120,26 +109,6 @@ void SVGSVGElement::didMoveToNewDocument(Document& oldDocument, Document& newDoc
     oldDocument.unregisterForDocumentSuspensionCallbacks(*this);
     protect(document())->registerForDocumentSuspensionCallbacks(*this);
     SVGGraphicsElement::didMoveToNewDocument(oldDocument, newDocument);
-}
-
-SMILTimeContainer& SVGSVGElement::timeContainer()
-{
-    if (m_timeContainer) [[likely]] {
-        return *m_timeContainer;
-    }
-
-    Ref timeContainer = SMILTimeContainer::create(*this);
-    m_timeContainer = timeContainer.copyRef();
-
-    if (isConnected()) {
-        Ref document = this->document();
-        if (CheckedPtr extensions = document->svgExtensionsIfExists(); extensions && extensions->areAnimationsPaused())
-            timeContainer->pause();
-        if (!document->parsing() && !document->processingLoadEvent() && document->loadEventFinished())
-            timeContainer->begin();
-    }
-
-    return *m_timeContainer;
 }
 
 SVGViewSpec& SVGSVGElement::currentView()
@@ -181,18 +150,11 @@ void SVGSVGElement::setCurrentScale(float scale)
     m_currentScale = scale;
 }
 
-SVGPoint& SVGSVGElement::currentTranslate()
-{
-    if (!m_currentTranslate)
-        m_currentTranslate = SVGPoint::create();
-    return *m_currentTranslate;
-}
-
 void SVGSVGElement::setCurrentTranslate(const FloatPoint& translation)
 {
-    if (currentTranslateValue() == translation)
+    if (m_currentTranslate->value() == translation)
         return;
-    Ref { currentTranslate() }->setValue(translation);
+    m_currentTranslate->setValue(translation);
     updateCurrentTranslate();
 }
 
@@ -218,35 +180,31 @@ void SVGSVGElement::updateCurrentTranslate()
 
 void SVGSVGElement::attributeChanged(const QualifiedName& name, const AtomString& oldValue, const AtomString& newValue, AttributeModificationReason attributeModificationReason)
 {
-    // For these events, the outermost <svg> element works like a <body> element does,
-    // setting certain event handlers directly on the window object.
-    const AtomString* windowEventName = nullptr;
-    switch (name.nodeName()) {
-    case AttributeNames::onunloadAttr:
-        windowEventName = &eventNames().unloadEvent;
-        break;
-    case AttributeNames::onresizeAttr:
-        windowEventName = &eventNames().resizeEvent;
-        break;
-    case AttributeNames::onscrollAttr:
-        windowEventName = &eventNames().scrollEvent;
-        break;
-    case AttributeNames::onzoomAttr:
-        windowEventName = &eventNames().zoomEvent;
-        break;
-    case AttributeNames::onabortAttr:
-        windowEventName = &eventNames().abortEvent;
-        break;
-    case AttributeNames::onerrorAttr:
-        windowEventName = &eventNames().errorEvent;
-        break;
-    default:
-        break;
-    }
-
-    if (windowEventName && isConnected() && !SVGGraphicsElement::nearestViewportElement(this)) [[unlikely]] {
-        protect(document())->setWindowAttributeEventListener(*windowEventName, name, newValue, mainThreadNormalWorldSingleton());
-        return;
+    if (!SVGGraphicsElement::nearestViewportElement(this) && isConnected()) {
+        // For these events, the outermost <svg> element works like a <body> element does,
+        // setting certain event handlers directly on the window object.
+        switch (name.nodeName()) {
+        case AttributeNames::onunloadAttr:
+            protect(document())->setWindowAttributeEventListener(eventNames().unloadEvent, name, newValue, mainThreadNormalWorldSingleton());
+            return;
+        case AttributeNames::onresizeAttr:
+            protect(document())->setWindowAttributeEventListener(eventNames().resizeEvent, name, newValue, mainThreadNormalWorldSingleton());
+            return;
+        case AttributeNames::onscrollAttr:
+            protect(document())->setWindowAttributeEventListener(eventNames().scrollEvent, name, newValue, mainThreadNormalWorldSingleton());
+            return;
+        case AttributeNames::onzoomAttr:
+            protect(document())->setWindowAttributeEventListener(eventNames().zoomEvent, name, newValue, mainThreadNormalWorldSingleton());
+            return;
+        case AttributeNames::onabortAttr:
+            protect(document())->setWindowAttributeEventListener(eventNames().abortEvent, name, newValue, mainThreadNormalWorldSingleton());
+            return;
+        case AttributeNames::onerrorAttr:
+            protect(document())->setWindowAttributeEventListener(eventNames().errorEvent, name, newValue, mainThreadNormalWorldSingleton());
+            return;
+        default:
+            break;
+        }
     }
 
     auto parseError = SVGParsingError::None;
@@ -581,8 +539,8 @@ Node::NeedsPostConnectionSteps SVGSVGElement::insertionSteps(InsertionType inser
         // Animations are started at the end of document parsing and after firing the load event,
         // but if we miss that train (deferred programmatic element insertion for example) we need
         // to initialize the time container here.
-        if (RefPtr timeContainer = m_timeContainer; timeContainer && !document->parsing() && !document->processingLoadEvent() && document->loadEventFinished())
-            timeContainer->begin();
+        if (!document->parsing() && !document->processingLoadEvent() && document->loadEventFinished())
+            m_timeContainer->begin();
     }
     return SVGGraphicsElement::insertionSteps(insertionType, parentOfInsertedTree);
 }
@@ -599,15 +557,15 @@ void SVGSVGElement::removingSteps(RemovalType removalType, ContainerNode& oldPar
 
 void SVGSVGElement::pauseAnimations()
 {
-    RefPtr timeContainer = m_timeContainer;
-    if (timeContainer && !timeContainer->isPaused())
+    Ref timeContainer = m_timeContainer;
+    if (!timeContainer->isPaused())
         timeContainer->pause();
 }
 
 void SVGSVGElement::unpauseAnimations()
 {
-    RefPtr timeContainer = m_timeContainer;
-    if (timeContainer && timeContainer->isPaused())
+    Ref timeContainer = m_timeContainer;
+    if (timeContainer->isPaused())
         timeContainer->resume();
 }
 
@@ -623,15 +581,12 @@ bool SVGSVGElement::resumePausedAnimationsIfNeeded(const IntRect& visibleRect)
 
 bool SVGSVGElement::animationsPaused() const
 {
-    return m_timeContainer && m_timeContainer->isPaused();
+    return timeContainer().isPaused();
 }
 
 float SVGSVGElement::getCurrentTime() const
 {
-    RefPtr timeContainer = m_timeContainer;
-    if (!timeContainer)
-        return 0;
-    return narrowPrecisionToFloat(timeContainer->elapsed().value());
+    return narrowPrecisionToFloat(protect(timeContainer())->elapsed().value());
 }
 
 void SVGSVGElement::setCurrentTime(float seconds)

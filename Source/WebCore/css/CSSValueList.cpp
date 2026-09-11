@@ -194,10 +194,8 @@ Ref<CSSValueList> CSSValueList::create(char16_t separator, CSSValueListBuilder b
 
 bool CSSValueContainingVector::hasValue(CSSValue& otherValue) const
 {
-    // The container owns every element for the whole loop, so binding by reference saves a
-    // ref/deref pair per item.
-    for (auto& value : *this) {
-        if (&value == &otherValue || value.equals(otherValue))
+    for (Ref value : *this) {
+        if (value->equals(otherValue))
             return true;
     }
     return false;
@@ -247,11 +245,7 @@ bool CSSValueContainingVector::itemsEqual(const CSSValueContainingVector& other)
     if (size != other.size())
         return false;
     for (unsigned i = 0; i < size; ++i) {
-        auto& value = (*this)[i];
-        auto& otherValue = other[i];
-        if (&value == &otherValue)
-            continue;
-        if (!protect(value)->equals(protect(otherValue)))
+        if (!protect((*this)[i])->equals(protect(other[i])))
             return false;
     }
     return true;
@@ -264,18 +258,15 @@ bool CSSValueList::equals(const CSSValueList& other) const
 
 bool CSSValueContainingVector::containsSingleEqualItem(const CSSValue& other) const
 {
-    if (size() != 1)
-        return false;
-    auto& value = (*this)[0];
-    return &value == &other || protect(value)->equals(other);
+    return size() == 1 && protect((*this)[0])->equals(other);
 }
 
 bool CSSValueContainingVector::addDerivedHash(Hasher& hasher) const
 {
     add(hasher, separator());
 
-    for (auto& item : *this) {
-        if (!item.addHash(hasher))
+    for (Ref item : *this) {
+        if (!item->addHash(hasher))
             return false;
     }
     return true;
@@ -283,8 +274,8 @@ bool CSSValueContainingVector::addDerivedHash(Hasher& hasher) const
 
 bool CSSValueContainingVector::customTraverseSubresources(NOESCAPE const Function<bool(const CachedResource&)>& handler) const
 {
-    for (auto& value : *this) {
-        if (value.traverseSubresources(handler))
+    for (Ref value : *this) {
+        if (value->traverseSubresources(handler))
             return true;
     }
     return false;
@@ -292,8 +283,8 @@ bool CSSValueContainingVector::customTraverseSubresources(NOESCAPE const Functio
 
 IterationStatus CSSValueContainingVector::customVisitChildren(NOESCAPE const Function<IterationStatus(CSSValue&)>& func) const
 {
-    for (auto& value : *this) {
-        if (func(const_cast<CSSValue&>(value)) == IterationStatus::Done)
+    for (Ref value : *this) {
+        if (func(const_cast<CSSValue&>(value.get())) == IterationStatus::Done)
             return IterationStatus::Done;
     }
     return IterationStatus::Continue;

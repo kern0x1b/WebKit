@@ -83,14 +83,6 @@ Ref<BoxData> BoxData::copy() const
 
 bool BoxData::operator==(const BoxData& o) const
 {
-    unsigned packedDelta = (hasAutoSpecifiedZIndex ^ o.hasAutoSpecifiedZIndex)
-        | (hasAutoUsedZIndex ^ o.hasAutoUsedZIndex)
-        | (boxSizing ^ o.boxSizing)
-        | (boxDecorationBreak ^ o.boxDecorationBreak)
-        | (baselineSource ^ o.baselineSource);
-    if (packedDelta)
-        return false;
-
     return width == o.width
         && height == o.height
         && minWidth == o.minWidth
@@ -103,7 +95,7 @@ bool BoxData::operator==(const BoxData& o) const
         && boxDecorationBreak == o.boxDecorationBreak
         && baselineSource == o.baselineSource
         && specifiedZIndexValue == o.specifiedZIndexValue
-        && usedZIndexValue == o.usedZIndexValue;
+        && hasAutoSpecifiedZIndex == o.hasAutoSpecifiedZIndex;
 }
 
 #if !LOG_DISABLED

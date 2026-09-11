@@ -27,7 +27,6 @@
 
 #include <WebCore/ImageDecoder.h>
 #include <atomic>
-#include <wtf/Lock.h>
 #include <wtf/TZoneMalloc.h>
 
 #if USE(CG)
@@ -83,11 +82,8 @@ public:
     static String decodeUTI(CGImageSourceRef, const SharedBuffer&);
 
 private:
-    bool hasAlpha() const { return m_hasAlpha; }
+    bool hasAlpha() const;
     String decodeUTI(const SharedBuffer&) const;
-
-    RetainPtr<CFDictionaryRef> propertiesAtIndex(size_t, SubsamplingLevel = SubsamplingLevel::Default) const;
-    void clearCachedProperties() const;
 
 #if ENABLE(QUICKLOOK_FULLSCREEN)
     bool isMaybePanoramic() const;
@@ -104,15 +100,9 @@ private:
 
     bool m_isAllDataReceived { false };
     std::atomic<bool> m_isXBitmapImage { false };
-    std::atomic<bool> m_hasAlpha { true };
     mutable EncodedDataStatus m_encodedDataStatus { EncodedDataStatus::Unknown };
     String m_uti;
     RetainPtr<CGImageSourceRef> m_nativeDecoder;
-
-    mutable Lock m_propertiesLock;
-    mutable RetainPtr<CFDictionaryRef> m_properties WTF_GUARDED_BY_LOCK(m_propertiesLock);
-    mutable size_t m_propertiesIndex WTF_GUARDED_BY_LOCK(m_propertiesLock) { 0 };
-    mutable SubsamplingLevel m_propertiesSubsamplingLevel WTF_GUARDED_BY_LOCK(m_propertiesLock) { SubsamplingLevel::Default };
 };
 
 } // namespace WebCore

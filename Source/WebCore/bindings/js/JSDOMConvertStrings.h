@@ -66,25 +66,7 @@ inline AtomString propertyNameToAtomString(JSC::PropertyName propertyName)
 template<> struct Converter<IDLDOMString> : DefaultConverter<IDLDOMString> {
     using Result = ConversionResult<IDLDOMString>;
 
-    static Result convert(JSC::JSGlobalObject& lexicalGlobalObject, JSC::JSValue value)
-    {
-        if (value.isString()) [[likely]] {
-            if (!JSC::asString(value)->isRope()) [[likely]] {
-                auto& vm = lexicalGlobalObject.vm();
-                auto scope = DECLARE_THROW_SCOPE(vm);
-
-                auto string = value.toWTFString(&lexicalGlobalObject);
-
-                RETURN_IF_EXCEPTION(scope, Result::exception());
-
-                return Result { WTF::move(string) };
-            }
-        }
-
-        return convertSlow(lexicalGlobalObject, value);
-    }
-
-    WEBCORE_EXPORT static Result convertSlow(JSC::JSGlobalObject&, JSC::JSValue);
+    WEBCORE_EXPORT static Result convert(JSC::JSGlobalObject&, JSC::JSValue);
 };
 
 template<> struct JSConverter<IDLDOMString> {
@@ -117,20 +99,6 @@ template<> struct Converter<IDLByteString> : DefaultConverter<IDLByteString> {
 
     static Result convert(JSC::JSGlobalObject& lexicalGlobalObject, JSC::JSValue value)
     {
-        if (value.isString()) [[likely]] {
-            if (!JSC::asString(value)->isRope()) [[likely]] {
-                auto& vm = lexicalGlobalObject.vm();
-                auto scope = DECLARE_THROW_SCOPE(vm);
-
-                auto string = value.toWTFString(&lexicalGlobalObject);
-
-                RETURN_IF_EXCEPTION(scope, Result::exception());
-
-                if (string.is8Bit()) [[likely]]
-                    return Result { WTF::move(string) };
-            }
-        }
-
         return valueToByteString(lexicalGlobalObject, value);
     }
 };
@@ -165,20 +133,6 @@ template<> struct Converter<IDLUSVString> : DefaultConverter<IDLUSVString> {
 
     static Result convert(JSC::JSGlobalObject& lexicalGlobalObject, JSC::JSValue value)
     {
-        if (value.isString()) [[likely]] {
-            if (!JSC::asString(value)->isRope()) [[likely]] {
-                auto& vm = lexicalGlobalObject.vm();
-                auto scope = DECLARE_THROW_SCOPE(vm);
-
-                auto string = value.toWTFString(&lexicalGlobalObject);
-
-                RETURN_IF_EXCEPTION(scope, Result::exception());
-
-                if (string.is8Bit()) [[likely]]
-                    return Result { WTF::move(string) };
-            }
-        }
-
         return valueToUSVString(lexicalGlobalObject, value);
     }
 
