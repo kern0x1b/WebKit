@@ -705,7 +705,9 @@ if (bmalloc_PRIVATE_FRAMEWORK_HEADERS_DIR)
 endif ()
 
 add_definitions(-D_GNU_SOURCE)
-add_definitions(-DPAS_BMALLOC=1)
+if (CMAKE_SIZEOF_VOID_P EQUAL 8)
+    add_definitions(-DPAS_BMALLOC=1)
+endif ()
 
 if (USE_MIMALLOC)
     add_definitions(-DUSE_MIMALLOC=1)
