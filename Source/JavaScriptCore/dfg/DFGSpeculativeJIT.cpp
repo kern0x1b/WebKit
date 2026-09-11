@@ -11516,10 +11516,10 @@ void SpeculativeJIT::compileCallDOMGetter(Node* node)
         storePtr(GPRInfo::callFrameRegister, &vm().topCallFrame);
         emitStoreCodeOrigin(m_currentNode->origin.semantic);
         if (Options::useJITCage())
-            callOperation(vmEntryCustomGetter, resultGPR, LinkableConstant::globalObject(*this, node), baseGPR, TrustedImmPtr(identifierUID(node->callDOMGetterData()->identifierNumber)), TrustedImmPtr(getter.taggedPtr()));
+            callOperation(vmEntryCustomGetter, resultGPR, LinkableConstant::globalObject(*this, node), CellValue(baseGPR), TrustedImmPtr(identifierUID(node->callDOMGetterData()->identifierNumber)), TrustedImmPtr(getter.taggedPtr()));
         else {
             CodePtr<OperationPtrTag> bypassedFunction(WTF::tagNativeCodePtrImpl<OperationPtrTag>(WTF::untagNativeCodePtrImpl<CustomAccessorPtrTag>(getter.taggedPtr())));
-            callOperation<J_JITOperation_GJI>(bypassedFunction, resultGPR, LinkableConstant::globalObject(*this, node), baseGPR, TrustedImmPtr(identifierUID(node->callDOMGetterData()->identifierNumber)));
+            callOperation<J_JITOperation_GJI>(bypassedFunction, resultGPR, LinkableConstant::globalObject(*this, node), CellValue(baseGPR), TrustedImmPtr(identifierUID(node->callDOMGetterData()->identifierNumber)));
         }
 
         jsValueResult(resultGPR, node);
@@ -12020,7 +12020,7 @@ void SpeculativeJIT::compileNewStringObject(Node* node)
         resultGPR, TrustedImmPtr(node->structure()), butterfly, scratch1GPR, scratch2GPR,
         slowPath, SlowAllocationResult::UndefinedBehavior);
     
-    storeValue(operandGPR, Address(resultGPR, JSWrapperObject::internalValueOffset()));
+    storeCell(operandGPR, Address(resultGPR, JSWrapperObject::internalValueOffset()));
 
     mutatorFence(vm());
     

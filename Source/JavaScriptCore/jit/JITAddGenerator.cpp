@@ -108,7 +108,7 @@ bool JITAddGenerator::generateFastPath(CCallHelpers& jit, CCallHelpers::JumpList
         if (!varOpr.definitelyIsNumber())
             slowPathJumpList.append(jit.branchIfNotNumber(var));
 
-        jit.unboxDouble(var, m_scratchGPR, m_leftFPR);
+        jit.unboxDoubleNonDestructive(var, m_leftFPR, m_scratchGPR);
 
         jit.move(CCallHelpers::Imm32(constOpr.asConstInt32()), m_scratchGPR);
         jit.convertInt32ToDouble(m_scratchGPR, m_rightFPR);

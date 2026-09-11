@@ -1469,7 +1469,7 @@ MacroAssemblerCodeRef<JITThunkPtrTag> boundFunctionCallGenerator(VM& vm)
     argsPushed.link(&jit);
 
     jit.loadPtr(CCallHelpers::Address(GPRInfo::regT0, JSBoundFunction::offsetOfTargetFunction()), GPRInfo::regT2);
-    jit.storeValue(GPRInfo::regT2, CCallHelpers::calleeFrameSlot(CallFrameSlot::callee));
+    jit.storeCell(GPRInfo::regT2, CCallHelpers::calleeFrameSlot(CallFrameSlot::callee));
     
     jit.loadPtr(CCallHelpers::Address(GPRInfo::regT2, JSFunction::offsetOfExecutableOrRareData()), GPRInfo::regT1);
     auto hasExecutable = jit.branchTestPtr(CCallHelpers::Zero, GPRInfo::regT1, CCallHelpers::TrustedImm32(JSFunction::rareDataTag));

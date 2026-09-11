@@ -668,7 +668,7 @@ public:
     void emitPutCellToCallFrameHeader(GPRReg from, VirtualRegister entry)
     {
         ASSERT(entry.isHeader());
-        storeValue(from, Address(GPRInfo::callFrameRegister, entry.offset() * sizeof(Register)));
+        storeCell(from, Address(GPRInfo::callFrameRegister, entry.offset() * sizeof(Register)));
     }
 
     void emitZeroToCallFrameHeader(VirtualRegister entry)
@@ -1549,6 +1549,11 @@ public:
     void unboxDoubleNonDestructive(JSValueRegs regs, FPRReg destFPR, GPRReg resultGPR)
     {
         unboxDouble(regs.payloadGPR(), resultGPR, destFPR);
+    }
+
+    void unboxDoubleNonDestructive(GPRReg gpr, FPRReg destFPR, GPRReg resultGPR)
+    {
+        unboxDouble(gpr, resultGPR, destFPR);
     }
 
     Jump isStrictInt52(GPRReg valueGPR, GPRReg scratchGPR)

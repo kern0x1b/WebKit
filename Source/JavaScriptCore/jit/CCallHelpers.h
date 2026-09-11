@@ -57,6 +57,20 @@ public:
     {
     }
 
+    // Wrapper to encode JSCell GPR into JSValue.
+    class CellValue {
+    public:
+        explicit CellValue(GPRReg gpr)
+            : m_gpr(gpr)
+        {
+        }
+
+        GPRReg gpr() const { return m_gpr; }
+
+    private:
+        GPRReg m_gpr;
+    };
+
     // Base class for constant materializers.
     // It offers DerivedClass::materialize and poke functions.
     class ConstantMaterializer { };

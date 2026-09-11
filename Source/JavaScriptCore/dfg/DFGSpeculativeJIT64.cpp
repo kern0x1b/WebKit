@@ -1778,7 +1778,7 @@ void SpeculativeJIT::compileObjectStrictEquality(Edge objectChild, Edge otherChi
     GPRReg op2GPR = op2.gpr();
     GPRReg resultGPR = result.gpr();
 
-    DFG_TYPE_CHECK(JSValueSource(op1GPR), objectChild, SpecObject, branchIfNotObject(op1GPR));
+    DFG_TYPE_CHECK(JSValueSource::unboxedCell(op1GPR), objectChild, SpecObject, branchIfNotObject(op1GPR));
 
     // At this point we know that we can perform a straight-forward equality comparison on pointer
     // values because we are doing strict equality.
@@ -1798,7 +1798,7 @@ void SpeculativeJIT::compilePeepHoleObjectStrictEquality(Edge objectChild, Edge 
     GPRReg op1GPR = op1.gpr();
     GPRReg op2GPR = op2.gpr();
     
-    DFG_TYPE_CHECK(JSValueSource(op1GPR), objectChild, SpecObject, branchIfNotObject(op1GPR));
+    DFG_TYPE_CHECK(JSValueSource::unboxedCell(op1GPR), objectChild, SpecObject, branchIfNotObject(op1GPR));
 
     if (taken == nextBlock()) {
         branchPtr(NotEqual, op1GPR, op2GPR, notTaken);
@@ -1824,11 +1824,11 @@ void SpeculativeJIT::compileObjectToObjectOrOtherEquality(Edge leftChild, Edge r
 
     if (masqueradesAsUndefinedWatchpointSetValid) {
         DFG_TYPE_CHECK(
-            JSValueSource(op1GPR), leftChild, SpecObject, branchIfNotObject(op1GPR));
+            JSValueSource::unboxedCell(op1GPR), leftChild, SpecObject, branchIfNotObject(op1GPR));
     } else {
         DFG_TYPE_CHECK(
-            JSValueSource(op1GPR), leftChild, SpecObject, branchIfNotObject(op1GPR));
-        speculationCheck(BadType, JSValueSource(op1GPR), leftChild,
+            JSValueSource::unboxedCell(op1GPR), leftChild, SpecObject, branchIfNotObject(op1GPR));
+        speculationCheck(BadType, JSValueSource::unboxedCell(op1GPR), leftChild,
             branchTest8(
                 NonZero,
                 Address(op1GPR, JSCell::typeInfoFlagsOffset()),
@@ -1897,11 +1897,11 @@ void SpeculativeJIT::compilePeepHoleObjectToObjectOrOtherEquality(Edge leftChild
 
     if (masqueradesAsUndefinedWatchpointSetValid) {
         DFG_TYPE_CHECK(
-            JSValueSource(op1GPR), leftChild, SpecObject, branchIfNotObject(op1GPR));
+            JSValueSource::unboxedCell(op1GPR), leftChild, SpecObject, branchIfNotObject(op1GPR));
     } else {
         DFG_TYPE_CHECK(
-            JSValueSource(op1GPR), leftChild, SpecObject, branchIfNotObject(op1GPR));
-        speculationCheck(BadType, JSValueSource(op1GPR), leftChild,
+            JSValueSource::unboxedCell(op1GPR), leftChild, SpecObject, branchIfNotObject(op1GPR));
+        speculationCheck(BadType, JSValueSource::unboxedCell(op1GPR), leftChild, 
             branchTest8(
                 NonZero,
                 Address(op1GPR, JSCell::typeInfoFlagsOffset()),
@@ -3207,7 +3207,7 @@ void SpeculativeJIT::compileDataViewGetByteLengthAsInt52(Node* node)
         speculateDataViewObject(node->child1(), baseGPR);
 
         auto [outOfBounds, doneCases] = loadDataViewByteLength(baseGPR, resultGPR, scratch1GPR, resultGPR, TypeDataView);
-        speculationCheck(OutOfBounds, JSValueSource(baseGPR), node, outOfBounds);
+        speculationCheck(OutOfBounds, JSValueSource::unboxedCell(baseGPR), node, outOfBounds);
         doneCases.link(this);
 
         strictInt52Result(resultGPR, node);
@@ -3222,7 +3222,7 @@ void SpeculativeJIT::compileDataViewGetByteLengthAsInt52(Node* node)
     speculateDataViewObject(node->child1(), baseGPR);
 
     if (!m_graph.isNeverResizableOrGrowableSharedTypedArrayIncludingDataView(m_state.forNode(node->child1())))
-        speculationCheck(UnexpectedResizableArrayBufferView, JSValueSource(baseGPR), node, branchTest8(NonZero, Address(baseGPR, JSArrayBufferView::offsetOfMode()), TrustedImm32(isResizableOrGrowableSharedMode)));
+        speculationCheck(UnexpectedResizableArrayBufferView, JSValueSource::unboxedCell(baseGPR), node, branchTest8(NonZero, Address(baseGPR, JSArrayBufferView::offsetOfMode()), TrustedImm32(isResizableOrGrowableSharedMode)));
     load64(Address(baseGPR, JSArrayBufferView::offsetOfLength()), resultGPR);
     static_assert(MAX_ARRAY_BUFFER_SIZE < (1ull << 52), "there is a risk that the size of a array buffer won't fit in an Int52");
     strictInt52Result(resultGPR, node);
@@ -3253,7 +3253,7 @@ void SpeculativeJIT::compileGetTypedArrayLengthAsInt52(Node* node)
     GPRReg resultGPR = result.gpr();
 
     if (!m_graph.isNeverResizableOrGrowableSharedTypedArrayIncludingDataView(m_state.forNode(node->child1())))
-        speculationCheck(UnexpectedResizableArrayBufferView, JSValueSource(baseGPR), node, branchTest8(NonZero, Address(baseGPR, JSArrayBufferView::offsetOfMode()), TrustedImm32(isResizableOrGrowableSharedMode)));
+        speculationCheck(UnexpectedResizableArrayBufferView, JSValueSource::unboxedCell(baseGPR), node, branchTest8(NonZero, Address(baseGPR, JSArrayBufferView::offsetOfMode()), TrustedImm32(isResizableOrGrowableSharedMode)));
     load64(Address(baseGPR, JSArrayBufferView::offsetOfLength()), resultGPR);
     static_assert(MAX_ARRAY_BUFFER_SIZE < (1ull << 52), "there is a risk that the size of a typed array won't fit in an Int52");
     strictInt52Result(resultGPR, node);
@@ -3290,7 +3290,7 @@ void SpeculativeJIT::compileGetTypedArrayByteOffsetAsInt52(Node* node)
     GPRReg resultGPR = result.gpr();
 
     if (!m_graph.isNeverResizableOrGrowableSharedTypedArrayIncludingDataView(m_state.forNode(node->child1())))
-        speculationCheck(UnexpectedResizableArrayBufferView, JSValueSource(baseGPR), node, branchTest8(NonZero, Address(baseGPR, JSArrayBufferView::offsetOfMode()), TrustedImm32(isResizableOrGrowableSharedMode)));
+        speculationCheck(UnexpectedResizableArrayBufferView, JSValueSource::unboxedCell(baseGPR), node, branchTest8(NonZero, Address(baseGPR, JSArrayBufferView::offsetOfMode()), TrustedImm32(isResizableOrGrowableSharedMode)));
 
     load64(Address(baseGPR, JSArrayBufferView::offsetOfByteOffset()), resultGPR);
     strictInt52Result(resultGPR, node);
@@ -6362,7 +6362,7 @@ void SpeculativeJIT::compile(Node* node)
             loadTypedArrayLength(dataViewGPR, t1, t2, t1, TypeDataView);
         else {
             if (!m_graph.isNeverResizableOrGrowableSharedTypedArrayIncludingDataView(m_state.forNode(node->child1())))
-                speculationCheck(UnexpectedResizableArrayBufferView, JSValueSource(dataViewGPR), node, branchTest8(NonZero, Address(dataViewGPR, JSArrayBufferView::offsetOfMode()), TrustedImm32(isResizableOrGrowableSharedMode)));
+                speculationCheck(UnexpectedResizableArrayBufferView, JSValueSource::unboxedCell(dataViewGPR), node, branchTest8(NonZero, Address(dataViewGPR, JSArrayBufferView::offsetOfMode()), TrustedImm32(isResizableOrGrowableSharedMode)));
 #if USE(LARGE_TYPED_ARRAYS)
             load64(Address(dataViewGPR, JSArrayBufferView::offsetOfLength()), t1);
 #else
@@ -6670,7 +6670,7 @@ void SpeculativeJIT::compile(Node* node)
             loadTypedArrayLength(dataViewGPR, t1, t2, t1, TypeDataView);
         else {
             if (!m_graph.isNeverResizableOrGrowableSharedTypedArrayIncludingDataView(m_state.forNode(m_graph.varArgChild(node, 0))))
-                speculationCheck(UnexpectedResizableArrayBufferView, JSValueSource(dataViewGPR), node, branchTest8(NonZero, Address(dataViewGPR, JSArrayBufferView::offsetOfMode()), TrustedImm32(isResizableOrGrowableSharedMode)));
+                speculationCheck(UnexpectedResizableArrayBufferView, JSValueSource::unboxedCell(dataViewGPR), node, branchTest8(NonZero, Address(dataViewGPR, JSArrayBufferView::offsetOfMode()), TrustedImm32(isResizableOrGrowableSharedMode)));
 #if USE(LARGE_TYPED_ARRAYS)
             load64(Address(dataViewGPR, JSArrayBufferView::offsetOfLength()), t1);
 #else
@@ -8042,7 +8042,7 @@ void SpeculativeJIT::compilePutPrivateName(Node* node)
 
         flushRegisters();
         auto operation = node->privateFieldPutKind().isDefine() ? operationPutByValDefinePrivateFieldGeneric : operationPutByValSetPrivateFieldGeneric;
-        callOperation(operation, LinkableConstant::globalObject(*this, node), baseGPR, propertyGPR, valueGPR);
+        callOperation(operation, LinkableConstant::globalObject(*this, node), baseGPR, CellValue(propertyGPR), valueGPR);
 
         noResult(node);
         return;
@@ -8763,7 +8763,7 @@ void SpeculativeJIT::compileEnumeratorPutByVal(Node* node)
         }
 
         if (!recoverGenericCase.empty()) {
-            addSlowPathGenerator(slowPathCall(recoverGenericCase, this, operationEnumeratorRecoverNameAndPutByVal, NoResult, LinkableConstant::globalObject(*this, node), baseGPR, valueGPR, TrustedImm32(ecmaMode.isStrict()), indexGPR, enumeratorGPR));
+            addSlowPathGenerator(slowPathCall(recoverGenericCase, this, operationEnumeratorRecoverNameAndPutByVal, NoResult, LinkableConstant::globalObject(*this, node), CellValue(baseGPR), valueGPR, TrustedImm32(ecmaMode.isStrict()), indexGPR, enumeratorGPR));
         }
 
         doneCases.link(this);
@@ -9593,7 +9593,7 @@ void SpeculativeJIT::compileMultiGetByVal(Node* node)
             Jump outOfBounds = branch32(AboveOrEqual, indexGPR, Address(scratch2GPR, Butterfly::offsetOfPublicLength()));
 
             if (arrayMode.isInBounds()) {
-                speculationCheck(OutOfBounds, JSValueSource(baseGPR), nullptr, outOfBounds);
+                speculationCheck(OutOfBounds, JSValueSource::unboxedCell(baseGPR), nullptr, outOfBounds);
 
                 if (expectedType == ArrayWithDouble) {
                     loadDouble(BaseIndex(scratch2GPR, indexGPR, TimesEight), resultFPR);
@@ -9606,7 +9606,7 @@ void SpeculativeJIT::compileMultiGetByVal(Node* node)
                             moveConditionallyDouble(DoubleNotEqualOrUnordered, resultFPR, resultFPR, scratch1GPR, resultGPR, resultGPR);
                         }
                     } else {
-                        speculationCheck(LoadFromHole, JSValueSource(baseGPR), nullptr, branchIfNaN(resultFPR));
+                        speculationCheck(LoadFromHole, JSValueSource::unboxedCell(baseGPR), nullptr, branchIfNaN(resultFPR));
                         if (!node->hasDoubleResult())
                             boxDouble(resultFPR, resultGPR);
                     }
@@ -9616,7 +9616,7 @@ void SpeculativeJIT::compileMultiGetByVal(Node* node)
                         move(TrustedImm64(JSValue::encode(jsUndefined())), scratch1GPR);
                         moveConditionally64(Equal, resultGPR, TrustedImm32(0), scratch1GPR, resultGPR, resultGPR);
                     } else
-                        speculationCheck(LoadFromHole, JSValueSource(baseGPR), nullptr, branchIfEmpty(resultGPR));
+                        speculationCheck(LoadFromHole, JSValueSource::unboxedCell(baseGPR), nullptr, branchIfEmpty(resultGPR));
                 }
                 doneCases.append(jump());
                 return;
@@ -9666,7 +9666,7 @@ void SpeculativeJIT::compileMultiGetByVal(Node* node)
 
         if (!arrayMode.mayBeResizableOrGrowableSharedTypedArray()) {
             if (!m_graph.isNeverResizableOrGrowableSharedTypedArrayIncludingDataView(m_state.forNode(baseEdge)))
-                speculationCheck(UnexpectedResizableArrayBufferView, JSValueSource(baseGPR), node, branchTest8(NonZero, Address(baseGPR, JSArrayBufferView::offsetOfMode()), TrustedImm32(isResizableOrGrowableSharedMode)));
+                speculationCheck(UnexpectedResizableArrayBufferView, JSValueSource::unboxedCell(baseGPR), node, branchTest8(NonZero, Address(baseGPR, JSArrayBufferView::offsetOfMode()), TrustedImm32(isResizableOrGrowableSharedMode)));
 #if USE(LARGE_TYPED_ARRAYS)
             load64(Address(baseGPR, JSArrayBufferView::offsetOfLength()), scratch1GPR);
 #else
@@ -9687,7 +9687,7 @@ void SpeculativeJIT::compileMultiGetByVal(Node* node)
             ASSERT(!node->hasDoubleResult());
             typedArrayUndefinedCases.append(typedArrayOutOfBounds);
         } else
-            speculationCheck(OutOfBounds, JSValueSource(baseGPR), nullptr, typedArrayOutOfBounds);
+            speculationCheck(OutOfBounds, JSValueSource::unboxedCell(baseGPR), nullptr, typedArrayOutOfBounds);
 
         loadPtr(Address(baseGPR, JSArrayBufferView::offsetOfVector()), scratch2GPR);
         cageTypedArrayStorage(baseGPR, scratch2GPR);
@@ -9747,11 +9747,11 @@ void SpeculativeJIT::compileMultiGetByVal(Node* node)
     }
 
     bailoutCases.append(jump());
-    speculationCheck(BadIndexingType, JSValueSource(baseGPR), nullptr, bailoutCases);
+    speculationCheck(BadIndexingType, JSValueSource::unboxedCell(baseGPR), nullptr, bailoutCases);
 
     if (!jsArrayUndefinedCases.empty()) {
         jsArrayUndefinedCases.link(this);
-        speculationCheck(NegativeIndex, JSValueSource(baseGPR), nullptr, branch32(LessThan, indexGPR, TrustedImm32(0)));
+        speculationCheck(NegativeIndex, JSValueSource::unboxedCell(baseGPR), nullptr, branch32(LessThan, indexGPR, TrustedImm32(0)));
         // Fall through to the typedArrayUndefinedCases handler below (or directly to the move).
     }
 
@@ -9847,7 +9847,7 @@ void SpeculativeJIT::compileMultiPutByVal(Node* node)
             loadPtr(Address(baseGPR, JSObject::butterflyOffset()), scratch2GPR);
 
             if (arrayMode.isInBounds())
-                speculationCheck(OutOfBounds, JSValueSource(baseGPR), nullptr, branch32(AboveOrEqual, indexGPR, Address(scratch2GPR, Butterfly::offsetOfPublicLength())));
+                speculationCheck(OutOfBounds, JSValueSource::unboxedCell(baseGPR), nullptr, branch32(AboveOrEqual, indexGPR, Address(scratch2GPR, Butterfly::offsetOfPublicLength())));
             else {
                 Jump inBoundsCase = branch32(Below, indexGPR, Address(scratch2GPR, Butterfly::offsetOfPublicLength()));
 
@@ -9855,7 +9855,7 @@ void SpeculativeJIT::compileMultiPutByVal(Node* node)
                 if (arrayMode.isOutOfBounds())
                     jsArraySlowCases.append(outOfVector);
                 else
-                    speculationCheck(OutOfBounds, JSValueSource(baseGPR), nullptr, outOfVector);
+                    speculationCheck(OutOfBounds, JSValueSource::unboxedCell(baseGPR), nullptr, outOfVector);
 
                 add32(TrustedImm32(1), indexGPR, lengthScratchGPR);
                 store32(lengthScratchGPR, Address(scratch2GPR, Butterfly::offsetOfPublicLength()));
@@ -9899,7 +9899,7 @@ void SpeculativeJIT::compileMultiPutByVal(Node* node)
 
         if (!arrayMode.mayBeResizableOrGrowableSharedTypedArray()) {
             if (!m_graph.isNeverResizableOrGrowableSharedTypedArrayIncludingDataView(m_state.forNode(baseEdge)))
-                speculationCheck(UnexpectedResizableArrayBufferView, JSValueSource(baseGPR), node, branchTest8(NonZero, Address(baseGPR, JSArrayBufferView::offsetOfMode()), TrustedImm32(isResizableOrGrowableSharedMode)));
+                speculationCheck(UnexpectedResizableArrayBufferView, JSValueSource::unboxedCell(baseGPR), node, branchTest8(NonZero, Address(baseGPR, JSArrayBufferView::offsetOfMode()), TrustedImm32(isResizableOrGrowableSharedMode)));
 #if USE(LARGE_TYPED_ARRAYS)
             load64(Address(baseGPR, JSArrayBufferView::offsetOfLength()), scratch1GPR);
 #else
@@ -9919,7 +9919,7 @@ void SpeculativeJIT::compileMultiPutByVal(Node* node)
         if (arrayMode.isOutOfBounds())
             doneCases.append(typedArrayOutOfBounds);
         else
-            speculationCheck(OutOfBounds, JSValueSource(baseGPR), nullptr, typedArrayOutOfBounds);
+            speculationCheck(OutOfBounds, JSValueSource::unboxedCell(baseGPR), nullptr, typedArrayOutOfBounds);
 
         loadPtr(Address(baseGPR, JSArrayBufferView::offsetOfVector()), scratch2GPR);
         cageTypedArrayStorage(baseGPR, scratch2GPR);
@@ -9982,7 +9982,7 @@ void SpeculativeJIT::compileMultiPutByVal(Node* node)
     }
 
     bailoutCases.append(jump());
-    speculationCheck(BadIndexingType, JSValueSource(baseGPR), nullptr, bailoutCases);
+    speculationCheck(BadIndexingType, JSValueSource::unboxedCell(baseGPR), nullptr, bailoutCases);
 
     doneCases.link(this);
 

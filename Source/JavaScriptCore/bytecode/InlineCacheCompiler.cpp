@@ -3482,14 +3482,14 @@ void InlineCacheCompiler::generateAccessCase(unsigned index, AccessCase& accessC
             if (Options::useJITCage()) {
                 jit.setupArguments<GetValueFuncWithPtr>(
                     CCallHelpers::TrustedImmPtr(globalObject),
-                    baseForCustom,
+                    CCallHelpers::CellValue(baseForCustom),
                     CCallHelpers::TrustedImmPtr(accessCase.uid()),
                     CCallHelpers::TrustedImmPtr(customAccessor.taggedPtr()));
                 jit.callOperation<OperationPtrTag>(vmEntryCustomGetter);
             } else {
                 jit.setupArguments<GetValueFunc>(
                     CCallHelpers::TrustedImmPtr(globalObject),
-                    baseForCustom,
+                    CCallHelpers::CellValue(baseForCustom),
                     CCallHelpers::TrustedImmPtr(accessCase.uid()));
                 jit.callOperation<CustomAccessorPtrTag>(customAccessor);
             }
@@ -3498,7 +3498,7 @@ void InlineCacheCompiler::generateAccessCase(unsigned index, AccessCase& accessC
             if (Options::useJITCage()) {
                 jit.setupArguments<PutValueFuncWithPtr>(
                     CCallHelpers::TrustedImmPtr(globalObject),
-                    baseForCustom,
+                    CCallHelpers::CellValue(baseForCustom),
                     valueGPR,
                     CCallHelpers::TrustedImmPtr(accessCase.uid()),
                     CCallHelpers::TrustedImmPtr(customAccessor.taggedPtr()));
@@ -3506,7 +3506,7 @@ void InlineCacheCompiler::generateAccessCase(unsigned index, AccessCase& accessC
             } else {
                 jit.setupArguments<PutValueFunc>(
                     CCallHelpers::TrustedImmPtr(globalObject),
-                    baseForCustom,
+                    CCallHelpers::CellValue(baseForCustom),
                     valueGPR,
                     CCallHelpers::TrustedImmPtr(accessCase.uid()));
                 jit.callOperation<CustomAccessorPtrTag>(customAccessor);
@@ -4364,11 +4364,11 @@ void InlineCacheCompiler::emitProxyObjectAccess(unsigned index, AccessCase& acce
         break;
     case AccessCase::ProxyObjectLoad:
     case AccessCase::IndexedProxyObjectLoad:
-        jit.storeValue(thisGPR, calleeFrame.withOffset(virtualRegisterForArgumentIncludingThis(2).offset() * sizeof(Register)));
+        jit.storeCell(thisGPR, calleeFrame.withOffset(virtualRegisterForArgumentIncludingThis(2).offset() * sizeof(Register)));
         break;
     case AccessCase::ProxyObjectStore:
     case AccessCase::IndexedProxyObjectStore:
-        jit.storeValue(thisGPR, calleeFrame.withOffset(virtualRegisterForArgumentIncludingThis(2).offset() * sizeof(Register)));
+        jit.storeCell(thisGPR, calleeFrame.withOffset(virtualRegisterForArgumentIncludingThis(2).offset() * sizeof(Register)));
         jit.storeValue(valueGPR, calleeFrame.withOffset(virtualRegisterForArgumentIncludingThis(3).offset() * sizeof(Register)));
         break;
     default:
