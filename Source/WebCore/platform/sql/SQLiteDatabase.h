@@ -26,6 +26,8 @@
 
 #pragma once
 
+#include "PlatformExportMacros.h"
+
 #include <functional>
 #include <sqlite3.h>
 #include <wtf/CheckedRef.h>

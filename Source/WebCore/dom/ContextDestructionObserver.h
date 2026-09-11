@@ -26,6 +26,8 @@
 
 #pragma once
 
+#include "PlatformExportMacros.h"
+
 #include <wtf/AbstractRefCountedAndCanMakeWeakPtr.h>
 #include <wtf/Forward.h>
 #include <wtf/WeakPtr.h>

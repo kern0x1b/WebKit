@@ -25,6 +25,8 @@
 
 #pragma once
 
+#include "PlatformExportMacros.h"
+
 #include <WebCore/LayoutUnit.h>
 #include <WebCore/RectEdges.h>
 #include <optional>

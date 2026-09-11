@@ -27,6 +27,8 @@
 #define WebScriptObject_h
 
 #import <Foundation/Foundation.h>
+
+#include "PlatformExportMacros.h"
 #import <JavaScriptCore/JSBase.h>
 #import <WebCore/WebKitAvailability.h>
 

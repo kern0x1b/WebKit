@@ -25,6 +25,8 @@
 
 #pragma once
 
+#include "PlatformExportMacros.h"
+
 #include <wtf/text/WTFString.h>
 
 namespace WebCore {

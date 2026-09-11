@@ -26,6 +26,8 @@
 
 #pragma once
 
+#include "PlatformExportMacros.h"
+
 #include <WebCore/BoxExtents.h>
 #include <WebCore/FloatPoint.h>
 #include <utility>

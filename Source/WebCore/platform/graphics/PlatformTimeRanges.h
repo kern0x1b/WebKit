@@ -25,6 +25,8 @@
 
 #pragma once
 
+#include "PlatformExportMacros.h"
+
 #include <algorithm>
 #include <wtf/ArgumentCoder.h>
 #include <wtf/MediaTime.h>

@@ -409,6 +409,20 @@ macro(WEBKIT_DEFINE_SUBTARGET_WITH_PREFIX _target _subtarget)
             string(JOIN "|" _groups ${_arg_HEADER_GROUPS})
             list(FILTER ${_subtarget}_SOURCES INCLUDE REGEX "-header-(${_groups})\\.")
         endif ()
+        # Under unified builds the original sources are marked HEADER_FILE_ONLY and
+        # only the generated bundles compile; a subtarget that catches only those
+        # would end up with nothing to build.
+        set(_compilable_sources)
+        foreach (_src IN LISTS ${_subtarget}_SOURCES)
+            get_source_file_property(_header_only "${_src}" HEADER_FILE_ONLY)
+            if (NOT _header_only)
+                list(APPEND _compilable_sources "${_src}")
+            endif ()
+        endforeach ()
+        if (NOT _compilable_sources)
+            set(${_subtarget}_SOURCES)
+        endif ()
+
         if (${_subtarget}_SOURCES)
             list(REMOVE_ITEM ${_target}_SOURCES ${${_subtarget}_SOURCES})
             WEBKIT_DEFINE_SUBTARGET(${_subtarget} ${_target} ${${_subtarget}_SOURCES})

@@ -28,6 +28,8 @@
 
 #import <Foundation/Foundation.h>
 
+#include "PlatformExportMacros.h"
+
 #if TARGET_OS_IPHONE
 
 #import <CoreGraphics/CoreGraphics.h>

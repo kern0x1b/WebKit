@@ -118,50 +118,6 @@ private:
     bool m_isMediaControls : 1 { false };
 };
 
-// RAII guard bracketing a mutating operation on a world's m_wrappers. On Cocoa it makes the
-// page-protected backing writable for the duration and read-only again afterwards (re-reading the
-// current backing, which may have been reallocated by a rehash during the operation); it is a cheap
-// branch on gGuardWrapperMaps when this process does not guard its wrapper maps. Off Cocoa the
-// diagnostic does not exist and the scope is an empty no-op, so call sites can construct it
-// unconditionally on every platform. rdar://157587352.
-class WrapperMutationScope {
-public:
-#if PLATFORM(COCOA)
-    explicit WrapperMutationScope(DOMWrapperWorld& world)
-        : m_world(world)
-    {
-        if (gGuardWrapperMaps) [[unlikely]]
-            enter();
-    }
-    ~WrapperMutationScope()
-    {
-        if (gGuardWrapperMaps) [[unlikely]]
-            leave();
-    }
-
-    // The world whose m_wrappers backing is currently being mutated on this thread (so the backing
-    // allocator can record each (re)allocated table on it), or nullptr when no scope is active.
-    static DOMWrapperWorld* currentlyMutatedWorld() { return s_active ? s_active->m_world.ptr() : nullptr; }
-#else
-    explicit WrapperMutationScope(DOMWrapperWorld&) { }
-#endif
-    WrapperMutationScope(const WrapperMutationScope&) = delete;
-    WrapperMutationScope& operator=(const WrapperMutationScope&) = delete;
-
-#if PLATFORM(COCOA)
-private:
-    WEBCORE_EXPORT void enter();
-    WEBCORE_EXPORT void leave();
-#if defined(WEBKIT_IOS6)
-    static IOS6ThreadLocal<WrapperMutationScope*> s_active;
-#else
-    static thread_local WrapperMutationScope* s_active;
-#endif
-    SingleThreadWeakRef<DOMWrapperWorld> m_world;
-    WrapperMutationScope* m_previous { nullptr };
-#endif
-};
-
 DOMWrapperWorld& NODELETE normalWorld(JSC::VM&);
 WEBCORE_EXPORT DOMWrapperWorld& mainThreadNormalWorldSingleton();
 
