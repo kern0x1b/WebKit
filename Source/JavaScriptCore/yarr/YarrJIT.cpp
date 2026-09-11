@@ -41,12 +41,19 @@
 #include "YarrDisassembler.h"
 #include "YarrJITRegisters.h"
 #include "YarrMatchingContextHolder.h"
+#if defined(WEBKIT_IOS6)
+#include <atomic>
+#include <cstdio>
+#include <cstdlib>
+#endif
 #include <wtf/ASCIICType.h>
 #include <wtf/BitVector.h>
 #include <wtf/ListDump.h>
 #include <wtf/MathExtras.h>
+#include <wtf/MonotonicTime.h>
 #include <wtf/SetForScope.h>
 #include <wtf/TZoneMallocInlines.h>
+#include <wtf/text/CString.h>
 #include <wtf/text/MakeString.h>
 
 WTF_ALLOW_UNSAFE_BUFFER_USAGE_BEGIN
@@ -6133,8 +6140,7 @@ class YarrGenerator final : public YarrJITInfo {
         static_assert(sizeof(BoyerMooreBitmap::Map::WordType) == sizeof(uint32_t));
         static_assert(1 << 5 == 32);
         static_assert(1 << (5 + 2) == BoyerMooreBitmap::Map::size());
-        m_jit.move(m_regs.regT0, m_regs.regT2);
-        m_jit.urshift32(MacroAssembler::TrustedImm32(5), m_regs.regT2);
+        m_jit.urshift32(m_regs.regT0, MacroAssembler::TrustedImm32(5), m_regs.regT2);
         m_jit.and32(MacroAssembler::TrustedImm32(0b11), m_regs.regT2);
         m_jit.load32(MacroAssembler::BaseIndex(m_regs.regT1, m_regs.regT2, MacroAssembler::TimesFour), m_regs.regT2);
         m_jit.urshift32(m_regs.regT0, m_regs.regT2);
@@ -6727,11 +6733,32 @@ class YarrGenerator final : public YarrJITInfo {
             size_t stackSizeForCalleeSaves = WTF::roundUpToMultipleOf<stackAlignmentBytes()>(m_calleeSaves.registerCount() * sizeof(UCPURegister));
 #if CPU(X86_64) || CPU(ARM64)
             m_jit.subPtr(GPRInfo::callFrameRegister, CCallHelpers::TrustedImm32(stackSizeForCalleeSaves), MacroAssembler::stackPointerRegister);
+            m_jit.emitSaveCalleeSavesFor(&m_calleeSaves);
 #else
+            // The registers are saved before one of them is used as scratch.
+            //
+            // On a target where the stack pointer cannot be written directly,
+            // the new value is computed into regT0 - and on ARM_THUMB2 regT0 is
+            // r4, which is itself in the callee-save set. Done in the other
+            // order, the caller's r4 is destroyed by the computation and then
+            // that destroyed value is what gets saved and later restored, so the
+            // caller resumes with a stack address where it left a live value.
+            //
+            // Diagnosed on an iPhone 4S: 'aaa'.matchAll(/\w+/g) followed by one
+            // next() took SIGBUS at `str r2, [r1, r4]` inside
+            // JSRegExpStringIterator::nextImpl, with r1 + r4 equal to the
+            // faulting address and r4 holding the frame pointer minus the
+            // callee-save area - exactly the value this prologue computes. Plain
+            // RegExp.prototype.exec survived only because the compiler happened
+            // not to keep anything in r4 across the call there.
+            //
+            // Saving first is safe: emitSaveCalleeSavesFor writes relative to the
+            // frame pointer, which emitFunctionPrologue has already established,
+            // so it does not depend on the stack pointer having moved yet.
+            m_jit.emitSaveCalleeSavesFor(&m_calleeSaves);
             m_jit.subPtr(GPRInfo::callFrameRegister, CCallHelpers::TrustedImm32(stackSizeForCalleeSaves), m_regs.regT0);
             m_jit.move(m_regs.regT0, MacroAssembler::stackPointerRegister);
 #endif
-            m_jit.emitSaveCalleeSavesFor(&m_calleeSaves);
         }
     }
 
@@ -7661,6 +7688,82 @@ JSC_DEFINE_NOEXCEPT_JIT_OPERATION(operationAreCanonicallyEquivalent, bool, (unsi
 }
 #endif
 
+#if defined(WEBKIT_IOS6)
+namespace YarrJITInstrumentation {
+
+static const char* failureReasonName(JITFailureReason failure)
+{
+    switch (failure) {
+    case JITFailureReason::DecodeSurrogatePair:
+        return "DecodeSurrogatePair";
+    case JITFailureReason::BackReference:
+        return "BackReference";
+    case JITFailureReason::Lookbehind:
+        return "Lookbehind";
+    case JITFailureReason::ParenthesizedSubpattern:
+        return "ParenthesizedSubpattern";
+    case JITFailureReason::ParenthesisNestedTooDeep:
+        return "ParenthesisNestedTooDeep";
+    case JITFailureReason::ExecutableMemoryAllocationFailure:
+        return "ExecutableMemoryAllocationFailure";
+    case JITFailureReason::OffsetTooLarge:
+        return "OffsetTooLarge";
+    case JITFailureReason::GeneratedCodeSizeTooLarge:
+        return "GeneratedCodeSizeTooLarge";
+    }
+    return "Unknown";
+}
+
+static FILE* NODELETE eventLog()
+{
+    static FILE* file = [] () -> FILE* {
+        const char* path = getenv("WEBKIT_IOS6_YARR_JIT_LOG");
+        if (!path || !path[0])
+            return nullptr;
+        FILE* opened = fopen(path, "w");
+        if (opened)
+            setvbuf(opened, nullptr, _IOLBF, 0);
+        return opened;
+    }();
+    return file;
+}
+
+static void recordAttempt(YarrPattern& pattern, StringView patternString, std::optional<JITFailureReason> failureReason)
+{
+    static std::atomic<uint64_t> attempts { 0 };
+    static std::atomic<uint64_t> successes { 0 };
+
+    uint64_t attemptCount = attempts.fetch_add(1, std::memory_order_relaxed) + 1;
+    uint64_t successCount = successes.load(std::memory_order_relaxed);
+    if (!failureReason)
+        successCount = successes.fetch_add(1, std::memory_order_relaxed) + 1;
+
+    FILE* log = eventLog();
+    if (!log)
+        return;
+
+    CString preview = patternString.utf8();
+    int previewLength = static_cast<int>(std::min<size_t>(preview.length(), 120));
+
+    fprintf(log, "%.3f attempt=%llu success=%llu ok=%d reason=%s flags=%s%s%s%s%s%s%s pattern=\"%.*s\"\n",
+        MonotonicTime::now().secondsSinceEpoch().value(),
+        static_cast<unsigned long long>(attemptCount),
+        static_cast<unsigned long long>(successCount),
+        failureReason ? 0 : 1,
+        failureReason ? failureReasonName(*failureReason) : "-",
+        pattern.global() ? "g" : "",
+        pattern.ignoreCase() ? "i" : "",
+        pattern.multiline() ? "m" : "",
+        pattern.dotAll() ? "s" : "",
+        pattern.sticky() ? "y" : "",
+        pattern.unicode() ? "u" : "",
+        pattern.unicodeSets() ? "v" : "",
+        previewLength, preview.data());
+}
+
+} // namespace YarrJITInstrumentation
+#endif // defined(WEBKIT_IOS6)
+
 static void dumpCompileFailure(JITFailureReason failure)
 {
     switch (failure) {
@@ -7699,6 +7802,10 @@ void jitCompile(YarrPattern& pattern, StringView patternString, CharSize charSiz
 
     YarrJITDefaultRegisters jitRegisters;
     YarrGenerator<YarrJITDefaultRegisters>(masm, vm, &codeBlock, jitRegisters, pattern, patternString, charSize, mode, sampleString).compile(codeBlock);
+
+#if defined(WEBKIT_IOS6)
+    YarrJITInstrumentation::recordAttempt(pattern, patternString, codeBlock.failureReason());
+#endif
 
     if (auto failureReason = codeBlock.failureReason()) {
         if (Options::dumpCompiledRegExpPatterns()) [[unlikely]] {

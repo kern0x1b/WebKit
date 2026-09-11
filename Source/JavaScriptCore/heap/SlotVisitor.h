@@ -26,6 +26,7 @@
 #pragma once
 
 #include <JavaScriptCore/AbstractSlotVisitor.h>
+#include <cstdlib>
 #include <wtf/Forward.h>
 #include <wtf/IterationStatus.h>
 #include <wtf/MonotonicTime.h>
@@ -40,6 +41,26 @@ class MarkingConstraint;
 class MarkingConstraintSolver;
 
 typedef uint32_t HeapVersion;
+
+#if defined(WEBKIT_IOS6)
+inline bool webkitIOS6GCUncontendedMarkEnabled()
+{
+    static bool enabled = !getenv("WEBKIT_IOS6_GC_MARK_FENCES");
+    return enabled;
+}
+
+inline bool webkitIOS6GCStructurePrefetchEnabled()
+{
+    static bool enabled = getenv("WEBKIT_IOS6_GC_STRUCTURE_PREFETCH");
+    return enabled;
+}
+
+inline bool webkitIOS6GCButterflyPrefetchEnabled()
+{
+    static bool enabled = getenv("WEBKIT_IOS6_GC_BUTTERFLY_PREFETCH");
+    return enabled;
+}
+#endif
 
 class SlotVisitor final : public AbstractSlotVisitor {
     WTF_MAKE_NONCOPYABLE(SlotVisitor);
@@ -92,6 +113,10 @@ public:
 
     template<typename T, typename Traits> void append(const WriteBarrierBase<T, Traits>&);
     template<typename T, typename Traits> void appendHidden(const WriteBarrierBase<T, Traits>&);
+#if defined(WEBKIT_IOS6)
+    ALWAYS_INLINE void append(const WriteBarrierBase<Unknown, RawValueTraits<Unknown>>&);
+    ALWAYS_INLINE void appendHidden(const WriteBarrierBase<Unknown, RawValueTraits<Unknown>>&);
+#endif
     void append(const WriteBarrierStructureID&);
     void appendHidden(const WriteBarrierStructureID&);
     template<typename Iterator> void append(Iterator begin , Iterator end);
@@ -198,7 +223,10 @@ private:
     
     template<typename ContainerType>
     void setMarkedAndAppendToMarkStack(ContainerType&, JSCell*, Dependency);
-    
+#if defined(WEBKIT_IOS6)
+    void setMarkedAndAppendToMarkStack(MarkedBlock&, JSCell*, Dependency);
+#endif
+
     void appendToMarkStack(JSCell*);
     
     template<typename ContainerType>
@@ -232,6 +260,9 @@ private:
     HeapAnalyzer* m_heapAnalyzer { nullptr };
     JSCell* m_currentCell { nullptr };
     bool m_isFirstVisit { false };
+#if defined(WEBKIT_IOS6)
+    bool m_needsMarkingFence { true };
+#endif
     bool m_mutatorIsStopped { false };
     bool m_canOptimizeForStoppedMutator { false };
     bool m_isInParallelMode { false };

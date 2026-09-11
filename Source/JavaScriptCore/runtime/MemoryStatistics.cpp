@@ -26,7 +26,12 @@
 #include "config.h"
 #include "MemoryStatistics.h"
 
+#include "CodeBlock.h"
 #include "ExecutableAllocator.h"
+#include "HeapIterationScope.h"
+#include "MarkedSpaceInlines.h"
+#include "ScriptExecutable.h"
+#include "UnlinkedCodeBlock.h"
 #include "VM.h"
 
 namespace JSC {
@@ -41,6 +46,36 @@ GlobalMemoryStatistics globalMemoryStatistics()
 #endif
 
     return stats;
+}
+
+
+CodeMemoryStatistics codeMemoryStatistics(VM& vm)
+{
+    CodeMemoryStatistics statistics;
+
+    HeapIterationScope iterationScope(vm.heap);
+    vm.heap.objectSpace().forEachLiveCell(iterationScope,
+        [&](HeapCell* cell, HeapCell::Kind kind) -> IterationStatus {
+            if (!isJSCellKind(kind))
+                return IterationStatus::Continue;
+            auto* jsCell = static_cast<JSCell*>(cell);
+            auto* classInfo = jsCell->classInfo();
+            if (!classInfo)
+                return IterationStatus::Continue;
+            if (classInfo->isSubClassOf(UnlinkedCodeBlock::info())) {
+                statistics.unlinkedCodeBlockCount++;
+                statistics.unlinkedCodeBlockBytes += jsCell->estimatedSizeInBytes(vm);
+            } else if (classInfo->isSubClassOf(CodeBlock::info())) {
+                statistics.codeBlockCount++;
+                statistics.codeBlockBytes += jsCell->estimatedSizeInBytes(vm);
+            } else if (classInfo->isSubClassOf(ScriptExecutable::info())) {
+                statistics.executableCount++;
+                statistics.sourceBytes += jsCell->estimatedSizeInBytes(vm);
+            }
+            return IterationStatus::Continue;
+        });
+
+    return statistics;
 }
 
 }

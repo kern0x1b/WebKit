@@ -26,8 +26,14 @@
 #include "config.h"
 #include "GigacageAlignedMemoryAllocator.h"
 
+#include "MarkedBlock.h"
+
 #if ENABLE(MALLOC_HEAP_BREAKDOWN)
 #include <wtf/text/MakeString.h>
+#endif
+
+#if defined(WEBKIT_IOS6)
+#include "Ios6BlockReservationPool.h"
 #endif
 
 namespace JSC {
@@ -46,6 +52,10 @@ void* GigacageAlignedMemoryAllocator::tryAllocateAlignedMemory(size_t alignment,
 {
 #if ENABLE(MALLOC_HEAP_BREAKDOWN)
     return m_heap.memalign(alignment, size, true);
+#elif defined(WEBKIT_IOS6)
+    if (alignment == MarkedBlock::blockSize && size == MarkedBlock::blockSize)
+        return Ios6BlockReservationPool::singleton().tryAllocateBlock();
+    return Gigacage::tryAlignedMalloc(m_kind, alignment, size);
 #else
     return Gigacage::tryAlignedMalloc(m_kind, alignment, size);
 #endif
@@ -55,6 +65,8 @@ void GigacageAlignedMemoryAllocator::freeAlignedMemory(void* basePtr)
 {
 #if ENABLE(MALLOC_HEAP_BREAKDOWN)
     return m_heap.free(basePtr);
+#elif defined(WEBKIT_IOS6)
+    Ios6BlockReservationPool::singleton().freeBlock(basePtr);
 #else
     Gigacage::free(m_kind, basePtr);
 #endif

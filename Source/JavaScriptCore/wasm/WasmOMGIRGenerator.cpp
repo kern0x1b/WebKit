@@ -485,13 +485,7 @@ public:
     }
 
     // SIMD
-    bool NODELETE usesSIMD() const { return m_info.usesSIMD(m_functionIndex); }
-    void NODELETE notifyFunctionUsesSIMD()
-    {
-        ASSERT(m_info.usesSIMD(m_functionIndex));
-        m_proc.setUsesSIMD();
-    }
-
+    void NODELETE notifyFunctionUsesSIMD() { ASSERT(m_info.usesSIMD(m_functionIndex)); }
     [[nodiscard]] PartialResult addSIMDLoad(ExpressionType pointer, uint32_t offset, ExpressionType& result, uint8_t memoryIndex);
     [[nodiscard]] PartialResult addSIMDStore(ExpressionType value, ExpressionType pointer, uint32_t offset, uint8_t memoryIndex);
     [[nodiscard]] PartialResult addSIMDSplat(SIMDLane, ExpressionType scalar, ExpressionType& result);
@@ -4749,8 +4743,6 @@ RefPtr<PatchpointExceptionHandle> OMGIRGenerator::preparePatchpointForExceptions
     if (!mustSaveState)
         return nullptr;
 
-    ASSERT(patch->kind().isCloningForbidden());
-
     unsigned firstStackmapChildOffset = patch->numChildren();
     unsigned firstStackmapParamOffset = firstStackmapChildOffset + m_proc.resultCount(patch->type());
 
@@ -5358,10 +5350,7 @@ auto OMGIRGenerator::createCallPatchpoint(BasicBlock* block, const RTT& signatur
     auto constrainedPatchArgs = createCallConstrainedArgs(block, wasmCalleeInfo, tmpArgs);
 
     advanceCallSiteIndex();
-    // Calls inside a try carry a catch-restoration stackmap keyed by CallSiteIndex, see preparePatchpointForExceptions.
-    // Forbid cloning so a B3 transform won't alias two call sites to one stackmap.
-    auto patchpointKind = m_tryCatchDepth ? cloningForbidden(Patchpoint) : Patchpoint;
-    PatchpointValue* patchpoint = m_proc.add<PatchpointValue>(returnType, origin(), patchpointKind);
+    PatchpointValue* patchpoint = m_proc.add<PatchpointValue>(returnType, origin());
     patchpoint->effects.writesPinned = true;
     patchpoint->effects.readsPinned = true;
     patchpoint->clobberEarly(RegisterSet::macroClobberedGPRs());

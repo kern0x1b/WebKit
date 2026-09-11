@@ -118,7 +118,7 @@ void JIT::compileSetupFrame(const Op& bytecode)
         // Initialize 'this'.
         constexpr JSValueRegs thisJSR = jsRegT10;
         emitGetVirtualRegister(thisValue, thisJSR);
-        storeValue(thisJSR, Address(regT5, CallFrame::thisArgumentOffset() * static_cast<int>(sizeof(Register))));
+        storeValueToFrame(thisJSR, Address(regT5, CallFrame::thisArgumentOffset() * static_cast<int>(sizeof(Register))));
 
         addPtr(TrustedImm32(sizeof(CallerFrameAndPC)), regT5, stackPointerRegister);
     } else {
@@ -249,7 +249,7 @@ void JIT::compileOpCall(const JSInstruction* instruction)
     store32(TrustedImm32(locationBits), tagFor(CallFrameSlot::argumentCountIncludingThis));
 
     emitGetVirtualRegister(callee, BaselineJITRegisters::Call::calleeJSR);
-    storeValue(BaselineJITRegisters::Call::calleeJSR, calleeFrameSlot(CallFrameSlot::callee));
+    storeValueToFrame(BaselineJITRegisters::Call::calleeJSR, calleeFrameSlot(CallFrameSlot::callee));
 
     if constexpr (Op::opcodeID == op_call_direct_eval) {
         compileCallDirectEval(bytecode);

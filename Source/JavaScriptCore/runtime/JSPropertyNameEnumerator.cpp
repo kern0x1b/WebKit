@@ -158,6 +158,20 @@ void getEnumerablePropertyNames(JSGlobalObject* globalObject, JSObject* base, Pr
     }
 }
 
+static ALWAYS_INLINE JSString* indexedPropertyNameString(VM& vm, uint32_t index)
+{
+    if (index >= NumericStrings::cacheSize) [[unlikely]]
+        return jsString(vm, Identifier::from(vm, index).releaseImpl());
+
+    auto& entry = vm.numericStrings.smallIntCacheEntry(index);
+    if (entry.jsString) [[likely]]
+        return entry.jsString;
+
+    JSString* name = jsString(vm, Identifier::from(vm, index).releaseImpl());
+    entry.jsString = name;
+    return name;
+}
+
 JSString* JSPropertyNameEnumerator::computeNext(JSGlobalObject* globalObject, JSObject* base, uint32_t& index, Flag& mode, bool shouldAllocateIndexedNameString)
 {
     VM& vm = globalObject->vm();
@@ -181,7 +195,7 @@ JSString* JSPropertyNameEnumerator::computeNext(JSGlobalObject* globalObject, JS
         scope.assertNoException();
 
         if (index < indexedLength())
-            return shouldAllocateIndexedNameString ? jsString(vm, Identifier::from(vm, index).releaseImpl()) : nullptr;
+            return shouldAllocateIndexedNameString ? indexedPropertyNameString(vm, index) : nullptr;
 
         if (!sizeOfPropertyNames())
             return nullptr;

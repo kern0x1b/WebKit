@@ -1141,9 +1141,24 @@ void JSGlobalObject::init(VM& vm)
     JS_GLOBAL_OBJECT_ADDITIONS_3;
 
     m_arraySpeciesGetterSetter.set(vm, this, GetterSetter::create(vm, this, JSFunction::create(vm, this, 0, "get [Symbol.species]"_s, globalFuncSpeciesGetter, ImplementationVisibility::Public, SpeciesGetterIntrinsic), nullptr));
+#if defined(WEBKIT_IOS6)
+    m_typedArraySpeciesGetterSetter.initLater(
+        [] (const Initializer<GetterSetter>& init) {
+            init.set(GetterSetter::create(init.vm, init.owner, JSFunction::create(init.vm, init.owner, 0, "get [Symbol.species]"_s, globalFuncSpeciesGetter, ImplementationVisibility::Public, SpeciesGetterIntrinsic), nullptr));
+        });
+    m_arrayBufferSpeciesGetterSetter.initLater(
+        [] (const Initializer<GetterSetter>& init) {
+            init.set(GetterSetter::create(init.vm, init.owner, JSFunction::create(init.vm, init.owner, 0, "get [Symbol.species]"_s, globalFuncSpeciesGetter, ImplementationVisibility::Public, SpeciesGetterIntrinsic), nullptr));
+        });
+    m_sharedArrayBufferSpeciesGetterSetter.initLater(
+        [] (const Initializer<GetterSetter>& init) {
+            init.set(GetterSetter::create(init.vm, init.owner, JSFunction::create(init.vm, init.owner, 0, "get [Symbol.species]"_s, globalFuncSpeciesGetter, ImplementationVisibility::Public, SpeciesGetterIntrinsic), nullptr));
+        });
+#else
     m_typedArraySpeciesGetterSetter.set(vm, this, GetterSetter::create(vm, this, JSFunction::create(vm, this, 0, "get [Symbol.species]"_s, globalFuncSpeciesGetter, ImplementationVisibility::Public, SpeciesGetterIntrinsic), nullptr));
     m_arrayBufferSpeciesGetterSetter.set(vm, this, GetterSetter::create(vm, this, JSFunction::create(vm, this, 0, "get [Symbol.species]"_s, globalFuncSpeciesGetter, ImplementationVisibility::Public, SpeciesGetterIntrinsic), nullptr));
     m_sharedArrayBufferSpeciesGetterSetter.set(vm, this, GetterSetter::create(vm, this, JSFunction::create(vm, this, 0, "get [Symbol.species]"_s, globalFuncSpeciesGetter, ImplementationVisibility::Public, SpeciesGetterIntrinsic), nullptr));
+#endif
     m_promiseSpeciesGetterSetter.set(vm, this, GetterSetter::create(vm, this, JSFunction::create(vm, this, 0, "get [Symbol.species]"_s, globalFuncSpeciesGetter, ImplementationVisibility::Public, SpeciesGetterIntrinsic), nullptr));
 
     m_throwTypeErrorArgumentsCalleeGetterSetter.initLater(
@@ -1281,8 +1296,15 @@ void JSGlobalObject::init(VM& vm)
     for (unsigned i = 0; i < NumberOfArrayIndexingModes; ++i)
         m_arrayStructureForIndexingShapeDuringAllocation[i] = m_originalArrayStructureForIndexingShape[i];
 
+#if defined(WEBKIT_IOS6)
+    if (Options::useShadowRealm()) {
+        m_shadowRealmPrototype.set(vm, this, ShadowRealmPrototype::create(vm, ShadowRealmPrototype::createStructure(vm, this, m_objectPrototype.get())));
+        m_shadowRealmObjectStructure.set(vm, this, ShadowRealmObject::createStructure(vm, this, m_shadowRealmPrototype.get()));
+    }
+#else
     m_shadowRealmPrototype.set(vm, this, ShadowRealmPrototype::create(vm, ShadowRealmPrototype::createStructure(vm, this, m_objectPrototype.get())));
     m_shadowRealmObjectStructure.set(vm, this, ShadowRealmObject::createStructure(vm, this, m_shadowRealmPrototype.get()));
+#endif
 
     m_regExpPrototype.set(vm, this, RegExpPrototype::create(vm, this, RegExpPrototype::createStructure(vm, this, m_objectPrototype.get())));
     m_regExpStructure.set(vm, this, RegExpObject::createStructure(vm, this, m_regExpPrototype.get()));
@@ -1382,8 +1404,16 @@ void JSGlobalObject::init(VM& vm)
     auto* wrapForValidIteratorPrototype = WrapForValidIteratorPrototype::create(vm, this, WrapForValidIteratorPrototype::createStructure(vm, this, m_iteratorPrototype.get()));
     m_wrapForValidIteratorStructure.set(vm, this, JSWrapForValidIterator::createStructure(vm, this, wrapForValidIteratorPrototype));
 
+#if defined(WEBKIT_IOS6)
+    m_asyncFromSyncIteratorStructure.initLater(
+        [] (const Initializer<Structure>& init) {
+            auto* prototype = AsyncFromSyncIteratorPrototype::create(init.vm, init.owner, AsyncFromSyncIteratorPrototype::createStructure(init.vm, init.owner, init.owner->m_iteratorPrototype.get()));
+            init.set(JSAsyncFromSyncIterator::createStructure(init.vm, init.owner, prototype));
+        });
+#else
     auto* asyncFromSyncIteratorPrototype = AsyncFromSyncIteratorPrototype::create(vm, this, AsyncFromSyncIteratorPrototype::createStructure(vm, this, m_iteratorPrototype.get()));
     m_asyncFromSyncIteratorStructure.set(vm, this, JSAsyncFromSyncIterator::createStructure(vm, this, asyncFromSyncIteratorPrototype));
+#endif
 
     auto* regExpStringIteratorPrototype = RegExpStringIteratorPrototype::create(vm, this, RegExpStringIteratorPrototype::createStructure(vm, this, m_iteratorPrototype.get()));
     m_regExpStringIteratorStructure.set(vm, this, JSRegExpStringIterator::createStructure(vm, this, regExpStringIteratorPrototype));
@@ -1432,8 +1462,16 @@ void JSGlobalObject::init(VM& vm)
     m_arrayConstructor.set(vm, this, arrayConstructor);
     m_linkTimeConstants[static_cast<unsigned>(LinkTimeConstant::Array)].set(vm, this, arrayConstructor);
 
+#if defined(WEBKIT_IOS6)
+    ShadowRealmConstructor* shadowRealmConstructor = nullptr;
+    if (Options::useShadowRealm()) {
+        shadowRealmConstructor = ShadowRealmConstructor::create(vm, ShadowRealmConstructor::createStructure(vm, this, m_functionPrototype.get()), m_shadowRealmPrototype.get());
+        m_shadowRealmConstructor.set(vm, this, shadowRealmConstructor);
+    }
+#else
     ShadowRealmConstructor* shadowRealmConstructor = ShadowRealmConstructor::create(vm, ShadowRealmConstructor::createStructure(vm, this, m_functionPrototype.get()), m_shadowRealmPrototype.get());
     m_shadowRealmConstructor.set(vm, this, shadowRealmConstructor);
+#endif
 
     RegExpConstructor* regExpConstructor = RegExpConstructor::create(vm, RegExpConstructor::createStructure(vm, this, m_functionPrototype.get()), m_regExpPrototype.get());
     m_regExpConstructor.set(vm, this, regExpConstructor);
@@ -1518,7 +1556,12 @@ capitalName ## Constructor* lowerName ## Constructor = featureFlag ? capitalName
     m_functionPrototype->putDirectWithoutTransition(vm, vm.propertyNames->constructor, functionConstructor, static_cast<unsigned>(PropertyAttribute::DontEnum));
     m_arrayPrototype->putDirectWithoutTransition(vm, vm.propertyNames->constructor, arrayConstructor, static_cast<unsigned>(PropertyAttribute::DontEnum));
     m_regExpPrototype->putDirectWithoutTransition(vm, vm.propertyNames->constructor, regExpConstructor, static_cast<unsigned>(PropertyAttribute::DontEnum));
+#if defined(WEBKIT_IOS6)
+    if (shadowRealmConstructor)
+        m_shadowRealmPrototype->putDirectWithoutTransition(vm, vm.propertyNames->constructor, shadowRealmConstructor, static_cast<unsigned>(PropertyAttribute::DontEnum));
+#else
     m_shadowRealmPrototype->putDirectWithoutTransition(vm, vm.propertyNames->constructor, shadowRealmConstructor, static_cast<unsigned>(PropertyAttribute::DontEnum));
+#endif
     
     putDirectWithoutTransition(vm, vm.propertyNames->Object, objectConstructor, static_cast<unsigned>(PropertyAttribute::DontEnum));
     putDirectWithoutTransition(vm, vm.propertyNames->Function, functionConstructor, static_cast<unsigned>(PropertyAttribute::DontEnum));
@@ -3059,7 +3102,11 @@ void JSGlobalObject::visitChildrenImpl(JSCell* cell, Visitor& visitor)
     visitor.append(thisObject->m_mapIteratorStructure);
     visitor.append(thisObject->m_setIteratorStructure);
     visitor.append(thisObject->m_wrapForValidIteratorStructure);
+#if defined(WEBKIT_IOS6)
+    thisObject->m_asyncFromSyncIteratorStructure.visit(visitor);
+#else
     visitor.append(thisObject->m_asyncFromSyncIteratorStructure);
+#endif
     visitor.append(thisObject->m_regExpStringIteratorStructure);
     thisObject->m_iteratorResultObjectStructure.visit(visitor);
     thisObject->m_dataPropertyDescriptorObjectStructure.visit(visitor);
@@ -3116,9 +3163,15 @@ void JSGlobalObject::visitChildrenImpl(JSCell* cell, Visitor& visitor)
     }
     
     visitor.append(thisObject->m_arraySpeciesGetterSetter);
+#if defined(WEBKIT_IOS6)
+    thisObject->m_typedArraySpeciesGetterSetter.visit(visitor);
+    thisObject->m_arrayBufferSpeciesGetterSetter.visit(visitor);
+    thisObject->m_sharedArrayBufferSpeciesGetterSetter.visit(visitor);
+#else
     visitor.append(thisObject->m_typedArraySpeciesGetterSetter);
     visitor.append(thisObject->m_arrayBufferSpeciesGetterSetter);
     visitor.append(thisObject->m_sharedArrayBufferSpeciesGetterSetter);
+#endif
     visitor.append(thisObject->m_promiseSpeciesGetterSetter);
     visitor.append(thisObject->m_unhandledRejectionCallback);
 

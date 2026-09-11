@@ -145,7 +145,9 @@ static constexpr WTF::UUID jscJITNamespace { static_cast<UInt128>(0x325696c8e7cc
 static bool NODELETE isJITEnabled()
 {
     bool jitEnabled = !g_jscConfig.jitDisabled;
-#if HAVE(IOS_JIT_RESTRICTIONS)
+#if defined(WEBKIT_IOS6)
+    return jitEnabled;
+#elif HAVE(IOS_JIT_RESTRICTIONS)
     jitEnabled = jitEnabled && (processHasEntitlement("dynamic-codesigning"_s) || processHasEntitlement("com.apple.developer.cs.allow-jit"_s));
 #elif HAVE(MAC_JIT_RESTRICTIONS) && USE(APPLE_INTERNAL_SDK)
     jitEnabled = jitEnabled && processHasEntitlement("com.apple.security.cs.allow-jit"_s);
@@ -405,6 +407,10 @@ static ALWAYS_INLINE JITReservation initializeJITPageReservation()
 
     void* addressHint = reinterpret_cast<void*>(Options::jitMemoryReservationAddress());
     reservation.pageReservation = tryCreatePageReservation(reservation.size, addressHint);
+#if defined(WEBKIT_IOS6)
+    WTFLogAlways("[jit] reservation of %lu bytes %s (useJIT %d)", (unsigned long)reservation.size,
+        reservation.pageReservation ? "succeeded" : "FAILED", (int)Options::useJIT());
+#endif
     if (addressHint)
         RELEASE_ASSERT(reservation.pageReservation.base() == addressHint && "Failed to accomodate JSC_jitMemoryReservationAddress");
 

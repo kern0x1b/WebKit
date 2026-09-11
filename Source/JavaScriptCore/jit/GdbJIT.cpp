@@ -29,7 +29,12 @@
 #include <wtf/TZoneMallocInlines.h>
 
 #if ENABLE(ASSEMBLER)
-#if OS(DARWIN) || OS(LINUX)
+// ios6/armv7: the Mach-O/ELF writers below emit 64-bit object files only -- the
+// Mach-O path hardcodes MH_MAGIC_64 headers with a `reserved` field and 64-bit
+// load commands, and has #error'd on anything but ARM64/X86_64. This is only a
+// debugger aid (GdbJIT::log from LinkBuffer), so 32-bit targets fall through to
+// the existing no-op GdbJIT::log in the #else branch below.
+#if (OS(DARWIN) || OS(LINUX)) && CPU(ADDRESS64)
 
 #include "CallFrame.h"
 #include "CallFrameInlines.h"
@@ -1489,5 +1494,5 @@ void GdbJIT::log(const CString&, MacroAssemblerCodeRef<LinkBufferPtrTag>) { }
 
 } // namespace JSC
 
-#endif // OS(DARWIN) || OS(LINUX)
+#endif // (OS(DARWIN) || OS(LINUX)) && CPU(ADDRESS64)
 #endif // ENABLE(ASSEMBLER)

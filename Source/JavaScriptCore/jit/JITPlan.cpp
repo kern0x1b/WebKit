@@ -50,6 +50,14 @@ extern Seconds totalFTLCompileTime;
 extern Seconds totalFTLDFGCompileTime;
 extern Seconds totalFTLB3CompileTime;
 
+#if defined(WEBKIT_IOS6)
+namespace CostCeilingInstrumentation {
+bool enabled();
+void recordDFGQueueAge(Seconds);
+bool queueOrderingEnabled();
+}
+#endif
+
 JITPlan::JITPlan(JITCompilationMode mode, CodeBlock* codeBlock)
     : m_mode(mode)
     , m_vm(&codeBlock->vm())
@@ -57,6 +65,12 @@ JITPlan::JITPlan(JITCompilationMode mode, CodeBlock* codeBlock)
     , m_signpostMessage(signpostMessage())
 {
     m_vm->changeNumberOfActiveJITPlans(1);
+#if defined(WEBKIT_IOS6)
+    if (CostCeilingInstrumentation::enabled())
+        m_timeCreatedForQueueInstrumentation = MonotonicTime::now();
+    if (CostCeilingInstrumentation::queueOrderingEnabled())
+        m_timeCreatedForQueueOrdering = MonotonicTime::now();
+#endif
 }
 
 JITPlan::~JITPlan()
@@ -262,6 +276,11 @@ void JITPlan::endSignpostImpl(JITPlan::SignpostDetail detail)
 void JITPlan::compileInThread(JITWorklistThread* thread)
 {
     SetForScope threadScope(m_thread, thread);
+
+#if defined(WEBKIT_IOS6)
+    if (isDFG() && m_timeCreatedForQueueInstrumentation)
+        CostCeilingInstrumentation::recordDFGQueueAge(MonotonicTime::now() - m_timeCreatedForQueueInstrumentation);
+#endif
 
     MonotonicTime before;
     CString codeBlockName;

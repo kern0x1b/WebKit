@@ -1665,7 +1665,7 @@ bool BytecodeGenerator::hasConstant(const Identifier& ident) const
 unsigned BytecodeGenerator::addConstant(const Identifier& ident)
 {
     UniquedStringImpl* rep = ident.impl();
-    IdentifierMap::AddResult result = m_identifierMap.add(rep, m_codeBlock->numberOfIdentifiers());
+    BorrowedIdentifierMap::AddResult result = m_identifierMap.add(rep, m_codeBlock->numberOfIdentifiers());
     if (result.isNewEntry)
         m_codeBlock->addIdentifier(ident);
 
@@ -1725,7 +1725,8 @@ RegisterID* BytecodeGenerator::moveEmptyValue(RegisterID* dst)
 
 RegisterID* BytecodeGenerator::emitMove(RegisterID* dst, RegisterID* src)
 {
-    m_staticPropertyAnalyzer.mov(dst, src);
+    if (m_staticPropertyAnalysesEverCreated) [[unlikely]]
+        m_staticPropertyAnalyzer.mov(dst, src);
     if (canDoPeepholeOptimization() && m_lastInstruction->is<OpMov>()) {
         auto op = m_lastInstruction->as<OpMov>();
         if (op.m_dst == dst->virtualRegister())
@@ -1838,11 +1839,15 @@ RegisterID* BytecodeGenerator::emitBinaryOp(OpcodeID opcodeID, RegisterID* dst, 
         };
 
         if (isConstantEmptyString(src1)) {
+            if (src2->isTemporary() || src2->virtualRegister().isConstant())
+                return emitToString(dst, src2);
             emitToPrimitive(dst, src2);
             return emitToString(dst, dst);
         }
 
         if (isConstantEmptyString(src2)) {
+            if (src1->isTemporary() || src1->virtualRegister().isConstant())
+                return emitToString(dst, src1);
             emitToPrimitive(dst, src1);
             return emitToString(dst, dst);
         }
@@ -2662,10 +2667,18 @@ std::optional<Variable> BytecodeGenerator::tryResolveVariable(ExpressionNode* ex
 // will start with this ResolveType and compute the least upper bound including intercepting scopes.
 ResolveType BytecodeGenerator::resolveType()
 {
+    if (!m_usesSloppyEval) [[likely]] {
+        for (unsigned i = m_lexicalScopeStack.size(); i--; ) {
+            if (m_lexicalScopeStack[i].m_isWithScope)
+                return Dynamic;
+        }
+        return GlobalProperty;
+    }
+
     for (unsigned i = m_lexicalScopeStack.size(); i--; ) {
         if (m_lexicalScopeStack[i].m_isWithScope)
             return Dynamic;
-        if (m_usesSloppyEval && m_lexicalScopeStack[i].m_symbolTable->scopeType() == SymbolTable::ScopeType::FunctionNameScope) {
+        if (m_lexicalScopeStack[i].m_symbolTable->scopeType() == SymbolTable::ScopeType::FunctionNameScope) {
             // We never want to assign to a FunctionNameScope. Returning Dynamic here achieves this goal.
             // If we aren't in non-strict eval mode, then NodesCodeGen needs to take care not to emit
             // a put_to_scope with the destination being the function name scope variable.
@@ -2673,9 +2686,7 @@ ResolveType BytecodeGenerator::resolveType()
         }
     }
 
-    if (m_usesSloppyEval)
-        return GlobalPropertyWithVarInjectionChecks;
-    return GlobalProperty;
+    return GlobalPropertyWithVarInjectionChecks;
 }
 
 RegisterID* BytecodeGenerator::emitResolveScope(RegisterID* dst, const Variable& variable)
@@ -2866,7 +2877,8 @@ RegisterID* BytecodeGenerator::emitPutById(RegisterID* base, const Identifier& p
 
     unsigned propertyIndex = addConstant(property);
 
-    m_staticPropertyAnalyzer.putById(base, propertyIndex);
+    if (m_staticPropertyAnalysesEverCreated) [[unlikely]]
+        m_staticPropertyAnalyzer.putById(base, propertyIndex);
 
     OpPutById::emit(this, base, propertyIndex, value, PutByIdFlags::create(ecmaMode())); // is not direct
     return value;
@@ -2889,7 +2901,8 @@ RegisterID* BytecodeGenerator::emitDirectPutById(RegisterID* base, const Identif
 
     unsigned propertyIndex = addConstant(property);
 
-    m_staticPropertyAnalyzer.putById(base, propertyIndex);
+    if (m_staticPropertyAnalysesEverCreated) [[unlikely]]
+        m_staticPropertyAnalyzer.putById(base, propertyIndex);
 
     PutByIdFlags type = PutByIdFlags::createDirect(ecmaMode());
     OpPutById::emit(this, base, propertyIndex, value, type);
@@ -2899,7 +2912,8 @@ RegisterID* BytecodeGenerator::emitDirectPutById(RegisterID* base, const Identif
 void BytecodeGenerator::emitPutGetterById(RegisterID* base, const Identifier& property, unsigned attributes, RegisterID* getter)
 {
     unsigned propertyIndex = addConstant(property);
-    m_staticPropertyAnalyzer.putById(base, propertyIndex);
+    if (m_staticPropertyAnalysesEverCreated) [[unlikely]]
+        m_staticPropertyAnalyzer.putById(base, propertyIndex);
 
     OpPutGetterById::emit(this, base, propertyIndex, attributes, getter);
 }
@@ -2907,7 +2921,8 @@ void BytecodeGenerator::emitPutGetterById(RegisterID* base, const Identifier& pr
 void BytecodeGenerator::emitPutSetterById(RegisterID* base, const Identifier& property, unsigned attributes, RegisterID* setter)
 {
     unsigned propertyIndex = addConstant(property);
-    m_staticPropertyAnalyzer.putById(base, propertyIndex);
+    if (m_staticPropertyAnalysesEverCreated) [[unlikely]]
+        m_staticPropertyAnalyzer.putById(base, propertyIndex);
 
     OpPutSetterById::emit(this, base, propertyIndex, attributes, setter);
 }
@@ -2916,7 +2931,8 @@ void BytecodeGenerator::emitPutGetterSetter(RegisterID* base, const Identifier& 
 {
     unsigned propertyIndex = addConstant(property);
 
-    m_staticPropertyAnalyzer.putById(base, propertyIndex);
+    if (m_staticPropertyAnalysesEverCreated) [[unlikely]]
+        m_staticPropertyAnalyzer.putById(base, propertyIndex);
 
     OpPutGetterSetterById::emit(this, base, propertyIndex, attributes, getter, setter);
 }
@@ -3178,6 +3194,7 @@ RegisterID* BytecodeGenerator::emitGetArgument(RegisterID* dst, int32_t index)
 RegisterID* BytecodeGenerator::emitCreateThis(RegisterID* dst)
 {
     OpCreateThis::emit(this, dst, dst, 0);
+    m_staticPropertyAnalysesEverCreated = true;
     m_staticPropertyAnalyzer.createThis(dst, m_lastInstruction);
     return dst;
 }
@@ -3412,6 +3429,7 @@ void BytecodeGenerator::restoreTDZStack(const BytecodeGenerator::PreservedTDZSta
 RegisterID* BytecodeGenerator::emitNewObject(RegisterID* dst)
 {
     OpNewObject::emit(this, dst, 0);
+    m_staticPropertyAnalysesEverCreated = true;
     m_staticPropertyAnalyzer.newObject(dst, m_lastInstruction);
 
     return dst;

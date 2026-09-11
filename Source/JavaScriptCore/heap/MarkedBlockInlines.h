@@ -260,7 +260,11 @@ void MarkedBlock::Handle::specializedSweep(FreeList* freeList, MarkedBlock::Hand
 
     VM& vm = this->vm();
     bool isMarking = space()->isMarking();
-    uint64_t secret = vm.heapRandom().getUint64();
+    // Only the free list's cells are scrambled with this, so a SweepOnly pass never consumes it. When
+    // this is the specialized instantiation the branch is folded away entirely.
+    uint64_t secret = 0;
+    if (sweepMode == SweepToFreeList)
+        secret = vm.heapRandom().getUint64();
 
     auto destroy = [&] (void* cell) {
         JSCell* jsCell = static_cast<JSCell*>(cell);
@@ -321,14 +325,9 @@ void MarkedBlock::Handle::specializedSweep(FreeList* freeList, MarkedBlock::Hand
         return;
     }
 
-    WTF::BitSet<atomsPerBlock> live;
-    if (marksMode == MarksNotStale && newlyAllocatedMode == HasNewlyAllocated) {
-        live = header.m_marks;
+    WTF::BitSet<atomsPerBlock> live = marksMode == MarksNotStale ? header.m_marks : header.m_newlyAllocated;
+    if (marksMode == MarksNotStale && newlyAllocatedMode == HasNewlyAllocated)
         live.merge(header.m_newlyAllocated);
-    } else if (marksMode == MarksNotStale)
-        live = header.m_marks;
-    else
-        live = header.m_newlyAllocated;
 
     // We only want to discard the newlyAllocated bits if we're creating a FreeList,
     // otherwise we would lose information on what's currently alive.

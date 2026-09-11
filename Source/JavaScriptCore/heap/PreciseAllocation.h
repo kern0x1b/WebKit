@@ -99,22 +99,27 @@ public:
     
     size_t cellSize() const { return m_cellSize; }
 
-    bool aboveLowerBound(const void* rawPtr)
+    char* lowerBound()
     {
-        char* ptr = std::bit_cast<char*>(rawPtr);
-        char* begin = std::bit_cast<char*>(cell());
-        return ptr >= begin;
+        return std::bit_cast<char*>(cell());
     }
-    
-    bool belowUpperBound(const void* rawPtr)
+
+    char* upperBound()
     {
-        char* ptr = std::bit_cast<char*>(rawPtr);
-        char* begin = std::bit_cast<char*>(cell());
-        char* end = begin + cellSize();
         // We cannot #include IndexingHeader.h because reasons. The fact that IndexingHeader is 8
         // bytes is wired deep into our engine, so this isn't so bad.
         size_t sizeOfIndexingHeader = 8;
-        return ptr <= end + sizeOfIndexingHeader;
+        return lowerBound() + cellSize() + sizeOfIndexingHeader;
+    }
+
+    bool aboveLowerBound(const void* rawPtr)
+    {
+        return std::bit_cast<char*>(rawPtr) >= lowerBound();
+    }
+
+    bool belowUpperBound(const void* rawPtr)
+    {
+        return std::bit_cast<char*>(rawPtr) <= upperBound();
     }
     
     bool contains(const void* rawPtr)

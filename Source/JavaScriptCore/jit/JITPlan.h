@@ -35,6 +35,9 @@
 #include "ReleaseHeapAccessScope.h"
 #include <wtf/MonotonicTime.h>
 #include <wtf/ThreadSafeRefCounted.h>
+#if defined(WEBKIT_IOS6)
+#include <atomic>
+#endif
 
 namespace JSC {
 
@@ -78,6 +81,13 @@ public:
     }
 
     JITCompilationKey key();
+
+#if defined(WEBKIT_IOS6)
+    MonotonicTime timeCreatedForQueueOrdering() const { return m_timeCreatedForQueueOrdering; }
+    bool wasLoopTriggerAtEnqueueForQueueOrdering() const { return m_wasLoopTriggerAtEnqueue; }
+    unsigned reheatCountForQueueOrdering() const { return m_reheatCountForQueueOrdering.load(std::memory_order_relaxed); }
+    void bumpReheatForQueueOrdering() { m_reheatCountForQueueOrdering.fetch_add(1, std::memory_order_relaxed); }
+#endif
 
     void compileInThread(JITWorklistThread*);
 
@@ -136,6 +146,15 @@ protected:
     JITPlanStage m_stage { JITPlanStage::Preparing };
     JITCompilationMode m_mode;
     MonotonicTime m_timeBeforeFTL;
+#if defined(WEBKIT_IOS6)
+    MonotonicTime m_timeCreatedForQueueInstrumentation;
+
+    MonotonicTime m_timeCreatedForQueueOrdering;
+
+    bool m_wasLoopTriggerAtEnqueue { false };
+
+    std::atomic<unsigned> m_reheatCountForQueueOrdering { 0 };
+#endif
     VM* m_vm;
     CodeBlock* m_codeBlock;
     CheckedPtr<JITWorklistThread> m_thread;

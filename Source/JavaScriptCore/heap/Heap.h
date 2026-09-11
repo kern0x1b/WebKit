@@ -367,6 +367,13 @@ public:
     JS_EXPORT_PRIVATE void setFullActivityCallback(RefPtr<GCActivityCallback>&&);
     JS_EXPORT_PRIVATE void setEdenActivityCallback(RefPtr<GCActivityCallback>&&);
     JS_EXPORT_PRIVATE void disableStopIfNecessaryTimer();
+#if defined(WEBKIT_IOS6)
+    void noteEdenActivityCallbackFired() { m_edenCollectionRequestedByTimer = true; }
+    void noteOpportunisticEdenCollection() { m_edenCollectionRequestedByOpportunisticTask = true; }
+    bool consumeEdenAllocationFloorSkip(size_t bytesAllowedThisCycle);
+    Seconds edenAllocationFloorSkipRemaining() const;
+    static double edenFloorRescheduleSeconds();
+#endif
 
     JS_EXPORT_PRIVATE void setGarbageCollectionTimerEnabled(bool);
     JS_EXPORT_PRIVATE void scheduleOpportunisticFullCollection();
@@ -792,6 +799,9 @@ private:
     double projectedGCRateLimitingValue(MonotonicTime);
     void updateAllocationLimits();
     void didFinishCollection();
+#if defined(WEBKIT_IOS6)
+    void reportCodeBlockTiers();
+#endif
     void resumeCompilerThreads();
     void gatherExtraHeapData(HeapProfiler&);
     void removeDeadHeapSnapshotNodes(HeapProfiler&);
@@ -802,6 +812,9 @@ private:
     bool sweepNextLogicallyEmptyWeakBlock();
 
     bool shouldDoFullCollection();
+#if defined(WEBKIT_IOS6)
+    bool suppressPromotionToFull();
+#endif
 
     inline void incrementDeferralDepth();
     inline void decrementDeferralDepth();
@@ -863,6 +876,23 @@ private:
 
     size_t m_nonOversizedBytesAllocatedThisCycle { 0 };
     size_t m_bytesAbandonedSinceLastFullCollect { 0 };
+#if defined(WEBKIT_IOS6)
+    unsigned m_edenCollectionsSinceLastFullCollect { 0 };
+    bool m_fullCollectionSuppressionActive { false };
+    MonotonicTime m_fullCollectionSuppressionStartTime;
+    Seconds m_gcPhaseBeginTime;
+    Seconds m_gcPhaseMarkTime;
+    Seconds m_gcPhaseConstraintTime;
+    Seconds m_gcPhaseFinalizeTime;
+    Seconds m_gcPhaseSweepTime;
+    Seconds m_gcPhaseEndTime;
+    bool m_edenAllocFloorSkipPending { false };
+    MonotonicTime m_edenAllocFloorSkipDeadline;
+    unsigned m_edenAllocFloorConsecutiveSkips { 0 };
+    uint64_t m_edenAllocFloorTotalSkips { 0 };
+    bool m_edenCollectionRequestedByTimer { false };
+    bool m_edenCollectionRequestedByOpportunisticTask { false };
+#endif
     size_t m_maxEdenSize;
     size_t m_maxEdenSizeWhenCritical;
     size_t m_maxHeapSize;
@@ -1045,8 +1075,14 @@ private:
     unsigned m_percentAvailableMemoryCachedCallCount { 0 };
     bool m_overCriticalMemoryThreshold { false };
 #endif
+#if defined(WEBKIT_IOS6)
+    bool m_overHardMemoryThreshold { false };
+#endif
 
     bool m_parallelMarkersShouldExit { false };
+    // Fixed for the lifetime of the Heap: heapHelperPool() sizes itself from
+    // Options::numberOfGCMarkers() the first time a Heap is constructed and never resizes.
+    bool m_hasParallelMarkers { false };
     Lock m_collectContinuouslyLock;
     Condition m_collectContinuouslyCondition;
 

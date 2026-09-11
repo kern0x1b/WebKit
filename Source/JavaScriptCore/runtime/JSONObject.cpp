@@ -1149,9 +1149,46 @@ ALWAYS_INLINE void FastStringifier<CharType, bufferMode>::appendInt32(int32_t nu
     }
 }
 
+#if defined(WEBKIT_IOS6)
+static ALWAYS_INLINE bool NODELETE latin1SpanNeedsJSONEscaping(std::span<const Latin1Character> span)
+{
+    constexpr uint32_t ones = 0x01010101U;
+    constexpr uint32_t highBits = 0x80808080U;
+    constexpr uint32_t quoteBytes = 0x22222222U;
+    constexpr uint32_t escapeBytes = 0x5C5C5C5CU;
+    constexpr uint32_t spaceBytes = 0x20202020U;
+    const auto* ptr = span.data();
+    const auto* end = ptr + span.size();
+    while (end - ptr >= 4) {
+        uint32_t word = WTF::unalignedLoad<uint32_t>(ptr);
+        uint32_t quotes = word ^ quoteBytes;
+        uint32_t escapes = word ^ escapeBytes;
+        uint32_t hits = (((quotes - ones) & ~quotes) | ((escapes - ones) & ~escapes) | ((word - spaceBytes) & ~word)) & highBits;
+        if (hits) [[unlikely]] {
+            for (unsigned i = 0; i < 4; ++i) {
+                if (WTF::escapedFormsForJSON[ptr[i]])
+                    return true;
+            }
+        }
+        ptr += 4;
+    }
+    for (; ptr < end; ++ptr) {
+        if (WTF::escapedFormsForJSON[*ptr]) [[unlikely]]
+            return true;
+    }
+    return false;
+}
+#endif
+
 template<typename CharType>
 static ALWAYS_INLINE bool stringCopySameType(std::span<const CharType> span, CharType* cursor)
 {
+#if defined(WEBKIT_IOS6)
+    if constexpr (sizeof(CharType) == 1) {
+        memcpySpan(std::span<CharType> { cursor, span.size() }, span);
+        return latin1SpanNeedsJSONEscaping(span);
+    }
+#endif
 #if (CPU(ARM64) || CPU(X86_64)) && COMPILER(CLANG)
     constexpr size_t stride = SIMD::stride<CharType>;
     if (span.size() >= stride) {
@@ -1207,6 +1244,10 @@ static ALWAYS_INLINE bool stringCopySameType(std::span<const CharType> span, Cha
 
 static ALWAYS_INLINE bool stringCopyUpconvert(std::span<const Latin1Character> span, char16_t* cursor)
 {
+#if defined(WEBKIT_IOS6)
+    WTF::copyElements(std::span<char16_t> { cursor, span.size() }, span);
+    return latin1SpanNeedsJSONEscaping(span);
+#else
 #if (CPU(ARM64) || CPU(X86_64)) && COMPILER(CLANG)
     constexpr size_t stride = SIMD::stride<Latin1Character>;
     if (span.size() >= stride) {
@@ -1245,6 +1286,7 @@ static ALWAYS_INLINE bool stringCopyUpconvert(std::span<const Latin1Character> s
         *cursor++ = character;
     }
     return false;
+#endif
 }
 
 template<typename CharType, BufferMode bufferMode>

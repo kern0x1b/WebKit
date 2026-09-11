@@ -236,6 +236,10 @@ public:
 
     const uint8_t* addLatin1Table(const CharacterClass::ByteTable& table)
     {
+        for (auto& stored : m_latin1Tables) {
+            if (stored->data == table.data)
+                return stored->data.data();
+        }
         m_latin1Tables.append(makeUniqueRef<CharacterClass::ByteTable>(table));
         return m_latin1Tables.last()->data.data();
     }

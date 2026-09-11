@@ -181,8 +181,13 @@ private:
     // This constant factor biases cache capacity toward allowing a minimum
     // working set to enter the cache before it starts evicting.
     static constexpr Seconds workingSetTime = 10_s;
+#if defined(WEBKIT_IOS6)
+    static constexpr int64_t workingSetMaxBytes = 2000000;
+    static constexpr size_t workingSetMaxEntries = 300;
+#else
     static constexpr int64_t workingSetMaxBytes = 16000000;
     static constexpr size_t workingSetMaxEntries = 2000;
+#endif
 
     // This constant factor biases cache capacity toward recent activity. We
     // want to adapt to changing workloads.
@@ -263,6 +268,10 @@ template <> struct CacheTypes<UnlinkedModuleProgramCodeBlock> {
 UnlinkedEvalCodeBlock* generateUnlinkedCodeBlockForDirectEval(VM&, DirectEvalExecutable*, const SourceCode&, JSParserScriptMode, OptionSet<CodeGenerationMode>, ParserError&, EvalContextType, const TDZEnvironment* variablesUnderTDZ, const PrivateNameEnvironment*);
 UnlinkedProgramCodeBlock* recursivelyGenerateUnlinkedCodeBlockForProgram(VM&, const SourceCode&, LexicallyScopedFeatures, JSParserScriptMode, OptionSet<CodeGenerationMode>, ParserError&, EvalContextType);
 UnlinkedModuleProgramCodeBlock* recursivelyGenerateUnlinkedCodeBlockForModuleProgram(VM&, const SourceCode&, LexicallyScopedFeatures, JSParserScriptMode, OptionSet<CodeGenerationMode>, ParserError&, EvalContextType);
+
+#if defined(WEBKIT_IOS6)
+bool enqueueAheadOfTimeBytecodeGeneration(VM&, const SourceCode&, LexicallyScopedFeatures, JSParserScriptMode, OptionSet<CodeGenerationMode>);
+#endif
 
 void writeCodeBlock(const SourceCodeKey&, const SourceCodeValue&);
 RefPtr<CachedBytecode> serializeBytecode(VM&, UnlinkedCodeBlock*, const SourceCode&, SourceCodeType, LexicallyScopedFeatures, JSParserScriptMode, FileSystem::FileHandle&, BytecodeCacheError&, OptionSet<CodeGenerationMode>);

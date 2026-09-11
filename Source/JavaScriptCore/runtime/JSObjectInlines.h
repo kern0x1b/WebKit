@@ -708,7 +708,7 @@ ALWAYS_INLINE void JSObject::setIndexQuicklyForArrayStorageIndexingType(VM& vm, 
 {
     ArrayStorage* storage = this->butterfly()->arrayStorage();
     WriteBarrier<Unknown>& x = storage->m_vector[i];
-    JSValue old = x.get();
+    JSValue old = loadElementUnordered(x);
     x.set(vm, this, v);
     if (!old) {
         ++storage->m_numValuesInVector;
@@ -1065,10 +1065,10 @@ void JSObject::forEachOwnIndexedProperty(JSGlobalObject* globalObject, const Fun
         ArrayStorage* storage = butterfly()->arrayStorage();
         unsigned usedVectorLength = std::min(storage->length(), storage->vectorLength());
         for (unsigned i = 0; i < usedVectorLength; ++i) {
-            auto value = storage->m_vector[i];
+            JSValue value = loadElementUnordered(storage->m_vector[i]);
             if (!value)
                 continue;
-            if (functor(i, value.get()) == IterationStatus::Done)
+            if (functor(i, value) == IterationStatus::Done)
                 return;
         }
 
@@ -1357,13 +1357,13 @@ inline JSValue JSObject::getIndexQuickly(unsigned i) const
     const Butterfly* butterfly = this->butterfly();
     switch (indexingType()) {
     case ALL_INT32_INDEXING_TYPES:
-        return jsNumber(butterfly->contiguous().at(this, i).get().asInt32());
+        return jsNumber(loadElementUnordered(butterfly->contiguous().at(this, i)).asInt32());
     case ALL_CONTIGUOUS_INDEXING_TYPES:
-        return butterfly->contiguous().at(this, i).get();
+        return loadElementUnordered(butterfly->contiguous().at(this, i));
     case ALL_DOUBLE_INDEXING_TYPES:
         return JSValue(JSValue::EncodeAsDouble, butterfly->contiguousDouble().at(this, i));
     case ALL_ARRAY_STORAGE_INDEXING_TYPES:
-        return butterfly->arrayStorage()->m_vector[i].get();
+        return loadElementUnordered(butterfly->arrayStorage()->m_vector[i]);
     case ALL_BLANK_INDEXING_TYPES:
         return getIndexQuicklyForTypedArray(i);
     default:
@@ -1384,14 +1384,14 @@ inline JSValue JSObject::tryGetIndexQuickly(unsigned i, ArrayProfile* arrayProfi
         break;
     case ALL_INT32_INDEXING_TYPES:
         if (i < butterfly->publicLength()) {
-            JSValue result = butterfly->contiguous().at(this, i).get();
+            JSValue result = loadElementUnordered(butterfly->contiguous().at(this, i));
             ASSERT(result.isInt32() || !result);
             return result;
         }
         break;
     case ALL_CONTIGUOUS_INDEXING_TYPES:
         if (i < butterfly->publicLength())
-            return butterfly->contiguous().at(this, i).get();
+            return loadElementUnordered(butterfly->contiguous().at(this, i));
         break;
     case ALL_DOUBLE_INDEXING_TYPES: {
         if (i >= butterfly->publicLength())
@@ -1403,7 +1403,7 @@ inline JSValue JSObject::tryGetIndexQuickly(unsigned i, ArrayProfile* arrayProfi
     }
     case ALL_ARRAY_STORAGE_INDEXING_TYPES:
         if (i < butterfly->arrayStorage()->vectorLength())
-            return butterfly->arrayStorage()->m_vector[i].get();
+            return loadElementUnordered(butterfly->arrayStorage()->m_vector[i]);
         break;
     default:
         RELEASE_ASSERT_NOT_REACHED();

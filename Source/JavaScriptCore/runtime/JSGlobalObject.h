@@ -404,7 +404,11 @@ public:
     WriteBarrierStructureID m_regExpStructure;
 
     WriteBarrierStructureID m_asyncFunctionStructure;
+#if defined(WEBKIT_IOS6)
+    LazyProperty<JSGlobalObject, Structure> m_asyncFromSyncIteratorStructure;
+#else
     WriteBarrierStructureID m_asyncFromSyncIteratorStructure;
+#endif
     WriteBarrierStructureID m_asyncGeneratorFunctionStructure;
     WriteBarrierStructureID m_generatorFunctionStructure;
     WriteBarrierStructureID m_generatorStructure;
@@ -474,9 +478,15 @@ public:
 #undef DEFINE_STORAGE_FOR_LAZY_TYPE
 
     WriteBarrier<GetterSetter> m_arraySpeciesGetterSetter;
+#if defined(WEBKIT_IOS6)
+    LazyProperty<JSGlobalObject, GetterSetter> m_typedArraySpeciesGetterSetter;
+    LazyProperty<JSGlobalObject, GetterSetter> m_arrayBufferSpeciesGetterSetter;
+    LazyProperty<JSGlobalObject, GetterSetter> m_sharedArrayBufferSpeciesGetterSetter;
+#else
     WriteBarrier<GetterSetter> m_typedArraySpeciesGetterSetter;
     WriteBarrier<GetterSetter> m_arrayBufferSpeciesGetterSetter;
     WriteBarrier<GetterSetter> m_sharedArrayBufferSpeciesGetterSetter;
+#endif
     WriteBarrier<GetterSetter> m_promiseSpeciesGetterSetter;
     WriteBarrier<JSObject> m_unhandledRejectionCallback;
 
@@ -775,7 +785,11 @@ public:
     // replaces the global object's associated property.
 
     GetterSetter* arraySpeciesGetterSetter() const LIFETIME_BOUND { return m_arraySpeciesGetterSetter.get(); }
+#if defined(WEBKIT_IOS6)
+    GetterSetter* typedArraySpeciesGetterSetter() const LIFETIME_BOUND { return m_typedArraySpeciesGetterSetter.get(this); }
+#else
     GetterSetter* typedArraySpeciesGetterSetter() const LIFETIME_BOUND { return m_typedArraySpeciesGetterSetter.get(); }
+#endif
     GetterSetter* promiseSpeciesGetterSetter() const LIFETIME_BOUND { return m_promiseSpeciesGetterSetter.get(); }
 
     ArrayConstructor* arrayConstructor() const LIFETIME_BOUND { return m_arrayConstructor.get(); }
@@ -972,7 +986,11 @@ public:
     Structure* shadowRealmStructure() const { return m_shadowRealmObjectStructure.get(); }
     Structure* generatorStructure() const { return m_generatorStructure.get(); }
     Structure* asyncFunctionGeneratorStructure() const { return m_asyncFunctionGeneratorStructure.get(); }
+#if defined(WEBKIT_IOS6)
+    Structure* asyncFromSyncIteratorStructure() const { return m_asyncFromSyncIteratorStructure.get(this); }
+#else
     Structure* asyncFromSyncIteratorStructure() const { return m_asyncFromSyncIteratorStructure.get(); }
+#endif
     Structure* asyncGeneratorStructure() const { return m_asyncGeneratorStructure.get(); }
     Structure* functionWithFieldsStructure() const { return m_functionWithFieldsStructure.get(); }
     Structure* generatorFunctionStructure() const { return m_generatorFunctionStructure.get(); }

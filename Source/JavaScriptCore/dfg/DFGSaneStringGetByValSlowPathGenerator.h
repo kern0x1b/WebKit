@@ -78,7 +78,7 @@ private:
     JITCompiler::LinkableConstant m_globalObject;
     GPRReg m_baseReg;
     GPRReg m_propertyReg;
-    Vector<SilentRegisterSavePlan, 2> m_plans;
+    Vector<SilentRegisterSavePlan, silentRegisterSavePlanInlineCapacity> m_plans;
 };
 
 } } // namespace JSC::DFG

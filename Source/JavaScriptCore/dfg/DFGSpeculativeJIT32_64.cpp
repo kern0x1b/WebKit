@@ -30,6 +30,7 @@
 #if ENABLE(DFG_JIT)
 
 #include "ArrayPrototype.h"
+#include "BaselineJITRegisters.h"
 #include "CallFrameShuffler.h"
 #include "ClonedArguments.h"
 #include "DFGAbstractInterpreterInlines.h"
@@ -431,7 +432,14 @@ void SpeculativeJIT::nonSpeculativePeepholeStrictEq(Node* node, Node* branchNode
         callOperationWithSilentSpill(operationCompareStrictEqCell, resultPayloadGPR, LinkableConstant::globalObject(*this, node), arg1PayloadGPR, arg2PayloadGPR);
         branchTest32(invert ? Zero : NonZero, resultPayloadGPR, taken);
     } else {
-        // FIXME: Add fast paths for twoCells, number etc.
+        MacroAssembler::Jump notSameTag = branch32(NotEqual, arg1Regs.tagGPR(), arg2Regs.tagGPR());
+        MacroAssembler::Jump notSamePayload = branch32(NotEqual, arg1PayloadGPR, arg2PayloadGPR);
+        MacroAssembler::Jump isDouble = branch32(Below, arg1Regs.tagGPR(), TrustedImm32(JSValue::LowestTag));
+        jump(invert ? notTaken : taken);
+
+        notSameTag.link(this);
+        notSamePayload.link(this);
+        isDouble.link(this);
         callOperationWithSilentSpill(operationCompareStrictEq, resultPayloadGPR, LinkableConstant::globalObject(*this, node), arg1Regs, arg2Regs);
         branchTest32(invert ? Zero : NonZero, resultPayloadGPR, taken);
     }
@@ -457,9 +465,6 @@ void SpeculativeJIT::genericJSValueNonPeepholeStrictEq(Node* node, bool invert)
     arg2.use();
     
     if (isKnownCell(node->child1().node()) && isKnownCell(node->child2().node())) {
-        // see if we get lucky: if the arguments are cells and they reference the same
-        // cell, then they must be strictly equal.
-        // FIXME: this should flush registers instead of silent spill/fill.
         Jump notEqualCase = branchPtr(NotEqual, arg1PayloadGPR, arg2PayloadGPR);
 
         move(TrustedImm32(!invert), resultPayloadGPR);
@@ -472,9 +477,19 @@ void SpeculativeJIT::genericJSValueNonPeepholeStrictEq(Node* node, bool invert)
 
         done.link(this);
     } else {
-        // FIXME: Add fast paths.
+        MacroAssembler::Jump notSameTag = branch32(NotEqual, arg1Regs.tagGPR(), arg2Regs.tagGPR());
+        MacroAssembler::Jump notSamePayload = branch32(NotEqual, arg1PayloadGPR, arg2PayloadGPR);
+        MacroAssembler::Jump isDouble = branch32(Below, arg1Regs.tagGPR(), TrustedImm32(JSValue::LowestTag));
+        move(TrustedImm32(!invert), resultPayloadGPR);
+        Jump doneFast = jump();
+
+        notSameTag.link(this);
+        notSamePayload.link(this);
+        isDouble.link(this);
         callOperationWithSilentSpill(operationCompareStrictEq, resultPayloadGPR, LinkableConstant::globalObject(*this, node), arg1Regs, arg2Regs);
         andPtr(TrustedImm32(1), resultPayloadGPR);
+
+        doneFast.link(this);
     }
 
     booleanResult(resultPayloadGPR, node, UseChildrenCalledExplicitly);
@@ -1140,7 +1155,7 @@ GPRReg SpeculativeJIT::fillSpeculateCell(Edge edge)
         if (edge->hasConstant()) {
             GPRReg gpr = allocate();
             m_gprs.retain(gpr, virtualRegister, SpillOrderConstant);
-            move(TrustedImmPtr(edge->constant()), gpr);
+            loadLinkableConstant(LinkableConstant(*this, edge->constant()->cell()), gpr);
             info.fillCell(m_stream, gpr);
             return gpr;
         }
@@ -4045,6 +4060,10 @@ void SpeculativeJIT::compile(Node* node)
         compileIsEmptyStorage(node);
         break;
 
+    case MapStorage:
+        compileMapStorage(node);
+        break;
+
     case MapStorageOrSentinel:
         compileMapStorageOrSentinel(node);
         break;
@@ -4639,7 +4658,6 @@ void SpeculativeJIT::compile(Node* node)
     case InByValMegamorphic:
     case MultiGetByVal:
     case MultiPutByVal:
-    case MapStorage:
     case ArrayShift:
     case ArrayUnshift:
         DFG_CRASH(m_graph, node, "unexpected node in DFG backend");
@@ -5629,6 +5647,31 @@ void SpeculativeJIT::speculateInt32(Edge edge, JSValueRegs regs)
     speculationCheck(BadType, regs, edge, branchIfNotInt32(regs.tagGPR()));
 }
 
+void SpeculativeJIT::compileMapStorage(Node* node)
+{
+    SpeculateCellOperand map(this, node->child1());
+    JSValueRegsTemporary result(this);
+
+    GPRReg mapGPR = map.gpr();
+    JSValueRegs resultRegs = result.regs();
+
+    if (node->child1().useKind() == MapObjectUse) {
+        speculateMapObject(node->child1(), mapGPR);
+        loadPtr(Address(mapGPR, JSMap::offsetOfStorage()), resultRegs.payloadGPR());
+    } else if (node->child1().useKind() == SetObjectUse) {
+        speculateSetObject(node->child1(), mapGPR);
+        loadPtr(Address(mapGPR, JSSet::offsetOfStorage()), resultRegs.payloadGPR());
+    } else
+        RELEASE_ASSERT_NOT_REACHED();
+
+    move(TrustedImm32(JSValue::CellTag), resultRegs.tagGPR());
+    Jump notEmpty = branchTestPtr(NonZero, resultRegs.payloadGPR());
+    move(TrustedImm32(JSValue::EmptyValueTag), resultRegs.tagGPR());
+    notEmpty.link(this);
+
+    jsValueResult(resultRegs, node);
+}
+
 void SpeculativeJIT::compileMapIteratorNext(Node* node)
 {
     bool isMapIterator = node->child2().useKind() == MapObjectUse;
@@ -5706,7 +5749,7 @@ void SpeculativeJIT::compileStringIteratorNext(Node* node)
 
     doneCases.link(this);
 
-    Vector<SilentRegisterSavePlan> savePlans;
+    Vector<SilentRegisterSavePlan, silentRegisterSavePlanInlineCapacity> savePlans;
     silentSpillAllRegistersImpl(false, savePlans, resultValueGPR, resultPositionGPR);
     Label doneOperationCall = label();
     addSlowPathGeneratorLambda([=, this, savePlans = WTF::move(savePlans), slowCases = WTF::move(slowCases)]() mutable {

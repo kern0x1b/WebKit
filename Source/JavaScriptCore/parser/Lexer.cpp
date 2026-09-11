@@ -576,10 +576,14 @@ void Lexer<T>::setCode(const SourceCode& source, ParserArena* arena)
     m_sourceURLDirective = String();
     m_sourceMappingURLDirective = String();
     
+#if defined(WEBKIT_IOS6)
+    m_buffer8.reserveInitialCapacity(initialReadBufferCapacity);
+#else
     m_buffer8.reserveInitialCapacity(initialReadBufferCapacity);
     m_buffer16.reserveInitialCapacity(initialReadBufferCapacity);
     m_bufferForRawTemplateString16.reserveInitialCapacity(initialReadBufferCapacity);
-    
+#endif
+
     if (m_code < m_codeEnd) [[likely]]
         m_current = *m_code;
     else
@@ -737,8 +741,13 @@ static ALWAYS_INLINE bool isRestrKeyword(JSTokenType token)
 template <typename T>
 ALWAYS_INLINE void Lexer<T>::skipWhitespace()
 {
-    while (isWhiteSpace(m_current))
-        shift();
+    if (!isWhiteSpace(m_current)) [[likely]]
+        return;
+    const T* ptr = m_code + 1;
+    while (ptr < m_codeEnd && isWhiteSpace(*ptr))
+        ++ptr;
+    m_code = ptr;
+    m_current = (ptr < m_codeEnd) ? *ptr : 0;
 }
 
 static bool isNonLatin1IdentStart(char32_t c)
@@ -977,8 +986,11 @@ template <bool shouldCreateIdentifier> ALWAYS_INLINE JSTokenType Lexer<Latin1Cha
 
     ASSERT(isIdentStart(m_current) || m_current == '\\');
 
-    // Attempt SIMD scan first
-    // caseFoldMask: OR-ing with 0x20 maps 'A'-'Z' to 'a'-'z', so one range check covers both cases.
+#if defined(WEBKIT_IOS6)
+    const Latin1Character* found = currentSourcePtr();
+    while (found < m_codeEnd && typesOfLatin1Characters[*found] <= CharacterOtherIdentifierPart)
+        ++found;
+#else
     constexpr auto caseFoldMask = SIMD::splat<Latin1Character>(0x20);
     constexpr auto lowerA = SIMD::splat<Latin1Character>('a');
     constexpr auto lowerZ = SIMD::splat<Latin1Character>('z');
@@ -1002,13 +1014,14 @@ template <bool shouldCreateIdentifier> ALWAYS_INLINE JSTokenType Lexer<Latin1Cha
     };
 
     auto* found = SIMD::find(std::span { currentSourcePtr(), m_codeEnd }, vectorMatch, scalarMatch);
+#endif
     m_code = found;
     m_current = (found < m_codeEnd) ? *found : 0;
 
     // Scalar fallback for non-ASCII Latin1 identifier parts
     while (isIdentPart(m_current))
         shift();
-    
+
     if (m_current == '\\') [[unlikely]]
         return parseIdentifierSlowCase<shouldCreateIdentifier>(tokenData, lexerFlags, strictMode, identifierStart);
 
@@ -1077,7 +1090,15 @@ template <bool shouldCreateIdentifier> ALWAYS_INLINE JSTokenType Lexer<char16_t>
     char16_t orAllChars = 0;
     ASSERT(isSingleCharacterIdentStart(m_current) || U16_IS_SURROGATE(m_current) || m_current == '\\');
 
-    // Attempt SIMD scan first
+#if defined(WEBKIT_IOS6)
+    const char16_t* found = currentSourcePtr();
+    while (found < m_codeEnd) {
+        char16_t character = *found;
+        if (!isASCIIAlphanumeric(character) && character != '_' && character != '$')
+            break;
+        ++found;
+    }
+#else
     constexpr auto caseFoldMask = SIMD::splat<uint16_t>(0x20);
     constexpr auto lowerA = SIMD::splat<uint16_t>('a');
     constexpr auto lowerZ = SIMD::splat<uint16_t>('z');
@@ -1101,6 +1122,7 @@ template <bool shouldCreateIdentifier> ALWAYS_INLINE JSTokenType Lexer<char16_t>
     };
 
     auto* found = SIMD::find(std::span { currentSourcePtr(), m_codeEnd }, vectorMatch, scalarMatch);
+#endif
     m_code = found;
     m_current = (found < m_codeEnd) ? *found : 0;
     // No need to update orAllChars: all SIMD-matched chars are ASCII, so they don't affect orAllChars & ~0xFF
@@ -1248,6 +1270,33 @@ static ALWAYS_INLINE bool NODELETE characterRequiresParseStringSlowCase(char16_t
     return character < 0xE || !isLatin1(character);
 }
 
+#if defined(WEBKIT_IOS6)
+template<typename CharacterType>
+static ALWAYS_INLINE const CharacterType* findInterestingStringCharacterFourAtATime(const CharacterType* from, const CharacterType* end, CharacterType quoteCharacter)
+{
+    static_assert(sizeof(CharacterType) == 1);
+    constexpr uint32_t ones = 0x01010101U;
+    constexpr uint32_t highBits = 0x80808080U;
+    constexpr uint32_t escapeWord = ones * static_cast<uint32_t>('\\');
+    constexpr uint32_t controlWord = ones * 0x0EU;
+    const uint32_t quoteWord = ones * static_cast<uint32_t>(static_cast<uint8_t>(quoteCharacter));
+
+    while (end - from >= 4) {
+        uint32_t word;
+        memcpy(&word, from, sizeof(word));
+        const uint32_t againstQuote = word ^ quoteWord;
+        const uint32_t againstEscape = word ^ escapeWord;
+        const uint32_t mask = (((againstQuote - ones) & ~againstQuote)
+            | ((againstEscape - ones) & ~againstEscape)
+            | ((word - controlWord) & ~word)) & highBits;
+        if (mask)
+            return from + (getLSBSet(mask) >> 3);
+        from += 4;
+    }
+    return from;
+}
+#endif
+
 template <typename T>
 template <bool shouldBuildStrings> ALWAYS_INLINE typename Lexer<T>::StringParseResult Lexer<T>::parseString(JSTokenData* tokenData, bool strictMode)
 {
@@ -1259,6 +1308,7 @@ template <bool shouldBuildStrings> ALWAYS_INLINE typename Lexer<T>::StringParseR
 
     const T* stringStart = currentSourcePtr();
 
+#if !defined(WEBKIT_IOS6)
     using UnsignedType = SameSizeUnsignedInteger<T>;
     auto quoteMask = SIMD::splat<UnsignedType>(stringQuoteCharacter);
     constexpr auto escapeMask = SIMD::splat<UnsignedType>('\\');
@@ -1277,6 +1327,7 @@ template <bool shouldBuildStrings> ALWAYS_INLINE typename Lexer<T>::StringParseR
             return SIMD::findFirstNonZeroIndex(mask);
         }
     };
+#endif
 
     auto scalarMatch = [&](auto character) ALWAYS_INLINE_LAMBDA {
         if (character == stringQuoteCharacter)
@@ -1292,7 +1343,21 @@ template <bool shouldBuildStrings> ALWAYS_INLINE typename Lexer<T>::StringParseR
             return !isLatin1(character);
     };
 
-    const T* found = SIMD::find(std::span { stringStart, m_codeEnd }, vectorMatch, scalarMatch);
+    auto findInterestingCharacter = [&](const T* from) ALWAYS_INLINE_LAMBDA -> const T* {
+#if defined(WEBKIT_IOS6)
+        if constexpr (sizeof(T) == 1)
+            from = findInterestingStringCharacterFourAtATime(from, m_codeEnd, stringQuoteCharacter);
+        for (const T* cursor = from; cursor < m_codeEnd; ++cursor) {
+            if (scalarMatch(*cursor))
+                return cursor;
+        }
+        return m_codeEnd;
+#else
+        return SIMD::find(std::span { from, m_codeEnd }, vectorMatch, scalarMatch);
+#endif
+    };
+
+    const T* found = findInterestingCharacter(stringStart);
     if (found == m_codeEnd) [[unlikely]] {
         setOffset(startingOffset, startingLineStartOffset);
         setLineNumber(startingLineNumber);
@@ -1345,8 +1410,8 @@ template <bool shouldBuildStrings> ALWAYS_INLINE typename Lexer<T>::StringParseR
             }
             stringStart = currentSourcePtr();
 
-            // Retry SIMD to skip the next plain segment to an interesting character
-            found = SIMD::find(std::span { stringStart, m_codeEnd }, vectorMatch, scalarMatch);
+            // Retry the scan to skip the next plain segment to an interesting character
+            found = findInterestingCharacter(stringStart);
             if (found == m_codeEnd) [[unlikely]] {
                 setOffset(startingOffset, startingLineStartOffset);
                 setLineNumber(startingLineNumber);
@@ -2870,7 +2935,9 @@ start:
             // This quickly detects the character is not a part of identifier-part *and* back-slash.
             if (typesOfLatin1Characters[static_cast<Latin1Character>(nextCharacter)] > CharacterBackSlash) {
                 const auto character = m_current;
-                shift();
+                ++m_code;
+                m_current = nextCharacter;
+                tokenData->escaped = false;
                 if (lexerFlags.contains(LexerFlags::DontBuildKeywords))
                     tokenData->ident = nullptr;
                 else
@@ -2878,6 +2945,30 @@ start:
                 token = IDENT;
                 break;
             }
+#if defined(WEBKIT_IOS6)
+            const auto thirdCharacter = peek(2);
+            if (isLatin1(thirdCharacter)
+                && typesOfLatin1Characters[static_cast<Latin1Character>(nextCharacter)] <= CharacterOtherIdentifierPart
+                && typesOfLatin1Characters[static_cast<Latin1Character>(thirdCharacter)] > CharacterBackSlash
+                && !m_parsingBuiltinFunction) {
+                const auto first = m_current;
+                const auto second = nextCharacter;
+                bool isTwoCharacterKeyword = (first == 'd' && second == 'o')
+                    || (first == 'i' && (second == 'f' || second == 'n'));
+                if (!isTwoCharacterKeyword) [[likely]] {
+                    const T* identifierStart = currentSourcePtr();
+                    m_code += 2;
+                    m_current = thirdCharacter;
+                    tokenData->escaped = false;
+                    if (lexerFlags.contains(LexerFlags::DontBuildKeywords))
+                        tokenData->ident = nullptr;
+                    else
+                        tokenData->ident = makeIdentifier(std::span { identifierStart, static_cast<size_t>(2) });
+                    token = IDENT;
+                    break;
+                }
+            }
+#endif
         }
         [[fallthrough]];
     }

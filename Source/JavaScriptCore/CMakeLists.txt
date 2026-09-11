@@ -26,6 +26,7 @@ set(JavaScriptCore_PRIVATE_INCLUDE_DIRECTORIES
     "${JAVASCRIPTCORE_DIR}/dfg"
     "${JAVASCRIPTCORE_DIR}/disassembler"
     "${JAVASCRIPTCORE_DIR}/disassembler/ARM64"
+    "${JAVASCRIPTCORE_DIR}/disassembler/ARMv7"
     "${JAVASCRIPTCORE_DIR}/disassembler/zydis"
     "${JAVASCRIPTCORE_DIR}/domjit"
     "${JAVASCRIPTCORE_DIR}/ftl"
@@ -1800,6 +1801,20 @@ add_dependencies(JavaScriptCore_CopyPrivateHeaders Bytecodes JSCBuiltins JSCWebP
 target_include_directories(LowLevelInterpreterLib
     PRIVATE "$<TARGET_PROPERTY:JavaScriptCore,INCLUDE_DIRECTORIES>" "${JavaScriptCore_PRIVATE_FRAMEWORK_HEADERS_DIR}/JavaScriptCore")
 add_dependencies(LowLevelInterpreterLib Bytecodes JSCBuiltins JSCWebPreferenceOptions)
+
+# The interpreter is offline-generated assembly whose jump tables are label
+# differences computed at assembly time. Link-time optimization re-lays the
+# functions those labels live in, and the first entry into the interpreter
+# then jumps through a table pointing at the old layout - a clean SIGSEGV in
+# doVMEntry, reproduced twice on the device. Everything else takes LTO; this
+# one translation unit is compiled the ordinary way.
+target_compile_options(LowLevelInterpreterLib PRIVATE -fno-lto)
+
+if (WEBKIT_IOS6_SIZE_OPTIMIZED)
+    # The interpreter keeps -O3: it is the hot path for every line of script on
+    # the page and the one place where speed is worth its bytes.
+    target_compile_options(JavaScriptCore PRIVATE -Oz)
+endif ()
 if (TARGET WTF_CopyHeaders)
     add_dependencies(LowLevelInterpreterLib WTF_CopyHeaders)
 endif ()

@@ -207,6 +207,11 @@ public:
     static constexpr int s_maxTransitionLengthForNonEvalPutById = 512;
     static constexpr int s_maxTransitionLengthForRemove = 4096; // Picked from benchmarking measurement.
 
+#if defined(WEBKIT_IOS6)
+    JS_EXPORT_PRIVATE static int maxTransitionLengthForNonEvalPutById();
+    static void logCacheableDictionaryTransitionForAdd(PropertyName, PutPropertySlot::Context);
+#endif
+
     using SeenProperties = TinyBloomFilter<CompactPtr<UniquedStringImpl>::StorageType>;
 
     enum PolyProtoTag { PolyProto };
@@ -249,11 +254,17 @@ public:
 
     inline bool shouldDoCacheableDictionaryTransitionForAdd(PutPropertySlot::Context context)
     {
+#if defined(WEBKIT_IOS6)
+        int maxTransitionLength = s_maxTransitionLength;
+        if (context == PutPropertySlot::PutById)
+            maxTransitionLength = maxTransitionLengthForNonEvalPutById();
+#else
         int maxTransitionLength;
         if (context == PutPropertySlot::PutById)
             maxTransitionLength = s_maxTransitionLengthForNonEvalPutById;
         else
             maxTransitionLength = s_maxTransitionLength;
+#endif
         return transitionCountEstimate() > maxTransitionLength;
     }
 
@@ -411,7 +422,11 @@ public:
 
     ALWAYS_INLINE bool hasMonoProto() const
     {
+#if defined(WEBKIT_IOS6)
+        return !m_prototype.slot()->isEmpty();
+#else
         return !m_prototype.get().isEmpty();
+#endif
     }
     ALWAYS_INLINE bool hasPolyProto() const
     {
@@ -836,6 +851,22 @@ public:
     DEFINE_BITFIELD(bool, hasNonConfigurableProperties, HasNonConfigurableProperties, 1, 29);
     DEFINE_BITFIELD(bool, hasNonConfigurableReadOnlyOrGetterSetterProperties, HasNonConfigurableReadOnlyOrGetterSetterProperties, 1, 30);
 
+    static constexpr uint32_t s_bitFieldFlagsCopiedOnTransition =
+        s_dictionaryKindBits
+        | s_hasAnyKindOfGetterSetterPropertiesBits
+        | s_hasReadOnlyOrGetterSetterPropertiesExcludingProtoBits
+        | s_isQuickPropertyAccessAllowedForEnumerationBits
+        | s_hasNonEnumerablePropertiesBits
+        | s_hasSpecialPropertiesBits
+        | s_mayBePrototypeBits
+        | s_didPreventExtensionsBits
+        | s_staticPropertiesReifiedBits
+        | s_hasBeenFlattenedBeforeBits
+        | s_hasBeenDictionaryBits
+        | s_hasUnderscoreProtoPropertyExcludingOriginalProtoBits
+        | s_hasNonConfigurablePropertiesBits
+        | s_hasNonConfigurableReadOnlyOrGetterSetterPropertiesBits;
+
     enum class StructureVariant : uint8_t {
         Normal,
         Branded,
@@ -903,6 +934,8 @@ private:
     bool findStructuresAndMapForMaterialization(Vector<Structure*, 8>& structures, Structure*& structure, PropertyTable*&) WTF_ACQUIRES_LOCK_IF(true, structure->m_lock);
     
     static Structure* toDictionaryTransition(VM&, Structure*, DictionaryKind, DeferredStructureTransitionWatchpointFire* = nullptr);
+
+    inline void updateBitFieldFlagsForAddedProperty(VM&, PropertyName, unsigned attributes); // Defined in StructureInlines.h
 
     enum class ShouldPin : bool { No, Yes };
     template<ShouldPin, typename Func>
@@ -976,9 +1009,15 @@ private:
 
     JS_EXPORT_PRIVATE void allocateRareData(VM&);
 
+#if defined(WEBKIT_IOS6) && !ASSERT_ENABLED
+    template<typename DetailsFunc>
+    ALWAYS_INLINE void checkOffsetConsistency(PropertyTable*, const DetailsFunc&) const { }
+    ALWAYS_INLINE void checkOffsetConsistency() const { }
+#else
     template<typename DetailsFunc>
     void checkOffsetConsistency(PropertyTable*, const DetailsFunc&) const;
     void checkOffsetConsistency() const;
+#endif
 
     void startWatchingInternalProperties(VM&);
 
@@ -1082,18 +1121,18 @@ inline bool Structure::transitivelyTransitionedFrom(Structure* structureToFind)
 inline PropertyOffset Structure::maxOffset() const
 {
     uint16_t maxOffset = m_maxOffset;
+    if (maxOffset < shortInvalidOffset) [[likely]]
+        return maxOffset;
     if (maxOffset == shortInvalidOffset)
         return invalidOffset;
-    if (maxOffset == useRareDataFlag)
-        return rareData()->m_maxOffset;
-    return maxOffset;
+    return rareData()->m_maxOffset;
 }
 
 inline void Structure::setMaxOffset(VM& vm, PropertyOffset offset)
 {
     if (offset == invalidOffset)
         m_maxOffset = shortInvalidOffset;
-    else if (offset < useRareDataFlag && offset < shortInvalidOffset)
+    else if (offset < shortInvalidOffset) [[likely]]
         m_maxOffset = offset;
     else if (m_maxOffset == useRareDataFlag)
         rareData()->m_maxOffset = offset;
@@ -1107,18 +1146,18 @@ inline void Structure::setMaxOffset(VM& vm, PropertyOffset offset)
 inline PropertyOffset Structure::transitionOffset() const
 {
     uint16_t transitionOffset = m_transitionOffset;
+    if (transitionOffset < shortInvalidOffset) [[likely]]
+        return transitionOffset;
     if (transitionOffset == shortInvalidOffset)
         return invalidOffset;
-    if (transitionOffset == useRareDataFlag)
-        return rareData()->m_transitionOffset;
-    return transitionOffset;
+    return rareData()->m_transitionOffset;
 }
 
 inline void Structure::setTransitionOffset(VM& vm, PropertyOffset offset)
 {
     if (offset == invalidOffset)
         m_transitionOffset = shortInvalidOffset;
-    else if (offset < useRareDataFlag && offset < shortInvalidOffset)
+    else if (offset < shortInvalidOffset) [[likely]]
         m_transitionOffset = offset;
     else if (m_transitionOffset == useRareDataFlag)
         rareData()->m_transitionOffset = offset;

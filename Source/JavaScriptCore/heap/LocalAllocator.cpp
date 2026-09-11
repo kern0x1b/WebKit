@@ -254,6 +254,10 @@ void* LocalAllocator::tryAllocateIn(MarkedBlock::Handle* block, size_t cellSize)
 
 void LocalAllocator::doTestCollectionsIfNeeded(JSC::Heap& heap, GCDeferralContext* deferralContext)
 {
+#if defined(WEBKIT_IOS6)
+    UNUSED_PARAM(heap);
+    UNUSED_PARAM(deferralContext);
+#else
     if (!Options::slowPathAllocsBetweenGCs()) [[likely]]
         return;
 
@@ -268,6 +272,7 @@ void LocalAllocator::doTestCollectionsIfNeeded(JSC::Heap& heap, GCDeferralContex
     }
     if (++allocationCount >= Options::slowPathAllocsBetweenGCs())
         allocationCount = 0;
+#endif
 }
 
 } // namespace JSC

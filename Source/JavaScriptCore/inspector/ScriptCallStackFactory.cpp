@@ -83,10 +83,14 @@ public:
     Ref<ScriptCallStack> takeStack()
     {
         AsyncStackTrace* parentStackTrace = nullptr;
+#if defined(WEBKIT_IOS6)
+        UNUSED_VARIABLE(m_globalObject);
+#else
         if (auto* debugger = m_globalObject->debugger()) {
             if (auto* debuggerAgent = dynamicDowncast<InspectorDebuggerAgent>(debugger->client()))
                 parentStackTrace = debuggerAgent->currentParentStackTrace();
         }
+#endif
 
         return ScriptCallStack::create(WTF::move(m_frames), m_truncated, parentStackTrace);
     }
@@ -141,6 +145,71 @@ Ref<ScriptCallStack> createScriptCallStackForConsole(JSC::JSGlobalObject* global
     }
     return stack;
 }
+
+#if defined(WEBKIT_IOS6)
+class CreateFirstSourceFrameFunctor {
+public:
+    CreateFirstSourceFrameFunctor(bool needToSkipAFrame)
+        : m_needToSkipAFrame(needToSkipAFrame)
+    {
+    }
+
+    IterationStatus operator()(StackVisitor& visitor) const
+    {
+        if (m_needToSkipAFrame) {
+            m_needToSkipAFrame = false;
+            return IterationStatus::Continue;
+        }
+
+        if (visitor->isImplementationVisibilityPrivate())
+            return IterationStatus::Continue;
+
+        if (!m_remainingCapacityForFrameCapture)
+            return IterationStatus::Done;
+        m_remainingCapacityForFrameCapture--;
+        m_visitedAnyFrame = true;
+
+        auto sourceURL = visitor->sourceURL();
+        if (sourceURL == "[native code]"_s)
+            return IterationStatus::Continue;
+
+        m_frames.append(ScriptCallFrame(visitor->functionName(), sourceURL, visitor->preRedirectURL(), visitor->sourceID(), visitor->computeLineAndColumn()));
+        return IterationStatus::Done;
+    }
+
+    bool visitedAnyFrame() const { return m_visitedAnyFrame; }
+
+    Ref<ScriptCallStack> takeStack() { return ScriptCallStack::create(WTF::move(m_frames), false, nullptr); }
+
+private:
+    mutable bool m_needToSkipAFrame;
+    mutable bool m_visitedAnyFrame { false };
+    mutable size_t m_remainingCapacityForFrameCapture { ScriptCallStack::maxCallStackSizeToCapture };
+    mutable Vector<ScriptCallFrame> m_frames;
+};
+
+Ref<ScriptCallStack> createScriptCallStackForConsoleSourceFrame(JSC::JSGlobalObject* globalObject)
+{
+    if (!globalObject)
+        return ScriptCallStack::create();
+
+    JSLockHolder locker(globalObject);
+
+    VM& vm = globalObject->vm();
+    CallFrame* frame = vm.topCallFrame;
+    if (!frame)
+        return ScriptCallStack::create();
+
+    CreateFirstSourceFrameFunctor functorSkippingFirstFrame(true);
+    StackVisitor::visit(frame, vm, functorSkippingFirstFrame);
+    if (functorSkippingFirstFrame.visitedAnyFrame())
+        return functorSkippingFirstFrame.takeStack();
+
+    CreateFirstSourceFrameFunctor functorIncludingFirstFrame(false);
+    StackVisitor::visit(frame, vm, functorIncludingFirstFrame);
+    return functorIncludingFirstFrame.takeStack();
+}
+#endif
 
 static bool extractSourceInformationFromException(JSC::JSGlobalObject* globalObject, JSObject* exceptionObject, LineColumn* lineColumn, String* sourceURL)
 {
@@ -204,10 +273,12 @@ Ref<ScriptCallStack> createScriptCallStackFromException(JSC::JSGlobalObject* glo
     }
 
     AsyncStackTrace* parentStackTrace = nullptr;
+#if !defined(WEBKIT_IOS6)
     if (auto* debugger = globalObject->debugger()) {
         if (auto* debuggerAgent = dynamicDowncast<InspectorDebuggerAgent>(debugger->client()))
             parentStackTrace = debuggerAgent->currentParentStackTrace();
     }
+#endif
     return ScriptCallStack::create(WTF::move(frames), stackTrace.size() > maxStackSize, parentStackTrace);
 }
 

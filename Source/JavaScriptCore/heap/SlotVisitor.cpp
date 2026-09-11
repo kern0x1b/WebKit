@@ -113,6 +113,9 @@ void SlotVisitor::didStartMarking()
         m_heapAnalyzer = heapProfiler->activeHeapAnalyzer();
 
     m_markingVersion = heap()->objectSpace().markingVersion();
+#if defined(WEBKIT_IOS6)
+    m_needsMarkingFence = m_heap.m_hasParallelMarkers;
+#endif
 }
 
 void SlotVisitor::reset()
@@ -258,16 +261,33 @@ ALWAYS_INLINE void SlotVisitor::setMarkedAndAppendToMarkStack(ContainerType& con
 {
     if (container.testAndSetMarked(cell, dependency))
         return;
-    
+
     ASSERT(cell->structure());
-    
+
     // Indicate that the object is grey and that:
     // In case of concurrent GC: it's the first time it is grey in this GC cycle.
     // In case of eden collection: it's a new object that became grey rather than an old remembered object.
     cell->setCellState(CellState::PossiblyGrey);
-    
+
     appendToMarkStack(container, cell);
 }
+
+#if defined(WEBKIT_IOS6)
+void SlotVisitor::setMarkedAndAppendToMarkStack(MarkedBlock& block, JSCell* cell, Dependency dependency)
+{
+    bool alreadyMarked = (!m_needsMarkingFence && webkitIOS6GCUncontendedMarkEnabled())
+        ? block.testAndSetMarkedUncontended(cell, dependency)
+        : block.testAndSetMarked(cell, dependency);
+    if (alreadyMarked)
+        return;
+
+    ASSERT(cell->structure());
+
+    cell->setCellState(CellState::PossiblyGrey);
+
+    appendToMarkStack(block, cell);
+}
+#endif
 
 void SlotVisitor::appendToMarkStack(JSCell* cell)
 {
@@ -367,9 +387,14 @@ ALWAYS_INLINE void SlotVisitor::visitChildren(const JSCell* cell)
     // black.
     
     cell->setCellState(CellState::PossiblyBlack);
-    
+
+#if defined(WEBKIT_IOS6)
+    if (m_needsMarkingFence) [[likely]]
+        WTF::storeLoadFence();
+#else
     WTF::storeLoadFence();
-    
+#endif
+
     switch (cell->type()) {
     case StringType:
         JSString::visitChildren(const_cast<JSCell*>(cell), *this);
@@ -452,6 +477,13 @@ void SlotVisitor::donateKnownParallel(MarkStackArray& from, MarkStackArray& to)
 
 void SlotVisitor::donateKnownParallel()
 {
+    // With no helper markers there is nobody on the other end of the shared stacks, so every step
+    // below - two stack size loads, a tryLock on the shared m_markingMutex, and a broadcast on the
+    // marking condition variable - is pure overhead. drain() calls us directly on every rebalance
+    // interval, so this check has to live here and not only in donate().
+    if (!m_heap.m_hasParallelMarkers)
+        return;
+
     forEachMarkStack(
         [&] (MarkStackArray& stack) -> IterationStatus {
             donateKnownParallel(stack, correspondingGlobalStack(stack));
@@ -486,6 +518,58 @@ void SlotVisitor::optimizeForStoppedMutator()
     m_canOptimizeForStoppedMutator = true;
 }
 
+#if defined(WEBKIT_IOS6)
+static unsigned NODELETE envUnsigned(const char* name, unsigned defaultValue)
+{
+    const char* text = getenv(name);
+    if (!text || !text[0])
+        return defaultValue;
+    char* end = nullptr;
+    long value = strtol(text, &end, 10);
+    if (end == text || value < 0)
+        return defaultValue;
+    return static_cast<unsigned>(value);
+}
+
+static constexpr unsigned ios6MaxMarkPipelineDepth = 16;
+
+static unsigned webkitIOS6GCMarkPipelineDepth()
+{
+    static const unsigned depth = std::min(envUnsigned("WEBKIT_IOS6_GC_MARK_PIPELINE_DEPTH", 0), ios6MaxMarkPipelineDepth);
+    return depth;
+}
+
+template<typename ShouldStop, typename OnVisit>
+ALWAYS_INLINE static void drainMarkStackPipelined(MarkStackArray& stack, unsigned depth, const ShouldStop& shouldStop, const OnVisit& onVisit)
+{
+    const JSCell* queue[ios6MaxMarkPipelineDepth];
+    unsigned head = 0;
+    unsigned count = 0;
+
+    auto pushOne = [&] ALWAYS_INLINE_LAMBDA -> bool {
+        if (count == depth || shouldStop() || !stack.canRemoveLast())
+            return false;
+        queue[(head + count) % ios6MaxMarkPipelineDepth] = stack.popAndPrefetch();
+        ++count;
+        return true;
+    };
+
+    while (pushOne()) { }
+
+    while (count) {
+        if (count > 1 && webkitIOS6GCStructurePrefetchEnabled()) [[likely]] {
+            const JSCell* upcoming = queue[(head + 1) % ios6MaxMarkPipelineDepth];
+            __builtin_prefetch(upcoming->structureID().tryDecode());
+        }
+        const JSCell* cell = queue[head];
+        head = (head + 1) % ios6MaxMarkPipelineDepth;
+        --count;
+        pushOne();
+        onVisit(cell);
+    }
+}
+#endif
+
 NEVER_INLINE void SlotVisitor::drain(MonotonicTime timeout)
 {
     if (!m_isInParallelMode) {
@@ -494,8 +578,14 @@ NEVER_INLINE void SlotVisitor::drain(MonotonicTime timeout)
     }
     
     Locker locker { m_rightToRun };
-    
-    while (!hasElapsed(timeout)) {
+
+    // Both of these are fixed for the whole drain. Reading the option out of its global on every
+    // rebalance interval, and calling into the out-of-line hasElapsed() when the caller passed the
+    // infinite timeout that a stop-the-world collector always passes, are both pure overhead.
+    const unsigned scansBetweenRebalance = Options::minimumNumberOfScansBetweenRebalance();
+    const bool neverTimesOut = timeout == MonotonicTime::infinity();
+
+    while (neverTimesOut || !hasElapsed(timeout)) {
         updateMutatorIsStopped(locker);
         IterationStatus status = forEachMarkStack(
             [&] (MarkStackArray& stack) -> IterationStatus {
@@ -510,7 +600,22 @@ NEVER_INLINE void SlotVisitor::drain(MonotonicTime timeout)
                 // because each cell would be likely placed in a random place. We perform software prefetching onto
                 // one next cell while accessing the current cell to make memory fetching in flight while handling
                 // the current cell.
-                unsigned countdown = Options::minimumNumberOfScansBetweenRebalance();
+                unsigned countdown = scansBetweenRebalance;
+#if defined(WEBKIT_IOS6)
+                if (unsigned pipelineDepth = webkitIOS6GCMarkPipelineDepth()) {
+                    drainMarkStackPipelined(stack, pipelineDepth,
+                        [&] ALWAYS_INLINE_LAMBDA -> bool {
+                            if (!countdown)
+                                return true;
+                            --countdown;
+                            return false;
+                        },
+                        [&] (const JSCell* cell) ALWAYS_INLINE_LAMBDA {
+                            visitChildren(cell);
+                        });
+                    return IterationStatus::Done;
+                }
+#endif
                 auto popAndPrefetch = [&] ALWAYS_INLINE_LAMBDA -> const JSCell* {
                     if (!countdown || !stack.canRemoveLast())
                         return nullptr;
@@ -519,6 +624,10 @@ NEVER_INLINE void SlotVisitor::drain(MonotonicTime timeout)
                 };
                 for (const JSCell* next = popAndPrefetch(); next;) {
                     const JSCell* cell = next;
+#if defined(WEBKIT_IOS6)
+                    if (webkitIOS6GCStructurePrefetchEnabled()) [[likely]]
+                        __builtin_prefetch(cell->structureID().tryDecode());
+#endif
                     next = popAndPrefetch();
                     visitChildren(cell);
                 }
@@ -527,7 +636,7 @@ NEVER_INLINE void SlotVisitor::drain(MonotonicTime timeout)
         propagateExternalMemoryVisitedIfNecessary();
         if (status == IterationStatus::Continue)
             break;
-        
+
         m_rightToRun.safepoint();
         donateKnownParallel();
     }
@@ -558,9 +667,11 @@ size_t SlotVisitor::performIncrementOfDraining(size_t bytesRequested)
         return bytesVisited() >= bytesRequested;
     };
     
+    const unsigned scansBetweenRebalance = Options::minimumNumberOfScansBetweenRebalance();
+
     {
         Locker locker { m_rightToRun };
-        
+
         while (!isDone()) {
             updateMutatorIsStopped(locker);
             IterationStatus status = forEachMarkStack(
@@ -569,10 +680,26 @@ size_t SlotVisitor::performIncrementOfDraining(size_t bytesRequested)
                         return IterationStatus::Continue;
 
                     stack.refill();
-                    
+
                     m_isFirstVisit = (&stack == &m_collectorStack);
 
-                    unsigned countdown = Options::minimumNumberOfScansBetweenRebalance();
+                    unsigned countdown = scansBetweenRebalance;
+#if defined(WEBKIT_IOS6)
+                    if (unsigned pipelineDepth = webkitIOS6GCMarkPipelineDepth()) {
+                        drainMarkStackPipelined(stack, pipelineDepth,
+                            [&] ALWAYS_INLINE_LAMBDA -> bool {
+                                if (!countdown || isDone())
+                                    return true;
+                                --countdown;
+                                return false;
+                            },
+                            [&] (const JSCell* cell) ALWAYS_INLINE_LAMBDA {
+                                cellBytesVisited += cell->cellSize();
+                                visitChildren(cell);
+                            });
+                        return IterationStatus::Done;
+                    }
+#endif
                     auto popAndPrefetch = [&] ALWAYS_INLINE_LAMBDA -> const JSCell* {
                         if (!countdown || !stack.canRemoveLast() || isDone())
                             return nullptr;
@@ -581,6 +708,10 @@ size_t SlotVisitor::performIncrementOfDraining(size_t bytesRequested)
                     };
                     for (const JSCell* next = popAndPrefetch(); next;) {
                         const JSCell* cell = next;
+#if defined(WEBKIT_IOS6)
+                        if (webkitIOS6GCStructurePrefetchEnabled()) [[likely]]
+                            __builtin_prefetch(cell->structureID().tryDecode());
+#endif
                         next = popAndPrefetch();
                         cellBytesVisited += cell->cellSize();
                         visitChildren(cell);
@@ -659,18 +790,12 @@ NEVER_INLINE SlotVisitor::SharedDrainResult SlotVisitor::drainFromShared(SharedD
                 if (didReachTermination(locker)) {
                     m_heap.m_markingConditionVariable.notifyAll();
                     
-                    // If we're in concurrent mode, then we know that the mutator will eventually do
-                    // the right thing because:
-                    // - It's possible that the collector has the conn. In that case, the collector will
-                    //   wake up from the notification above. This will happen if the app released heap
-                    //   access. Native apps can spend a lot of time with heap access released.
-                    // - It's possible that the mutator will allocate soon. Then it will check if we
-                    //   reached termination. This is the most likely outcome in programs that allocate
-                    //   a lot.
-                    // - WebCore never releases access. But WebCore has a runloop. The runloop will check
-                    //   if we reached termination.
-                    // So, this tells the runloop that it's got things to do.
+#if defined(WEBKIT_IOS6)
+                    if (!m_heap.worldIsStopped())
+                        m_heap.m_stopIfNecessaryTimer->scheduleSoon();
+#else
                     m_heap.m_stopIfNecessaryTimer->scheduleSoon();
+#endif
                 }
 
                 auto isReady = [&] () -> bool {
@@ -736,7 +861,7 @@ SlotVisitor::SharedDrainResult SlotVisitor::drainInParallelPassively(MonotonicTi
     
     ASSERT(Options::numberOfGCMarkers());
     
-    if (Options::numberOfGCMarkers() == 1
+    if (!m_heap.m_hasParallelMarkers
         || (m_heap.m_worldState.load() & Heap::mutatorWaitingBit)
         || !m_heap.hasHeapAccess()
         || m_heap.worldIsStopped()) {
@@ -790,9 +915,6 @@ void SlotVisitor::donate()
         dataLog("FATAL: Attempting to donate when not in parallel mode.\n");
         RELEASE_ASSERT_NOT_REACHED();
     }
-    
-    if (Options::numberOfGCMarkers() == 1)
-        return;
     
     donateKnownParallel();
 }

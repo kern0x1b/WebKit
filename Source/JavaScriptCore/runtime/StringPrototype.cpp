@@ -206,6 +206,7 @@ StringPrototype* StringPrototype::create(VM& vm, JSGlobalObject* globalObject, S
 NEVER_INLINE void substituteBackreferencesSlow(StringBuilder& result, StringView replacement, StringView source, const int* ovector, RegExp* reg, size_t i)
 {
     bool hasNamedCaptures = reg && reg->hasNamedCaptures();
+    const unsigned numSubpatterns = reg ? reg->numSubpatterns() : 0;
     int offset = 0;
     do {
         if (i + 1 == replacement.length())
@@ -244,7 +245,7 @@ NEVER_INLINE void substituteBackreferencesSlow(StringBuilder& result, StringView
             unsigned nameLength = closingBracket - i - 2;
             unsigned backrefIndex = reg->subpatternIdForGroupName(replacement.substring(i + 2, nameLength), ovector);
 
-            if (!backrefIndex || backrefIndex > reg->numSubpatterns()) {
+            if (!backrefIndex || backrefIndex > numSubpatterns) {
                 backrefStart = 0;
                 backrefEnd = 0;
             } else {
@@ -255,13 +256,13 @@ NEVER_INLINE void substituteBackreferencesSlow(StringBuilder& result, StringView
         } else if (reg && isASCIIDigit(ref)) {
             // 1- and 2-digit back references are allowed
             unsigned backrefIndex = ref - '0';
-            if (backrefIndex > reg->numSubpatterns())
+            if (backrefIndex > numSubpatterns)
                 continue;
             if (replacement.length() > i + 2) {
                 ref = replacement[i + 2];
                 if (isASCIIDigit(ref)) {
                     backrefIndex = 10 * backrefIndex + ref - '0';
-                    if (backrefIndex > reg->numSubpatterns())
+                    if (backrefIndex > numSubpatterns)
                         backrefIndex = backrefIndex / 10;   // Fall back to the 1-digit reference
                     else
                         advance = 1;
@@ -390,13 +391,15 @@ JSString* replaceUsingRegExpSearch(VM& vm, JSGlobalObject* globalObject, JSStrin
     size_t lastIndex = 0;
     unsigned startPosition = 0;
 
+    const unsigned captureSlots = regExp->numSubpatterns() + 1;
+
     Vector<Range<int32_t>, 16> sourceRanges;
     Vector<String, 16> replacements;
 
     // This is either a loop (if global is set) or a one-way (if not).
     if (global && callData.type == CallData::Type::JS) {
         // regExp->numSubpatterns() + 1 for pattern args, + 2 for match start and string
-        int argCount = regExp->numSubpatterns() + 1 + 2;
+        int argCount = captureSlots + 2;
         if (hasNamedCaptures)
             ++argCount;
         JSFunction* func = uncheckedDowncast<JSFunction>(replaceValue);
@@ -421,7 +424,7 @@ JSString* replaceUsingRegExpSearch(VM& vm, JSGlobalObject* globalObject, JSStrin
             JSObject* groups = hasNamedCaptures ? constructEmptyObject(vm, groupsStructure ? groupsStructure : globalObject->nullPrototypeObjectStructure()) : nullptr;
             PropertyOffset groupOffset = 0;
 
-            for (unsigned i = 0; i < regExp->numSubpatterns() + 1; ++i) {
+            for (unsigned i = 0; i < captureSlots; ++i) {
                 int matchStart = ovector[i * 2];
                 int matchEnd = ovector[i * 2 + 1];
 
@@ -513,7 +516,7 @@ JSString* replaceUsingRegExpSearch(VM& vm, JSGlobalObject* globalObject, JSStrin
             JSObject* groups = hasNamedCaptures ? constructEmptyObject(vm, groupsStructure ? groupsStructure : globalObject->nullPrototypeObjectStructure()) : nullptr;
             PropertyOffset groupOffset = 0;
 
-            for (unsigned i = 0; i < regExp->numSubpatterns() + 1; ++i) {
+            for (unsigned i = 0; i < captureSlots; ++i) {
                 int matchStart = ovector[i * 2];
                 int matchEnd = ovector[i * 2 + 1];
 

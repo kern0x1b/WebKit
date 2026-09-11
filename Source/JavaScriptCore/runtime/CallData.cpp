@@ -84,18 +84,43 @@ JSValue call(JSGlobalObject* globalObject, JSValue functionObject, const CallDat
     return result;
 }
 
+
+#if defined(WEBKIT_IOS6)
+#include <unistd.h>
+#include <stdio.h>
+#include "JSCInlines.h"
+#include "JSFunction.h"
+#include "FunctionExecutable.h"
+
+extern "C" { __attribute__((visibility("default"))) volatile int g_webkitIOS6InsideScript = 0; }
+#endif
+
 JSValue profiledCall(JSGlobalObject* globalObject, ProfilingReason reason, JSValue functionObject, const CallData& callData, JSValue thisValue, const ArgList& args)
 {
     VM& vm = globalObject->vm();
     ScriptProfilingScope profilingScope(vm.deprecatedVMEntryGlobalObject(globalObject), reason);
+#if defined(WEBKIT_IOS6)
+    g_webkitIOS6InsideScript++;
+    JSValue result = call(globalObject, functionObject, callData, thisValue, args);
+    g_webkitIOS6InsideScript--;
+    return result;
+#else
     return call(globalObject, functionObject, callData, thisValue, args);
+#endif
 }
 
 JSValue profiledCall(JSGlobalObject* globalObject, ProfilingReason reason, JSValue functionObject, const CallData& callData, JSValue thisValue, const ArgList& args, NakedPtr<Exception>& returnedException)
 {
     VM& vm = globalObject->vm();
     ScriptProfilingScope profilingScope(vm.deprecatedVMEntryGlobalObject(globalObject), reason);
+#if defined(WEBKIT_IOS6)
+    g_webkitIOS6InsideScript++;
+    JSValue result = call(globalObject, functionObject, callData, thisValue, args, returnedException);
+    g_webkitIOS6InsideScript--;
+    return result;
+#else
     return call(globalObject, functionObject, callData, thisValue, args, returnedException);
+#endif
 }
 
 } // namespace JSC

@@ -34,7 +34,10 @@
 #include <WebKitAdditions/JITCageAdditions.h>
 #pragma clang diagnostic pop
 #else // ENABLE(JIT_CAGE)
-#if OS(DARWIN)
+#if defined(WEBKIT_IOS6)
+#define MAP_EXECUTABLE_FOR_JIT 0
+#define MAP_EXECUTABLE_FOR_JIT_WITH_JIT_CAGE 0
+#elif OS(DARWIN)
 #define MAP_EXECUTABLE_FOR_JIT MAP_JIT
 #define MAP_EXECUTABLE_FOR_JIT_WITH_JIT_CAGE MAP_JIT
 #else // OS(DARWIN)

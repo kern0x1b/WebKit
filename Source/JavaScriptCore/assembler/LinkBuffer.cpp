@@ -275,11 +275,31 @@ private:
 
 static ALWAYS_INLINE void recordLinkOffsets(AssemblerData& assemblerData, int32_t regionStart, int32_t regionEnd, int32_t offset)
 {
+    // This table is read back by executableOffsetFor() as an array of int32_t
+    // slots, so the pattern has to land on slot boundaries. regionStart and
+    // regionEnd are instruction offsets, and on Thumb-2 instructions are two or
+    // four bytes - so roughly half of these regions start at 2 mod 4. On ARM64,
+    // the only other branch-compaction target, every instruction is four bytes
+    // and the question never comes up, which is why the Darwin path below has
+    // always been written as a byte-addressed fill.
+    //
+    // memset_pattern4() repeats the pattern from exactly the byte it is handed.
+    // Handed a 2-mod-4 address it writes every slot two bytes out of phase, so a
+    // compaction delta of 0x80 reads back as 0x00800000. applyOffset() subtracts
+    // that from a code offset, and JIT::link() then patches an address 8MB
+    // outside its own code buffer - a read-only mapping, hence SIGBUS.
+    //
+    // Round to slot boundaries, which is exactly what the portable path does.
+    const int32_t slotMask = ~static_cast<int32_t>(sizeof(int32_t) - 1);
+    const int32_t slotStart = regionStart & slotMask;
+    const int32_t slotEnd = regionEnd & slotMask;
+    if (slotEnd <= slotStart)
+        return;
 #if OS(DARWIN)
-    memset_pattern4(std::bit_cast<uint8_t*>(assemblerData.buffer()) + regionStart, &offset, regionEnd - regionStart);
+    memset_pattern4(std::bit_cast<uint8_t*>(assemblerData.buffer()) + slotStart, &offset, slotEnd - slotStart);
 #else
-    int32_t ptr = regionStart / sizeof(int32_t);
-    const int32_t end = regionEnd / sizeof(int32_t);
+    int32_t ptr = slotStart / sizeof(int32_t);
+    const int32_t end = slotEnd / sizeof(int32_t);
     int32_t* offsets = reinterpret_cast_ptr<int32_t*>(assemblerData.buffer());
     while (ptr < end)
         offsets[ptr++] = offset;
@@ -405,7 +425,7 @@ void LinkBuffer::copyCompactAndLinkCode(MacroAssembler& macroAssembler, JITCompi
 
 
     recordLinkOffsets(m_assemblerStorage, readPtr, initialSize, readPtr - writePtr);
-        
+
     for (unsigned i = 0; i < jumpCount; ++i) {
         auto& linkRecord = jumpsToLink[i];
         uint8_t* location = codeOutData + linkRecord.from();

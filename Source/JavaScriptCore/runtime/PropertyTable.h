@@ -128,6 +128,7 @@ public:
     };
 
     FindResult find(const KeyType&);
+    ALWAYS_INLINE FindResult findEmptySlot(const KeyType&);
     std::tuple<PropertyOffset, unsigned, bool> addAfterFind(VM&, const ValueType& entry, FindResult&&);
 
     void seal();
@@ -340,6 +341,23 @@ inline PropertyTable::FindResult PropertyTable::find(const KeyType& key)
     });
 }
 
+inline PropertyTable::FindResult PropertyTable::findEmptySlot(const KeyType& key)
+{
+    ASSERT(key);
+    ASSERT(key->isAtom() || key->isSymbol());
+    unsigned hash = IdentifierRepHash::hash(key);
+    unsigned indexMask = m_indexMask;
+    return withIndexVector([&](auto* vector) -> FindResult {
+        unsigned probeCount = 0;
+        unsigned index = hash & indexMask;
+        while (vector[index] != EmptyEntryIndex) {
+            ++probeCount;
+            index = (index + probeCount) & indexMask;
+        }
+        return FindResult { EmptyEntryIndex, index, invalidOffset, 0 };
+    });
+}
+
 inline std::tuple<PropertyOffset, unsigned> PropertyTable::get(const KeyType& key)
 {
     ASSERT(key);
@@ -376,7 +394,7 @@ ALWAYS_INLINE std::tuple<PropertyOffset, unsigned, bool> PropertyTable::addAfter
     // ensure capacity is available.
     if (!canInsert(entry)) {
         rehash(vm, m_keyCount + 1, canFitInCompact(entry));
-        result = find(entry.key());
+        result = findEmptySlot(entry.key());
         ASSERT(result.offset == invalidOffset);
         ASSERT(result.entryIndex == EmptyEntryIndex);
     }

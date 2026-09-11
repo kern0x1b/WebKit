@@ -85,14 +85,35 @@ inline bool logCompilationChanges(JITCompilationMode mode = JITCompilationMode::
 
 inline bool shouldDumpGraphAtEachPhase(Graph&);
 
+#if ASSERT_ENABLED
 inline bool validationEnabled()
 {
-#if ASSERT_ENABLED
     return true;
-#else
-    return Options::validateGraph() || Options::validateGraphAtEachPhase();
-#endif
 }
+#elif defined(WEBKIT_IOS6)
+constexpr bool validationEnabled()
+{
+    return false;
+}
+#else
+inline bool validationEnabled()
+{
+    return Options::validateGraph() || Options::validateGraphAtEachPhase();
+}
+#endif
+
+#if defined(WEBKIT_IOS6)
+struct PipelineTuning {
+    unsigned preciseLocalCSEBlockLimit;
+    bool typeCheckHoisting;
+    bool staticExecutionCountEstimation;
+    bool localCSE;
+    bool strengthReduction;
+    bool varargsForwarding;
+};
+
+const PipelineTuning& pipelineTuning();
+#endif
 
 inline bool constexpr enableInt52()
 {

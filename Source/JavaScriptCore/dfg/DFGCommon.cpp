@@ -27,6 +27,9 @@
 #include "DFGCommon.h"
 
 #include "FunctionAllowlist.h"
+#include <cstdlib>
+#include <cstring>
+#include <mutex>
 #include <wtf/Lock.h>
 #include <wtf/NeverDestroyed.h>
 #include <wtf/PrintStream.h>
@@ -56,6 +59,45 @@ FunctionAllowlist& ensureGlobalFTLAllowlist()
         ftlAllowlist.construct(functionAllowlistFile);
     });
     return ftlAllowlist;
+}
+#endif
+
+#if defined(WEBKIT_IOS6)
+static unsigned envUnsigned(const char* name, unsigned defaultValue)
+{
+    const char* value = getenv(name);
+    if (!value || !value[0])
+        return defaultValue;
+    char* end = nullptr;
+    unsigned long parsed = strtoul(value, &end, 10);
+    if (end == value)
+        return defaultValue;
+    return static_cast<unsigned>(parsed);
+}
+
+static bool envBool(const char* name, bool defaultValue)
+{
+    const char* value = getenv(name);
+    if (!value || !value[0])
+        return defaultValue;
+    if (!strcmp(value, "0") || !strcmp(value, "false") || !strcmp(value, "off"))
+        return false;
+    return true;
+}
+
+const PipelineTuning& pipelineTuning()
+{
+    static PipelineTuning tuning;
+    static std::once_flag onceFlag;
+    std::call_once(onceFlag, [] {
+        tuning.preciseLocalCSEBlockLimit = envUnsigned("WEBKIT_IOS6_DFG_CSE_PRECISE_BLOCK_LIMIT", 800);
+        tuning.typeCheckHoisting = envBool("WEBKIT_IOS6_DFG_TYPE_CHECK_HOISTING", true);
+        tuning.staticExecutionCountEstimation = envBool("WEBKIT_IOS6_DFG_STATIC_EXECUTION_COUNTS", true);
+        tuning.localCSE = envBool("WEBKIT_IOS6_DFG_LOCAL_CSE", true);
+        tuning.strengthReduction = envBool("WEBKIT_IOS6_DFG_STRENGTH_REDUCTION", true);
+        tuning.varargsForwarding = envBool("WEBKIT_IOS6_DFG_VARARGS_FORWARDING", true);
+    });
+    return tuning;
 }
 #endif
 

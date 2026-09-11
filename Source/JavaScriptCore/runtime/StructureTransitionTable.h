@@ -243,12 +243,50 @@ class StructureTransitionTable {
     };
 #else
     struct Hash {
-        using Key = std::tuple<void*, unsigned, TransitionKind>;
-        using KeyTraits = HashTraits<Key>;
-        
+        // Logically, Key is a tuple of (1) PointerKey, (2) unsigned attributes, and (3) transitionKind,
+        // packed into two words since a 32-bit pointer has no spare high bits.
+        struct Key {
+            friend struct Hash;
+            static constexpr uint32_t hashTableDeletedValue = 0x2;
+            static constexpr uint32_t attributesMask = 0xffU;
+            static constexpr unsigned transitionKindShift = 8;
+            static_assert(sizeof(TransitionPropertyAttributes) * 8 <= 8);
+            static_assert(sizeof(TransitionKind) * 8 <= 8);
+
+            Key(PointerKey impl, unsigned attributes, TransitionKind transitionKind)
+                : m_pointer(static_cast<uint32_t>(impl.raw()))
+                , m_extra(static_cast<uint32_t>(attributes) | (static_cast<uint32_t>(transitionKind) << transitionKindShift))
+            {
+                ASSERT(impl == this->impl());
+                ASSERT(attributes <= UINT8_MAX);
+                ASSERT(attributes == this->attributes());
+                ASSERT(transitionKind != TransitionKind::Unknown);
+                ASSERT(transitionKind == this->transitionKind());
+            }
+
+            Key() = default;
+
+            Key(WTF::HashTableDeletedValueType)
+                : m_pointer(hashTableDeletedValue)
+            { }
+
+            bool isHashTableDeletedValue() const { return m_pointer == hashTableDeletedValue; }
+
+            PointerKey impl() const { return PointerKey::fromRaw(m_pointer); }
+            TransitionPropertyAttributes attributes() const { return m_extra & attributesMask; }
+            TransitionKind transitionKind() const { return static_cast<TransitionKind>(m_extra >> transitionKindShift); }
+
+            friend bool operator==(const Key&, const Key&) = default;
+
+        private:
+            uint32_t m_pointer { 0 };
+            uint32_t m_extra { 0 };
+        };
+        using KeyTraits = SimpleClassHashTraits<Key>;
+
         static unsigned hash(const Key& p)
         {
-            return PtrHash<void*>::hash(std::get<0>(p)) + std::get<1>(p) + static_cast<unsigned>(std::get<2>(p));
+            return IntHash<uint32_t>::hash(p.m_pointer) + p.m_extra;
         }
 
         static bool equal(const Key& a, const Key& b)
@@ -259,7 +297,7 @@ class StructureTransitionTable {
         static Key createKeyFromStructure(Structure*);
         static Key createKey(PointerKey impl, unsigned attributes, TransitionKind transitionKind)
         {
-            return Key { impl.pointer(), attributes, transitionKind };
+            return Key { impl, attributes, transitionKind };
         }
 
         static constexpr bool safeToCompareToEmptyOrDeleted = true;

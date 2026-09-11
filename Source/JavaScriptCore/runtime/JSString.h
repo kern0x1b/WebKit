@@ -131,7 +131,11 @@ public:
 
     static constexpr uintptr_t isRopeInPointer = 0x1;
 
+#if defined(WEBKIT_IOS6)
+    static constexpr unsigned maxLengthForOnStackResolve = 512;
+#else
     static constexpr unsigned maxLengthForOnStackResolve = 2048;
+#endif
 
     template<typename CharacterType>
     inline void resolveToBuffer(std::span<CharacterType>);
@@ -1140,7 +1144,7 @@ ALWAYS_INLINE JSString* jsStringWithCache(VM& vm, const String& s)
 
     auto& stringImpl = *s.impl();
     if (length == 1) {
-        if (auto c = stringImpl[0]; c <= maxSingleCharacterString)
+        if (auto c = stringImpl.at(0); c <= maxSingleCharacterString)
             return vm.smallStrings.singleCharacterString(c);
     }
 

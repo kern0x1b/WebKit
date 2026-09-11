@@ -25,12 +25,90 @@
 
 #pragma once
 
+#if defined(WEBKIT_IOS6)
+#define WEBKIT_IOS6_STACK_TRACE_LIMIT 25u
+#else
+#define WEBKIT_IOS6_STACK_TRACE_LIMIT 100u
+#endif
+
+
+#if defined(WEBKIT_IOS6)
+#define WEBKIT_IOS6_JIT_WARMUP 500
+#define WEBKIT_IOS6_JIT_SOON 100
+#define WEBKIT_IOS6_OPTIMIZE_WARMUP 1000
+#define WEBKIT_IOS6_OPTIMIZE_SOON 1000
+#else
+#define WEBKIT_IOS6_JIT_WARMUP 500
+#define WEBKIT_IOS6_JIT_SOON 100
+#define WEBKIT_IOS6_OPTIMIZE_WARMUP 1000
+#define WEBKIT_IOS6_OPTIMIZE_SOON 1000
+#endif
+
+#if defined(WEBKIT_IOS6)
+#define WEBKIT_IOS6_AHEAD_OF_TIME_BYTECODE true
+#else
+#define WEBKIT_IOS6_AHEAD_OF_TIME_BYTECODE false
+#endif
+
+#if defined(WEBKIT_IOS6)
+#define WEBKIT_IOS6_WORKLIST_THREADS 1
+#define WEBKIT_IOS6_COMPILER_THREAD_PRIORITY_DELTA -8
+#else
+#define WEBKIT_IOS6_WORKLIST_THREADS computeNumberOfWorkerThreads(3, 2)
+#define WEBKIT_IOS6_COMPILER_THREAD_PRIORITY_DELTA computePriorityDeltaOfWorkerThreads(-1, 0)
+#endif
+
+
 #include <JavaScriptCore/GCLogging.h>
 #include <JavaScriptCore/JSCWebPreferenceOptions.h>
 #include <JavaScriptCore/JSExportMacros.h>
 
 #if OS(DARWIN)
 #include <mach/vm_param.h>
+#endif
+
+#if defined(WEBKIT_IOS6)
+#if CPU(ARM_THUMB2)
+#define WEBKIT_IOS6_LARGE_HEAP_SIZE (4 * 1024 * 1024)
+#define WEBKIT_IOS6_MEDIUM_HEAP_SIZE (1024 * 1024)
+#define WEBKIT_IOS6_SMALL_HEAP_SIZE (512 * 1024)
+#define WEBKIT_IOS6_SMALL_HEAP_RAM_FRACTION 0.08
+#define WEBKIT_IOS6_MEDIUM_HEAP_RAM_FRACTION 0.2
+#define WEBKIT_IOS6_SMALL_HEAP_GROWTH_FACTOR 1.25
+#define WEBKIT_IOS6_MEDIUM_HEAP_GROWTH_FACTOR 1.12
+#define WEBKIT_IOS6_LARGE_HEAP_GROWTH_FACTOR 1.05
+#define WEBKIT_IOS6_MAX_REGEXP_STACK_SIZE (16 * 1024 * 1024)
+#else
+#define WEBKIT_IOS6_LARGE_HEAP_SIZE (2 * 1024 * 1024)
+#define WEBKIT_IOS6_MEDIUM_HEAP_SIZE (512 * 1024)
+#define WEBKIT_IOS6_SMALL_HEAP_SIZE (256 * 1024)
+#define WEBKIT_IOS6_SMALL_HEAP_RAM_FRACTION 0.04
+#define WEBKIT_IOS6_MEDIUM_HEAP_RAM_FRACTION 0.10
+#define WEBKIT_IOS6_SMALL_HEAP_GROWTH_FACTOR 1.20
+#define WEBKIT_IOS6_MEDIUM_HEAP_GROWTH_FACTOR 1.10
+#define WEBKIT_IOS6_LARGE_HEAP_GROWTH_FACTOR 1.03
+#define WEBKIT_IOS6_MAX_REGEXP_STACK_SIZE (4 * 1024 * 1024)
+#endif
+#else
+#define WEBKIT_IOS6_LARGE_HEAP_SIZE (32 * 1024 * 1024)
+#define WEBKIT_IOS6_MEDIUM_HEAP_SIZE (4 * 1024 * 1024)
+#define WEBKIT_IOS6_SMALL_HEAP_SIZE (1024 * 1024)
+#define WEBKIT_IOS6_SMALL_HEAP_RAM_FRACTION 0.25
+#define WEBKIT_IOS6_MEDIUM_HEAP_RAM_FRACTION 0.5
+#define WEBKIT_IOS6_SMALL_HEAP_GROWTH_FACTOR 2
+#define WEBKIT_IOS6_MEDIUM_HEAP_GROWTH_FACTOR 1.5
+#define WEBKIT_IOS6_LARGE_HEAP_GROWTH_FACTOR 1.24
+#define WEBKIT_IOS6_MAX_REGEXP_STACK_SIZE (128 * 1024 * 1024)
+#endif
+
+#if defined(WEBKIT_IOS6)
+#if CPU(ARM_THUMB2)
+#define WEBKIT_IOS6_MIN_BYTES_PER_COLLECTION_CYCLE (8 * 1024 * 1024)
+#else
+#define WEBKIT_IOS6_MIN_BYTES_PER_COLLECTION_CYCLE (3 * 1024 * 1024)
+#endif
+#else
+#define WEBKIT_IOS6_MIN_BYTES_PER_COLLECTION_CYCLE 0
 #endif
 
 using WTF::PrintStream;
@@ -84,8 +162,8 @@ bool hasCapacityToUseLargeGigacage();
     v(Bool, useLLInt,  true, Normal, "allows the LLINT to be used if true"_s) \
     v(Bool, useJIT, jitEnabledByDefault(), Normal, "allows the executable pages to be allocated for JIT and thunks if true"_s) \
     v(Bool, useBaselineJIT, true, Normal, "allows the baseline JIT to be used if true"_s) \
-    v(Bool, useDFGJIT, is64Bit(), Normal, "allows the DFG JIT to be used if true"_s) \
-    v(Bool, useRegExpJIT, jitEnabledByDefault() && is64Bit(), Normal, "allows the RegExp JIT to be used if true"_s) \
+    v(Bool, useDFGJIT, dfgJITEnabledByDefault(), Normal, "allows the DFG JIT to be used if true"_s) \
+    v(Bool, useRegExpJIT, regExpJITEnabledByDefault(), Normal, "allows the RegExp JIT to be used if true"_s) \
     v(Bool, useDOMJIT, is64Bit(), Normal, "allows the DOMJIT to be used if true"_s) \
     \
     v(Bool, reportMustSucceedExecutableAllocations, false, Normal, nullptr) \
@@ -101,7 +179,7 @@ bool hasCapacityToUseLargeGigacage();
     v(Size, jitMemoryReservationAddress, 0, Restricted, "If non-zero, we will attempt to allocate JIT memory at the address provided and crash if we cannot.") \
     \
     v(Bool, forceCodeBlockLiveness, false, Normal, nullptr) \
-    v(Bool, forceICFailure, is32Bit(), Normal, nullptr) \
+    v(Bool, forceICFailure, false, Normal, nullptr) \
     v(Bool, forceUnlinkedDFG, false, Normal, nullptr) \
     \
     v(Unsigned, repatchCountForCoolDown, 8, Normal, nullptr) \
@@ -212,15 +290,16 @@ bool hasCapacityToUseLargeGigacage();
     v(Bool, verboseVisitRace, false, Normal, nullptr) \
     v(Bool, optimizeParallelSlotVisitorsForStoppedMutator, false, Normal, nullptr) \
     v(Bool, verboseHeapSnapshotLogging, true, Normal, nullptr) \
-    v(Unsigned, largeHeapSize, 32 * 1024 * 1024, Normal, nullptr) \
-    v(Unsigned, mediumHeapSize, 4 * 1024 * 1024, Normal, nullptr) \
-    v(Unsigned, smallHeapSize, 1 * 1024 * 1024, Normal, nullptr) \
-    v(Double, smallHeapRAMFraction, 0.25, Normal, nullptr) \
-    v(Double, smallHeapGrowthFactor, 2, Normal, nullptr) \
-    v(Double, mediumHeapRAMFraction, 0.5, Normal, nullptr) \
-    v(Double, mediumHeapGrowthFactor, 1.5, Normal, nullptr) \
-    v(Double, largeHeapGrowthFactor, 1.24, Normal, nullptr) \
+    v(Unsigned, largeHeapSize, WEBKIT_IOS6_LARGE_HEAP_SIZE, Normal, nullptr) \
+    v(Unsigned, mediumHeapSize, WEBKIT_IOS6_MEDIUM_HEAP_SIZE, Normal, nullptr) \
+    v(Unsigned, smallHeapSize, WEBKIT_IOS6_SMALL_HEAP_SIZE, Normal, nullptr) \
+    v(Double, smallHeapRAMFraction, WEBKIT_IOS6_SMALL_HEAP_RAM_FRACTION, Normal, nullptr) \
+    v(Double, smallHeapGrowthFactor, WEBKIT_IOS6_SMALL_HEAP_GROWTH_FACTOR, Normal, nullptr) \
+    v(Double, mediumHeapRAMFraction, WEBKIT_IOS6_MEDIUM_HEAP_RAM_FRACTION, Normal, nullptr) \
+    v(Double, mediumHeapGrowthFactor, WEBKIT_IOS6_MEDIUM_HEAP_GROWTH_FACTOR, Normal, nullptr) \
+    v(Double, largeHeapGrowthFactor, WEBKIT_IOS6_LARGE_HEAP_GROWTH_FACTOR, Normal, nullptr) \
     v(Double, miniVMHeapGrowthFactor, 1.20, Normal, nullptr) \
+    v(Unsigned, minimumBytesPerCollectionCycle, WEBKIT_IOS6_MIN_BYTES_PER_COLLECTION_CYCLE, Normal, "Floor under the allocation budget between collections, in bytes. Zero uses the proportional growth factors alone."_s) \
     v(Double, heapGrowthSteepnessFactor, 2.00, Normal, nullptr) \
     v(Double, heapGrowthMaxIncrease, 3.00, Normal, nullptr) \
     v(Unsigned, aggressiveHeapThresholdInMB, 16 * 1024, Normal, nullptr) \
@@ -285,9 +364,18 @@ bool hasCapacityToUseLargeGigacage();
     v(Unsigned, maxDFGNodesInBasicBlockForPreciseAnalysis, 20000, Normal, "Disable precise but costly analysis and give conservative results if the number of DFG nodes in a block exceeds this threshold"_s) \
     \
     v(Bool, useConcurrentJIT, true, Normal, "allows the DFG / FTL compilation in threads other than the executing JS thread"_s) \
-    v(Unsigned, minNumberOfWorklistThreads, computeNumberOfWorkerThreads(3, 2), Normal, nullptr) \
-    v(Unsigned, maxNumberOfWorklistThreads, computeNumberOfWorkerThreads(3, 2), Normal, nullptr) \
+    v(Unsigned, minNumberOfWorklistThreads, WEBKIT_IOS6_WORKLIST_THREADS, Normal, nullptr) \
+    v(Unsigned, maxNumberOfWorklistThreads, WEBKIT_IOS6_WORKLIST_THREADS, Normal, nullptr) \
     v(Unsigned, numberOfBaselineCompilerThreads, computeNumberOfWorkerThreads(3, 2), Normal, nullptr) \
+    /* One thread on this device, since the Darwin thread tuning in Options.cpp is \
+       gated on CPU(ARM64) and does not compile for armv7. That gate looked accidental \
+       - the reasoning there is about core counts, and on two cores it would ask for \
+       two DFG threads - so it was measured. Two threads is worse: over SoundCloud, \
+       The Verge and Hacker News the mean age of a plan waiting in the queue rose from \
+       267ms to 330ms, and the number waiting longer than half a second went from 82 \
+       to 195. With two cores and a busy main thread, a second compiler takes the time \
+       the first one needed. Left at one; this matches the earlier finding that \
+       reordering the same queue also hurts. */ \
     v(Unsigned, numberOfDFGCompilerThreads, computeNumberOfWorkerThreads(3, 2) - 1, Normal, nullptr) \
     v(Unsigned, numberOfFTLCompilerThreads, computeNumberOfWorkerThreads(MAXIMUM_NUMBER_OF_FTL_COMPILER_THREADS, 2) - 1, Normal, nullptr) \
     v(Unsigned, numberOfWasmCompilerThreads, computeNumberOfWorkerThreads(INT32_MAX, 2) - 1, Normal, nullptr) \
@@ -295,7 +383,7 @@ bool hasCapacityToUseLargeGigacage();
     v(Unsigned, worklistBaselineLoadWeight, 1, Normal, nullptr) \
     v(Unsigned, worklistDFGLoadWeight, 1, Normal, nullptr) \
     v(Unsigned, worklistFTLLoadWeight, 1, Normal, nullptr) \
-    v(Int32, priorityDeltaOfDFGCompilerThreads, computePriorityDeltaOfWorkerThreads(-1, 0), Normal, nullptr) \
+    v(Int32, priorityDeltaOfDFGCompilerThreads, WEBKIT_IOS6_COMPILER_THREAD_PRIORITY_DELTA, Normal, nullptr) \
     v(Int32, priorityDeltaOfFTLCompilerThreads, computePriorityDeltaOfWorkerThreads(-2, 0), Normal, nullptr) \
     v(Int32, priorityDeltaOfWasmCompilerThreads, computePriorityDeltaOfWorkerThreads(-1, 0), Normal, nullptr) \
     \
@@ -308,6 +396,13 @@ bool hasCapacityToUseLargeGigacage();
     \
     v(Bool, breakOnThrow, false, Normal, nullptr) \
     \
+    /* Upstream lowers this to 42403 for 32-bit ARM, in a Linux-gated block whose \
+       reasoning is about the architecture rather than the operating system, so it \
+       looked like it should apply here too. Measured with WEBKIT_IOS6_OPT_CEILING_LOG \
+       (see JIT.cpp) at the lower value across SoundCloud, The Verge, Google and Hacker \
+       News: 1629 DFG dispatches, refusedForCost=0. Not one code block on the real web \
+       is anywhere near either ceiling, so neither value changes anything. Left at the \
+       upstream default; do not spend time on it again. */ \
     v(Unsigned, maximumOptimizationCandidateBytecodeCost, 100000, Normal, nullptr) \
     \
     v(Unsigned, maximumFunctionForCallInlineCandidateBytecodeCostForDFG, 80, Normal, nullptr) \
@@ -351,12 +446,12 @@ bool hasCapacityToUseLargeGigacage();
     v(Double, dfgThresholdScaleForLowP0Cores, 2.0, Normal, "On low P0-core-count Apple silicon Macs, scale the DFG tier-up thresholds (thresholdForOptimize*) by this factor."_s) \
     v(Double, ftlThresholdScaleForLowP0Cores, 1.5, Normal, "On low P0-core-count Apple silicon Macs, scale the FTL tier-up thresholds (thresholdForFTLOptimize*) by this factor."_s) \
     v(Bool, forceEagerCompilation, false, Normal, nullptr) \
-    v(Int32, thresholdForJITAfterWarmUp, 500, Normal, nullptr) \
-    v(Int32, thresholdForJITSoon, 100, Normal, nullptr) \
+    v(Int32, thresholdForJITAfterWarmUp, WEBKIT_IOS6_JIT_WARMUP, Normal, nullptr) \
+    v(Int32, thresholdForJITSoon, WEBKIT_IOS6_JIT_SOON, Normal, nullptr) \
     \
-    v(Int32, thresholdForOptimizeAfterWarmUp, 1000, Normal, nullptr) \
+    v(Int32, thresholdForOptimizeAfterWarmUp, WEBKIT_IOS6_OPTIMIZE_WARMUP, Normal, nullptr) \
     v(Int32, thresholdForOptimizeAfterLongWarmUp, 1000, Normal, nullptr) \
-    v(Int32, thresholdForOptimizeSoon, 1000, Normal, nullptr) \
+    v(Int32, thresholdForOptimizeSoon, WEBKIT_IOS6_OPTIMIZE_SOON, Normal, nullptr) \
     v(Int32, executionCounterIncrementForLoop, 1, Normal, nullptr) \
     v(Int32, executionCounterIncrementForEntry, 15, Normal, nullptr) \
     \
@@ -458,8 +553,8 @@ bool hasCapacityToUseLargeGigacage();
     v(Bool, verifyHeap, false, Normal, nullptr) \
     v(Unsigned, numberOfGCCyclesToRecordForVerification, 3, Normal, nullptr) \
     \
-    v(Unsigned, exceptionStackTraceLimit, 100, Normal, "Stack trace limit for internal Exception object"_s) \
-    v(Unsigned, defaultErrorStackTraceLimit, 100, Normal, "The default value for Error.stackTraceLimit"_s) \
+    v(Unsigned, exceptionStackTraceLimit, WEBKIT_IOS6_STACK_TRACE_LIMIT, Normal, "Stack trace limit for internal Exception object"_s) \
+    v(Unsigned, defaultErrorStackTraceLimit, WEBKIT_IOS6_STACK_TRACE_LIMIT, Normal, "The default value for Error.stackTraceLimit"_s) \
     v(Bool, exitOnResourceExhaustion, false, Normal, nullptr) \
     v(Bool, useExceptionFuzz, false, Normal, nullptr) \
     v(Unsigned, fireExceptionFuzzAt, 0, Normal, nullptr) \
@@ -467,7 +562,7 @@ bool hasCapacityToUseLargeGigacage();
     v(Bool, validateDFGExceptionHandling, ASSERT_ENABLED, Normal, "Causes the DFG to emit code validating exception handling for each node that can exit"_s) \
     v(Bool, dumpSimulatedThrows, false, Normal, "Dumps the call stack of the last simulated throw if exception scope verification fails"_s) \
     v(Bool, validateExceptionChecks, false, Normal, "Verifies that needed exception checks are performed."_s) \
-    v(Unsigned, unexpectedExceptionStackTraceLimit, 100, Normal, "Stack trace limit for debugging unexpected exceptions observed in the VM"_s) \
+    v(Unsigned, unexpectedExceptionStackTraceLimit, WEBKIT_IOS6_STACK_TRACE_LIMIT, Normal, "Stack trace limit for debugging unexpected exceptions observed in the VM"_s) \
     \
     v(Bool, validateDFGClobberize, false, Normal, "Emits code in the DFG/FTL to validate the Clobberize phase"_s) \
     v(Bool, validateBoundsCheckElimination, false, Normal, "Emits code in the DFG/FTL to validate bounds check elimination"_s) \
@@ -560,6 +655,10 @@ bool hasCapacityToUseLargeGigacage();
     \
     v(Bool, useSourceProviderCache, true, Normal, "If false, the parser will not use the source provider cache. It's good to verify everything works when this is false. Because the cache is so successful, it can mask bugs."_s) \
     v(Bool, useCodeCache, true, Normal, "If false, the unlinked byte code cache will not be used."_s) \
+    v(Bool, useAheadOfTimeBytecode, WEBKIT_IOS6_AHEAD_OF_TIME_BYTECODE, Normal, "Generate a program's function bytecode ahead of time on a background thread, in a private VM, and hand the result to the source provider's bytecode cache."_s) \
+    v(Unsigned, aheadOfTimeBytecodeMinimumSourceLength, 65536, Normal, "Programs shorter than this are not worth a background pass."_s) \
+    v(Unsigned, aheadOfTimeBytecodeMaximumSourceLength, 4194304, Normal, "Programs longer than this are refused: the pass holds an isolated copy of the source and a whole second heap of unlinked code blocks while it runs."_s) \
+    v(Unsigned, aheadOfTimeBytecodeQueueLength, 8, Normal, "Maximum number of programs waiting for the ahead-of-time bytecode thread. Each pending job pins a copy of its source."_s) \
     \
     v(Bool, useWasm, canUseWasm(), Normal, "Expose the Wasm global object."_s) \
     \

@@ -174,8 +174,11 @@ void ConsoleMessage::autogenerateMetadata(JSC::JSGlobalObject* globalObject)
     if (m_type == MessageType::EndGroup)
         return;
 
-    // FIXME: Should this really be using "for console" in the generic ConsoleMessage autogeneration? This can skip the first frame.
+#if defined(WEBKIT_IOS6)
+    m_callStack = createScriptCallStackForConsoleSourceFrame(globalObject);
+#else
     m_callStack = createScriptCallStackForConsole(globalObject);
+#endif
 
     if (const ScriptCallFrame* frame = m_callStack->firstNonNativeCallFrame()) {
         m_url = frame->sourceURL();

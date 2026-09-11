@@ -40,6 +40,13 @@ EdenGCActivityCallback::~EdenGCActivityCallback() = default;
 void EdenGCActivityCallback::doCollection(VM& vm)
 {
     setDidGCRecently(false);
+#if defined(WEBKIT_IOS6)
+    if (vm.heap.consumeEdenAllocationFloorSkip(0)) {
+        scheduleTimer(vm.heap.edenAllocationFloorSkipRemaining());
+        return;
+    }
+    vm.heap.noteEdenActivityCallbackFired();
+#endif
     vm.heap.collect(m_synchronousness, CollectionScope::Eden);
 }
 

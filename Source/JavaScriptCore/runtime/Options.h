@@ -174,7 +174,29 @@ private:
     static unsigned computeNumberOfGCMarkers(unsigned maxNumberOfGCMarkers);
     static unsigned computeNumberOfWorkerThreads(int maxNumberOfWorkerThreads, int minimum = 1);
     static int32_t computePriorityDeltaOfWorkerThreads(int32_t twoCorePriorityDelta, int32_t multiCorePriorityDelta);
+#if defined(WEBKIT_IOS6)
+#if ENABLE(JIT)
+    static constexpr bool jitEnabledByDefault() { return true; }
+#else
+    static constexpr bool jitEnabledByDefault() { return false; }
+#endif
+#else
     static constexpr bool jitEnabledByDefault() { return isAddress64Bit(); }
+#endif
+#if defined(WEBKIT_IOS6) && ENABLE(DFG_JIT)
+    static constexpr bool dfgJITEnabledByDefault() { return true; }
+#else
+    static constexpr bool dfgJITEnabledByDefault() { return is64Bit(); }
+#endif
+#if defined(WEBKIT_IOS6)
+#if ENABLE(YARR_JIT)
+    static constexpr bool regExpJITEnabledByDefault() { return jitEnabledByDefault(); }
+#else
+    static constexpr bool regExpJITEnabledByDefault() { return false; }
+#endif
+#else
+    static constexpr bool regExpJITEnabledByDefault() { return jitEnabledByDefault() && is64Bit(); }
+#endif
     static constexpr bool ipintEnabledByDefault() { return isARM64() || isARM64E() || isX86_64(); }
     static double defaultQuickDFGTierUpThresholdFactor()
     {

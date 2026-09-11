@@ -29,6 +29,9 @@
 #include "BytecodeStructs.h"
 #include "CodeBlock.h"
 #include "DFGJITCode.h"
+#include "JumpTable.h"  // ios6/armv7: baselineSwitchJumpTable() below is #if ENABLE(JIT)
+                        // and indexes FixedVector<SimpleJumpTable>, which needs the
+                        // complete type; CodeBlock.h only forward-declares it.
 #include "UnlinkedMetadataTableInlines.h"
 
 namespace JSC {

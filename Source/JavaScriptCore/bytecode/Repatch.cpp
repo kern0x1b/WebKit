@@ -202,8 +202,8 @@ void linkPolymorphicCall(VM& vm, JSCell* owner, CallFrame* callFrame, CallLinkIn
         JSCell* caseValue = nullptr;
         if (isClosureCall) {
             caseValue = variant.executable();
-            // FIXME: We could add a fast path for InternalFunction with closure call.
-            // https://bugs.webkit.org/show_bug.cgi?id=179311
+            if (!caseValue)
+                caseValue = variant.internalFunction();
             if (!caseValue)
                 continue;
         } else {
@@ -1042,8 +1042,13 @@ static InlineCacheAction tryCachePutBy(JSGlobalObject* globalObject, CodeBlock* 
         RefPtr<AccessCase> newCase;
 
         if (propertyName == vm.propertyNames->length) {
+#if USE(JSVALUE64)
+            // ios6/armv7: InlineCacheCompiler has no 32-bit path for ArrayLengthStore,
+            // so do not create the case at all on a 32-bit build. Falling through leaves
+            // the store to the generic path, which is correct, just not inline-cached.
             if (baseCell->type() == ArrayType)
                 newCase = AccessCase::create(vm, codeBlock, AccessCase::ArrayLengthStore, propertyName);
+#endif
         } else if (propertyName == vm.propertyNames->lastIndex) {
             if (is<RegExpObject>(baseCell))
                 newCase = AccessCase::create(vm, codeBlock, AccessCase::RegExpLastIndexStore, propertyName);

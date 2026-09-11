@@ -54,18 +54,8 @@ void JIT::emit_op_mov(const JSInstruction* currentInstruction)
     VirtualRegister dst = bytecode.m_dst;
     VirtualRegister src = bytecode.m_src;
 
-    if (src.isConstant()) {
-        if (m_profiledCodeBlock->isConstantOwnedByUnlinkedCodeBlock(src)) {
-            storeValue(m_unlinkedCodeBlock->getConstant(src), addressFor(dst), jsRegT10);
-        } else {
-            loadCodeBlockConstant(src, jsRegT10);
-            storeValue(jsRegT10, addressFor(dst));
-        }
-        return;
-    }
-
-    loadValue(addressFor(src), jsRegT10);
-    storeValue(jsRegT10, addressFor(dst));
+    emitGetVirtualRegister(src, jsRegT10);
+    emitPutVirtualRegister(dst, jsRegT10);
 }
 
 void JIT::emit_op_jmp(const JSInstruction* currentInstruction)
@@ -1543,6 +1533,10 @@ void JIT::emit_op_enter(const JSInstruction*)
             addSlowCase(branchAdd32(PositiveOrZero, TrustedImm32(Options::executionCounterIncrementForEntry()), argumentGPR2));
             store32(argumentGPR2, Address(GPRInfo::jitDataRegister, BaselineJITData::offsetOfJITExecuteCounter()));
         }
+#if defined(WEBKIT_IOS6)
+        else if (m_costCeilingCounterSlot)
+            add32(TrustedImm32(1), AbsoluteAddress(m_costCeilingCounterSlot));
+#endif
     }
 #endif
 }

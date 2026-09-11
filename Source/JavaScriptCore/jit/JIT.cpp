@@ -56,6 +56,11 @@
 #include <wtf/SequesteredMalloc.h>
 #include <wtf/SimpleStats.h>
 #include <wtf/text/MakeString.h>
+#if defined(WEBKIT_IOS6)
+#include <algorithm>
+#include <cstdlib>
+#include <mutex>
+#endif
 
 WTF_ALLOW_UNSAFE_BUFFER_USAGE_BEGIN
 
@@ -63,6 +68,288 @@ namespace JSC {
 namespace JITInternal {
 static constexpr const bool verbose = false;
 }
+
+#if defined(WEBKIT_IOS6)
+namespace CostCeilingInstrumentation {
+
+struct Refusal {
+    CString description;
+    unsigned bytecodeCost;
+    uint32_t callCount { 0 };
+};
+
+static std::mutex& lock()
+{
+    static std::mutex s_lock;
+    return s_lock;
+}
+
+static Vector<Refusal*>& entries()
+{
+    static Vector<Refusal*> s_entries;
+    return s_entries;
+}
+
+static unsigned& otherReasonRefusalCount()
+{
+    static unsigned s_count = 0;
+    return s_count;
+}
+
+static const char* logPath()
+{
+    static const char* path = getenv("WEBKIT_IOS6_OPT_CEILING_LOG");
+    return (path && path[0]) ? path : nullptr;
+}
+
+bool enabled()
+{
+    return logPath();
+}
+
+bool queueOrderingEnabled()
+{
+    static bool value = [] {
+        const char* env = getenv("WEBKIT_IOS6_DFG_QUEUE_HOTTEST_FIRST");
+        return env && env[0];
+    }();
+    return value;
+}
+
+unsigned queueDiscardThresholdMS()
+{
+    static unsigned value = [] {
+        const char* env = getenv("WEBKIT_IOS6_DFG_QUEUE_DISCARD_MS");
+        if (!env || !env[0])
+            return 750u;
+        long parsed = strtol(env, nullptr, 10);
+        return parsed > 0 ? static_cast<unsigned>(parsed) : 750u;
+    }();
+    return value;
+}
+
+unsigned queueStarveThresholdMS()
+{
+    static unsigned value = [] {
+        const char* env = getenv("WEBKIT_IOS6_DFG_QUEUE_STARVE_MS");
+        if (!env || !env[0])
+            return 500u;
+        long parsed = strtol(env, nullptr, 10);
+        return parsed > 0 ? static_cast<unsigned>(parsed) : 500u;
+    }();
+    return value;
+}
+
+static unsigned& queueReorderedCount()
+{
+    static unsigned s_count = 0;
+    return s_count;
+}
+
+static unsigned& queueStarvationPromotionCount()
+{
+    static unsigned s_count = 0;
+    return s_count;
+}
+
+static unsigned& queueDiscardedCount()
+{
+    static unsigned s_count = 0;
+    return s_count;
+}
+
+void recordQueueReordered()
+{
+    std::lock_guard<std::mutex> locker(lock());
+    ++queueReorderedCount();
+}
+
+void recordQueueStarvationPromotion()
+{
+    std::lock_guard<std::mutex> locker(lock());
+    ++queueStarvationPromotionCount();
+}
+
+void recordQueueDiscarded()
+{
+    std::lock_guard<std::mutex> locker(lock());
+    ++queueDiscardedCount();
+}
+
+static FILE* logFile()
+{
+    static FILE* file = [] () -> FILE* {
+        const char* path = logPath();
+        if (!path)
+            return nullptr;
+        FILE* opened = fopen(path, "a");
+        if (opened)
+            setvbuf(opened, nullptr, _IOLBF, 0);
+        return opened;
+    }();
+    return file;
+}
+
+static const char* describe(const CString& string)
+{
+    return string.isNull() ? "?" : string.data();
+}
+
+static constexpr unsigned maxTrackedEntries = 2000;
+
+uint32_t* recordCostRefusal(CodeBlock* codeBlock, unsigned bytecodeCost)
+{
+    if (!enabled())
+        return nullptr;
+
+    std::lock_guard<std::mutex> locker(lock());
+    if (entries().size() >= maxTrackedEntries)
+        return nullptr;
+
+    auto* entry = new Refusal;
+    entry->bytecodeCost = bytecodeCost;
+    ScriptExecutable* executable = codeBlock->ownerExecutable();
+    entry->description = makeString(
+        codeBlock->inferredNameWithHash(), " ("_s,
+        executable->sourceURLStripped(), ":"_s, executable->firstLine(), ")"_s).utf8();
+    entries().append(entry);
+
+    if (FILE* log = logFile()) {
+        fprintf(log, "%.3f REFUSAL cost=%u name=\"%s\"\n",
+            MonotonicTime::now().secondsSinceEpoch().value(), bytecodeCost, describe(entry->description));
+    }
+
+    return &entry->callCount;
+}
+
+void recordOtherRefusal()
+{
+    if (!enabled())
+        return;
+    std::lock_guard<std::mutex> locker(lock());
+    ++otherReasonRefusalCount();
+}
+
+static SimpleStats& dfgQueueAgeStatsMS()
+{
+    static SimpleStats stats;
+    return stats;
+}
+
+static double& dfgQueueAgeMaxMS()
+{
+    static double maxMS = 0;
+    return maxMS;
+}
+
+static unsigned* dfgQueueAgeBuckets()
+{
+    static unsigned buckets[5] = { 0, 0, 0, 0, 0 };
+    return buckets;
+}
+
+static unsigned dfgQueueAgeBucketFor(double ms)
+{
+    if (ms < 16)
+        return 0;
+    if (ms < 100)
+        return 1;
+    if (ms < 500)
+        return 2;
+    if (ms < 2000)
+        return 3;
+    return 4;
+}
+
+void recordDFGQueueAge(Seconds age)
+{
+    if (!enabled())
+        return;
+    double ms = age.milliseconds();
+    std::lock_guard<std::mutex> locker(lock());
+    dfgQueueAgeStatsMS().add(ms);
+    dfgQueueAgeMaxMS() = std::max(dfgQueueAgeMaxMS(), ms);
+    dfgQueueAgeBuckets()[dfgQueueAgeBucketFor(ms)]++;
+}
+
+void dumpSnapshot()
+{
+    if (!enabled())
+        return;
+    FILE* log = logFile();
+    if (!log)
+        return;
+
+    std::lock_guard<std::mutex> locker(lock());
+    if (entries().isEmpty() && !otherReasonRefusalCount() && !dfgQueueAgeStatsMS()
+        && !queueReorderedCount() && !queueStarvationPromotionCount() && !queueDiscardedCount())
+        return;
+
+    Vector<Refusal*> sorted = entries();
+    std::sort(sorted.begin(), sorted.end(), [](Refusal* a, Refusal* b) {
+        return a->callCount > b->callCount;
+    });
+
+    unsigned ceiling = Options::maximumOptimizationCandidateBytecodeCost();
+    unsigned buckets[5] = { 0, 0, 0, 0, 0 }; // (1-2x],(2-4x],(4-8x],(8-16x],(16x+] of the ceiling
+    uint64_t totalCalls = 0;
+    unsigned calledAtLeastOnce = 0;
+    unsigned calledAtLeast100 = 0;
+    unsigned calledAtLeast1000 = 0;
+    for (auto* entry : entries()) {
+        totalCalls += entry->callCount;
+        if (entry->callCount)
+            ++calledAtLeastOnce;
+        if (entry->callCount >= 100)
+            ++calledAtLeast100;
+        if (entry->callCount >= 1000)
+            ++calledAtLeast1000;
+        unsigned ratio = ceiling ? (entry->bytecodeCost / ceiling) : 0;
+        unsigned bucket = ratio < 2 ? 0 : ratio < 4 ? 1 : ratio < 8 ? 2 : ratio < 16 ? 3 : 4;
+        buckets[bucket]++;
+    }
+
+    double now = MonotonicTime::now().secondsSinceEpoch().value();
+    fprintf(log, "%.3f SUMMARY ceiling=%u refusedForCost=%zu refusedOther=%u"
+        " calledAtLeastOnce=%u calledAtLeast100=%u calledAtLeast1000=%u totalCalls=%llu"
+        " histogram_of_ceiling_multiples[1-2x,2-4x,4-8x,8-16x,16x+]=%u,%u,%u,%u,%u\n",
+        now, ceiling, entries().size(), otherReasonRefusalCount(),
+        calledAtLeastOnce, calledAtLeast100, calledAtLeast1000,
+        static_cast<unsigned long long>(totalCalls),
+        buckets[0], buckets[1], buckets[2], buckets[3], buckets[4]);
+
+    if (dfgQueueAgeStatsMS()) {
+        unsigned* qb = dfgQueueAgeBuckets();
+        fprintf(log, "%.3f QUEUE dfgDispatches=%.0f histogram_of_dispatchAgeMS[0-16,16-100,100-500,500-2000,2000+]=%u,%u,%u,%u,%u"
+            " (context only, not a counter: mean=%.2fms max=%.2fms)\n",
+            now, dfgQueueAgeStatsMS().count(), qb[0], qb[1], qb[2], qb[3], qb[4],
+            dfgQueueAgeStatsMS().mean(), dfgQueueAgeMaxMS());
+    }
+
+    if (queueReorderedCount() || queueStarvationPromotionCount() || queueDiscardedCount()) {
+        fprintf(log, "%.3f ORDER queueReordered=%u queueStarvationPromotions=%u queueDiscarded=%u"
+            " starveThresholdMS=%u discardThresholdMS=%u\n",
+            now, queueReorderedCount(), queueStarvationPromotionCount(), queueDiscardedCount(),
+            queueStarveThresholdMS(), queueDiscardThresholdMS());
+    }
+
+    unsigned rank = 0;
+    for (auto* entry : sorted) {
+        if (rank++ >= 10)
+            break;
+        fprintf(log, "%.3f TOP callCount=%u cost=%u name=\"%s\"\n",
+            now, entry->callCount, entry->bytecodeCost, describe(entry->description));
+    }
+}
+
+static void registerAtExitDumpOnce()
+{
+    static std::once_flag once;
+    std::call_once(once, [] { std::atexit([] { dumpSnapshot(); }); });
+}
+
+} // namespace CostCeilingInstrumentation
+#endif // defined(WEBKIT_IOS6)
 
 Seconds totalBaselineCompileTime;
 Seconds totalDFGCompileTime;
@@ -722,6 +1009,16 @@ RefPtr<BaselineJITCode> JIT::compileAndLinkWithoutFinalizing(JITCompilationEffor
     case DFG::CannotCompile:
         m_canBeOptimized = false;
         m_shouldEmitProfiling = false;
+#if defined(WEBKIT_IOS6)
+        if (CostCeilingInstrumentation::enabled()) {
+            unsigned cost = m_profiledCodeBlock->bytecodeCost();
+            if (cost > Options::maximumOptimizationCandidateBytecodeCost()) {
+                m_costCeilingCounterSlot = CostCeilingInstrumentation::recordCostRefusal(m_profiledCodeBlock, cost);
+                CostCeilingInstrumentation::registerAtExitDumpOnce();
+            } else
+                CostCeilingInstrumentation::recordOtherRefusal();
+        }
+#endif
         break;
     case DFG::CanCompile:
     case DFG::CanCompileAndInline:

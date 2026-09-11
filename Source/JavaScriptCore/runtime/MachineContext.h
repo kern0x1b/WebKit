@@ -233,6 +233,8 @@ static inline void*& framePointerImpl(PlatformRegisters& regs)
     return reinterpret_cast<void*&>(regs.__rbp);
 #elif CPU(ARM64)
     return reinterpret_cast<void*&>(regs.__x[29]);
+#elif CPU(ARM_THUMB2) || CPU(ARM)
+    return reinterpret_cast<void*&>(regs.__r[7]);
 #else
 #error Unknown Architecture
 #endif
@@ -577,6 +579,8 @@ inline void* wasmInstancePointer(const PlatformRegisters& regs)
     return reinterpret_cast<void*>(regs.__rbx);
 #elif CPU(ARM64)
     return reinterpret_cast<void*>(regs.__x[19]);
+#elif CPU(ARM_THUMB2) || CPU(ARM)
+    return reinterpret_cast<void*>(regs.__r[10]);
 #else
 #error Unknown Architecture
 #endif
@@ -751,6 +755,12 @@ inline void*& llintInstructionPointer(PlatformRegisters& regs)
 #elif CPU(ARM64)
     static_assert(LLInt::LLIntPC == ARM64Registers::x4, "Wrong LLInt PC.");
     return reinterpret_cast<void*&>(regs.__x[4]);
+#elif CPU(ARM_THUMB2) || CPU(ARM)
+    // ios6/armv7: GPRInfo gives regT4 == ARMRegisters::r4 for ARM_THUMB2, and
+    // LLIntPC is regT4. This block is #if !ENABLE(C_LOOP), so it was never
+    // compiled while ARMv7 was on the interpreter and no case was ever added.
+    static_assert(LLInt::LLIntPC == ARMRegisters::r4, "Wrong LLInt PC.");
+    return reinterpret_cast<void*&>(regs.__r[4]);
 #else
 #error Unknown Architecture
 #endif

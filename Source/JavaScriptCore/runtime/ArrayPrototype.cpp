@@ -583,7 +583,22 @@ JSC_DEFINE_HOST_FUNCTION(arrayProtoFuncPush, (JSGlobalObject* globalObject, Call
         array->pushInline(globalObject, callFrame->uncheckedArgument(0));
         return JSValue::encode(jsNumber(array->length()));
     }
-    
+
+#if defined(WEBKIT_IOS6)
+    if (isJSArray(thisValue) && callFrame->argumentCount() > 1) {
+        JSArray* array = asArray(thisValue);
+        unsigned argCount = callFrame->argumentCount();
+        if (!hasAnyArrayStorage(array->indexingType()) && !array->mayInterceptIndexedAccesses()
+            && static_cast<uint64_t>(array->length()) + argCount <= MAX_ARRAY_INDEX) {
+            for (unsigned n = 0; n < argCount; ++n) {
+                array->pushInline(globalObject, callFrame->uncheckedArgument(n));
+                RETURN_IF_EXCEPTION(scope, { });
+            }
+            return JSValue::encode(jsNumber(array->length()));
+        }
+    }
+#endif
+
     JSObject* thisObj = thisValue.toObject(globalObject);
     EXCEPTION_ASSERT(!!scope.exception() == !thisObj);
     if (!thisObj) [[unlikely]]
@@ -828,7 +843,7 @@ static ALWAYS_INLINE std::tuple<uint64_t, IndexingType, std::span<EncodedJSValue
             unsigned count = 0;
             compactedRoot.fill(vm, butterflyLength, [&](JSValue* buffer) {
                 for (unsigned i = 0; i < butterflyLength; ++i) {
-                    if (JSValue value = data[i].get(); value) [[likely]]
+                    if (JSValue value = loadElementUnordered(data[i]); value) [[likely]]
                         buffer[count++] = value;
                 }
             });
@@ -845,7 +860,7 @@ static ALWAYS_INLINE std::tuple<uint64_t, IndexingType, std::span<EncodedJSValue
             unsigned count = 0;
             compactedRoot.fill(vm, butterflyLength, [&](JSValue* buffer) {
                 for (unsigned i = 0; i < butterflyLength; ++i) {
-                    if (JSValue value = data[i].get(); value) [[likely]] {
+                    if (JSValue value = loadElementUnordered(data[i]); value) [[likely]] {
                         if (!value.isUndefined()) [[likely]]
                             buffer[count++] = value;
                         else
@@ -1267,8 +1282,10 @@ ALWAYS_INLINE JSValue fastIndexOf(JSGlobalObject* globalObject, VM& vm, JSArray*
         auto& butterfly = *array->butterfly();
         auto data = butterfly.contiguous().data();
 
+        bool searchElementComparesByBits = !searchElement.isNumber() && !searchElement.isString() && !searchElement.isBigInt();
+
         if constexpr (direction == IndexOfDirection::Forward) {
-            if (searchElement.isObject()) {
+            if (searchElementComparesByBits) {
                 auto* result = std::bit_cast<const WriteBarrier<Unknown>*>(WTF::find64(std::bit_cast<const uint64_t*>(data + index), JSValue::encode(searchElement), length - index));
                 if (result)
                     return jsNumber(result - data);
@@ -1276,7 +1293,7 @@ ALWAYS_INLINE JSValue fastIndexOf(JSGlobalObject* globalObject, VM& vm, JSArray*
             }
 
             for (; index < length; ++index) {
-                JSValue value = data[index].get();
+                JSValue value = loadElementUnordered(data[index]);
                 if (!value)
                     continue;
                 bool isEqual = JSValue::strictEqual(globalObject, searchElement, value);
@@ -1285,7 +1302,7 @@ ALWAYS_INLINE JSValue fastIndexOf(JSGlobalObject* globalObject, VM& vm, JSArray*
                     return jsNumber(index);
             }
         } else {
-            if (searchElement.isObject()) {
+            if (searchElementComparesByBits) {
                 auto* result = std::bit_cast<const WriteBarrier<Unknown>*>(WTF::reverseFind64(std::bit_cast<const uint64_t*>(data), JSValue::encode(searchElement), static_cast<uint64_t>(index) + 1));
                 if (result)
                     return jsNumber(result - data);
@@ -1294,7 +1311,7 @@ ALWAYS_INLINE JSValue fastIndexOf(JSGlobalObject* globalObject, VM& vm, JSArray*
 
             do {
                 ASSERT(index < length);
-                JSValue value = data[index].get();
+                JSValue value = loadElementUnordered(data[index]);
                 if (!value)
                     continue;
                 bool isEqual = JSValue::strictEqual(globalObject, searchElement, value);
@@ -1351,8 +1368,8 @@ JSC_DEFINE_HOST_FUNCTION(arrayProtoFuncIndexOf, (JSGlobalObject* globalObject, C
 
     if (isJSArray(thisObject)) [[likely]] {
         JSArray* array = asArray(thisObject);
-        Butterfly* butterfly = array->butterfly();
-        if (isCopyOnWrite(array->indexingMode()) && JSCellButterfly::isOnlyAtomStringsStructure(vm, butterfly) && searchElement.isString()) {
+        if (isCopyOnWrite(array->indexingMode()) && searchElement.isString() && JSCellButterfly::isOnlyAtomStringsStructure(vm, array->butterfly())) {
+            Butterfly* butterfly = array->butterfly();
             auto search = asString(searchElement)->toAtomString(globalObject);
             RETURN_IF_EXCEPTION(scope, { });
 
@@ -1361,7 +1378,7 @@ JSC_DEFINE_HOST_FUNCTION(arrayProtoFuncIndexOf, (JSGlobalObject* globalObject, C
             if (mayContainSearch) {
                 auto data = butterfly->contiguous().data();
                 for (unsigned i = index; i < length; ++i) {
-                    JSValue value = data[i].get();
+                    JSValue value = loadElementUnordered(data[i]);
                     if (asString(value)->getValueImpl() == search.data) {
                         result = jsNumber(i);
                         break;
@@ -2046,7 +2063,6 @@ JSC_DEFINE_HOST_FUNCTION(arrayProtoFuncWith, (JSGlobalObject* globalObject, Call
     return JSValue::encode(result);
 }
 
-// FIXME: We can optimize `Array.prototype.includes` for atom string arrays too. https://bugs.webkit.org/show_bug.cgi?id=288695
 JSC_DEFINE_HOST_FUNCTION(arrayProtoFuncIncludes, (JSGlobalObject* globalObject, CallFrame* callFrame))
 {
     VM& vm = globalObject->vm();

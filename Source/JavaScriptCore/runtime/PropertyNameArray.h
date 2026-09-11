@@ -75,6 +75,7 @@ public:
     bool canAddKnownUniqueForStructure() const { return m_data->propertyNameVector().isEmpty(); }
     typedef PropertyNameArray::PropertyNameVector::const_iterator const_iterator;
     size_t size() const { return m_data->propertyNameVector().size(); }
+    void reserveCapacity(size_t capacity) { m_data->propertyNameVector().reserveCapacity(capacity); }
     const_iterator begin() const { return m_data->propertyNameVector().begin(); }
     const_iterator end() const { return m_data->propertyNameVector().end(); }
 

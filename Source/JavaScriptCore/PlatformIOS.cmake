@@ -26,7 +26,17 @@ set(PRODUCT_BUNDLE_IDENTIFIER "com.apple.JavaScriptCore")
 configure_file(${JAVASCRIPTCORE_DIR}/Info.plist ${CMAKE_CURRENT_BINARY_DIR}/JavaScriptCore-Info.plist)
 
 # Weak-linked: iOS 17.4+.
-target_link_options(JavaScriptCore PRIVATE -weak_framework BrowserEngineCore)
+# ios6/armv7: the port's guard for this moved -- on trunk this line lives in
+# JavaScriptCore/PlatformCocoa.cmake, on 2.54 it is here. BrowserEngineCore (the
+# be_memory_* inline-JIT-permissions API) is iOS 17.4+ and absent from this SDK;
+# even weak-linking needs the framework to exist at link time.
+find_library(BROWSERENGINECORE_LIBRARY BrowserEngineCore
+    PATHS "${CMAKE_OSX_SYSROOT}/System/Library/Frameworks"
+    NO_DEFAULT_PATH
+)
+if (BROWSERENGINECORE_LIBRARY)
+    target_link_options(JavaScriptCore PRIVATE -weak_framework BrowserEngineCore)
+endif ()
 
 target_compile_options(JavaScriptCore PRIVATE ${WEBKIT_PRIVATE_FRAMEWORKS_COMPILE_FLAG})
 

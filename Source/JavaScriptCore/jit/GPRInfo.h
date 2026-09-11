@@ -1006,6 +1006,28 @@ class PreferredArgumentImpl {
         }
     }
 #elif USE(JSVALUE32_64)
+    // Does AAPCS rule C.3 - round the next core register number up to even before an
+    // argument whose natural alignment is 8 - apply to a 64-bit argument here?
+    //
+    // On every ARM_THUMB2 platform but Darwin it does, and the caller then never splits
+    // such an argument between registers and the stack (rule C.4 sends the whole value
+    // to the stack instead). Apple's ARM32 ABI gives `long long`, and so EncodedJSValue,
+    // 4-byte alignment rather than 8, so neither rule fires: the value starts at
+    // whichever core register comes next, odd or even, and if only one register is left
+    // it is split across that register and the first stack word. Measured, not assumed -
+    // see the comment on setupArgumentsImpl(..., JSValueRegs, ...) in CCallHelpers.h.
+    static constexpr bool wideArgumentSkipsOddRegister(GPRReg first, GPRReg second, GPRReg third)
+    {
+#if OS(DARWIN)
+        UNUSED_PARAM(first);
+        UNUSED_PARAM(second);
+        UNUSED_PARAM(third);
+        return false;
+#else
+        return first == GPRInfo::argumentGPR1 && second == GPRInfo::argumentGPR2 && third == GPRInfo::argumentGPR3;
+#endif
+    }
+
     template <typename OperationType, size_t ArgNum, size_t Index = ArgNum, typename... Args>
     static constexpr JSValueRegs pickJSR(GPRReg first, GPRReg second, GPRReg third, Args... rest)
     {
@@ -1017,7 +1039,7 @@ class PreferredArgumentImpl {
                 UNUSED_PARAM(second); // Otherwise warning due to constexpr
                 UNUSED_PARAM(third); // Otherwise warning due to constexpr
                 return JSValueRegs::payloadOnly(first);
-            } else if (first == GPRInfo::argumentGPR1 && second == GPRInfo::argumentGPR2 && third == GPRInfo::argumentGPR3) {
+            } else if (wideArgumentSkipsOddRegister(first, second, third)) {
                 // Wide argument passed in GPRs needs to start with even register number, so skip argumentGPR1
                 return JSValueRegs { third, second };
             } else {
@@ -1029,7 +1051,7 @@ class PreferredArgumentImpl {
                 // Fits in single GPR
                 UNUSED_PARAM(first); // Otherwise warning due to constexpr
                 return pickJSR<OperationType, ArgNum, Index - 1>(second, third, rest...);
-            } else if (first == GPRInfo::argumentGPR1 && second == GPRInfo::argumentGPR2 && third == GPRInfo::argumentGPR3) {
+            } else if (wideArgumentSkipsOddRegister(first, second, third)) {
                 // Wide argument passed in GPRs needs to start with even register number, so skip argumentGPR1, but reuse it later
                 return pickJSR<OperationType, ArgNum, Index - 1>(first, rest...);
             } else {
@@ -1086,11 +1108,28 @@ public:
 #if CPU(ARM_THUMB2)
         // Be careful about GPRInfo::regCS0. It is used as a metadataTable register.
         // So, if you clobber it, you need to restore it.
+        //
+        // regT7 is deliberately absent. It is GPRInfo::handlerGPR, and
+        // emitDataICHandlerDispatch() overwrites that register with the
+        // InlineCacheHandler* while every operand of the access is still live:
+        //
+        //     loadPtr(Address(propertyCacheGPR, offsetOfHandler()), handlerGPR)
+        //     call(Address(handlerGPR, offsetOfCallTarget()))
+        //
+        // so anything an inline cache holds across its own dispatch must not live
+        // there. On 64-bit targets that is free - there are eight argument registers
+        // and handlerGPR is not one of them - which is why the only list that reaches
+        // this far is this one, and why the noOverlap() assertions in
+        // BaselineJITRegisters.h name GPRInfo::handlerGPR only under USE(JSVALUE64).
+        // With regT7 in the list, PutByVal's fifth argument landed on it and the
+        // dispatch destroyed the ArrayProfile* the handler was about to use; the
+        // handler then wrote a StructureID over the handler's own callTarget and the
+        // next dispatch jumped to it.
         return pickJSR<OperationType, ArgNum>(
             GPRInfo::argumentGPR0, GPRInfo::argumentGPR1,
             GPRInfo::argumentGPR2, GPRInfo::argumentGPR3,
             GPRInfo::regT4,        GPRInfo::regT5,
-            GPRInfo::regT6,        GPRInfo::regT7,
+            GPRInfo::regT6,
             GPRInfo::regCS0);
 #else
 #  error "Unsupported architecture"

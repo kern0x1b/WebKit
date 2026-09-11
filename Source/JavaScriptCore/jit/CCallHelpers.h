@@ -288,6 +288,11 @@ private:
             return ArgCollection<numGPRArgs, numGPRSources, numFPRArgs + 1, numFPRSources, numCrossSources, extraGPRArgs, nonArgGPRs, extraPoke>(*this);
         }
 
+        ArgCollection<numGPRArgs, numGPRSources, numFPRArgs + 1, numFPRSources, numCrossSources, extraGPRArgs + 2, nonArgGPRs, extraPoke> addFPRArgInGPRs()
+        {
+            return ArgCollection<numGPRArgs, numGPRSources, numFPRArgs + 1, numFPRSources, numCrossSources, extraGPRArgs + 2, nonArgGPRs, extraPoke>(*this);
+        }
+
         ArgCollection<numGPRArgs, numGPRSources, numFPRArgs, numFPRSources, numCrossSources, extraGPRArgs, nonArgGPRs, extraPoke + 1> addPoke()
         {
             return ArgCollection<numGPRArgs, numGPRSources, numFPRArgs, numFPRSources, numCrossSources, extraGPRArgs, nonArgGPRs, extraPoke + 1>(*this);
@@ -423,6 +428,30 @@ private:
 #else // USE(JSVALUE64)
 #if CPU(ARM_THUMB2)
 
+#if OS(DARWIN)
+    template<typename OperationType, unsigned numGPRArgs, unsigned numGPRSources, unsigned numFPRArgs, unsigned numFPRSources, unsigned numCrossSources, unsigned extraGPRArgs, unsigned nonArgGPRs, unsigned extraPoke, typename... Args>
+    void setupArgumentsImpl(ArgCollection<numGPRArgs, numGPRSources, numFPRArgs, numFPRSources, numCrossSources, extraGPRArgs, nonArgGPRs, extraPoke> argSourceRegs, FPRReg arg, Args... args)
+    {
+        static_assert(std::is_same_v<CURRENT_ARGUMENT_TYPE, double>, "We should only be passing FPRRegs to a double. We use moveDouble / loadDouble / storeDouble exclusively");
+
+        unsigned numArgRegisters = GPRInfo::numberOfArgumentRegisters;
+        unsigned currentArgCount = argSourceRegs.argCount(InvalidGPRReg);
+
+        if (currentArgCount + 1 < numArgRegisters) {
+            setupArgumentsImpl<OperationType>(argSourceRegs.addFPRArgInGPRs(), args...);
+            moveDoubleToInts(arg, GPRInfo::toArgumentRegister(currentArgCount), GPRInfo::toArgumentRegister(currentArgCount + 1));
+        } else if (currentArgCount + 1 == numArgRegisters) {
+            unsigned pokeOffset = calculatePokeOffset(numGPRArgs, numFPRArgs, numCrossSources, extraGPRArgs + 1, nonArgGPRs, extraPoke);
+            setupArgumentsImpl<OperationType>(argSourceRegs.addFPRArgInGPRs(), args...);
+            RegisterID scratch = getCachedDataTempRegisterIDAndInvalidate();
+            moveDoubleToInts(arg, GPRInfo::toArgumentRegister(currentArgCount), scratch);
+            store32(scratch, addressForPoke(pokeOffset));
+        } else {
+            pokeForArgument(arg, numGPRArgs, numFPRArgs, numCrossSources, extraGPRArgs, nonArgGPRs, extraPoke);
+            setupArgumentsImpl<OperationType>(argSourceRegs.addFPRArgInGPRs(), args...);
+        }
+    }
+#else // OS(DARWIN)
     template<typename OperationType, unsigned numGPRArgs, unsigned numGPRSources, unsigned numFPRArgs, unsigned numFPRSources, unsigned numCrossSources, unsigned extraGPRArgs, unsigned nonArgGPRs, unsigned extraPoke, typename... Args>
     void setupArgumentsImpl(ArgCollection<numGPRArgs, numGPRSources, numFPRArgs, numFPRSources, numCrossSources, extraGPRArgs, nonArgGPRs, extraPoke> argSourceRegs, FPRReg arg, Args... args)
     {
@@ -447,6 +476,7 @@ private:
             setupArgumentsImpl<OperationType>(argSourceRegs.addStackArg(arg).addPoke().addPoke(), args...);
         }
     }
+#endif // OS(DARWIN)
 
     template<typename OperationType, unsigned numGPRArgs, unsigned numGPRSources, unsigned numFPRArgs, unsigned numFPRSources, unsigned numCrossSources, unsigned extraGPRArgs, unsigned nonArgGPRs, unsigned extraPoke, typename... Args>
         requires (sizeof(CURRENT_ARGUMENT_TYPE) <= 4)
@@ -485,6 +515,83 @@ private:
         }
     }
 
+#if OS(DARWIN)
+    // Both halves of a 64-bit argument land past the core registers. They are
+    // contiguous and 4-byte aligned, so this is the plain two-word case - it is
+    // pokeArgumentsAligned() with every alignment adjustment removed.
+    template<typename OperationType, typename ArgLow, typename ArgHigh, unsigned numGPRArgs, unsigned numGPRSources, unsigned numFPRArgs, unsigned numFPRSources, unsigned numCrossSources, unsigned extraGPRArgs, unsigned nonArgGPRs, unsigned extraPoke, typename... Args>
+    void pokeWideArgument(ArgCollection<numGPRArgs, numGPRSources, numFPRArgs, numFPRSources, numCrossSources, extraGPRArgs, nonArgGPRs, extraPoke> argSourceRegs, ArgLow low, ArgHigh high, Args... args)
+    {
+        pokeForArgument(low, numGPRArgs, numFPRArgs, numCrossSources, extraGPRArgs, nonArgGPRs, extraPoke);
+        pokeForArgument(high, numGPRArgs, numFPRArgs, numCrossSources, extraGPRArgs, nonArgGPRs, extraPoke + 1);
+        setupArgumentsImpl<OperationType>(argSourceRegs.addGPRArg().addPoke(), args...);
+    }
+
+    template<typename OperationType, unsigned numGPRArgs, unsigned numGPRSources, unsigned numFPRArgs, unsigned numFPRSources, unsigned numCrossSources, unsigned extraGPRArgs, unsigned nonArgGPRs, unsigned extraPoke, typename... Args>
+        requires std::same_as<CURRENT_ARGUMENT_TYPE, EncodedJSValue>
+    void setupArgumentsImpl(ArgCollection<numGPRArgs, numGPRSources, numFPRArgs, numFPRSources, numCrossSources, extraGPRArgs, nonArgGPRs, extraPoke> argSourceRegs, CellValue payload, Args... args)
+    {
+        unsigned numArgRegisters = GPRInfo::numberOfArgumentRegisters;
+        unsigned currentArgCount = argSourceRegs.argCount(payload.gpr());
+
+        if (currentArgCount + 1 < numArgRegisters) {
+            auto updatedArgSourceRegs = argSourceRegs.pushRegArg(payload.gpr(), GPRInfo::toArgumentRegister(currentArgCount));
+            setupArgumentsImpl<OperationType>(updatedArgSourceRegs.addGPRExtraArg(), args...);
+            move(TrustedImm32(JSValue::CellTag), GPRInfo::toArgumentRegister(currentArgCount + 1));
+        } else if (currentArgCount + 1 == numArgRegisters) {
+            pokeForArgument(TrustedImm32(JSValue::CellTag), numGPRArgs, numFPRArgs, numCrossSources, extraGPRArgs + 1, nonArgGPRs, extraPoke);
+            auto updatedArgSourceRegs = argSourceRegs.pushRegArg(payload.gpr(), GPRInfo::toArgumentRegister(currentArgCount));
+            setupArgumentsImpl<OperationType>(updatedArgSourceRegs.addGPRExtraArg(), args...);
+        } else
+            pokeWideArgument<OperationType>(argSourceRegs, payload.gpr(), TrustedImm32(JSValue::CellTag), args...);
+    }
+
+    // Apple's ARM32 ABI gives `long long` - and so EncodedJSValue - 4-byte alignment
+    // where AAPCS gives it 8, and two of AAPCS's parameter-passing rules are conditioned
+    // on that alignment:
+    //
+    //   C.3  round the next core register number up to even before an 8-byte-aligned
+    //        argument. Does not apply: a 64-bit argument starts at whichever core
+    //        register comes next, odd or even, and no register is skipped as padding.
+    //   C.4  an 8-byte-aligned argument that does not fit entirely in the core registers
+    //        goes wholly on the stack. Does not apply either: with exactly one core
+    //        register left the value is split, low word in that register and high word
+    //        in the first stack slot.
+    //
+    // Measured rather than assumed. For
+    //   op(void*, EncodedJSValue, EncodedJSValue, void*)
+    // clang targeting armv7-apple-ios6.0 emits
+    //   r0 = arg0, r1:r2 = arg1, r3:[sp+0] = arg2, [sp+4] = arg3
+    // and the same source targeting armv7-unknown-linux-gnueabihf emits
+    //   r0 = arg0, r1 skipped, r2:r3 = arg1, [sp+0..7] = arg2, [sp+8] = arg3
+    // which is what the #else path below produces. Getting this wrong is not subtle:
+    // operationValueAddOptimize read its JSGlobalObject* out of the stack slot holding
+    // the second value's tag and dereferenced Int32Tag.
+    template<typename OperationType, unsigned numGPRArgs, unsigned numGPRSources, unsigned numFPRArgs, unsigned numFPRSources, unsigned numCrossSources, unsigned extraGPRArgs, unsigned nonArgGPRs, unsigned extraPoke, typename... Args>
+        requires std::same_as<CURRENT_ARGUMENT_TYPE, EncodedJSValue>
+    void setupArgumentsImpl(ArgCollection<numGPRArgs, numGPRSources, numFPRArgs, numFPRSources, numCrossSources, extraGPRArgs, nonArgGPRs, extraPoke> argSourceRegs, JSValueRegs arg, Args... args)
+    {
+        unsigned numArgRegisters = GPRInfo::numberOfArgumentRegisters;
+        unsigned currentArgCount = argSourceRegs.argCount(arg.tagGPR());
+
+        if (currentArgCount + 1 < numArgRegisters) {
+            // JSValueRegs is passed in two 32-bit registers on these architectures. Increase both numGPRArgs and extraGPRArgs by 1.
+            // We can't just add 2 to numGPRArgs, since it is used for CURRENT_ARGUMENT_TYPE. Adding 2 would lead to a skipped argument.
+            auto updatedArgSourceRegs1 = argSourceRegs.pushRegArg(arg.payloadGPR(), GPRInfo::toArgumentRegister(currentArgCount));
+            auto updatedArgSourceRegs2 = updatedArgSourceRegs1.pushExtraRegArg(arg.tagGPR(), GPRInfo::toArgumentRegister(currentArgCount + 1));
+            setupArgumentsImpl<OperationType>(updatedArgSourceRegs2, args...);
+        } else if (currentArgCount + 1 == numArgRegisters) {
+            // Split. The payload takes the last core register and the tag takes the first
+            // stack word; passing extraGPRArgs + 1 to calculatePokeOffset() accounts for
+            // that register, so the tag lands on the first overflow word rather than
+            // overwriting a slot the register file already covers.
+            pokeForArgument(arg.tagGPR(), numGPRArgs, numFPRArgs, numCrossSources, extraGPRArgs + 1, nonArgGPRs, extraPoke);
+            auto updatedArgSourceRegs = argSourceRegs.pushRegArg(arg.payloadGPR(), GPRInfo::toArgumentRegister(currentArgCount));
+            setupArgumentsImpl<OperationType>(updatedArgSourceRegs.addGPRExtraArg(), args...);
+        } else
+            pokeWideArgument<OperationType>(argSourceRegs, arg.payloadGPR(), arg.tagGPR(), args...);
+    }
+#else // OS(DARWIN)
     template<typename OperationType, unsigned numGPRArgs, unsigned numGPRSources, unsigned numFPRArgs, unsigned numFPRSources, unsigned numCrossSources, unsigned extraGPRArgs, unsigned nonArgGPRs, unsigned extraPoke, typename... Args>
         requires std::same_as<CURRENT_ARGUMENT_TYPE, EncodedJSValue>
     void setupArgumentsImpl(ArgCollection<numGPRArgs, numGPRSources, numFPRArgs, numFPRSources, numCrossSources, extraGPRArgs, nonArgGPRs, extraPoke> argSourceRegs, CellValue payload, Args... args)
@@ -528,6 +635,7 @@ private:
         } else
             pokeArgumentsAligned<OperationType>(argSourceRegs, arg.payloadGPR(), arg.tagGPR(), args...);
     }
+#endif // OS(DARWIN)
 
 #endif // CPU(ARM_THUMB2)
 #endif // USE(JSVALUE64)
@@ -742,8 +850,13 @@ public:
     
     void setupResults(FPRReg destA)
     {
-        if (destA != InvalidFPRReg)
-            moveDouble(FPRInfo::returnValueFPR, destA);
+        if (destA == InvalidFPRReg)
+            return;
+#if CPU(ARM_THUMB2) && OS(DARWIN)
+        moveIntsToDouble(GPRInfo::returnValueGPR, GPRInfo::returnValueGPR2, destA);
+#else
+        moveDouble(FPRInfo::returnValueFPR, destA);
+#endif
     }
 
     void jumpToExceptionHandler(VM& vm)

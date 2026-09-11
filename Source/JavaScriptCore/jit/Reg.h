@@ -150,7 +150,7 @@ public:
 
     ASCIILiteral debugName() const;
 
-    void dump(PrintStream&) const;
+    JS_EXPORT_PRIVATE void dump(PrintStream&) const;
 
     class AllRegsIterable {
     public:

@@ -63,16 +63,28 @@ namespace JSC {
         void clear()
         {
             m_identifiers.clear();
-            for (int i = 0; i < MaximumCachableCharacter; i++)
-                m_shortIdentifiers[i] = nullptr;
-            for (int i = 0; i < MaximumCachableCharacter; i++)
-                m_recentIdentifiers[i] = nullptr;
+            m_shortIdentifiers.fill(nullptr);
+            m_recentIdentifiers.fill(nullptr);
         }
 
     private:
+        static constexpr unsigned recentIdentifierCacheSize = 512;
+        static constexpr unsigned recentIdentifierCacheMask = recentIdentifierCacheSize - 1;
+
+        template<typename T>
+        static ALWAYS_INLINE unsigned recentIdentifierSlot(std::span<const T> characters)
+        {
+            size_t length = characters.size();
+            unsigned hash = static_cast<unsigned>(characters[0]) * 31u;
+            hash += static_cast<unsigned>(characters[length - 1]) * 7u;
+            hash += static_cast<unsigned>(characters[length >> 1]);
+            hash += static_cast<unsigned>(length) * 131u;
+            return (hash ^ (hash >> 9)) & recentIdentifierCacheMask;
+        }
+
         IdentifierVector m_identifiers;
         std::array<Identifier*, MaximumCachableCharacter> m_shortIdentifiers;
-        std::array<Identifier*, MaximumCachableCharacter> m_recentIdentifiers;
+        std::array<Identifier*, recentIdentifierCacheSize> m_recentIdentifiers;
     };
 
     template <typename T>
@@ -80,22 +92,19 @@ namespace JSC {
     {
         if (characters.empty())
             return vm.propertyNames->emptyIdentifier;
-        if (characters.front() >= MaximumCachableCharacter) {
-            m_identifiers.append(Identifier::fromString(vm, characters));
-            return m_identifiers.last();
-        }
-        if (characters.size() == 1) {
+        if (characters.size() == 1 && characters.front() < MaximumCachableCharacter) {
             if (Identifier* ident = m_shortIdentifiers[characters.front()])
                 return *ident;
             m_identifiers.append(Identifier::fromString(vm, characters));
             m_shortIdentifiers[characters.front()] = &m_identifiers.last();
             return m_identifiers.last();
         }
-        Identifier* ident = m_recentIdentifiers[characters.front()];
+        unsigned slot = recentIdentifierSlot(characters);
+        Identifier* ident = m_recentIdentifiers[slot];
         if (ident && Identifier::equal(ident->impl(), characters))
             return *ident;
         m_identifiers.append(Identifier::fromString(vm, characters));
-        m_recentIdentifiers[characters.front()] = &m_identifiers.last();
+        m_recentIdentifiers[slot] = &m_identifiers.last();
         return m_identifiers.last();
     }
 
@@ -115,22 +124,19 @@ namespace JSC {
     {
         if (characters.empty())
             return vm.propertyNames->emptyIdentifier;
-        if (characters.front() >= MaximumCachableCharacter) {
-            m_identifiers.append(Identifier::createLatin1(vm, characters));
-            return m_identifiers.last();
-        }
-        if (characters.size() == 1) {
+        if (characters.size() == 1 && characters.front() < MaximumCachableCharacter) {
             if (Identifier* ident = m_shortIdentifiers[characters.front()])
                 return *ident;
             m_identifiers.append(Identifier::fromString(vm, characters));
             m_shortIdentifiers[characters.front()] = &m_identifiers.last();
             return m_identifiers.last();
         }
-        Identifier* ident = m_recentIdentifiers[characters.front()];
+        unsigned slot = recentIdentifierSlot(characters);
+        Identifier* ident = m_recentIdentifiers[slot];
         if (ident && Identifier::equal(ident->impl(), characters))
             return *ident;
         m_identifiers.append(Identifier::createLatin1(vm, characters));
-        m_recentIdentifiers[characters.front()] = &m_identifiers.last();
+        m_recentIdentifiers[slot] = &m_identifiers.last();
         return m_identifiers.last();
     }
     

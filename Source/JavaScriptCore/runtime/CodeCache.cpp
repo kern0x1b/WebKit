@@ -34,13 +34,28 @@
 #include "VariableEnvironmentInlines.h"
 #include <wtf/TZoneMallocInlines.h>
 
+#if defined(WEBKIT_IOS6)
+#include "VM.h"
+#include <wtf/Condition.h>
+#include <wtf/Deque.h>
+#include <wtf/Lock.h>
+#include <wtf/NeverDestroyed.h>
+#include <wtf/RunLoop.h>
+#include <wtf/Threading.h>
+#endif
+
 namespace JSC {
 
 WTF_MAKE_TZONE_ALLOCATED_IMPL(CodeCache);
 
 void CodeCacheMap::pruneSlowCase()
 {
+#if defined(WEBKIT_IOS6)
+    int64_t burst = std::max(m_size - m_sizeAtLastPrune, static_cast<int64_t>(0));
+    m_minCapacity = std::max(burst, (m_minCapacity * 3) / 4);
+#else
     m_minCapacity = std::max(m_size - m_sizeAtLastPrune, static_cast<int64_t>(0));
+#endif
     m_sizeAtLastPrune = m_size;
     m_timeAtLastPrune = ApproximateTime::now();
 
@@ -157,6 +172,166 @@ UnlinkedModuleProgramCodeBlock* recursivelyGenerateUnlinkedCodeBlockForModulePro
     return recursivelyGenerateUnlinkedCodeBlock<UnlinkedModuleProgramCodeBlock>(vm, source, lexicallyScopedFeatures, scriptMode, codeGenerationMode, error, evalContextType);
 }
 
+#if defined(WEBKIT_IOS6)
+
+
+namespace {
+
+struct AheadOfTimeBytecodeJob {
+    RefPtr<SourceProvider> provider;
+    RefPtr<WTF::RunLoop> runLoop;
+    String source;
+    String sourceURL;
+    URL sourceOriginURL;
+    TextPosition startPosition;
+    int startOffset { 0 };
+    int endOffset { 0 };
+    int firstLine { 1 };
+    int startColumn { 1 };
+    unsigned sourceHash { 0 };
+    SourceTaintedOrigin taintedness { SourceTaintedOrigin::Untainted };
+    LexicallyScopedFeatures lexicallyScopedFeatures { NoLexicallyScopedFeatures };
+    JSParserScriptMode scriptMode { JSParserScriptMode::Classic };
+    OptionSet<CodeGenerationMode> codeGenerationMode;
+};
+
+class AheadOfTimeBytecodeThread {
+    WTF_MAKE_NONCOPYABLE(AheadOfTimeBytecodeThread);
+public:
+    AheadOfTimeBytecodeThread() = default;
+
+    bool enqueue(AheadOfTimeBytecodeJob&&);
+
+private:
+    void run();
+
+    static constexpr unsigned maximumRememberedPrograms = 256;
+
+    Lock m_lock;
+    Condition m_jobAvailable;
+    Deque<AheadOfTimeBytecodeJob> m_queue WTF_GUARDED_BY_LOCK(m_lock);
+    UncheckedKeyHashSet<unsigned> m_alreadyQueued WTF_GUARDED_BY_LOCK(m_lock);
+    RefPtr<Thread> m_thread WTF_GUARDED_BY_LOCK(m_lock);
+};
+
+bool AheadOfTimeBytecodeThread::enqueue(AheadOfTimeBytecodeJob&& job)
+{
+    if (!job.sourceHash)
+        return false;
+
+    Locker locker { m_lock };
+
+    if (m_queue.size() >= Options::aheadOfTimeBytecodeQueueLength())
+        return false;
+
+    if (m_alreadyQueued.size() >= maximumRememberedPrograms)
+        m_alreadyQueued.clear();
+    if (!m_alreadyQueued.add(job.sourceHash).isNewEntry)
+        return false;
+
+    if (!m_thread)
+        m_thread = Thread::create("JSC AOT Bytecode"_s, [this] { run(); }, ThreadType::Compiler, Thread::QOS::Utility);
+
+    m_queue.append(WTF::move(job));
+    m_jobAvailable.notifyOne();
+    return true;
+}
+
+void AheadOfTimeBytecodeThread::run()
+{
+    Ref<VM> vm = VM::create();
+
+    for (;;) {
+        AheadOfTimeBytecodeJob job;
+        {
+            Locker locker { m_lock };
+            while (m_queue.isEmpty())
+                m_jobAvailable.wait(m_lock);
+            job = m_queue.takeFirst();
+        }
+
+        RefPtr<CachedBytecode> bytecode;
+        {
+            JSLockHolder locker(vm.get());
+
+            SourceCode source(
+                RefPtr<SourceProvider> { StringSourceProvider::create(job.source, SourceOrigin { job.sourceOriginURL }, String { job.sourceURL }, job.taintedness, job.startPosition) },
+                job.startOffset, job.endOffset, job.firstLine, job.startColumn);
+
+            ParserError error;
+            UnlinkedProgramCodeBlock* unlinkedCodeBlock = recursivelyGenerateUnlinkedCodeBlockForProgram(vm.get(), source, job.lexicallyScopedFeatures, job.scriptMode, job.codeGenerationMode, error, EvalContextType::None);
+
+            if (unlinkedCodeBlock) {
+                SourceCodeKey key(
+                    source, String(), SourceCodeType::ProgramType, job.lexicallyScopedFeatures, job.scriptMode,
+                    DerivedContextType::None, EvalContextType::None, false, job.codeGenerationMode,
+                    std::nullopt);
+                bytecode = encodeCodeBlock(vm.get(), key, unlinkedCodeBlock);
+            }
+        }
+
+        {
+            JSLockHolder locker(vm.get());
+            vm->clearSourceProviderCaches();
+            vm->codeCache()->clear();
+            vm->heap.collectNow(Sync, CollectionScope::Full);
+        }
+        job.source = String();
+
+        RefPtr<WTF::RunLoop> runLoop = WTF::move(job.runLoop);
+        runLoop->dispatch([provider = WTF::move(job.provider), bytecode = WTF::move(bytecode)] {
+            if (!bytecode)
+                return;
+            provider->cacheBytecode([&] { return bytecode; });
+        });
+    }
+}
+
+} // anonymous namespace
+
+bool enqueueAheadOfTimeBytecodeGeneration(VM& vm, const SourceCode& source, LexicallyScopedFeatures lexicallyScopedFeatures, JSParserScriptMode scriptMode, OptionSet<CodeGenerationMode> codeGenerationMode)
+{
+    if (!Options::useAheadOfTimeBytecode())
+        return false;
+
+    SourceProvider* provider = source.provider();
+    if (!provider || provider->sourceType() != SourceProviderSourceType::Program)
+        return false;
+
+    if (!provider->wantsBytecodeCache())
+        return false;
+
+    StringView text = provider->source();
+    if (source.startOffset() || static_cast<unsigned>(source.endOffset()) != text.length())
+        return false;
+
+    unsigned length = text.length();
+    if (length < Options::aheadOfTimeBytecodeMinimumSourceLength() || length > Options::aheadOfTimeBytecodeMaximumSourceLength())
+        return false;
+
+    AheadOfTimeBytecodeJob job;
+    job.provider = provider;
+    job.runLoop = &vm.runLoop();
+    job.source = text.toString().isolatedCopy();
+    job.sourceURL = provider->sourceURL().isolatedCopy();
+    job.sourceOriginURL = provider->sourceOrigin().url().isolatedCopy();
+    job.startPosition = provider->startPosition();
+    job.startOffset = source.startOffset();
+    job.endOffset = source.endOffset();
+    job.firstLine = source.firstLine().oneBasedInt();
+    job.startColumn = source.startColumn().oneBasedInt();
+    job.sourceHash = provider->hash();
+    job.taintedness = provider->sourceTaintedOrigin();
+    job.lexicallyScopedFeatures = lexicallyScopedFeatures;
+    job.scriptMode = scriptMode;
+    job.codeGenerationMode = codeGenerationMode;
+
+    static NeverDestroyed<AheadOfTimeBytecodeThread> generator;
+    return generator->enqueue(WTF::move(job));
+}
+
+#endif // defined(WEBKIT_IOS6)
+
 template <class UnlinkedCodeBlockType, class ExecutableType>
 UnlinkedCodeBlockType* CodeCache::getUnlinkedGlobalCodeBlock(VM& vm, ExecutableType* executable, const SourceCode& source, JSParserScriptMode scriptMode, OptionSet<CodeGenerationMode> codeGenerationMode, ParserError& error, EvalContextType evalContextType)
 {
@@ -184,6 +359,15 @@ UnlinkedCodeBlockType* CodeCache::getUnlinkedGlobalCodeBlock(VM& vm, ExecutableT
 
     if (unlinkedCodeBlock && Options::useCodeCache()) {
         m_sourceCode.addCache(key, SourceCodeValue(vm, unlinkedCodeBlock, m_sourceCode.age()));
+
+#if defined(WEBKIT_IOS6)
+        if constexpr (std::is_same_v<UnlinkedCodeBlockType, UnlinkedProgramCodeBlock>) {
+            if (derivedContextType == DerivedContextType::None && !isArrowFunctionContext && evalContextType == EvalContextType::None) {
+                if (enqueueAheadOfTimeBytecodeGeneration(vm, source, executable->lexicallyScopedFeatures(), scriptMode, codeGenerationMode))
+                    return unlinkedCodeBlock;
+            }
+        }
+#endif
 
         key.source().provider().cacheBytecode([&] {
             return encodeCodeBlock(vm, key, unlinkedCodeBlock);

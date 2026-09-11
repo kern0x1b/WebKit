@@ -34,6 +34,9 @@
 #include "PropertyNameArray.h"
 #include "PropertyTable.h"
 #include "WebAssemblyGCStructure.h"
+#include <atomic>
+#include <cstdio>
+#include <stdlib.h>
 #include <wtf/CommaPrinter.h>
 #include <wtf/NeverDestroyed.h>
 #include <wtf/RefPtr.h>
@@ -44,13 +47,10 @@ WTF_ALLOW_UNSAFE_BUFFER_USAGE_BEGIN
 
 namespace JSC {
 
+#if !(defined(WEBKIT_IOS6) && !ASSERT_ENABLED)
 template<typename DetailsFunc>
 void Structure::checkOffsetConsistency(PropertyTable* propertyTable, const DetailsFunc& detailsFunc) const
 {
-    // We cannot reliably assert things about the property table in the concurrent
-    // compilation thread. It is possible for the table to be stolen and then have
-    // things added to it, which leads to the offsets being all messed up. We could
-    // get around this by grabbing a lock here, but I think that would be overkill.
     if (isCompilationThread())
         return;
 
@@ -77,6 +77,7 @@ void Structure::checkOffsetConsistency(PropertyTable* propertyTable, const Detai
     if (inlineOverflowAccordingToTotalSize != numberOfOutOfLineSlotsForMaxOffset(maxOffset()))
         fail("inlineOverflowAccordingToTotalSize doesn't match numberOfOutOfLineSlotsForMaxOffset");
 }
+#endif
 
 #if DUMP_STRUCTURE_ID_STATISTICS
 static UncheckedKeyHashSet<Structure*>& liveStructureSet = *(new UncheckedKeyHashSet<Structure*>);
@@ -245,30 +246,29 @@ Structure::Structure(VM& vm, JSGlobalObject* globalObject, JSValue prototype, co
 {
     bool hasStaticNonEnumerableProperty = m_classInfo->hasStaticPropertyWithAnyOfAttributes(static_cast<uint8_t>(PropertyAttribute::DontEnum));
     bool hasStaticNonConfigurableProperty = m_classInfo->hasStaticPropertyWithAnyOfAttributes(static_cast<uint8_t>(PropertyAttribute::DontDelete));
+    bool hasStaticGetterSetterProperty = m_classInfo->hasStaticPropertyWithAnyOfAttributes(static_cast<uint8_t>(PropertyAttribute::AccessorOrCustomAccessorOrValue));
+    bool hasReadOnlyOrGetterSetterProperty = hasStaticGetterSetterProperty || m_classInfo->hasStaticPropertyWithAnyOfAttributes(static_cast<uint8_t>(PropertyAttribute::ReadOnly));
     bool isArrayStorage = hasAnyArrayStorage(indexingType);
+    bool overridesGetOwnPropertySlot = typeInfo.overridesGetOwnPropertySlot();
 
-    setDictionaryKind(NoneDictionaryKind);
-    setIsPinnedPropertyTable(false);
-    setHasAnyKindOfGetterSetterProperties(m_classInfo->hasStaticPropertyWithAnyOfAttributes(static_cast<uint8_t>(PropertyAttribute::AccessorOrCustomAccessorOrValue)));
-    setHasReadOnlyOrGetterSetterPropertiesExcludingProto(hasAnyKindOfGetterSetterProperties() || m_classInfo->hasStaticPropertyWithAnyOfAttributes(static_cast<uint8_t>(PropertyAttribute::ReadOnly)));
-    setHasNonEnumerableProperties(hasStaticNonEnumerableProperty || typeInfo.overridesGetOwnPropertySlot() || isArrayStorage);
-    setHasSpecialProperties(false);
-    setHasNonConfigurableProperties(hasStaticNonConfigurableProperty || typeInfo.overridesGetOwnPropertySlot() || isArrayStorage);
-    setHasNonConfigurableReadOnlyOrGetterSetterProperties(hasStaticNonConfigurableProperty || (typeInfo.overridesGetOwnPropertySlot() && typeInfo.type() != ArrayType) || isArrayStorage);
-    setHasUnderscoreProtoPropertyExcludingOriginalProto(false);
-    setIsQuickPropertyAccessAllowedForEnumeration(true);
-    setTransitionPropertyAttributes(0);
-    setTransitionKind(TransitionKind::Unknown);
-    setMayBePrototype(false);
-    setDidPreventExtensions(typeInfo.overridesIsExtensible());
-    setDidTransition(false);
-    setStaticPropertiesReified(false);
-    setTransitionWatchpointIsLikelyToBeFired(false);
-    setHasBeenDictionary(false);
-    setProtectPropertyTableWhileTransitioning(false);
+    uint32_t bitField = s_isQuickPropertyAccessAllowedForEnumerationBits;
+    if (hasStaticGetterSetterProperty)
+        bitField |= s_hasAnyKindOfGetterSetterPropertiesBits;
+    if (hasReadOnlyOrGetterSetterProperty)
+        bitField |= s_hasReadOnlyOrGetterSetterPropertiesExcludingProtoBits;
+    if (hasStaticNonEnumerableProperty || overridesGetOwnPropertySlot || isArrayStorage)
+        bitField |= s_hasNonEnumerablePropertiesBits;
+    if (hasStaticNonConfigurableProperty || overridesGetOwnPropertySlot || isArrayStorage)
+        bitField |= s_hasNonConfigurablePropertiesBits;
+    if (hasStaticNonConfigurableProperty || (overridesGetOwnPropertySlot && typeInfo.type() != ArrayType) || isArrayStorage)
+        bitField |= s_hasNonConfigurableReadOnlyOrGetterSetterPropertiesBits;
+    if (typeInfo.overridesIsExtensible())
+        bitField |= s_didPreventExtensionsBits;
+    m_bitField = bitField;
+
     setTransitionOffset(vm, invalidOffset);
     setMaxOffset(vm, invalidOffset);
- 
+
     ASSERT(inlineCapacity <= JSFinalObject::maxInlineCapacity);
     ASSERT(static_cast<PropertyOffset>(inlineCapacity) < firstOutOfLineOffset);
     ASSERT(!hasRareData());
@@ -281,6 +281,41 @@ Structure::Structure(VM& vm, JSGlobalObject* globalObject, JSValue prototype, co
 }
 
 const ClassInfo Structure::s_info = { "Structure"_s, nullptr, nullptr, nullptr, CREATE_METHOD_TABLE(Structure) };
+
+#if defined(WEBKIT_IOS6)
+int Structure::maxTransitionLengthForNonEvalPutById()
+{
+    static const int limit = [] -> int {
+        if (const char* override = getenv("WEBKIT_IOS6_MAX_PUT_BY_ID_TRANSITIONS")) {
+            int value = atoi(override);
+            if (value > 0)
+                return value;
+        }
+        return s_maxTransitionLengthForNonEvalPutById;
+    }();
+    return limit;
+}
+
+void Structure::logCacheableDictionaryTransitionForAdd(PropertyName propertyName, PutPropertySlot::Context context)
+{
+    static const char* path = [] () -> const char* {
+        const char* value = getenv("WEBKIT_IOS6_DICTIONARY_TRANSITION_LOG");
+        return (value && value[0]) ? value : nullptr;
+    }();
+    if (!path)
+        return;
+    static std::atomic<uint64_t> count { 0 };
+    uint64_t total = count.fetch_add(1, std::memory_order_relaxed) + 1;
+    if (FILE* file = fopen(path, "a")) {
+        auto* uid = propertyName.uid();
+        fprintf(file, "dictionary-transition #%llu context=%s property=%s\n",
+            static_cast<unsigned long long>(total),
+            context == PutPropertySlot::PutById ? "PutById" : "other",
+            uid ? uid->utf8().data() : "<null>");
+        fclose(file);
+    }
+}
+#endif
 
 Structure::Structure(VM& vm, CreatingEarlyCellTag)
     : JSCell(CreatingEarlyCell)
@@ -330,7 +365,7 @@ Structure::Structure(VM& vm, CreatingEarlyCellTag)
 Structure::Structure(VM& vm, StructureVariant variant, Structure* previous)
     : JSCell(vm, vm.structureStructure.get())
     , m_inlineCapacity(previous->m_inlineCapacity)
-    , m_bitField(0)
+    , m_bitField((previous->m_bitField & s_bitFieldFlagsCopiedOnTransition) | s_didTransitionBits)
     , m_structureVariant(variant)
     , m_propertyHash(previous->m_propertyHash)
     , m_seenProperties(previous->m_seenProperties)
@@ -338,31 +373,11 @@ Structure::Structure(VM& vm, StructureVariant variant, Structure* previous)
     , m_classInfo(previous->m_classInfo)
     , m_transitionWatchpointSet(IsWatched)
 {
-    setDictionaryKind(previous->dictionaryKind());
-    setIsPinnedPropertyTable(false);
-    setHasBeenFlattenedBefore(previous->hasBeenFlattenedBefore());
-    setHasAnyKindOfGetterSetterProperties(previous->hasAnyKindOfGetterSetterProperties());
-    setHasReadOnlyOrGetterSetterPropertiesExcludingProto(previous->hasReadOnlyOrGetterSetterPropertiesExcludingProto());
-    setHasNonEnumerableProperties(previous->hasNonEnumerableProperties());
-    setHasSpecialProperties(previous->hasSpecialProperties());
-    setHasNonConfigurableProperties(previous->hasNonConfigurableProperties());
-    setHasNonConfigurableReadOnlyOrGetterSetterProperties(previous->hasNonConfigurableReadOnlyOrGetterSetterProperties());
-    setHasUnderscoreProtoPropertyExcludingOriginalProto(previous->hasUnderscoreProtoPropertyExcludingOriginalProto());
-    setIsQuickPropertyAccessAllowedForEnumeration(previous->isQuickPropertyAccessAllowedForEnumeration());
-    setTransitionPropertyAttributes(0);
-    setTransitionKind(TransitionKind::Unknown);
-    setMayBePrototype(previous->mayBePrototype());
-    setDidPreventExtensions(previous->didPreventExtensions());
-    setDidTransition(true);
-    setStaticPropertiesReified(previous->staticPropertiesReified());
-    setHasBeenDictionary(previous->hasBeenDictionary());
-    setProtectPropertyTableWhileTransitioning(false);
     setTransitionOffset(vm, invalidOffset);
     setMaxOffset(vm, invalidOffset);
- 
-    TypeInfo typeInfo = previous->typeInfo();
-    m_blob = TypeInfoBlob(previous->indexingModeIncludingHistory(), typeInfo);
-    m_outOfLineTypeFlags = typeInfo.outOfLineTypeFlags();
+
+    m_blob = previous->m_blob;
+    m_outOfLineTypeFlags = previous->m_outOfLineTypeFlags;
 
     ASSERT(!previous->typeInfo().structureIsImmortal());
     setPreviousID(vm, previous);
@@ -491,7 +506,7 @@ PropertyTable* Structure::materializePropertyTable(VM& vm, bool setPropertyTable
             PropertyTableEntry entry(structure->m_transitionPropertyName.get(), structure->transitionOffset(), structure->transitionPropertyAttributes());
             auto nextOffset = table->nextOffset(structure->inlineCapacity());
             ASSERT_UNUSED(nextOffset, nextOffset == structure->transitionOffset());
-            auto [offset, attribute, result] = table->add(vm, entry);
+            auto [offset, attribute, result] = table->addAfterFind(vm, entry, table->findEmptySlot(entry.key()));
             ASSERT_UNUSED(result, result);
             ASSERT_UNUSED(offset, offset == nextOffset);
             UNUSED_VARIABLE(attribute);
@@ -576,6 +591,9 @@ Structure* Structure::addNewPropertyTransition(VM& vm, Structure* structure, Pro
     
     if (structure->shouldDoCacheableDictionaryTransitionForAdd(context)) {
         ASSERT(!isCopyOnWrite(structure->indexingMode()));
+#if defined(WEBKIT_IOS6)
+        logCacheableDictionaryTransitionForAdd(propertyName, context);
+#endif
         Structure* transition = toCacheableDictionaryTransition(vm, structure, deferred);
         ASSERT(structure != transition);
         offset = transition->add(vm, propertyName, attributes);
@@ -1333,6 +1351,9 @@ void Structure::getPropertyNamesFromStructure(VM& vm, PropertyNameArrayBuilder& 
     bool knownUnique = propertyNames.canAddKnownUniqueForStructure();
     bool foundSymbol = false;
 
+    if (knownUnique && (mode == DontEnumPropertiesMode::Include || !hasNonEnumerableProperties()))
+        propertyNames.reserveCapacity(table->size());
+
     auto checkDontEnumAndAdd = [&](const auto& entry) {
         if (mode == DontEnumPropertiesMode::Include || !(entry.attributes() & PropertyAttribute::DontEnum)) {
             if (knownUnique)
@@ -1810,6 +1831,7 @@ void dumpTransitionKind(PrintStream& out, TransitionKind kind)
     out.print(kindName);
 }
 
+#if !(defined(WEBKIT_IOS6) && !ASSERT_ENABLED)
 void Structure::checkOffsetConsistency() const
 {
     if (auto* propertyTable = propertyTableOrNull())
@@ -1817,6 +1839,7 @@ void Structure::checkOffsetConsistency() const
     else
         ASSERT(!isPinnedPropertyTable());
 }
+#endif
 
 #if ASSERT_ENABLED
 void Structure::checkConsistency()

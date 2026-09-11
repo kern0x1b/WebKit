@@ -39,6 +39,12 @@
 
 namespace JSC {
 
+#if defined(WEBKIT_IOS6)
+namespace CostCeilingInstrumentation {
+bool queueOrderingEnabled();
+}
+#endif
+
 WTF_MAKE_TZONE_ALLOCATED_IMPL(JITWorklist);
 
 JITWorklist::JITWorklist()
@@ -434,11 +440,32 @@ JITWorklist::State JITWorklist::removeAllReadyPlansForVM(VM& vm, Vector<Ref<JITP
         if (isCompiled)
             return Compiled;
 
+#if defined(WEBKIT_IOS6)
+        auto iter = m_plans.find(requestedKey);
+        if (iter != m_plans.end()) {
+            if (CostCeilingInstrumentation::queueOrderingEnabled())
+                iter->value->bumpReheatForQueueOrdering();
+            return Compiling;
+        }
+#else
         if (m_plans.contains(requestedKey))
             return Compiling;
+#endif
     }
     return NotKnown;
 }
+
+#if defined(WEBKIT_IOS6)
+void JITWorklist::discardPreparingPlan(Ref<JITPlan>&& plan)
+{
+    RELEASE_ASSERT(plan->stage() == JITPlanStage::Preparing);
+    JITCompilationKey key = plan->key(); // Must read before cancel() nulls out the code block.
+    ASSERT(m_totalLoad >= planLoad(plan.get()));
+    m_totalLoad -= planLoad(plan.get());
+    m_plans.remove(key);
+    plan->cancel();
+}
+#endif
 
 template<typename MatchFunction>
 void JITWorklist::removeMatchingPlansForVM(VM& vm, const MatchFunction& matches)

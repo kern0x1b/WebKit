@@ -40,8 +40,8 @@ WTF_MAKE_TZONE_ALLOCATED_IMPL(RegExpCache);
 
 RegExp* RegExpCache::lookup(VM&, const WTF::String& patternString, OptionSet<Yarr::Flags> flags)
 {
-    Locker locker { m_lock };
     RegExpKey key(flags, patternString);
+    Locker locker { m_lock };
     return m_weakCache.get(key);
 }
 
@@ -58,9 +58,6 @@ RegExp* RegExpCache::lookupOrCreate(VM& vm, const String& patternString, OptionS
 #if ENABLE(REGEXP_TRACING)
     vm.addRegExpToTrace(regExp);
 #endif
-
-    if (!regExp->isValid())
-        return regExp;
 
     {
         Locker locker { m_lock };
@@ -85,8 +82,7 @@ void RegExpCache::finalize(Handle<Unknown> handle, void*)
 
 void RegExpCache::addToStrongCache(RegExp* regExp)
 {
-    String pattern = regExp->pattern();
-    if (pattern.length() > maxStrongCacheablePatternLength)
+    if (regExp->pattern().length() > maxStrongCacheablePatternLength)
         return;
 
     m_strongCache[m_nextEntryInStrongCache] = regExp;

@@ -1161,7 +1161,8 @@ namespace JSC {
 
         RegisterID* kill(RegisterID* dst)
         {
-            m_staticPropertyAnalyzer.kill(dst);
+            if (m_staticPropertyAnalysesEverCreated) [[unlikely]]
+                m_staticPropertyAnalyzer.kill(dst);
             return dst;
         }
 
@@ -1413,7 +1414,7 @@ namespace JSC {
         int m_nextConstantOffset { 0 };
         
         // Constant pool
-        IdentifierMap m_identifierMap;
+        BorrowedIdentifierMap m_identifierMap;
 
         typedef UncheckedKeyHashMap<EncodedJSValueWithRepresentation, unsigned, EncodedJSValueWithRepresentationHash, EncodedJSValueWithRepresentationHashTraits> JSValueMap;
         JSValueMap m_jsValueMap;
@@ -1423,6 +1424,7 @@ namespace JSC {
         TemplateDescriptorMap m_templateDescriptorMap;
 
         StaticPropertyAnalyzer m_staticPropertyAnalyzer;
+        bool m_staticPropertyAnalysesEverCreated { false };
 
         VM& m_vm;
 

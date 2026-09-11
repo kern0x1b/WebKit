@@ -27,6 +27,8 @@
 #include <JavaScriptCore/PureNaN.h>
 #include <atomic>
 #include <cmath>
+#include <wtf/Atomics.h>  // ios6/armv7: updateEncodedJSValueConcurrent() in the
+                          // USE(JSVALUE32_64) branch calls WTF::storeStoreFence().
 #include <wtf/Forward.h>
 #include <wtf/HashFunctions.h>
 #include <wtf/HashTraits.h>
@@ -799,7 +801,11 @@ inline bool JSValue::isNull() const
 
 inline bool JSValue::isUndefinedOrNull() const
 {
+#if USE(JSVALUE32_64)
+    return (tag() & ~1) == UndefinedTag;
+#else
     return isUndefined() || isNull();
+#endif
 }
 
 inline bool JSValue::isCell() const
@@ -875,7 +881,11 @@ inline JSValue::JSValue(int32_t tag, int32_t payload)
 
 inline bool JSValue::isNumber() const
 {
+#if USE(JSVALUE32_64)
+    return static_cast<uint32_t>(tag() - LowestTag) > static_cast<uint32_t>(BooleanTag - LowestTag);
+#else
     return isInt32() || isDouble();
+#endif
 }
 
 inline bool JSValue::isBoolean() const
@@ -1329,10 +1339,40 @@ ALWAYS_INLINE void clearEncodedJSValueConcurrent(EncodedJSValue& dest)
 
 inline JSValue JSValue::decodeConcurrent(const volatile EncodedJSValue *encodedJSValue)
 {
+    // Read the two halves separately rather than taking one 64-bit snapshot.
+    //
+    // The snapshot spelling - casting to std::atomic<EncodedJSValue> and calling
+    // load() - compiles on ARMv7 to LDREXD, which raises an alignment fault
+    // unless the address is 8-byte aligned. On this ABI it frequently is not:
+    // alignof(long long) is 8 as a scalar but 4 inside an aggregate, which is
+    // Apple's ARM32 deviation from AAPCS, so alignof(WriteBarrier<Unknown>) is 4
+    // and TrailingArray::offsetOfData() places FixedVector<WriteBarrier<Unknown>>'s
+    // elements at offset 4. Every even-indexed constant of a CodeBlock is then
+    // 4 mod 8 and CodeBlock::setConstantRegisters() takes SIGBUS on the first
+    // one. Linux ARMv7 keeps AAPCS's 8-byte aggregate alignment for long long
+    // and so never sees it, and 64-bit builds do not compile this function.
+    //
+    // Halves are all the protocol needs. updateEncodedJSValueConcurrent() below
+    // does not use a 64-bit atomic either: it publishes through the tag, as
+    // InvalidTag / store-store fence / payload / store-store fence / real tag.
+    // Reading tag, payload, then the tag again and retrying whenever the tag
+    // reads InvalidTag or changed underneath us yields the same guarantee the
+    // snapshot gave - a tag and a payload that were paired at one instant -
+    // because every torn state passes through InvalidTag.
+    auto* descriptor = reinterpret_cast<const volatile EncodedValueDescriptor*>(encodedJSValue);
+    const volatile int32_t* tagPointer = &descriptor->asBits.tag;
+    const volatile int32_t* payloadPointer = &descriptor->asBits.payload;
+
     for (;;) {
-        auto v = JSValue::decode(reinterpret_cast<const volatile std::atomic<EncodedJSValue>*>(encodedJSValue)->load());
-        if (v.tag() != InvalidTag)
-            return v;
+        int32_t tag = *tagPointer;
+        if (static_cast<uint32_t>(tag) == InvalidTag)
+            continue;
+        WTF::loadLoadFence();
+        int32_t payload = *payloadPointer;
+        WTF::loadLoadFence();
+        if (*tagPointer != tag)
+            continue;
+        return JSValue(tag, payload);
     }
 }
 

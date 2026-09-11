@@ -53,6 +53,10 @@ ALWAYS_INLINE void JSRopeString::destroy(JSCell* cell)
 
 bool JSString::equal(JSGlobalObject* globalObject, JSString* other) const
 {
+#if defined(WEBKIT_IOS6)
+    if (this == other)
+        return true;
+#endif
     if (isRope() || other->isRope())
         return equalSlowCase(globalObject, other);
     return WTF::equal(*valueInternal().impl(), *other->valueInternal().impl());
@@ -60,6 +64,10 @@ bool JSString::equal(JSGlobalObject* globalObject, JSString* other) const
 
 ALWAYS_INLINE bool JSString::equalInline(JSGlobalObject* globalObject, JSString* other) const
 {
+#if defined(WEBKIT_IOS6)
+    if (this == other)
+        return true;
+#endif
     VM& vm = globalObject->vm();
     auto scope = DECLARE_THROW_SCOPE(vm);
 

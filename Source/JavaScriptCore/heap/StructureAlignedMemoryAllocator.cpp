@@ -54,6 +54,10 @@ WTF_ALLOW_UNSAFE_BUFFER_USAGE_END
 
 #include <wtf/OSAllocator.h>
 
+#if !CPU(ADDRESS64) && defined(WEBKIT_IOS6)
+#include "Ios6BlockReservationPool.h"
+#endif
+
 namespace JSC {
 
 StructureAlignedMemoryAllocator::StructureAlignedMemoryAllocator() = default;
@@ -309,6 +313,23 @@ void StructureAlignedMemoryAllocator::initializeStructureAddressSpace()
     g_jscConfig.sizeOfStructureHeap = UINTPTR_MAX;
 }
 
+#if defined(WEBKIT_IOS6)
+
+
+void* StructureAlignedMemoryAllocator::tryAllocateAlignedMemory(size_t alignment, size_t size)
+{
+    ASSERT_UNUSED(alignment, alignment == MarkedBlock::blockSize);
+    ASSERT_UNUSED(size, size == MarkedBlock::blockSize);
+    return Ios6BlockReservationPool::singleton().tryAllocateBlock();
+}
+
+void StructureAlignedMemoryAllocator::freeAlignedMemory(void* block)
+{
+    Ios6BlockReservationPool::singleton().freeBlock(block);
+}
+
+#else // not defined(WEBKIT_IOS6)
+
 void* StructureAlignedMemoryAllocator::tryAllocateAlignedMemory(size_t alignment, size_t size)
 {
     ASSERT_UNUSED(alignment, alignment == MarkedBlock::blockSize);
@@ -320,6 +341,8 @@ void StructureAlignedMemoryAllocator::freeAlignedMemory(void* block)
 {
     fastFree(block);
 }
+
+#endif // defined(WEBKIT_IOS6)
 
 #endif // CPU(ADDRESS64)
 

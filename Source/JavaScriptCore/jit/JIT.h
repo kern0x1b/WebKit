@@ -344,6 +344,16 @@ namespace JSC {
         void emitGetVirtualRegisterPayload(VirtualRegister src, RegisterID dst);
         void emitPutVirtualRegister(VirtualRegister dst, JSValueRegs src);
 
+        void storeValueToFrame(JSValueRegs from, Address address)
+        {
+#if defined(WEBKIT_IOS6) && USE(JSVALUE32_64)
+            store32(from.payloadGPR(), address.withOffset(PayloadOffset));
+            store32(from.tagGPR(), address.withOffset(TagOffset));
+#else
+            storeValue(from, address);
+#endif
+        }
+
 #if USE(JSVALUE32_64)
         void emitGetVirtualRegisterTag(VirtualRegister src, RegisterID dst);
 #elif USE(JSVALUE64)
@@ -918,6 +928,10 @@ namespace JSC {
 
         bool m_canBeOptimized;
         bool m_shouldEmitProfiling;
+
+#if defined(WEBKIT_IOS6)
+        uint32_t* m_costCeilingCounterSlot { nullptr };
+#endif
 
         CodeBlock* const m_profiledCodeBlock { nullptr };
         UnlinkedCodeBlock* const m_unlinkedCodeBlock { nullptr };

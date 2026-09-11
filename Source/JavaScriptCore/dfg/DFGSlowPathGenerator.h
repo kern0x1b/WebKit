@@ -224,7 +224,7 @@ protected:
     SpillRegistersMode m_spillMode;
     ExceptionCheckRequirement m_exceptionCheckRequirement;
     ResultType m_result;
-    Vector<SilentRegisterSavePlan, 2> m_plans;
+    Vector<SilentRegisterSavePlan, silentRegisterSavePlanInlineCapacity> m_plans;
 };
 
 template<typename JumpType, typename FunctionType, typename ResultType, typename... Arguments>

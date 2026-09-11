@@ -651,6 +651,7 @@ private:
         OP_ORR_imm_T1   = 0xF040,
         OP_MOV_imm_T2   = 0xF040,
         OP_MVN_imm      = 0xF060,
+        OP_ORN_imm_T1   = 0xF060,
         OP_EOR_imm_T1   = 0xF080,
         OP_ADD_imm_T3   = 0xF100,
         OP_ADD_S_imm_T3 = 0xF110,
@@ -1610,6 +1611,15 @@ public:
         ASSERT(!BadReg(rn));
         ASSERT(imm.isEncodedImm());
         m_formatter.twoWordOp5i6Imm4Reg4EncodedImm(OP_ORR_imm_T1, rn, rd, imm);
+    }
+
+    // rd = rn | ~imm
+    ALWAYS_INLINE void orn(RegisterID rd, RegisterID rn, ARMThumbImmediate imm)
+    {
+        ASSERT(!BadReg(rd));
+        ASSERT(!BadReg(rn));
+        ASSERT(imm.isEncodedImm());
+        m_formatter.twoWordOp5i6Imm4Reg4EncodedImm(OP_ORN_imm_T1, rn, rd, imm);
     }
 
     ALWAYS_INLINE void orr(RegisterID rd, RegisterID rn, RegisterID rm, ShiftTypeAndAmount shift)

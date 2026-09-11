@@ -2109,6 +2109,12 @@ public:
         storePtr(TrustedImmPtr(nullptr), Address(resultGPR, JSObject::butterflyOffset()));
     }
 
+#if USE(JSVALUE64)
+    // ios6/armv7: this helper is written entirely in 64-bit macro-assembler ops
+    // (store64/neg64/moveConditionally64) which MacroAssemblerARMv7 does not provide.
+    // Its only caller is DFGSpeculativeJIT64.cpp, so a 32-bit build never needs it.
+    // The names are non-dependent, so without this guard the template body fails to
+    // parse even though it is never instantiated.
     template<typename StructureType>
     void emitAllocateJSBigInt64(VM& vm, GPRReg resultGPR, GPRReg valueGPR, GPRReg scratchGPR1, GPRReg scratchGPR2, StructureType structure, bool isSigned, JumpList& slowCases)
     {
@@ -2141,6 +2147,7 @@ public:
 
         done.link(this);
     }
+#endif // USE(JSVALUE64)
 
     enum LazyGlobalObjectLoadTag { LazyBaselineGlobalObject };
     JumpList branchIfValue(VM&, JSValueRegs, GPRReg scratch, GPRReg scratchIfShouldCheckMasqueradesAsUndefined, FPRReg, FPRReg, bool shouldCheckMasqueradesAsUndefined, Variant<JSGlobalObject*, GPRReg, LazyGlobalObjectLoadTag>, bool negateResult);

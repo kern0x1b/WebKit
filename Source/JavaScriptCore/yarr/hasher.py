@@ -28,11 +28,12 @@
 
 mask64 = 2**64 - 1
 mask32 = 2**32 - 1
-secret = [3257665815644502181, 10067880064238660809, 5418857496715711651]
+narrowSecretA = 0x53c5ca59
+narrowSecretB = 0x74743c1b
 
 
 def stringHash(str):
-    return rapidhash(str)
+    return narrowHash(str)
 
 
 def maskTop8BitsAndAvoidZero(value):
@@ -50,50 +51,12 @@ def maskTop8BitsAndAvoidZero(value):
     return value
 
 
-def rapidhash(string):
+def narrowHash(string):
     # https://github.com/Nicoshev/rapidhash
-    # Hashes raw ASCII bytes (1 byte per character).
-    def add64(a, b):
-        return (a + b) & mask64
-
-    def multi64(a, b):
-        return a * b & mask64
-
-    def rapid_mul128(A, B):
-        ha = A >> 32
-        hb = B >> 32
-        la = A & mask32
-        lb = B & mask32
-        rh = multi64(ha, hb)
-        rm0 = multi64(ha, lb)
-        rm1 = multi64(hb, la)
-        rl = multi64(la, lb)
-        t = add64(rl, (rm0 << 32))
-        c = int(t < rl)
-
-        lo = add64(t, (rm1 << 32))
-        c += int(lo < t)
-        hi = add64(rh, add64((rm0 >> 32), add64((rm1 >> 32), c)))
-        return lo, hi
-
-    def rapid_mix(A, B):
-        A, B = rapid_mul128(A, B)
-        return A ^ B
-
-    length = len(string)
-    seed = rapid_mix(0 ^ secret[0], secret[1]) ^ length
-    a = 0
-    b = 0
-
-    def read64(i):
-        return (ord(string[i])
-                | (ord(string[i + 1]) << 8)
-                | (ord(string[i + 2]) << 16)
-                | (ord(string[i + 3]) << 24)
-                | (ord(string[i + 4]) << 32)
-                | (ord(string[i + 5]) << 40)
-                | (ord(string[i + 6]) << 48)
-                | (ord(string[i + 7]) << 56))
+    # 32-bit narrow variant (RapidHash::narrowHash), raw ASCII bytes.
+    def narrowMix(a, b):
+        product = ((a ^ narrowSecretA) * (b ^ narrowSecretB)) & mask64
+        return (product & mask32, (product >> 32) & mask32)
 
     def read32(i):
         return (ord(string[i])
@@ -102,48 +65,35 @@ def rapidhash(string):
                 | (ord(string[i + 3]) << 24))
 
     def readSmall(i, k):
-        return ((ord(string[i]) << 56)
-                | (ord(string[i + (k >> 1)]) << 32)
+        return ((ord(string[i]) << 16)
+                | (ord(string[i + (k >> 1)]) << 8)
                 | ord(string[i + k - 1]))
 
-    if length <= 16:
-        if length >= 4:
-            delta = 4 if length >= 8 else 0
-            a = (read32(0) << 32) | read32(length - 4)
-            b = (read32(delta) << 32) | read32(length - 4 - delta)
-        elif length > 0:
-            a = readSmall(0, length)
-            b = 0
-        else:
-            a = b = 0
-    else:
-        i = length
-        off = 0
-        if i > 48:
-            see1 = seed
-            see2 = seed
-            while True:
-                seed = rapid_mix(read64(off) ^ secret[0], read64(off + 8) ^ seed)
-                see1 = rapid_mix(read64(off + 16) ^ secret[1], read64(off + 24) ^ see1)
-                see2 = rapid_mix(read64(off + 32) ^ secret[2], read64(off + 40) ^ see2)
-                off += 48
-                i -= 48
-                if i < 48:
-                    break
-            seed ^= see1 ^ see2
-        if i > 16:
-            seed = rapid_mix(read64(off) ^ secret[2], read64(off + 8) ^ seed ^ secret[1])
-            if i > 32:
-                seed = rapid_mix(read64(off + 16) ^ secret[2], read64(off + 24) ^ seed)
-        a = read64(off + i - 16)
-        b = read64(off + i - 8)
-    a ^= secret[1]
-    b ^= seed
+    length = len(string)
+    seed = 0
+    see1 = length & mask32
+    (seed, see1) = narrowMix(seed, see1)
 
-    (a, b) = rapid_mul128(a, b)
-    hashValue = rapid_mix(a ^ secret[0] ^ length, b ^ secret[1]) & mask32
+    remaining = length
+    offset = 0
+    while remaining > 8:
+        seed ^= read32(offset)
+        see1 ^= read32(offset + 4)
+        (seed, see1) = narrowMix(seed, see1)
+        offset += 8
+        remaining -= 8
 
-    return maskTop8BitsAndAvoidZero(hashValue)
+    if remaining >= 4:
+        seed ^= read32(offset)
+        see1 ^= read32(offset + remaining - 4)
+    elif remaining:
+        seed ^= readSmall(offset, remaining)
+
+    (seed, see1) = narrowMix(seed, see1)
+    seed ^= see1
+    (seed, see1) = narrowMix(seed, see1)
+
+    return maskTop8BitsAndAvoidZero((seed ^ see1) & mask32)
 
 
 def ceilingToPowerOf2(v):

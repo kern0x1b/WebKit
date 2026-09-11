@@ -54,6 +54,11 @@ public:
 private:
     inline ARMRegisters::FPSingleRegisterID fpTempRegisterAsSingle() { return ARMRegisters::asSingle(fpTempRegister); }
 
+    static constexpr int32_t negate32(int32_t value)
+    {
+        return static_cast<int32_t>(0u - static_cast<uint32_t>(value));
+    }
+
     // In the Thumb-2 instruction set, instructions operating only on registers r0-r7 can often
     // be encoded using 16-bit encodings, while the use of registers r8 and above often require
     // 32-bit encodings, so prefer to use the addressTemporary (r6) whenever possible.
@@ -330,9 +335,16 @@ public:
 
     void getEffectiveAddress(BaseIndex address, RegisterID dest)
     {
-        RegisterID scratch = getCachedAddressTempRegisterIDAndInvalidate();
-        m_assembler.lsl(scratch, address.index, static_cast<int>(address.scale));
-        m_assembler.add(dest, address.base, scratch);
+        if (address.scale == TimesOne)
+            m_assembler.add(dest, address.base, address.index);
+        else if (dest != ARMRegisters::sp) {
+            ShiftTypeAndAmount shift { ARMShiftType::SRType_LSL, static_cast<unsigned>(address.scale) };
+            m_assembler.add(dest, address.base, address.index, shift);
+        } else {
+            RegisterID scratch = getCachedAddressTempRegisterIDAndInvalidate();
+            m_assembler.lsl(scratch, address.index, static_cast<int>(address.scale));
+            m_assembler.add(dest, address.base, scratch);
+        }
         if (address.offset)
             add32(TrustedImm32(address.offset), dest);
     }
@@ -346,7 +358,10 @@ public:
     {
         RegisterID scratch = getCachedDataTempRegisterIDAndInvalidate();
 
-        load32(setupArmAddress(address), scratch);
+        // The whole sequence below indexes off addressTempRegister at offsets 0 and 4,
+        // so the pointer has to actually be there.
+        move(TrustedImmPtr(address.m_ptr), addressTempRegister);
+        m_assembler.ldr(scratch, addressTempRegister, ARMThumbImmediate::makeUInt12(0));
         ARMThumbImmediate armImm = ARMThumbImmediate::makeEncodedImm(imm.m_value);
         if (armImm.isValid())
             m_assembler.add_S(scratch, scratch, armImm);
@@ -586,12 +601,17 @@ public:
 
     void lshift32(RegisterID src, RegisterID shiftAmount, RegisterID dest)
     {
-        RegisterID scratch = getCachedDataTempRegisterIDAndInvalidate();
         // Clamp the shift to the range 0..31
         ARMThumbImmediate armImm = ARMThumbImmediate::makeEncodedImm(0x1f);
         ASSERT(armImm.isValid());
-        m_assembler.ARM_and(scratch, shiftAmount, armImm);
+        if (dest != src) {
+            m_assembler.ARM_and(dest, shiftAmount, armImm);
+            m_assembler.lsl(dest, src, dest);
+            return;
+        }
 
+        RegisterID scratch = getCachedDataTempRegisterIDAndInvalidate();
+        m_assembler.ARM_and(scratch, shiftAmount, armImm);
         m_assembler.lsl(dest, src, scratch);
     }
 
@@ -623,21 +643,31 @@ public:
 
     void mul32(RegisterID src, RegisterID dest)
     {
-        RegisterID scratch = getCachedDataTempRegisterIDAndInvalidate();
-        m_assembler.smull(dest, scratch, dest, src);
+        m_assembler.mul(dest, dest, src);
     }
 
     void mul32(RegisterID left, RegisterID right, RegisterID dest)
     {
-        RegisterID scratch = getCachedDataTempRegisterIDAndInvalidate();
-        m_assembler.smull(dest, scratch, left, right);
+        m_assembler.mul(dest, left, right);
     }
 
     void mul32(TrustedImm32 imm, RegisterID src, RegisterID dest)
     {
+        if (!imm.m_value) {
+            move(TrustedImm32(0), dest);
+            return;
+        }
+        if (imm.m_value == 1) {
+            move(src, dest);
+            return;
+        }
+        if (imm.m_value > 0 && hasOneBitSet(imm.m_value)) {
+            lshift32(src, TrustedImm32(getLSBSet(imm.m_value)), dest);
+            return;
+        }
         move(imm, dataTempRegister);
         cachedDataTempRegister().invalidate();
-        m_assembler.smull(dest, dataTempRegister, src, dataTempRegister);
+        m_assembler.mul(dest, src, dataTempRegister);
     }
 
     void uMull32(RegisterID left, RegisterID right, RegisterID destHi, RegisterID destLo)
@@ -666,38 +696,41 @@ public:
     void or8(TrustedImm32 imm, AbsoluteAddress address)
     {
         ARMThumbImmediate armImm = ARMThumbImmediate::makeEncodedImm(imm.m_value);
-        load8(setupArmAddress(address), dataTempRegister);
-        if (armImm.isValid()) {
+        ArmAddress armAddress = setupArmAddressForReadModifyWrite(address);
+        load8(armAddress, dataTempRegister);
+        if (armImm.isValid())
             m_assembler.orr(dataTempRegister, dataTempRegister, armImm);
-            store8(dataTempRegister, Address(addressTempRegister));
-        } else {
+        else {
             move(imm, addressTempRegister);
             m_assembler.orr(dataTempRegister, dataTempRegister, addressTempRegister);
             move(TrustedImmPtr(address.m_ptr), addressTempRegister);
-            store8(dataTempRegister, Address(addressTempRegister));
+            armAddress = ArmAddress(addressTempRegister);
         }
+        store8(dataTempRegister, armAddress);
     }
 
     void or16(TrustedImm32 imm, AbsoluteAddress dest)
     {
         ARMThumbImmediate armImm = ARMThumbImmediate::makeEncodedImm(imm.m_value);
-        load16(setupArmAddress(dest), dataTempRegister);
-        if (armImm.isValid()) {
+        ArmAddress armAddress = setupArmAddressForReadModifyWrite(dest);
+        load16(armAddress, dataTempRegister);
+        if (armImm.isValid())
             m_assembler.orr(dataTempRegister, dataTempRegister, armImm);
-            store16(dataTempRegister, Address(addressTempRegister));
-        } else {
+        else {
             move(imm, addressTempRegister);
             m_assembler.orr(dataTempRegister, dataTempRegister, addressTempRegister);
             move(TrustedImmPtr(dest.m_ptr), addressTempRegister);
-            store16(dataTempRegister, Address(addressTempRegister));
+            armAddress = ArmAddress(addressTempRegister);
         }
+        store16(dataTempRegister, armAddress);
     }
 
     void or16(RegisterID mask, AbsoluteAddress dest)
     {
-        load16(setupArmAddress(dest), dataTempRegister);
+        ArmAddress armAddress = setupArmAddressForReadModifyWrite(dest);
+        load16(armAddress, dataTempRegister);
         m_assembler.orr(dataTempRegister, dataTempRegister, mask);
-        store16(dataTempRegister, Address(addressTempRegister));
+        store16(dataTempRegister, armAddress);
     }
 
     void or32(RegisterID src, RegisterID dest)
@@ -707,9 +740,10 @@ public:
 
     void or32(RegisterID src, AbsoluteAddress dest)
     {
-        load32(setupArmAddress(dest), dataTempRegister);
+        ArmAddress armAddress = setupArmAddressForReadModifyWrite(dest);
+        load32(armAddress, dataTempRegister);
         or32(src, dataTempRegister);
-        store32(dataTempRegister, Address(addressTempRegister));
+        store32(dataTempRegister, armAddress);
     }
 
     void or32(RegisterID src, Address dest)
@@ -722,16 +756,25 @@ public:
     void or32(TrustedImm32 imm, AbsoluteAddress address)
     {
         ARMThumbImmediate armImm = ARMThumbImmediate::makeEncodedImm(imm.m_value);
-        load32(setupArmAddress(address), dataTempRegister);
-        if (armImm.isValid()) {
+        bool useOrn = false;
+        if (!armImm.isValid()) {
+            armImm = ARMThumbImmediate::makeEncodedImm(~imm.m_value);
+            useOrn = armImm.isValid();
+        }
+
+        ArmAddress armAddress = setupArmAddressForReadModifyWrite(address);
+        load32(armAddress, dataTempRegister);
+        if (useOrn)
+            m_assembler.orn(dataTempRegister, dataTempRegister, armImm);
+        else if (armImm.isValid())
             m_assembler.orr(dataTempRegister, dataTempRegister, armImm);
-            store32(dataTempRegister, Address(addressTempRegister));
-        } else {
+        else {
             move(imm, addressTempRegister);
             m_assembler.orr(dataTempRegister, dataTempRegister, addressTempRegister);
             move(TrustedImmPtr(address.m_ptr), addressTempRegister);
-            store32(dataTempRegister, Address(addressTempRegister));
+            armAddress = ArmAddress(addressTempRegister);
         }
+        store32(dataTempRegister, armAddress);
     }
 
     void or32(TrustedImm32 imm, Address address)
@@ -753,14 +796,24 @@ public:
 
     void or32(TrustedImm32 imm, RegisterID src, RegisterID dest)
     {
+        if (!imm.m_value)
+            return move(src, dest);
+
         ARMThumbImmediate armImm = ARMThumbImmediate::makeEncodedImm(imm.m_value);
-        if (armImm.isValid())
+        if (armImm.isValid()) {
             m_assembler.orr(dest, src, armImm);
-        else {
-            ASSERT(src != dataTempRegister);
-            move(imm, dataTempRegister);
-            m_assembler.orr(dest, src, dataTempRegister);
+            return;
         }
+
+        armImm = ARMThumbImmediate::makeEncodedImm(~imm.m_value);
+        if (armImm.isValid()) {
+            m_assembler.orn(dest, src, armImm);
+            return;
+        }
+
+        ASSERT(src != dataTempRegister);
+        move(imm, dataTempRegister);
+        m_assembler.orr(dest, src, dataTempRegister);
     }
 
     void or64(RegisterID op1Hi, RegisterID op1Lo, RegisterID op2Hi, RegisterID op2Lo, RegisterID destHi, RegisterID destLo)
@@ -783,7 +836,8 @@ public:
 
     void rotateRight32(RegisterID src, TrustedImm32 imm, RegisterID dest)
     {
-        if (!imm.m_value)
+        // ROR with an immediate of 0 encodes RRX, so a rotate of a multiple of 32 is a move.
+        if (!(imm.m_value & 0x1f))
             move(src, dest);
         else
             m_assembler.ror(dest, src, imm.m_value & 0x1f);
@@ -796,19 +850,26 @@ public:
 
     void rotateLeft32(RegisterID src, RegisterID shift, RegisterID dest)
     {
+        // ROR by register uses Rs[7:0] modulo 32, so negating the shift count turns a
+        // left rotate into a right rotate for every input without an explicit mask.
+        if (dest != src) {
+            m_assembler.neg(dest, shift);
+            m_assembler.ror(dest, src, dest);
+            return;
+        }
+
         RegisterID scratch = getCachedDataTempRegisterIDAndInvalidate();
-        m_assembler.ARM_and(scratch, shift, ARMThumbImmediate::makeEncodedImm(0x1f));
-        m_assembler.sub(scratch, ARMThumbImmediate::makeUInt12(32), scratch);
+        m_assembler.neg(scratch, shift);
         m_assembler.ror(dest, src, scratch);
     }
 
     void rotateLeft32(RegisterID src, TrustedImm32 shift, RegisterID dest)
     {
-        RegisterID scratch = getCachedDataTempRegisterIDAndInvalidate();
-        move(shift, scratch);
-        m_assembler.ARM_and(scratch, scratch, ARMThumbImmediate::makeEncodedImm(0x1f));
-        m_assembler.sub(scratch, ARMThumbImmediate::makeUInt12(32), scratch);
-        m_assembler.ror(dest, src, scratch);
+        int32_t amount = shift.m_value & 0x1f;
+        if (!amount)
+            move(src, dest);
+        else
+            m_assembler.ror(dest, src, 32 - amount);
     }
 
     void rshiftUnchecked(RegisterID src, RegisterID shiftAmount, RegisterID dest)
@@ -818,12 +879,17 @@ public:
 
     void rshift32(RegisterID src, RegisterID shiftAmount, RegisterID dest)
     {
-        RegisterID scratch = getCachedDataTempRegisterIDAndInvalidate();
         // Clamp the shift to the range 0..31
         ARMThumbImmediate armImm = ARMThumbImmediate::makeEncodedImm(0x1f);
         ASSERT(armImm.isValid());
-        m_assembler.ARM_and(scratch, shiftAmount, armImm);
+        if (dest != src) {
+            m_assembler.ARM_and(dest, shiftAmount, armImm);
+            m_assembler.asr(dest, src, dest);
+            return;
+        }
 
+        RegisterID scratch = getCachedDataTempRegisterIDAndInvalidate();
+        m_assembler.ARM_and(scratch, shiftAmount, armImm);
         m_assembler.asr(dest, src, scratch);
     }
 
@@ -860,12 +926,17 @@ public:
 
     void urshift32(RegisterID src, RegisterID shiftAmount, RegisterID dest)
     {
-        RegisterID scratch = getCachedDataTempRegisterIDAndInvalidate();
         // Clamp the shift to the range 0..31
         ARMThumbImmediate armImm = ARMThumbImmediate::makeEncodedImm(0x1f);
         ASSERT(armImm.isValid());
-        m_assembler.ARM_and(scratch, shiftAmount, armImm);
+        if (dest != src) {
+            m_assembler.ARM_and(dest, shiftAmount, armImm);
+            m_assembler.lsr(dest, src, dest);
+            return;
+        }
 
+        RegisterID scratch = getCachedDataTempRegisterIDAndInvalidate();
+        m_assembler.ARM_and(scratch, shiftAmount, armImm);
         m_assembler.lsr(dest, src, scratch);
     }
 
@@ -915,23 +986,24 @@ public:
     void sub32(RegisterID left, TrustedImm32 right, RegisterID dest)
     {
         ARMThumbImmediate armImm = ARMThumbImmediate::makeUInt12OrEncodedImm(right.m_value);
-        if (armImm.isValid())
+        if (armImm.isValid()) {
             m_assembler.sub(dest, left, armImm);
-        else {
-            move(right, dataTempRegister);
-            m_assembler.sub(dest, left, dataTempRegister);
+            return;
         }
+
+        armImm = ARMThumbImmediate::makeUInt12OrEncodedImm(negate32(right.m_value));
+        if (armImm.isValid()) {
+            m_assembler.add(dest, left, armImm);
+            return;
+        }
+
+        move(right, dataTempRegister);
+        m_assembler.sub(dest, left, dataTempRegister);
     }
 
     void sub32(TrustedImm32 imm, RegisterID dest)
     {
-        ARMThumbImmediate armImm = ARMThumbImmediate::makeUInt12OrEncodedImm(imm.m_value);
-        if (armImm.isValid())
-            m_assembler.sub(dest, dest, armImm);
-        else {
-            move(imm, dataTempRegister);
-            m_assembler.sub(dest, dest, dataTempRegister);
-        }
+        sub32(dest, imm, dest);
     }
 
     void sub32(TrustedImm32 imm, RegisterID src, RegisterID dest)
@@ -952,6 +1024,8 @@ public:
         ARMThumbImmediate armImm = ARMThumbImmediate::makeUInt12OrEncodedImm(imm.m_value);
         if (armImm.isValid())
             m_assembler.sub(dataTempRegister, dataTempRegister, armImm);
+        else if ((armImm = ARMThumbImmediate::makeUInt12OrEncodedImm(negate32(imm.m_value))).isValid())
+            m_assembler.add(dataTempRegister, dataTempRegister, armImm);
         else {
             // Hrrrm, since dataTempRegister holds the data loaded,
             // use addressTempRegister to hold the immediate.
@@ -975,6 +1049,8 @@ public:
         ARMThumbImmediate armImm = ARMThumbImmediate::makeUInt12OrEncodedImm(imm.m_value);
         if (armImm.isValid())
             m_assembler.sub(dataTempRegister, dataTempRegister, armImm);
+        else if ((armImm = ARMThumbImmediate::makeUInt12OrEncodedImm(negate32(imm.m_value))).isValid())
+            m_assembler.add(dataTempRegister, dataTempRegister, armImm);
         else {
             // Hrrrm, since dataTempRegister holds the data loaded,
             // use addressTempRegister to hold the immediate.
@@ -1917,20 +1993,12 @@ public:
 
     void loadDouble(BaseIndex address, FPRegisterID dest)
     {
-        move(address.index, addressTempRegister);
-        lshift32(TrustedImm32(address.scale), addressTempRegister);
-        add32(address.base, addressTempRegister);
-        cachedAddressTempRegister().invalidate();
-        loadDouble(Address(addressTempRegister, address.offset), dest);
+        loadDouble(Address(baseIndexToScratch(address), address.offset), dest);
     }
-    
+
     void loadFloat(BaseIndex address, FPRegisterID dest)
     {
-        move(address.index, addressTempRegister);
-        lshift32(TrustedImm32(address.scale), addressTempRegister);
-        add32(address.base, addressTempRegister);
-        cachedAddressTempRegister().invalidate();
-        loadFloat(Address(addressTempRegister, address.offset), dest);
+        loadFloat(Address(baseIndexToScratch(address), address.offset), dest);
     }
 
     void moveDouble(FPRegisterID src, FPRegisterID dest)
@@ -1965,8 +2033,8 @@ public:
 
     void moveZeroToFloat(FPRegisterID reg)
     {
-        static double zeroConstant = 0.;
-        loadFloat(TrustedImmPtr(&zeroConstant), reg);
+        move(TrustedImm32(0), addressTempRegister);
+        m_assembler.vmov(ARMRegisters::asSingle(reg), addressTempRegister);
     }
 
     void loadFloat(TrustedImmPtr address, FPRegisterID dest)
@@ -1977,8 +2045,8 @@ public:
 
     void moveZeroToDouble(FPRegisterID reg)
     {
-        static double zeroConstant = 0.;
-        loadDouble(TrustedImmPtr(&zeroConstant), reg);
+        move(TrustedImm32(0), addressTempRegister);
+        m_assembler.vmov(reg, addressTempRegister, addressTempRegister);
     }
 
     void loadDouble(TrustedImmPtr address, FPRegisterID dest)
@@ -2027,20 +2095,12 @@ public:
 
     void storeDouble(FPRegisterID src, BaseIndex address)
     {
-        move(address.index, addressTempRegister);
-        lshift32(TrustedImm32(address.scale), addressTempRegister);
-        add32(address.base, addressTempRegister);
-        cachedAddressTempRegister().invalidate();
-        storeDouble(src, Address(addressTempRegister, address.offset));
+        storeDouble(src, Address(baseIndexToScratch(address), address.offset));
     }
-    
+
     void storeFloat(FPRegisterID src, BaseIndex address)
     {
-        move(address.index, addressTempRegister);
-        lshift32(TrustedImm32(address.scale), addressTempRegister);
-        add32(address.base, addressTempRegister);
-        cachedAddressTempRegister().invalidate();
-        storeFloat(src, Address(addressTempRegister, address.offset));
+        storeFloat(src, Address(baseIndexToScratch(address), address.offset));
     }
 
     void addFloat(FPRegisterID op1, FPRegisterID op2, FPRegisterID dest)
@@ -2877,7 +2937,11 @@ private:
                 m_assembler.add_S(dataTempRegister, dataTempRegister, armImm);
             else
                 m_assembler.add(dataTempRegister, dataTempRegister, armImm);
-        } else {
+        } else if (!updateFlags && (armImm = ARMThumbImmediate::makeUInt12(imm.m_value)).isValid())
+            m_assembler.add(dataTempRegister, dataTempRegister, armImm);
+        else if (!updateFlags && (armImm = ARMThumbImmediate::makeUInt12OrEncodedImm(negate32(imm.m_value))).isValid())
+            m_assembler.sub(dataTempRegister, dataTempRegister, armImm);
+        else {
             // Hrrrm, since dataTempRegister holds the data loaded,
             // use addressTempRegister to hold the immediate.
             move(imm, addressTempRegister);
@@ -2900,7 +2964,11 @@ private:
                 m_assembler.add_S(dataTempRegister, dataTempRegister, armImm);
             else
                 m_assembler.add(dataTempRegister, dataTempRegister, armImm);
-        } else {
+        } else if (!updateFlags && (armImm = ARMThumbImmediate::makeUInt12(imm.m_value)).isValid())
+            m_assembler.add(dataTempRegister, dataTempRegister, armImm);
+        else if (!updateFlags && (armImm = ARMThumbImmediate::makeUInt12OrEncodedImm(negate32(imm.m_value))).isValid())
+            m_assembler.sub(dataTempRegister, dataTempRegister, armImm);
+        else {
             // Hrrrm, since dataTempRegister holds the data loaded,
             // use addressTempRegister to hold the immediate.
             move(imm, addressTempRegister);
@@ -3379,9 +3447,9 @@ public:
         m_assembler.smull(dest, dataTempRegister, src1, src2);
         // The invalidation of cachedDataTempRegister is handled by the branch.
         if (cond == Overflow) {
-            RegisterID scratch = getCachedAddressTempRegisterIDAndInvalidate();
-            m_assembler.asr(scratch, dest, 31);
-            return branch32(NotEqual, scratch, dataTempRegister);
+            ShiftTypeAndAmount shift { ARMShiftType::SRType_ASR, 31u };
+            m_assembler.cmp(dataTempRegister, dest, shift);
+            return Jump(makeBranch(NotEqual));
         }
 
         return branchTest32(cond, dest);
@@ -4282,7 +4350,7 @@ protected:
         if (cachedRegisterGetValue(cachedRegister, currentRegisterContents)) {
             intptr_t addressDelta = addressAsInt - currentRegisterContents;
             if (Bounds::within(addressDelta))
-                return reinterpret_cast<int32_t>(addressDelta);
+                return static_cast<int32_t>(addressDelta);
         }
         return { };
     }
@@ -4296,6 +4364,31 @@ protected:
             return ArmAddress(dataTempRegister, *offset);
         move(TrustedImmPtr(address.m_ptr), scratch);
         return ArmAddress(scratch);
+    }
+
+    // setupArmAddress(AbsoluteAddress) may hand back an address relative to whichever
+    // temp register happens to cache a nearby value. A read-modify-write sequence has
+    // to keep that exact address for the store, and must not have its base clobbered by
+    // the load, so pin it to addressTempRegister.
+    ArmAddress setupArmAddressForReadModifyWrite(AbsoluteAddress address)
+    {
+        ArmAddress armAddress = setupArmAddress(address);
+        if (armAddress.type == ArmAddress::HasOffset && armAddress.base == addressTempRegister)
+            return armAddress;
+        move(TrustedImmPtr(address.m_ptr), addressTempRegister);
+        return ArmAddress(addressTempRegister);
+    }
+
+    RegisterID baseIndexToScratch(BaseIndex address)
+    {
+        RegisterID scratch = getCachedAddressTempRegisterIDAndInvalidate();
+        if (address.scale == TimesOne)
+            m_assembler.add(scratch, address.base, address.index);
+        else {
+            ShiftTypeAndAmount shift { ARMShiftType::SRType_LSL, static_cast<unsigned>(address.scale) };
+            m_assembler.add(scratch, address.base, address.index, shift);
+        }
+        return scratch;
     }
 
     RegisterID makeBaseIndexBase(BaseIndex address)

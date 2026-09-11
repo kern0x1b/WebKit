@@ -30,17 +30,52 @@
 #include "DeferGCInlines.h"
 #include "HeapInlines.h"
 #include "MarkedBlockInlines.h"
+#if defined(WEBKIT_IOS6)
+#include <algorithm>
+#include <cmath>
+#include <cstdlib>
+#endif
 #include <wtf/SystemTracing.h>
 
 namespace JSC {
 
+#if defined(WEBKIT_IOS6)
+static double envDouble(const char* name, double defaultValue)
+{
+    const char* text = getenv(name);
+    if (!text || !text[0])
+        return defaultValue;
+    char* end = nullptr;
+    double value = strtod(text, &end);
+    if (end == text || !std::isfinite(value) || value <= 0)
+        return defaultValue;
+    return value;
+}
+
+static Seconds sweepTimeSlice()
+{
+    static const Seconds slice = Seconds::fromMilliseconds(envDouble("JSC_IOS6_SWEEP_SLICE_MS", 2.0));
+    return slice;
+}
+
+static double sweepTimeMultiplier()
+{
+    static const double multiplier = 1.0 / std::min(1.0, envDouble("JSC_IOS6_SWEEP_DUTY", 0.10));
+    return multiplier;
+}
+#else
 static constexpr Seconds sweepTimeSlice = 10_ms;
 static constexpr double sweepTimeTotal = .10;
 static constexpr double sweepTimeMultiplier = 1.0 / sweepTimeTotal;
+#endif
 
 void IncrementalSweeper::scheduleTimer()
 {
+#if defined(WEBKIT_IOS6)
+    setTimeUntilFire(sweepTimeSlice() * sweepTimeMultiplier());
+#else
     setTimeUntilFire(sweepTimeSlice * sweepTimeMultiplier);
+#endif
 }
 
 IncrementalSweeper::IncrementalSweeper(JSC::Heap* heap)
@@ -65,7 +100,11 @@ void IncrementalSweeper::doWork(VM& vm)
         scheduleTimer();
         return;
     }
+#if defined(WEBKIT_IOS6)
+    doSweep(vm, ApproximateTime::now() + sweepTimeSlice(), SweepTrigger::Timer);
+#else
     doSweep(vm, ApproximateTime::now() + sweepTimeSlice, SweepTrigger::Timer);
+#endif
 }
 
 void IncrementalSweeper::doSweep(VM& vm, ApproximateTime deadline, SweepTrigger trigger)

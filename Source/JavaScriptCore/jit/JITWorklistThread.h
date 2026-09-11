@@ -31,6 +31,9 @@
 #include <wtf/AutomaticThread.h>
 #include <wtf/Platform.h>
 #include <wtf/SequesteredAutomaticThread.h>
+#if defined(WEBKIT_IOS6)
+#include <wtf/Deque.h>
+#endif
 
 namespace JSC {
 
@@ -63,6 +66,10 @@ public:
 private:
     PollResult poll(const AbstractLocker&) final;
     WorkResult work() final;
+
+#if defined(WEBKIT_IOS6)
+    RefPtr<JITPlan> selectAndRemoveBestDFGPlan(Deque<RefPtr<JITPlan>>&);
+#endif
 
     void threadDidStart() final;
 

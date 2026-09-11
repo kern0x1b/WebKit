@@ -231,6 +231,31 @@ inline void Structure::cacheSpecialProperty(JSGlobalObject* globalObject, VM& vm
     rareData()->cacheSpecialProperty(globalObject, vm, this, value, key, slot);
 }
 
+ALWAYS_INLINE void Structure::updateBitFieldFlagsForAddedProperty(VM& vm, PropertyName propertyName, unsigned attributes)
+{
+    uint32_t bitsToSet = 0;
+    uint32_t bitsToClear = 0;
+
+    if (attributes & PropertyAttribute::DontEnum || propertyName.isSymbol())
+        bitsToClear |= s_isQuickPropertyAccessAllowedForEnumerationBits;
+    if (attributes & PropertyAttribute::ReadOnly)
+        bitsToSet |= s_hasReadOnlyOrGetterSetterPropertiesExcludingProtoBits;
+    if (attributes & PropertyAttribute::DontEnum)
+        bitsToSet |= s_hasNonEnumerablePropertiesBits;
+    if (attributes & PropertyAttribute::DontDelete) {
+        bitsToSet |= s_hasNonConfigurablePropertiesBits;
+        if (attributes & PropertyAttribute::ReadOnlyOrAccessorOrCustomAccessorOrValue)
+            bitsToSet |= s_hasNonConfigurableReadOnlyOrGetterSetterPropertiesBits;
+    }
+    if (propertyName == vm.propertyNames->underscoreProto)
+        bitsToSet |= s_hasUnderscoreProtoPropertyExcludingOriginalProtoBits;
+    else if (propertyName == vm.propertyNames->then)
+        bitsToSet |= s_hasSpecialPropertiesBits;
+
+    if (bitsToSet | bitsToClear)
+        m_bitField = (m_bitField & ~bitsToClear) | bitsToSet;
+}
+
 template<Structure::ShouldPin shouldPin, typename Func>
 inline PropertyOffset Structure::add(VM& vm, PropertyName propertyName, unsigned attributes, const Func& func)
 {
@@ -251,21 +276,7 @@ inline PropertyOffset Structure::add(VM& vm, PropertyName propertyName, unsigned
     ASSERT(!JSC::isValidOffset(get(vm, propertyName)));
 
     checkConsistency();
-    if (attributes & PropertyAttribute::DontEnum || propertyName.isSymbol())
-        setIsQuickPropertyAccessAllowedForEnumeration(false);
-    if (attributes & PropertyAttribute::ReadOnly)
-        setContainsReadOnlyProperties();
-    if (attributes & PropertyAttribute::DontEnum)
-        setHasNonEnumerableProperties(true);
-    if (attributes & PropertyAttribute::DontDelete) {
-        setHasNonConfigurableProperties(true);
-        if (attributes & PropertyAttribute::ReadOnlyOrAccessorOrCustomAccessorOrValue)
-            setHasNonConfigurableReadOnlyOrGetterSetterProperties(true);
-    }
-    if (propertyName == vm.propertyNames->underscoreProto)
-        setHasUnderscoreProtoPropertyExcludingOriginalProto(true);
-    else if (propertyName == vm.propertyNames->then)
-        setHasSpecialProperties(true);
+    updateBitFieldFlagsForAddedProperty(vm, propertyName, attributes);
 
     auto rep = propertyName.uid();
 
@@ -274,12 +285,12 @@ inline PropertyOffset Structure::add(VM& vm, PropertyName propertyName, unsigned
     m_propertyHash = m_propertyHash ^ rep->existingSymbolAwareHash();
     m_seenProperties.add(CompactPtr<UniquedStringImpl>::encode(rep));
 
-    auto [offset, attribute, result] = table->add(vm, PropertyTableEntry(rep, newOffset, attributes));
+    auto [offset, attribute, result] = table->addAfterFind(vm, PropertyTableEntry(rep, newOffset, attributes), table->findEmptySlot(rep));
     ASSERT_UNUSED(result, result);
     ASSERT_UNUSED(offset, offset == newOffset);
     UNUSED_VARIABLE(attribute);
     auto newMaxOffset = std::max(newOffset, maxOffset());
-    
+
     func(locker, newOffset, newMaxOffset);
     
     ASSERT(maxOffset() == newMaxOffset);
@@ -411,21 +422,7 @@ ALWAYS_INLINE auto Structure::addOrReplacePropertyWithoutTransition(VM& vm, Prop
     ASSERT(!JSC::isValidOffset(get(vm, propertyName)));
 
     checkConsistency();
-    if (newAttributes & PropertyAttribute::DontEnum || propertyName.isSymbol())
-        setIsQuickPropertyAccessAllowedForEnumeration(false);
-    if (newAttributes & PropertyAttribute::ReadOnly)
-        setContainsReadOnlyProperties();
-    if (newAttributes & PropertyAttribute::DontEnum)
-        setHasNonEnumerableProperties(true);
-    if (newAttributes & PropertyAttribute::DontDelete) {
-        setHasNonConfigurableProperties(true);
-        if (newAttributes & PropertyAttribute::ReadOnlyOrAccessorOrCustomAccessorOrValue)
-            setHasNonConfigurableReadOnlyOrGetterSetterProperties(true);
-    }
-    if (propertyName == vm.propertyNames->underscoreProto)
-        setHasUnderscoreProtoPropertyExcludingOriginalProto(true);
-    else if (propertyName == vm.propertyNames->then)
-        setHasSpecialProperties(true);
+    updateBitFieldFlagsForAddedProperty(vm, propertyName, newAttributes);
 
     PropertyOffset newOffset = table->nextOffset(m_inlineCapacity);
 

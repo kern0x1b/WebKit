@@ -1445,8 +1445,15 @@ macro getterSetterOSRExitReturnPoint(opName, size)
 end
 
 macro arrayProfile(offset, cell, metadata, scratch)
-    loadi JSCell::m_structureID[cell], scratch
-    storei scratch, offset + ArrayProfile::m_lastSeenStructureID[metadata]
+    # ArrayProfile::m_lastSeenStructureID is drained by
+    # CodeBlock::updateAllArrayProfilePredictions -> ArrayProfile::computeUpdatedPrediction,
+    # which only writes m_observedArrayModes / m_arrayProfileFlags. Every reader of
+    # those lives in dfg/ or ftl/, neither of which is compiled with ENABLE(DFG_JIT) off.
+    # The field and the metadata layout stay; only the per-access store is elided.
+    if not C_LOOP
+        loadi JSCell::m_structureID[cell], scratch
+        storei scratch, offset + ArrayProfile::m_lastSeenStructureID[metadata]
+    end
 end
 
 # Note that index is already sign-extended to be a register width.

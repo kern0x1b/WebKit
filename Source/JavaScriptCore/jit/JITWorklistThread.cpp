@@ -32,8 +32,20 @@
 #include "JITWorklist.h"
 #include "VM.h"
 #include <wtf/TZoneMallocInlines.h>
+#include <wtf/Threading.h>
 
 namespace JSC {
+
+#if defined(WEBKIT_IOS6)
+namespace CostCeilingInstrumentation {
+bool queueOrderingEnabled();
+unsigned queueStarveThresholdMS();
+unsigned queueDiscardThresholdMS();
+void recordQueueReordered();
+void recordQueueStarvationPromotion();
+void recordQueueDiscarded();
+}
+#endif
 
 WTF_MAKE_TZONE_ALLOCATED_IMPL(JITWorklistThread);
 
@@ -103,13 +115,23 @@ auto JITWorklistThread::poll(const AbstractLocker& locker) -> PollResult
         if (m_worklist.m_ongoingCompilationsPerTier[i] >= m_worklist.m_maximumNumberOfConcurrentCompilationsPerTier[i])
             continue;
 
-        m_plan = queue.takeFirst();
-        if (!m_plan) [[unlikely]] {
-            if (Options::verboseCompilationQueue()) {
-                m_worklist.dump(locker, WTF::dataFile());
-                dataLog(": Thread shutting down\n");
+#if defined(WEBKIT_IOS6)
+        if (i == static_cast<unsigned>(JITPlan::Tier::DFG) && CostCeilingInstrumentation::queueOrderingEnabled()) {
+            m_plan = selectAndRemoveBestDFGPlan(queue);
+            if (!m_plan) {
+                continue;
             }
-            return PollResult::Stop;
+        } else
+#endif
+        {
+            m_plan = queue.takeFirst();
+            if (!m_plan) [[unlikely]] {
+                if (Options::verboseCompilationQueue()) {
+                    m_worklist.dump(locker, WTF::dataFile());
+                    dataLog(": Thread shutting down\n");
+                }
+                return PollResult::Stop;
+            }
         }
 
         RELEASE_ASSERT(m_plan->stage() == JITPlanStage::Preparing);
@@ -123,6 +145,82 @@ auto JITWorklistThread::poll(const AbstractLocker& locker) -> PollResult
     m_worklist.m_numberOfActiveThreads--;
     return PollResult::Wait;
 }
+
+#if defined(WEBKIT_IOS6)
+namespace {
+
+constexpr unsigned reheatScoreWeight = 1000;
+constexpr unsigned loopTriggerScoreBonus = 1;
+
+unsigned dfgPlanScore(JITPlan& plan)
+{
+    unsigned score = plan.reheatCountForQueueOrdering() * reheatScoreWeight;
+    if (plan.wasLoopTriggerAtEnqueueForQueueOrdering())
+        score += loopTriggerScoreBonus;
+    return score;
+}
+
+} // anonymous namespace
+
+RefPtr<JITPlan> JITWorklistThread::selectAndRemoveBestDFGPlan(Deque<RefPtr<JITPlan>>& queue)
+{
+    MonotonicTime now = MonotonicTime::now();
+    Seconds discardThreshold = Seconds::fromMilliseconds(CostCeilingInstrumentation::queueDiscardThresholdMS());
+
+    constexpr unsigned maxEvictionsPerPoll = 8;
+    for (unsigned evictions = 0; evictions < maxEvictionsPerPoll; ++evictions) {
+        auto it = queue.findIf([&](const RefPtr<JITPlan>& candidate) {
+            JITPlan& plan = *candidate;
+            if (plan.wasLoopTriggerAtEnqueueForQueueOrdering())
+                return false;
+            if (plan.reheatCountForQueueOrdering())
+                return false;
+            return (now - plan.timeCreatedForQueueOrdering()) >= discardThreshold;
+        });
+        if (it == queue.end())
+            break;
+        RefPtr<JITPlan> discarded = WTF::move(*it);
+        queue.remove(it);
+        m_worklist.discardPreparingPlan(discarded.releaseNonNull());
+        CostCeilingInstrumentation::recordQueueDiscarded();
+    }
+
+    if (queue.isEmpty())
+        return nullptr;
+
+    Seconds starveThreshold = Seconds::fromMilliseconds(CostCeilingInstrumentation::queueStarveThresholdMS());
+    auto best = queue.begin();
+    bool bestStarved = (now - (*best)->timeCreatedForQueueOrdering()) >= starveThreshold;
+    unsigned bestScore = dfgPlanScore(**best);
+    for (auto it = std::next(queue.begin()); it != queue.end(); ++it) {
+        bool starved = (now - (*it)->timeCreatedForQueueOrdering()) >= starveThreshold;
+        if (starved != bestStarved) {
+            if (!starved)
+                continue; // A starved candidate always beats a non-starved one.
+            best = it;
+            bestStarved = true;
+            bestScore = dfgPlanScore(**it);
+            continue;
+        }
+        if (starved)
+            continue; // Both starved: keep the earlier (already-'best') of the two.
+        unsigned score = dfgPlanScore(**it);
+        if (score > bestScore) {
+            best = it;
+            bestScore = score;
+        }
+    }
+
+    if (best != queue.begin())
+        CostCeilingInstrumentation::recordQueueReordered();
+    if (bestStarved)
+        CostCeilingInstrumentation::recordQueueStarvationPromotion();
+
+    RefPtr<JITPlan> chosen = WTF::move(*best);
+    queue.remove(best);
+    return chosen;
+}
+#endif
 
 auto JITWorklistThread::work() -> WorkResult
 {
@@ -172,6 +270,12 @@ auto JITWorklistThread::work() -> WorkResult
 
 void JITWorklistThread::threadDidStart()
 {
+#if defined(WEBKIT_IOS6)
+    int priorityDelta = Options::priorityDeltaOfDFGCompilerThreads();
+    if (priorityDelta < 0)
+        Thread::currentSingleton().changePriority(priorityDelta);
+#endif
+
     dataLogLnIf(Options::verboseCompilationQueue(), m_worklist, ": Thread started");
 
 }

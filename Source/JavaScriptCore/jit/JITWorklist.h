@@ -103,6 +103,10 @@ private:
 
     State removeAllReadyPlansForVM(VM&, Vector<Ref<JITPlan>, 8>&, JITCompilationKey);
 
+#if defined(WEBKIT_IOS6)
+    void discardPreparingPlan(Ref<JITPlan>&&);
+#endif
+
     void dump(const AbstractLocker&, PrintStream&) const;
 
     unsigned m_numberOfActiveThreads { 0 };

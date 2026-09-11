@@ -256,7 +256,15 @@ JS_EXPORT_PRIVATE extern const WTF::BitSet<256> whiteSpaceTable;
 template <>
 ALWAYS_INLINE bool Lexer<Latin1Character>::isWhiteSpace(Latin1Character ch)
 {
+#if defined(WEBKIT_IOS6)
+    if (ch > ' ') [[likely]]
+        return ch == 0xA0;
+    if (ch == ' ')
+        return true;
+    return ch == '\t' || ch == 0x0B || ch == 0x0C;
+#else
     return whiteSpaceTable.get(ch);
+#endif
 }
 
 template <>
@@ -367,6 +375,23 @@ ALWAYS_INLINE JSTokenType Lexer<T>::lexExpectIdentifier(JSToken* tokenRecord, Op
         ASSERT(ptr == end);
         goto slowCase;
     }
+#if defined(WEBKIT_IOS6)
+    if (!WTF::isASCIIAlpha(*ptr) && *ptr != '_' && *ptr != '$')
+        goto slowCase;
+    ++ptr;
+    while (ptr < end) {
+        if (!WTF::isASCIIAlphanumeric(*ptr) && *ptr != '_' && *ptr != '$')
+            break;
+        ++ptr;
+    }
+
+    if (ptr < end) {
+        if ((!WTF::isASCII(*ptr)) || (*ptr == '\\'))
+            goto slowCase;
+        m_current = *ptr;
+    } else
+        m_current = 0;
+#else
     if (!WTF::isASCIIAlpha(*ptr))
         goto slowCase;
     ++ptr;
@@ -376,13 +401,13 @@ ALWAYS_INLINE JSTokenType Lexer<T>::lexExpectIdentifier(JSToken* tokenRecord, Op
         ++ptr;
     }
 
-    // Here's the shift
     if (ptr < end) {
         if ((!WTF::isASCII(*ptr)) || (*ptr == '\\') || (*ptr == '_') || (*ptr == '$'))
             goto slowCase;
         m_current = *ptr;
     } else
         m_current = 0;
+#endif
 
     m_code = ptr;
     ASSERT(currentOffset() >= currentLineStartOffset());

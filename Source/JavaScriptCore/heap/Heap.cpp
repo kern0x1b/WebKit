@@ -101,6 +101,13 @@
 #include "WeakMapImplInlines.h"
 #include "WeakSetInlines.h"
 #include <algorithm>
+#if defined(WEBKIT_IOS6)
+#include "ExecutableAllocator.h"
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <unistd.h>
+#endif
 #include <wtf/AvailableMemory.h>
 #include <wtf/CryptographicallyRandomNumber.h>
 #include <wtf/ListDump.h>
@@ -123,6 +130,12 @@
 
 namespace JSC {
 
+#if defined(WEBKIT_IOS6)
+namespace CostCeilingInstrumentation {
+void dumpSnapshot();
+}
+#endif
+
 namespace HeapInternal {
 static constexpr bool verbose = false;
 static constexpr bool verboseStop = false;
@@ -136,6 +149,131 @@ static double maxPauseMS(double thisPauseMS)
     maxPauseMS = std::max(thisPauseMS, maxPauseMS);
     return maxPauseMS;
 }
+
+#if defined(WEBKIT_IOS6)
+static double NODELETE envDouble(const char* name, double defaultValue)
+{
+    const char* text = getenv(name);
+    if (!text || !text[0])
+        return defaultValue;
+    char* end = nullptr;
+    double value = strtod(text, &end);
+    if (end == text || !std::isfinite(value) || value <= 0)
+        return defaultValue;
+    return value;
+}
+
+static size_t NODELETE criticalMemoryFootprintBytes()
+{
+    static const size_t bytes = static_cast<size_t>(envDouble("JSC_IOS6_GC_CRITICAL_MB", 148) * MB);
+    return bytes;
+}
+
+static size_t NODELETE hardMemoryFootprintBytes()
+{
+    static const size_t bytes = static_cast<size_t>(envDouble("JSC_IOS6_GC_HARD_MB", 180) * MB);
+    return bytes;
+}
+
+static size_t NODELETE maxEdenSizeWhenCriticalBytes()
+{
+    static const size_t bytes = static_cast<size_t>(envDouble("WEBKIT_IOS6_GC_CRITICAL_EDEN_MB", 8.0) * MB);
+    return bytes;
+}
+
+static size_t NODELETE maxEdenSizeWhenHardCriticalBytes()
+{
+    static const size_t bytes = static_cast<size_t>(envDouble("WEBKIT_IOS6_GC_HARD_EDEN_MB", 1.0) * MB);
+    return bytes;
+}
+
+static size_t NODELETE edenAllocationFloorBytes()
+{
+    static const size_t bytes = static_cast<size_t>(envDouble("WEBKIT_IOS6_GC_EDEN_ALLOC_FLOOR_KB", 96.0) * KB);
+    return bytes;
+}
+
+static unsigned NODELETE edenAllocationFloorMaxSkips()
+{
+    static const unsigned count = static_cast<unsigned>(std::max(1.0, envDouble("WEBKIT_IOS6_GC_EDEN_ALLOC_FLOOR_MAX_SKIPS", 8.0)));
+    return count;
+}
+
+static FILE* NODELETE gcEventLog()
+{
+    static FILE* file = [] () -> FILE* {
+        const char* path = getenv("WEBKIT_IOS6_GC_LOG");
+        if (!path || !path[0])
+            return nullptr;
+        FILE* opened = fopen(path, "w");
+        if (opened)
+            setvbuf(opened, nullptr, _IOLBF, 0);
+        return opened;
+    }();
+    return file;
+}
+
+static double NODELETE fullCollectionHeapGrowthTrigger()
+{
+    static const double factor = std::max(1.05, envDouble("JSC_IOS6_GC_FULL_TRIGGER", 1.6));
+    return factor;
+}
+
+static unsigned NODELETE maxEdenCollectionsBetweenFullCollections()
+{
+    static const unsigned count = static_cast<unsigned>(std::max(1.0, envDouble("JSC_IOS6_GC_MAX_EDENS", 24)));
+    return count;
+}
+
+static bool NODELETE suppressUnproductiveFullsEnvEnabled()
+{
+    static const bool enabled = envDouble("WEBKIT_IOS6_GC_SUPPRESS_UNPRODUCTIVE_FULLS", 1.0) > 0;
+    return enabled;
+}
+
+static bool suppressUnproductiveFullsEnabled()
+{
+    if (!suppressUnproductiveFullsEnvEnabled())
+        return false;
+    return access("/tmp/jsc-gc-no-suppress", F_OK) != 0;
+}
+
+static size_t NODELETE unproductiveFullReclaimFloorBytes()
+{
+    static const size_t bytes = static_cast<size_t>(envDouble("WEBKIT_IOS6_GC_UNPRODUCTIVE_FLOOR_KB", 2048.0) * KB);
+    return bytes;
+}
+
+static double NODELETE unproductiveFullReclaimFraction()
+{
+    static const double fraction = envDouble("WEBKIT_IOS6_GC_UNPRODUCTIVE_FRACTION", 0.02);
+    return fraction;
+}
+
+static size_t NODELETE fullCollectionGrowthReleaseFloorBytes()
+{
+    static const size_t bytes = static_cast<size_t>(envDouble("WEBKIT_IOS6_GC_SUPPRESS_RELEASE_GROWTH_FLOOR_KB", 512.0) * KB);
+    return bytes;
+}
+
+static double NODELETE fullCollectionGrowthReleaseFraction()
+{
+    static const double fraction = envDouble("WEBKIT_IOS6_GC_SUPPRESS_RELEASE_GROWTH_FRACTION", 0.6);
+    return fraction;
+}
+
+static double NODELETE fullCollectionSuppressionMaxMS()
+{
+    static const double ms = envDouble("WEBKIT_IOS6_GC_SUPPRESS_RELEASE_MS", 45000.0);
+    return ms;
+}
+
+static size_t NODELETE absoluteMemoryFootprintBytes()
+{
+    static const size_t bytes = static_cast<size_t>(envDouble("JSC_IOS6_GC_ABSOLUTE_MB", 265.0) * MB);
+    return bytes;
+}
+#endif
 
 static GrowthMode NODELETE growthMode(size_t ramSize)
 {
@@ -192,7 +330,12 @@ static size_t proportionalHeapSize(size_t heapSize, GrowthMode growthMode, size_
         return ratio * heapSize;
     }
 
-#if USE(MEMORY_FOOTPRINT_API)
+#if defined(WEBKIT_IOS6)
+    if (heapSize < ramSize * Options::smallHeapRAMFraction())
+        return Options::smallHeapGrowthFactor() * heapSize;
+    if (heapSize < ramSize * Options::mediumHeapRAMFraction())
+        return Options::mediumHeapGrowthFactor() * heapSize;
+#elif USE(MEMORY_FOOTPRINT_API)
     size_t memoryFootprint = WTF::memoryFootprint();
     if (memoryFootprint < ramSize * Options::smallHeapRAMFraction())
         return Options::smallHeapGrowthFactor() * heapSize;
@@ -448,10 +591,17 @@ Heap::Heap(VM& vm, HeapType heapType)
 
     m_worldState.store(0);
 
+    m_hasParallelMarkers = heapHelperPool().numberOfThreads() > 0;
+
     for (unsigned i = 0, numberOfParallelThreads = heapHelperPool().numberOfThreads(); i < numberOfParallelThreads; ++i) {
         std::unique_ptr<SlotVisitor> visitor = makeUnique<SlotVisitor>(*this, toCString("P", i + 1));
+#if defined(WEBKIT_IOS6)
+        if (Options::optimizeParallelSlotVisitorsForStoppedMutator() || !Options::useConcurrentGC())
+            visitor->optimizeForStoppedMutator();
+#else
         if (Options::optimizeParallelSlotVisitorsForStoppedMutator())
             visitor->optimizeForStoppedMutator();
+#endif
         m_availableParallelSlotVisitors.append(visitor.get());
         m_parallelSlotVisitors.append(WTF::move(visitor));
     }
@@ -472,9 +622,12 @@ Heap::Heap(VM& vm, HeapType heapType)
     
     m_collectorSlotVisitor->optimizeForStoppedMutator();
 
-    // When memory is critical, allow allocating 25% of the amount above the critical threshold before collecting.
+#if defined(WEBKIT_IOS6)
+    m_maxEdenSizeWhenCritical = maxEdenSizeWhenCriticalBytes();
+#else
     size_t memoryAboveCriticalThreshold = static_cast<size_t>(static_cast<double>(m_ramSize) * (1.0 - Options::criticalGCMemoryThreshold()));
     m_maxEdenSizeWhenCritical = memoryAboveCriticalThreshold / 4;
+#endif
 
     Locker locker { *m_threadLock };
     lazyInitialize(m_thread, adoptRef(*new HeapThread(locker, *this)));
@@ -712,12 +865,25 @@ void Heap::deprecatedReportExtraMemorySlowCase(size_t size)
 bool Heap::overCriticalMemoryThreshold(MemoryThresholdCallType memoryThresholdCallType)
 {
 #if USE(MEMORY_FOOTPRINT_API)
-    if (memoryThresholdCallType == MemoryThresholdCallType::Direct || ++m_percentAvailableMemoryCachedCallCount >= 100) {
+#if defined(WEBKIT_IOS6)
+    constexpr unsigned percentAvailableMemoryRecheckInterval = 1000;
+    if (memoryThresholdCallType == MemoryThresholdCallType::Direct || ++m_percentAvailableMemoryCachedCallCount >= percentAvailableMemoryRecheckInterval) {
+        size_t footprint = WTF::memoryFootprint();
+        m_overCriticalMemoryThreshold = footprint > criticalMemoryFootprintBytes();
+        m_overHardMemoryThreshold = footprint > hardMemoryFootprintBytes();
+        m_percentAvailableMemoryCachedCallCount = 0;
+    }
+
+    return m_overCriticalMemoryThreshold;
+#else
+    constexpr unsigned percentAvailableMemoryRecheckInterval = 100;
+    if (memoryThresholdCallType == MemoryThresholdCallType::Direct || ++m_percentAvailableMemoryCachedCallCount >= percentAvailableMemoryRecheckInterval) {
         m_overCriticalMemoryThreshold = WTF::percentAvailableMemoryInUse() > Options::criticalGCMemoryThreshold();
         m_percentAvailableMemoryCachedCallCount = 0;
     }
 
     return m_overCriticalMemoryThreshold;
+#endif
 #else
     UNUSED_PARAM(memoryThresholdCallType);
     return false;
@@ -1491,8 +1657,18 @@ NEVER_INLINE bool Heap::runNotRunningPhase(GCConductor conn)
 
 NEVER_INLINE bool Heap::runBeginPhase(GCConductor conn)
 {
+#if defined(WEBKIT_IOS6)
+    MonotonicTime ios6BeginPhaseStart = MonotonicTime::now();
+    m_gcPhaseBeginTime = 0_s;
+    m_gcPhaseMarkTime = 0_s;
+    m_gcPhaseConstraintTime = 0_s;
+    m_gcPhaseFinalizeTime = 0_s;
+    m_gcPhaseSweepTime = 0_s;
+    m_gcPhaseEndTime = 0_s;
+    ios6TakeWeakOutputConstraintNanoseconds();
+#endif
     m_currentGCStartTime = MonotonicTime::now();
-    
+
     {
         Locker locker { *m_threadLock };
         RELEASE_ASSERT(!m_requests.isEmpty());
@@ -1600,7 +1776,10 @@ NEVER_INLINE bool Heap::runBeginPhase(GCConductor conn)
         dataLog("visitor.didReachTermination(): ", visitor.didReachTermination(), "\n");
         RELEASE_ASSERT_NOT_REACHED();
     }
-        
+
+#if defined(WEBKIT_IOS6)
+    m_gcPhaseBeginTime = MonotonicTime::now() - ios6BeginPhaseStart;
+#endif
     return changePhase(conn, CollectorPhase::Fixpoint);
 }
 
@@ -1642,10 +1821,14 @@ WTF_ALLOW_UNSAFE_BUFFER_USAGE_END
         // estimate.
         // https://bugs.webkit.org/show_bug.cgi?id=166828
             
-        // Wondering what this does? Look at Heap::addCoreConstraints(). The DOM and others can also
-        // add their own using Heap::addMarkingConstraint().
+#if defined(WEBKIT_IOS6)
+        MonotonicTime ios6ConstraintStart = MonotonicTime::now();
+#endif
         bool converged = m_constraintSet->executeConvergence(visitor);
-        
+#if defined(WEBKIT_IOS6)
+        m_gcPhaseConstraintTime += MonotonicTime::now() - ios6ConstraintStart;
+#endif
+
         // FIXME: The visitor.isEmpty() check is most likely not needed.
         // https://bugs.webkit.org/show_bug.cgi?id=180310
         if (converged && visitor.isEmpty()) {
@@ -1659,10 +1842,16 @@ WTF_ALLOW_UNSAFE_BUFFER_USAGE_END
     dataLogIf(Options::logGC(), visitor.collectorMarkStack().size(), "+", m_mutatorMarkStack->size() + visitor.mutatorMarkStack().size(), " ");
         
     {
+#if defined(WEBKIT_IOS6)
+        MonotonicTime ios6MarkStart = MonotonicTime::now();
+#endif
         ParallelModeEnabler enabler(visitor);
         visitor.drainInParallel(m_scheduler->timeToResume());
+#if defined(WEBKIT_IOS6)
+        m_gcPhaseMarkTime += MonotonicTime::now() - ios6MarkStart;
+#endif
     }
-        
+
     m_scheduler->synchronousDrainingDidStall();
 
     // This is kinda tricky. The termination check looks at:
@@ -1714,8 +1903,14 @@ NEVER_INLINE bool Heap::runConcurrentPhase(GCConductor conn)
     }
     case GCConductor::Collector: {
         {
+#if defined(WEBKIT_IOS6)
+            MonotonicTime ios6MarkStart = MonotonicTime::now();
+#endif
             ParallelModeEnabler enabler(visitor);
             visitor.drainInParallelPassively(m_scheduler->timeToStop());
+#if defined(WEBKIT_IOS6)
+            m_gcPhaseMarkTime += MonotonicTime::now() - ios6MarkStart;
+#endif
         }
         return changePhase(conn, CollectorPhase::Reloop);
     } }
@@ -1738,6 +1933,9 @@ NEVER_INLINE bool Heap::runReloopPhase(GCConductor conn)
 
 NEVER_INLINE bool Heap::runEndPhase(GCConductor conn)
 {
+#if defined(WEBKIT_IOS6)
+    MonotonicTime ios6EndPhaseStart = MonotonicTime::now();
+#endif
     m_scheduler->endCollection();
         
     {
@@ -1780,18 +1978,35 @@ NEVER_INLINE bool Heap::runEndPhase(GCConductor conn)
         if (vm().typeProfiler())
             vm().typeProfiler()->invalidateTypeSetCache(vm());
 
+#if defined(WEBKIT_IOS6)
+        MonotonicTime ios6SweepPreStart = MonotonicTime::now();
+#endif
         cancelDeferredWorkIfNeeded();
         reapWeakHandles();
         pruneStaleEntriesFromWeakGCHashTables();
         sweepArrayBuffers();
         snapshotUnswept();
+#if defined(WEBKIT_IOS6)
+        m_gcPhaseSweepTime += MonotonicTime::now() - ios6SweepPreStart;
+        MonotonicTime ios6FinalizeStart = MonotonicTime::now();
+#endif
         finalizeUnconditionalFinalizers(); // We rely on these unconditional finalizers running before clearCurrentlyExecuting since CodeBlock's finalizer relies on querying currently executing.
+#if defined(WEBKIT_IOS6)
+        m_gcPhaseFinalizeTime += MonotonicTime::now() - ios6FinalizeStart;
+        MonotonicTime ios6SweepPostStart = MonotonicTime::now();
+#endif
         removeDeadCompilerWorklistEntries();
         deleteUnmarkedCompiledCode();
+#if defined(WEBKIT_IOS6)
+        m_gcPhaseSweepTime += MonotonicTime::now() - ios6SweepPostStart;
+#endif
     }
 
+#if defined(WEBKIT_IOS6)
+    MonotonicTime ios6SweepTailStart = MonotonicTime::now();
+#endif
     notifyIncrementalSweeper();
-    
+
     m_codeBlocks->iterateCurrentlyExecuting(
         [&] (CodeBlock* codeBlock) {
             writeBarrier(codeBlock);
@@ -1799,6 +2014,9 @@ NEVER_INLINE bool Heap::runEndPhase(GCConductor conn)
     m_codeBlocks->clearCurrentlyExecutingAndRemoveDeadCodeBlocks(vm());
 
     m_objectSpace.prepareForAllocation();
+#if defined(WEBKIT_IOS6)
+    m_gcPhaseSweepTime += MonotonicTime::now() - ios6SweepTailStart;
+#endif
     updateAllocationLimits();
 
     if (m_verifier) [[unlikely]] {
@@ -1840,6 +2058,22 @@ NEVER_INLINE bool Heap::runEndPhase(GCConductor conn)
     setNeedFinalize();
 
     MonotonicTime now = MonotonicTime::now();
+#if defined(WEBKIT_IOS6)
+    m_gcPhaseEndTime = now - ios6EndPhaseStart;
+    if (FILE* log = gcEventLog()) {
+        fprintf(log, "%.3f %c phase begin=%.1f mark=%.1f constraints=%.1f weakOutCpu=%.1f finalize=%.1f sweep=%.1f end=%.1f total=%.1f\n",
+            now.secondsSinceEpoch().value(),
+            endingCollectionScope == CollectionScope::Full ? 'F' : 'E',
+            m_gcPhaseBeginTime.milliseconds(),
+            m_gcPhaseMarkTime.milliseconds(),
+            m_gcPhaseConstraintTime.milliseconds(),
+            Seconds::fromNanoseconds(static_cast<double>(ios6TakeWeakOutputConstraintNanoseconds())).milliseconds(),
+            m_gcPhaseFinalizeTime.milliseconds(),
+            m_gcPhaseSweepTime.milliseconds(),
+            m_gcPhaseEndTime.milliseconds(),
+            (now - m_beforeGC).milliseconds());
+    }
+#endif
     if (m_maxEdenSizeForRateLimiting) {
         m_gcRateLimitingValue = projectedGCRateLimitingValue(now);
         m_gcRateLimitingValue += 1.0;
@@ -2571,6 +2805,10 @@ void Heap::updateAllocationLimits()
         // fixed minimum.
         size_t lastMaxHeapSize = m_maxHeapSize;
         m_maxHeapSize = std::max(m_minBytesPerCycle, proportionalHeapSize(currentHeapSize, m_growthMode, m_ramSize));
+#if defined(WEBKIT_IOS6)
+        if (!m_overHardMemoryThreshold && Options::minimumBytesPerCollectionCycle())
+            m_maxHeapSize = std::max(m_maxHeapSize, currentHeapSize + static_cast<size_t>(Options::minimumBytesPerCollectionCycle()));
+#endif
         m_maxEdenSize = m_maxHeapSize - currentHeapSize;
         if (m_isInOpportunisticTask && !isCritical) {
             // After an Opportunistic Full GC, we allow eden to occupy all the space we recovered.
@@ -2585,6 +2823,25 @@ void Heap::updateAllocationLimits()
         dataLogLnIf(verbose, "Full: sizeAfterLastFullCollect = ", currentHeapSize);
         m_bytesAbandonedSinceLastFullCollect = 0;
         dataLogLnIf(verbose, "Full: bytesAbandonedSinceLastFullCollect = ", 0);
+#if defined(WEBKIT_IOS6)
+        m_edenCollectionsSinceLastFullCollect = 0;
+        {
+            size_t reclaimed = m_sizeBeforeLastFullCollect > currentHeapSize ? m_sizeBeforeLastFullCollect - currentHeapSize : 0;
+            size_t reclaimThreshold = std::max(unproductiveFullReclaimFloorBytes(), static_cast<size_t>(m_sizeBeforeLastFullCollect * unproductiveFullReclaimFraction()));
+            bool unproductive = reclaimed < reclaimThreshold;
+            if (unproductive) {
+                if (!m_fullCollectionSuppressionActive)
+                    m_fullCollectionSuppressionStartTime = MonotonicTime::now();
+                m_fullCollectionSuppressionActive = true;
+            } else
+                m_fullCollectionSuppressionActive = false;
+            if (FILE* log = gcEventLog()) {
+                fprintf(log, "%.3f S full-result reclaimedKb=%zu thresholdKb=%zu unproductive=%d suppressed=%d\n",
+                    MonotonicTime::now().secondsSinceEpoch().value(),
+                    reclaimed >> 10, reclaimThreshold >> 10, unproductive ? 1 : 0, m_fullCollectionSuppressionActive ? 1 : 0);
+            }
+        }
+#endif
     } else {
         ASSERT(currentHeapSize >= m_sizeAfterLastCollect);
         // Theoretically, we shouldn't ever scan more memory than the heap size we planned to have.
@@ -2593,10 +2850,19 @@ void Heap::updateAllocationLimits()
         dataLogLnIf(verbose, "Eden: remainingHeapSize = ", remainingHeapSize);
         m_sizeAfterLastEdenCollect = currentHeapSize;
         dataLogLnIf(verbose, "Eden: sizeAfterLastEdenCollect = ", currentHeapSize);
+#if defined(WEBKIT_IOS6)
+        ++m_edenCollectionsSinceLastFullCollect;
+        size_t growthTrigger = static_cast<size_t>(m_sizeAfterLastFullCollect * fullCollectionHeapGrowthTrigger());
+        if (currentHeapSize > std::max(m_minBytesPerCycle, growthTrigger)
+            || m_edenCollectionsSinceLastFullCollect >= maxEdenCollectionsBetweenFullCollections()
+            || m_overHardMemoryThreshold)
+            m_shouldDoFullCollection = true;
+#else
         double edenToOldGenerationRatio = (double)remainingHeapSize / (double)m_maxHeapSize;
         double minEdenToOldGenerationRatio = 1.0 / 3.0;
         if (edenToOldGenerationRatio < minEdenToOldGenerationRatio)
             m_shouldDoFullCollection = true;
+#endif
         m_maxHeapSize = std::max(m_maxHeapSize, currentHeapSize + m_maxEdenSize);
         dataLogLnIf(verbose, "Eden: maxHeapSize = ", m_maxHeapSize);
         dataLogLnIf(verbose, "Eden: maxEdenSize = ", m_maxEdenSize);
@@ -2608,6 +2874,28 @@ void Heap::updateAllocationLimits()
 
     m_sizeAfterLastCollect = currentHeapSize;
     dataLogLnIf(verbose, "sizeAfterLastCollect = ", m_sizeAfterLastCollect);
+#if defined(WEBKIT_IOS6)
+    if (FILE* log = gcEventLog()) {
+        fprintf(log, "%.3f %c visited=%zu heap=%zu max=%zu eden=%zu alloc=%zu crit=%d hard=%d fp=%zu ms=%.1f edenSkipped=%u edenSkippedTotal=%llu origin=%c\n",
+            MonotonicTime::now().secondsSinceEpoch().value(),
+            (m_collectionScope && m_collectionScope.value() == CollectionScope::Full) ? 'F' : 'E',
+            static_cast<size_t>(m_totalBytesVisitedThisCycle >> 10),
+            static_cast<size_t>(currentHeapSize >> 10),
+            static_cast<size_t>(m_maxHeapSize >> 10),
+            static_cast<size_t>(m_maxEdenSize >> 10),
+            static_cast<size_t>(totalBytesAllocatedThisCycle() >> 10),
+            isCritical ? 1 : 0, m_overHardMemoryThreshold ? 1 : 0,
+            static_cast<size_t>(WTF::memoryFootprint() >> 20),
+            (MonotonicTime::now() - m_beforeGC).milliseconds(),
+            m_edenAllocFloorConsecutiveSkips, static_cast<unsigned long long>(m_edenAllocFloorTotalSkips),
+            m_edenCollectionRequestedByTimer ? 'T' : (m_edenCollectionRequestedByOpportunisticTask ? 'O' : 'A'));
+    }
+    CostCeilingInstrumentation::dumpSnapshot();
+    m_edenAllocFloorSkipPending = false;
+    m_edenAllocFloorConsecutiveSkips = 0;
+    m_edenCollectionRequestedByTimer = false;
+    m_edenCollectionRequestedByOpportunisticTask = false;
+#endif
     m_nonOversizedBytesAllocatedThisCycle = 0;
     m_oversizedBytesAllocatedThisCycle = 0;
     m_lastOversidedAllocationThisCycle = 0;
@@ -2640,9 +2928,76 @@ void Heap::didFinishCollection()
     m_lastCollectionScope = m_collectionScope;
     m_collectionScope = std::nullopt;
 
+#if defined(WEBKIT_IOS6)
+    reportCodeBlockTiers();
+#endif
+
     for (auto* observer : m_observers)
         observer->didGarbageCollect(scope);
 }
+
+#if defined(WEBKIT_IOS6)
+void Heap::reportCodeBlockTiers()
+{
+    static const char* path = getenv("WEBKIT_IOS6_TIER_LOG");
+    if (!path || !path[0])
+        return;
+    if (access("/tmp/native-jsc-tiers", F_OK))
+        return;
+    static MonotonicTime lastReport;
+    MonotonicTime now = MonotonicTime::now();
+    if (lastReport && now - lastReport < 5_s)
+        return;
+    lastReport = now;
+
+    unsigned blocks[4] = { 0, 0, 0, 0 };
+    unsigned cost[4] = { 0, 0, 0, 0 };
+    unsigned coldBlocks[7] = { 0, 0, 0, 0, 0, 0, 0 };
+    unsigned coldCost[7] = { 0, 0, 0, 0, 0, 0, 0 };
+    {
+        Locker locker { codeBlockSet().getLock() };
+        forEachCodeBlockIgnoringJITPlans(locker, [&](CodeBlock* codeBlock) {
+            unsigned slot;
+            switch (codeBlock->jitType()) {
+            case JITType::InterpreterThunk: slot = 0; break;
+            case JITType::BaselineJIT: slot = 1; break;
+            case JITType::DFGJIT: slot = 2; break;
+            default: slot = 3; break;
+            }
+            ++blocks[slot];
+            cost[slot] += codeBlock->bytecodeCost();
+            if (slot)
+                return;
+            double executions = codeBlock->unlinkedCodeBlock()->llintExecuteCounter().count();
+            unsigned bucket = executions < 15 ? 0 : executions < 45 ? 1 : executions < 100 ? 2
+                : executions < 200 ? 3 : executions < 350 ? 4 : executions < 500 ? 5 : 6;
+            ++coldBlocks[bucket];
+            coldCost[bucket] += codeBlock->bytecodeCost();
+        });
+    }
+
+    FILE* log = fopen(path, "a");
+    if (!log)
+        return;
+    fprintf(log, "%.3f tiers llint=%u/%u baseline=%u/%u dfg=%u/%u other=%u/%u\n",
+        now.secondsSinceEpoch().value(),
+        blocks[0], cost[0], blocks[1], cost[1], blocks[2], cost[2], blocks[3], cost[3]);
+    fprintf(log, "%.3f llintOnlyByCount <15=%u/%u <45=%u/%u <100=%u/%u <200=%u/%u <350=%u/%u <500=%u/%u 500+=%u/%u\n",
+        now.secondsSinceEpoch().value(),
+        coldBlocks[0], coldCost[0], coldBlocks[1], coldCost[1], coldBlocks[2], coldCost[2],
+        coldBlocks[3], coldCost[3], coldBlocks[4], coldCost[4], coldBlocks[5], coldCost[5],
+        coldBlocks[6], coldCost[6]);
+    double codePerWord = 0, codePerWordSD = 0;
+    if (vm().machineCodeBytesPerBytecodeWordForBaselineJIT) {
+        codePerWord = vm().machineCodeBytesPerBytecodeWordForBaselineJIT->mean();
+        codePerWordSD = vm().machineCodeBytesPerBytecodeWordForBaselineJIT->standardDeviation();
+    }
+    fprintf(log, "%.3f jit pressure=%.3f codeBytesPerBytecodeWord=%.2f sd=%.2f\n",
+        now.secondsSinceEpoch().value(),
+        ExecutableAllocator::singleton().memoryPressureMultiplier(0), codePerWord, codePerWordSD);
+    fclose(log);
+}
+#endif
 
 void Heap::resumeCompilerThreads()
 {
@@ -2751,8 +3106,14 @@ bool Heap::useGenerationalGC()
 
 bool Heap::shouldSweepSynchronously()
 {
-    // updateAllocationLimits() updates info that overCriticalMemoryThreshold() needs.
+#if defined(WEBKIT_IOS6)
+    if (Options::sweepSynchronously() || m_overHardMemoryThreshold)
+        return true;
+    return overCriticalMemoryThreshold()
+        && m_lastCollectionScope && m_lastCollectionScope.value() == CollectionScope::Full;
+#else
     return overCriticalMemoryThreshold() || Options::sweepSynchronously() || VM::isInMiniMode();
+#endif
 }
 
 bool Heap::shouldDoFullCollection()
@@ -2760,10 +3121,73 @@ bool Heap::shouldDoFullCollection()
     if (!useGenerationalGC())
         return true;
 
-    if (!m_currentRequest.scope)
+    if (!m_currentRequest.scope) {
+#if defined(WEBKIT_IOS6)
+        bool wantsFull = m_shouldDoFullCollection || (overCriticalMemoryThreshold() && m_overHardMemoryThreshold);
+        return wantsFull && !suppressPromotionToFull();
+#else
         return m_shouldDoFullCollection || overCriticalMemoryThreshold();
+#endif
+    }
+#if defined(WEBKIT_IOS6)
+    bool wantsFull = *m_currentRequest.scope == CollectionScope::Full;
+    return wantsFull && !suppressPromotionToFull();
+#else
     return *m_currentRequest.scope == CollectionScope::Full;
+#endif
 }
+
+#if defined(WEBKIT_IOS6)
+bool Heap::suppressPromotionToFull()
+{
+    if (!m_fullCollectionSuppressionActive)
+        return false;
+    if (!suppressUnproductiveFullsEnabled())
+        return false;
+
+    size_t footprint = WTF::memoryFootprint();
+    if (footprint > absoluteMemoryFootprintBytes()) {
+        m_fullCollectionSuppressionActive = false;
+        if (FILE* log = gcEventLog()) {
+            fprintf(log, "%.3f S release=absolute fp=%zu boundMb=%zu\n",
+                MonotonicTime::now().secondsSinceEpoch().value(),
+                footprint >> 20, absoluteMemoryFootprintBytes() >> 20);
+        }
+        return false;
+    }
+
+    size_t growth = m_sizeAfterLastCollect > m_sizeAfterLastFullCollect ? m_sizeAfterLastCollect - m_sizeAfterLastFullCollect : 0;
+    size_t growthReleaseThreshold = std::max(fullCollectionGrowthReleaseFloorBytes(), static_cast<size_t>(m_sizeAfterLastFullCollect * fullCollectionGrowthReleaseFraction()));
+    if (growth > growthReleaseThreshold) {
+        m_fullCollectionSuppressionActive = false;
+        if (FILE* log = gcEventLog()) {
+            fprintf(log, "%.3f S release=growth growthKb=%zu thresholdKb=%zu\n",
+                MonotonicTime::now().secondsSinceEpoch().value(),
+                growth >> 10, growthReleaseThreshold >> 10);
+        }
+        return false;
+    }
+
+    Seconds elapsed = MonotonicTime::now() - m_fullCollectionSuppressionStartTime;
+    if (elapsed.milliseconds() > fullCollectionSuppressionMaxMS()) {
+        m_fullCollectionSuppressionActive = false;
+        if (FILE* log = gcEventLog()) {
+            fprintf(log, "%.3f S release=timeout elapsedMs=%.1f boundMs=%.1f\n",
+                MonotonicTime::now().secondsSinceEpoch().value(),
+                elapsed.milliseconds(), fullCollectionSuppressionMaxMS());
+        }
+        return false;
+    }
+
+    if (FILE* log = gcEventLog()) {
+        fprintf(log, "%.3f S suppress heapKb=%zu lastFullKb=%zu growthKb=%zu fp=%zu crit=%d hard=%d\n",
+            MonotonicTime::now().secondsSinceEpoch().value(),
+            m_sizeAfterLastCollect >> 10, m_sizeAfterLastFullCollect >> 10, growth >> 10,
+            footprint >> 20, overCriticalMemoryThreshold() ? 1 : 0, m_overHardMemoryThreshold ? 1 : 0);
+    }
+    return true;
+}
+#endif
 
 void Heap::addLogicallyEmptyWeakBlock(WeakBlock* block)
 {
@@ -2886,6 +3310,57 @@ void Heap::reportExternalMemoryVisited(size_t size)
 }
 #endif
 
+#if defined(WEBKIT_IOS6)
+double Heap::edenFloorRescheduleSeconds()
+{
+    return envDouble("WEBKIT_IOS6_GC_EDEN_FLOOR_RESCHEDULE_MS", 250.0) / 1000.0;
+}
+
+Seconds Heap::edenAllocationFloorSkipRemaining() const
+{
+    Seconds remaining = m_edenAllocFloorSkipDeadline - MonotonicTime::now();
+    return std::max(0_s, remaining);
+}
+
+bool Heap::consumeEdenAllocationFloorSkip(size_t bytesAllowedThisCycle)
+{
+    bool isCritical = overCriticalMemoryThreshold();
+    if (isCritical && envDouble("WEBKIT_IOS6_GC_EDEN_FLOOR_UNDER_CRITICAL", 1.0) <= 0) {
+        if (FILE* log = gcEventLog()) {
+            fprintf(log, "%.3f K eden-floor-release allocKb=%zu floorKb=%zu consecutive=%u reason=critical\n",
+                MonotonicTime::now().secondsSinceEpoch().value(),
+                totalBytesAllocatedThisCycle() >> 10, edenAllocationFloorBytes() >> 10, m_edenAllocFloorConsecutiveSkips);
+        }
+        return false;
+    }
+    size_t bytesAllocatedThisCycle = totalBytesAllocatedThisCycle();
+    size_t floor = edenAllocationFloorBytes();
+    if (bytesAllocatedThisCycle >= floor || m_edenAllocFloorConsecutiveSkips >= edenAllocationFloorMaxSkips()) {
+        if (FILE* log = gcEventLog()) {
+            fprintf(log, "%.3f K eden-floor-release allocKb=%zu floorKb=%zu consecutive=%u reason=%s\n",
+                MonotonicTime::now().secondsSinceEpoch().value(),
+                bytesAllocatedThisCycle >> 10, floor >> 10, m_edenAllocFloorConsecutiveSkips,
+                bytesAllocatedThisCycle >= floor ? "floor" : "cap");
+        }
+        return false;
+    }
+    MonotonicTime now = MonotonicTime::now();
+    if (!m_edenAllocFloorSkipPending || now >= m_edenAllocFloorSkipDeadline) {
+        m_edenAllocFloorSkipPending = true;
+        m_edenAllocFloorSkipDeadline = now + Seconds(edenFloorRescheduleSeconds());
+        ++m_edenAllocFloorConsecutiveSkips;
+        ++m_edenAllocFloorTotalSkips;
+        if (FILE* log = gcEventLog()) {
+            fprintf(log, "%.3f K eden-floor-skip allocKb=%zu neededKb=%zu floorKb=%zu critical=%d consecutive=%u total=%llu\n",
+                now.secondsSinceEpoch().value(),
+                bytesAllocatedThisCycle >> 10, bytesAllowedThisCycle >> 10, floor >> 10, isCritical ? 1 : 0,
+                m_edenAllocFloorConsecutiveSkips, static_cast<unsigned long long>(m_edenAllocFloorTotalSkips));
+        }
+    }
+    return true;
+}
+#endif
+
 void Heap::collectIfNecessaryOrDefer(GCDeferralContext* deferralContext)
 {
     ASSERT(deferralContext || isDeferred() || !AssertNoGC::isInEffectOnCurrentThread());
@@ -2932,12 +3407,23 @@ void Heap::collectIfNecessaryOrDefer(GCDeferralContext* deferralContext)
         size_t bytesAllowedThisCycle = m_maxHeapSize - m_sizeAfterLastCollect;
 
         bool isCritical = overCriticalMemoryThreshold();
+#if defined(WEBKIT_IOS6)
+        if (isCritical) {
+            size_t clamp = m_overHardMemoryThreshold ? maxEdenSizeWhenHardCriticalBytes() : m_maxEdenSizeWhenCritical;
+            bytesAllowedThisCycle = std::min(clamp, bytesAllowedThisCycle);
+        }
+#else
         if (isCritical)
             bytesAllowedThisCycle = std::min(m_maxEdenSizeWhenCritical, bytesAllowedThisCycle);
+#endif
 
         size_t bytesAllocatedThisCycle = totalBytesAllocatedThisCycle();
         if (bytesAllocatedThisCycle <= bytesAllowedThisCycle)
             return false;
+#if defined(WEBKIT_IOS6)
+        if (consumeEdenAllocationFloorSkip(bytesAllowedThisCycle))
+            return false;
+#endif
         if (bytesAllocatedThisCycle < m_maxEdenSizeForRateLimiting) {
             if (projectedGCRateLimitingValue(MonotonicTime::now()) > 1.0)
                 return false;

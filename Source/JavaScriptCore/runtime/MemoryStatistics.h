@@ -39,4 +39,16 @@ struct GlobalMemoryStatistics {
 
 JS_EXPORT_PRIVATE GlobalMemoryStatistics globalMemoryStatistics();
 
+struct CodeMemoryStatistics {
+    size_t unlinkedCodeBlockCount = 0;
+    size_t unlinkedCodeBlockBytes = 0;
+    size_t codeBlockCount = 0;
+    size_t codeBlockBytes = 0;
+    size_t executableCount = 0;
+    size_t sourceBytes = 0;
+};
+
+class VM;
+JS_EXPORT_PRIVATE CodeMemoryStatistics codeMemoryStatistics(VM&);
+
 } // namespace JSC

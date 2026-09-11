@@ -72,6 +72,12 @@ enum SilentFillAction {
     LoadJSUnboxDouble
 };
 
+#if USE(JSVALUE32_64)
+static constexpr size_t silentRegisterSavePlanInlineCapacity = 8;
+#else
+static constexpr size_t silentRegisterSavePlanInlineCapacity = 4;
+#endif
+
 class SilentRegisterSavePlan {
 public:
     SilentRegisterSavePlan()
