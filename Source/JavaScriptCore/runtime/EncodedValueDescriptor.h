@@ -37,10 +37,9 @@ typedef int64_t EncodedJSValue;
 
 union EncodedValueDescriptor {
     int64_t asInt64;
+    JSCell* ptr;
 #if USE(JSVALUE32_64)
     double asDouble;
-#elif USE(JSVALUE64)
-    JSCell* ptr;
 #endif
 
 #if CPU(BIG_ENDIAN)

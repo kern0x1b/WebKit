@@ -192,15 +192,28 @@ inline HandleSlot StrongBlock::slotAtIndex(unsigned index) const
 // so a tagged link can never be read as a cell; a bare pointer would be.
 inline JSValue StrongBlock::encodeFreeListEntry(HandleSlot next)
 {
+#if USE(JSVALUE64)
     uint64_t bits = static_cast<uint64_t>(std::bit_cast<uintptr_t>(next));
     RELEASE_ASSERT(!(bits & static_cast<uint64_t>(JSValue::NumberTag)));
     return JSValue::decode(static_cast<EncodedJSValue>(bits | static_cast<uint64_t>(JSValue::NumberTag)));
+#else
+    EncodedValueDescriptor descriptor;
+    descriptor.asBits.tag = JSValue::EmptyValueTag;
+    descriptor.asBits.payload = static_cast<int32_t>(std::bit_cast<uintptr_t>(next));
+    return JSValue::decode(descriptor.asInt64);
+#endif
 }
 
 inline HandleSlot StrongBlock::decodeFreeListEntry(JSValue value)
 {
+#if USE(JSVALUE64)
     uint64_t bits = static_cast<uint64_t>(JSValue::encode(value)) & ~static_cast<uint64_t>(JSValue::NumberTag);
     return std::bit_cast<HandleSlot>(static_cast<uintptr_t>(bits));
+#else
+    EncodedValueDescriptor descriptor;
+    descriptor.asInt64 = JSValue::encode(value);
+    return std::bit_cast<HandleSlot>(static_cast<uintptr_t>(static_cast<uint32_t>(descriptor.asBits.payload)));
+#endif
 }
 
 inline void StrongBlock::setFreeListHead(HandleSlot freeListHead)
