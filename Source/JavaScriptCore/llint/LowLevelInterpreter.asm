@@ -1735,9 +1735,22 @@ macro functionInitialization(profileArgSkip)
     addp (constexpr (ArgumentValueProfileFixedVector::Storage::offsetOfData())), t3
     addp t2, t3 # pointer to end of ValueProfile array in the value profile array.
 .argumentProfileLoop:
-    loadq ThisArgumentOffset - 8 + profileArgSkip * 8[cfr, t0], t2
-    subp sizeof ArgumentValueProfile, t3
-    storeq t2, profileArgSkip * sizeof ArgumentValueProfile + ValueProfile::m_buckets[t3]
+    if JSVALUE64
+        loadq ThisArgumentOffset - 8 + profileArgSkip * 8[cfr, t0], t2
+        subp sizeof ArgumentValueProfile, t3
+        storeq t2, profileArgSkip * sizeof ArgumentValueProfile + ValueProfile::m_buckets[t3]
+    else
+        subp sizeof ArgumentValueProfile, t3
+        loadi ThisArgumentOffset + TagOffset - 8 + profileArgSkip * 8[cfr, t0], t1
+        loadi ThisArgumentOffset + PayloadOffset - 8 + profileArgSkip * 8[cfr, t0], t2
+        storeJSValueConcurrent(
+            macro (val, offset)
+                storei val, profileArgSkip * sizeof ArgumentValueProfile + ValueProfile::m_buckets + offset[t3]
+            end,
+            t1,
+            t2
+        )
+    end
     baddpnz -8, t0, .argumentProfileLoop
 .argumentProfileDone:
 end
