@@ -46,17 +46,10 @@ namespace Call {
 namespace CallDirectEval {
     namespace SlowPath {
         static constexpr GPRReg calleeFrameGPR { GPRInfo::regT0 };
-#if USE(JSVALUE64)
         static constexpr GPRReg scopeGPR { GPRInfo::regT1 };
         static constexpr JSValueRegs thisValueJSR { GPRInfo::regT2 };
         static constexpr GPRReg codeBlockGPR { GPRInfo::regT3 };
         static constexpr GPRReg bytecodeIndexGPR { GPRInfo::regT4 };
-#else
-        static constexpr GPRReg scopeGPR { GPRInfo::regT1 };
-        static constexpr JSValueRegs thisValueJSR { JSRInfo::jsRegT32 };
-        static constexpr GPRReg codeBlockGPR { GPRInfo::regT4 };
-        static constexpr GPRReg bytecodeIndexGPR { GPRInfo::regT5 };
-#endif
         static_assert(noOverlap(calleeFrameGPR, scopeGPR, thisValueJSR, codeBlockGPR, bytecodeIndexGPR), "Required for call to slow operation");
     }
 }
@@ -198,15 +191,12 @@ namespace GetByVal {
     static_assert(noOverlap(baseJSR, propertyJSR, propertyCacheGPR, profileGPR, GPRInfo::handlerGPR), "Required for DataIC");
     static constexpr auto scratchRegisters = allocatedScratchRegisters<GPRInfo, baseJSR, propertyJSR, propertyCacheGPR, profileGPR, GPRInfo::handlerGPR>;
     static constexpr GPRReg scratch1GPR { scratchRegisters[0] };
-#if USE(JSVALUE64)
     static constexpr GPRReg scratch2GPR { scratchRegisters[1] };
     static constexpr GPRReg scratch3GPR { scratchRegisters[2] };
     static_assert(noOverlap(baseJSR, propertyJSR, propertyCacheGPR, profileGPR, scratch1GPR, scratch2GPR, scratch3GPR), "Required for DataIC");
-#endif
     static_assert(noOverlap(resultJSR, propertyCacheGPR));
 }
 
-#if USE(JSVALUE64)
 namespace EnumeratorGetByVal {
     // We rely on using the same registers when linking a CodeBlock and initializing registers
     // for a GetByVal PropertyCache.
@@ -221,9 +211,7 @@ namespace EnumeratorGetByVal {
     static_assert(noOverlap(baseJSR, propertyJSR, propertyCacheGPR, profileGPR, scratch1GPR, scratch2GPR, scratch3GPR));
     static_assert(noOverlap(resultJSR, propertyCacheGPR));
 }
-#endif
 
-#if USE(JSVALUE64)
 namespace GetByValWithThis {
     // Registers used on both Fast and Slow paths
     using SlowOperation = decltype(operationGetByValWithThisOptimize);
@@ -239,7 +227,6 @@ namespace GetByValWithThis {
     static_assert(noOverlap(baseJSR, propertyJSR, thisJSR, propertyCacheGPR, profileGPR, GPRInfo::handlerGPR, scratch1GPR), "Required for call to slow operation");
     static_assert(noOverlap(resultJSR, propertyCacheGPR));
 }
-#endif
 
 namespace PutById {
     // Registers used on both Fast and Slow paths
@@ -253,12 +240,10 @@ namespace PutById {
     static_assert(noOverlap(baseJSR, valueJSR, propertyCacheGPR, scratch1GPR), "Required for DataIC");
     static_assert(noOverlap(baseJSR, valueJSR, propertyCacheGPR, GPRInfo::handlerGPR, scratch1GPR), "Required for call to slow operation");
 
-#if USE(JSVALUE64)
     static constexpr GPRReg scratch2GPR { scratchRegisters[1] };
     static constexpr GPRReg scratch3GPR { scratchRegisters[2] };
     static constexpr GPRReg scratch4GPR { scratchRegisters[3] };
     static_assert(noOverlap(baseJSR, valueJSR, propertyCacheGPR, GPRInfo::handlerGPR, scratch1GPR, scratch2GPR, scratch3GPR, scratch4GPR), "Required for HandlerIC");
-#endif
 }
 
 namespace PutByVal {
@@ -268,7 +253,6 @@ namespace PutByVal {
     static constexpr JSValueRegs valueJSR { preferredArgumentJSR<SlowOperation, 2>() };
     static constexpr GPRReg propertyCacheGPR { preferredArgumentGPR<SlowOperation, 3>() };
     static constexpr GPRReg profileGPR { preferredArgumentGPR<SlowOperation, 4>() };
-#if USE(JSVALUE64)
     static constexpr auto scratchRegisters = allocatedScratchRegisters<GPRInfo, baseJSR, propertyJSR, valueJSR, propertyCacheGPR, profileGPR, GPRInfo::handlerGPR>;
     static constexpr GPRReg scratch1GPR { scratchRegisters[0] };
     static constexpr GPRReg scratch2GPR { scratchRegisters[1] };
@@ -286,7 +270,6 @@ namespace PutByVal {
 #endif
 }
 
-#if USE(JSVALUE64)
 namespace EnumeratorPutByVal {
     // We rely on using the same registers when linking a CodeBlock and initializing registers
     // for a PutByVal PropertyCache.
@@ -298,7 +281,6 @@ namespace EnumeratorPutByVal {
     using PutByVal::scratch1GPR;
     using PutByVal::scratch2GPR;
 }
-#endif
 
 namespace InById {
     using GetById::resultJSR;
@@ -329,7 +311,7 @@ namespace DelById {
     static constexpr GPRReg scratch1GPR { scratchRegisters[0] };
     static constexpr GPRReg scratch2GPR { scratchRegisters[1] };
     static constexpr GPRReg scratch3GPR { scratchRegisters[2] };
-    static constexpr JSValueRegs scratchJSR { JSValueRegs::withTwoAvailableRegs(scratch1GPR, scratch2GPR) };
+    static constexpr JSValueRegs scratchJSR { scratch1GPR };
 
     static_assert(noOverlap(baseJSR, propertyCacheGPR, scratchJSR, scratch3GPR, GPRInfo::handlerGPR), "Required for call to slow operation");
     static_assert(noOverlap(resultJSR.payloadGPR(), propertyCacheGPR));
@@ -346,7 +328,7 @@ namespace DelByVal {
     static constexpr GPRReg scratch1GPR { scratchRegisters[0] };
     static constexpr GPRReg scratch2GPR { scratchRegisters[1] };
     static constexpr GPRReg scratch3GPR { scratchRegisters[2] };
-    static constexpr JSValueRegs scratchJSR { JSValueRegs::withTwoAvailableRegs(scratch1GPR, scratch2GPR) };
+    static constexpr JSValueRegs scratchJSR { scratch1GPR };
 
     static_assert(noOverlap(baseJSR, propertyJSR, propertyCacheGPR, scratchJSR, scratch3GPR, GPRInfo::handlerGPR), "Required for call to slow operation");
     static_assert(noOverlap(resultJSR.payloadGPR(), propertyCacheGPR));

@@ -163,32 +163,9 @@ public:
 
     bool NODELETE containsPC(void* pc) const;
 
-    JSValueRegs valueRegs() const
-    {
-        return JSValueRegs(
-#if USE(JSVALUE32_64)
-            m_valueTagGPR,
-#endif
-            m_valueGPR);
-    }
-
-    JSValueRegs propertyRegs() const
-    {
-        return JSValueRegs(
-#if USE(JSVALUE32_64)
-            propertyTagGPR(),
-#endif
-            propertyGPR());
-    }
-
-    JSValueRegs baseRegs() const
-    {
-        return JSValueRegs(
-#if USE(JSVALUE32_64)
-            m_baseTagGPR,
-#endif
-            m_baseGPR);
-    }
+    JSValueRegs valueRegs() const { return JSValueRegs(valueGPR()); }
+    JSValueRegs propertyRegs() const { return JSValueRegs(propertyGPR()); }
+    JSValueRegs baseRegs() const { return JSValueRegs(baseGPR()); }
 
     bool thisValueIsInExtraGPR() const { return accessType == AccessType::GetByIdWithThis || accessType == AccessType::GetByValWithThis; }
 
@@ -276,37 +253,39 @@ public:
     JSGlobalObject* globalObject() const { return m_globalObject; }
 
     inline ScalarRegisterSet usedRegisters() const;
-    inline void setUsedRegisters(ScalarRegisterSet);
-    inline void removeUsedRegister(GPRReg);
+
+    struct Registers {
+        GPRReg baseGPR { InvalidGPRReg };
+        GPRReg valueGPR { InvalidGPRReg };
+        GPRReg extraGPR { InvalidGPRReg };
+        GPRReg extra2GPR { InvalidGPRReg };
+        GPRReg propertyCacheGPR { InvalidGPRReg };
+        GPRReg arrayProfileGPR { InvalidGPRReg };
+    };
+
+    Registers registers() const;
+
+    GPRReg baseGPR() const { return registers().baseGPR; }
+    GPRReg valueGPR() const { return registers().valueGPR; }
+    GPRReg extraGPR() const { return registers().extraGPR; }
+    GPRReg extra2GPR() const { return registers().extra2GPR; }
+    GPRReg propertyCacheGPR() const { return registers().propertyCacheGPR; }
+    GPRReg arrayProfileGPR() const { return registers().arrayProfileGPR; }
 
     void resetStubAsJumpInAccess(CodeBlock*);
 
-    GPRReg thisGPR() const { return m_extraGPR; }
-    GPRReg prototypeGPR() const { return m_extraGPR; }
-    GPRReg brandGPR() const { return m_extraGPR; }
+    GPRReg thisGPR() const { return extraGPR(); }
+    GPRReg prototypeGPR() const { return extraGPR(); }
+    GPRReg brandGPR() const { return extraGPR(); }
     GPRReg propertyGPR() const
     {
         switch (accessType) {
         case AccessType::GetByValWithThis:
-            return m_extra2GPR;
+            return extra2GPR();
         default:
-            return m_extraGPR;
+            return extraGPR();
         }
     }
-
-#if USE(JSVALUE32_64)
-    GPRReg thisTagGPR() const { return m_extraTagGPR; }
-    GPRReg prototypeTagGPR() const { return m_extraTagGPR; }
-    GPRReg propertyTagGPR() const
-    {
-        switch (accessType) {
-        case AccessType::GetByValWithThis:
-            return m_extra2TagGPR;
-        default:
-            return m_extraTagGPR;
-        }
-    }
-#endif
 
     CodeOrigin codeOrigin { };
     PropertyOffset byIdSelfOffset;
@@ -321,30 +300,9 @@ private:
     // (accessed from JIT via offsetOfHandler()). Repatching IC uses it in
     // rewireStubAsJumpInAccess() and initializeWithUnitHandler().
     RefPtr<InlineCacheHandler> m_handler;
-    // Represents those structures that already have buffered AccessCases in the PolymorphicAccess.
-    // Note that it's always safe to clear this. If we clear it prematurely, then if we see the same
-    // structure again during this buffering countdown, we will create an AccessCase object for it.
-    // That's not so bad - we'll get rid of the redundant ones once we regenerate.
-    Variant<std::monostate, Vector<StructureID>, Vector<std::tuple<StructureID, CacheableIdentifier>>> m_bufferedStructures WTF_GUARDED_BY_LOCK(m_bufferedStructuresLock);
 public:
 
     CallSiteIndex callSiteIndex;
-
-    // FIXME: These should only be needed by the repatching ICs but it's slightly non-trivial to move them there as different AccessTypes use different pinned registers.
-    GPRReg m_baseGPR { InvalidGPRReg };
-    GPRReg m_valueGPR { InvalidGPRReg };
-    GPRReg m_extraGPR { InvalidGPRReg };
-    GPRReg m_extra2GPR { InvalidGPRReg };
-    GPRReg m_propertyCacheGPR { InvalidGPRReg };
-    GPRReg m_arrayProfileGPR { InvalidGPRReg };
-#if USE(JSVALUE32_64)
-    GPRReg m_valueTagGPR { InvalidGPRReg };
-    // FIXME: [32-bits] Check if PropertyInlineCache::m_baseTagGPR is used somewhere.
-    // https://bugs.webkit.org/show_bug.cgi?id=204726
-    GPRReg m_baseTagGPR { InvalidGPRReg };
-    GPRReg m_extraTagGPR { InvalidGPRReg };
-    GPRReg m_extra2TagGPR { InvalidGPRReg };
-#endif
 
     AccessType accessType { AccessType::GetById };
 protected:

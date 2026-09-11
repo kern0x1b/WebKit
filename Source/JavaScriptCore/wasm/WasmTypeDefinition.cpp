@@ -1058,8 +1058,9 @@ bool Type::definitelyIsWasmGCObjectOrNull() const
     if (!isRefType(*this))
         return false;
 
-    if (typeIndexIsType(index)) {
-        switch (static_cast<TypeKind>(index)) {
+    TypeIndex typeIndex = index();
+    if (isAbstractTypeIndex(typeIndex)) {
+        switch (typeIndexAsTypeKind(typeIndex)) {
         case TypeKind::Arrayref:
         case TypeKind::Structref:
             return true;
@@ -1117,14 +1118,8 @@ void RTT::ensureArgumINTBytecode(const CallInformation& callCC) const
                 const ValueLocation& loc = argLoc.location;
 
                 if (loc.isGPR()) {
-#if USE(JSVALUE64)
                     ASSERT_UNUSED(NUM_ARGUMINT_GPRS, GPRInfo::toArgumentIndex(loc.jsr().gpr()) < NUM_ARGUMINT_GPRS);
                     return static_cast<uint8_t>(IPInt::ArgumINTBytecode::ArgGPR) + GPRInfo::toArgumentIndex(loc.jsr().gpr());
-#elif USE(JSVALUE32_64)
-                    ASSERT_UNUSED(NUM_ARGUMINT_GPRS, GPRInfo::toArgumentIndex(loc.jsr().payloadGPR()) < NUM_ARGUMINT_GPRS);
-                    ASSERT_UNUSED(NUM_ARGUMINT_GPRS, GPRInfo::toArgumentIndex(loc.jsr().tagGPR()) < NUM_ARGUMINT_GPRS);
-                    return static_cast<uint8_t>(IPInt::ArgumINTBytecode::ArgGPR) + GPRInfo::toArgumentIndex(loc.jsr().gpr(WhichValueWord::PayloadWord)) / 2;
-#endif
                 }
 
                 if (loc.isFPR()) {
@@ -1172,14 +1167,8 @@ void RTT::ensureUINTBytecode(const CallInformation& returnCC) const
             const ValueLocation& loc = argLoc.location;
 
             if (loc.isGPR()) {
-#if USE(JSVALUE64)
                 ASSERT_UNUSED(NUM_UINT_GPRS, GPRInfo::toArgumentIndex(loc.jsr().gpr()) < NUM_UINT_GPRS);
                 return static_cast<uint8_t>(IPInt::UINTBytecode::RetGPR) + GPRInfo::toArgumentIndex(loc.jsr().gpr());
-#elif USE(JSVALUE32_64)
-                ASSERT_UNUSED(NUM_UINT_GPRS, GPRInfo::toArgumentIndex(loc.jsr().payloadGPR()) < NUM_UINT_GPRS);
-                ASSERT_UNUSED(NUM_UINT_GPRS, GPRInfo::toArgumentIndex(loc.jsr().tagGPR()) < NUM_UINT_GPRS);
-                return static_cast<uint8_t>(IPInt::UINTBytecode::RetGPR) + GPRInfo::toArgumentIndex(loc.jsr().gpr(WhichValueWord::PayloadWord));
-#endif
             }
 
             if (loc.isFPR()) {
@@ -1251,14 +1240,8 @@ static Vector<uint8_t, 16> buildCallArgumentBytecode(const CallInformation& call
             const ValueLocation& loc = argLoc.location;
 
             if (loc.isGPR()) {
-#if USE(JSVALUE64)
                 ASSERT_UNUSED(NUM_MINT_CALL_GPRS, GPRInfo::toArgumentIndex(loc.jsr().gpr()) < NUM_MINT_CALL_GPRS);
                 return static_cast<uint8_t>(IPInt::CallArgumentBytecode::ArgumentGPR) + GPRInfo::toArgumentIndex(loc.jsr().gpr());
-#elif USE(JSVALUE32_64)
-                ASSERT_UNUSED(NUM_MINT_CALL_GPRS, GPRInfo::toArgumentIndex(loc.jsr().payloadGPR()) < NUM_MINT_CALL_GPRS);
-                ASSERT_UNUSED(NUM_MINT_CALL_GPRS, GPRInfo::toArgumentIndex(loc.jsr().tagGPR()) < NUM_MINT_CALL_GPRS);
-                return static_cast<uint8_t>(IPInt::CallArgumentBytecode::ArgumentGPR) + GPRInfo::toArgumentIndex(loc.jsr().gpr(WhichValueWord::PayloadWord));
-#endif
             }
 
             if (loc.isFPR()) {
@@ -1316,11 +1299,7 @@ static intptr_t buildCallResultBytecode(Vector<uint8_t, 16>& results, const Call
 
             if (loc.isGPR()) {
                 ASSERT_UNUSED(NUM_MINT_RET_GPRS, GPRInfo::toArgumentIndex(loc.jsr().payloadGPR()) < NUM_MINT_RET_GPRS);
-#if USE(JSVALUE64)
                 return static_cast<uint8_t>(IPInt::CallResultBytecode::ResultGPR) + GPRInfo::toArgumentIndex(loc.jsr().gpr());
-#elif USE(JSVALUE32_64)
-                return static_cast<uint8_t>(IPInt::CallResultBytecode::ResultGPR) + GPRInfo::toArgumentIndex(loc.jsr().gpr(WhichValueWord::PayloadWord));
-#endif
             }
 
             if (loc.isFPR()) {
