@@ -62,8 +62,13 @@ void AsyncRevalidation::cancel()
 
 void AsyncRevalidation::staleWhileRevalidateEnding()
 {
-    if (m_completionHandler)
-        m_completionHandler(Result::Timeout);
+    // Move the handler out before cancelling. m_load->cancel() would otherwise re-enter it via the
+    // load's own completion handler and report Result::Failure before we report Result::Timeout.
+    auto completionHandler = std::exchange(m_completionHandler, nullptr);
+    if (m_load)
+        m_load->cancel();
+    if (completionHandler)
+        completionHandler(Result::Timeout);
 }
 
 Ref<AsyncRevalidation> AsyncRevalidation::create(Cache& cache, const GlobalFrameID& frameID, const WebCore::ResourceRequest& request, std::unique_ptr<NetworkCache::Entry>&& entry, std::optional<NavigatingToAppBoundDomain> isNavigatingToAppBoundDomain, bool allowPrivacyProxy, OptionSet<WebCore::AdvancedPrivacyProtections> advancedPrivacyProtections, CompletionHandler<void(Result)>&& handler)
@@ -83,11 +88,12 @@ AsyncRevalidation::AsyncRevalidation(Cache& cache, const GlobalFrameID& frameID,
     ASSERT(responseMaxStaleness);
     m_timer.startOneShot(*responseMaxStaleness + (lifetime - age));
 
-    SpeculativeLoad::RevalidationCompletionHandler loadRevalidationCompletionHandler = [this, key, revalidationRequest](auto&& revalidatedEntry) {
+    SpeculativeLoad::RevalidationCompletionHandler loadRevalidationCompletionHandler = [weakThis = WeakPtr { *this }, key, revalidationRequest](auto&& revalidatedEntry) {
         ASSERT(!revalidatedEntry || !revalidatedEntry->needsValidation());
         ASSERT(!revalidatedEntry || revalidatedEntry->key() == key);
-        if (m_completionHandler)
-            m_completionHandler(revalidatedEntry ? Result::Success : Result::Failure);
+        RefPtr protectedThis = weakThis;
+        if (protectedThis && protectedThis->m_completionHandler)
+            protectedThis->m_completionHandler(revalidatedEntry ? Result::Success : Result::Failure);
     };
     lazyInitialize(m_load, SpeculativeLoad::create(cache, frameID, WTF::move(revalidationRequest), WTF::move(entry), isNavigatingToAppBoundDomain, allowPrivacyProxy, advancedPrivacyProtections, WTF::move(loadRevalidationCompletionHandler)));
 }

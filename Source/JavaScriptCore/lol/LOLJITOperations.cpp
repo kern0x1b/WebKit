@@ -26,7 +26,7 @@
 #include "config.h"
 #include "LOLJITOperations.h"
 
-#if ENABLE(JIT) && USE(JSVALUE64)
+#if ENABLE(JIT)
 
 #include "ArithProfile.h"
 #include "ArrayConstructor.h"
@@ -188,7 +188,7 @@ JSC_DEFINE_JIT_OPERATION(operationPutToScopeForLOL, void, (CallFrame* callFrame,
     if (getPutInfo.resolveType() == ResolvedClosureVar) {
         JSLexicalEnvironment* environment = uncheckedDowncast<JSLexicalEnvironment>(jsScope);
         environment->variableAt(ScopeOffset(metadata.m_operand)).set(vm, environment, value);
-        if (RefPtr set = metadata.m_watchpointSet)
+        if (InlineWatchpointSet* set = metadata.m_watchpointSet)
             set->touch(vm, "Executed op_put_scope<ResolvedClosureVar>");
         OPERATION_RETURN(scope);
     }
@@ -223,4 +223,4 @@ JSC_DEFINE_JIT_OPERATION(operationPutToScopeForLOL, void, (CallFrame* callFrame,
 
 } // namespace JSC::LOL
 
-#endif // ENABLE(JIT) && USE(JSVALUE64)
+#endif // ENABLE(JIT)

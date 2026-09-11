@@ -126,7 +126,7 @@ static CMVideoDimensions NODELETE toCMVideoDimensions(const IntSize& size)
 
 static dispatch_queue_t globaVideoCaptureSerialQueue()
 {
-    static NeverDestroyed<OSObjectPtr<dispatch_queue_t>> globalQueue = adoptOSObject(dispatch_queue_create_with_target("WebCoreAVVideoCaptureSource video capture queue", DISPATCH_QUEUE_SERIAL, globalDispatchQueueSingleton(DISPATCH_QUEUE_PRIORITY_HIGH, 0)));
+    static NeverDestroyed<OSObjectPtr<dispatch_queue_t>> globalQueue = adoptOSObject(dispatch_queue_create_with_target("WebCoreAVVideoCaptureSource video capture queue", serialQueueWithAutoreleasePoolAttrSingleton(), globalDispatchQueueSingleton(DISPATCH_QUEUE_PRIORITY_HIGH, 0)));
     return globalQueue.get().get();
 }
 
@@ -682,6 +682,7 @@ AVCapturePhotoOutput* AVVideoCaptureSource::photoOutput()
     }
     if (![session() canAddOutput:m_photoOutput.get()]) {
         ERROR_LOG_IF_POSSIBLE(LOGIDENTIFIER, "unable to add photo output");
+        m_photoOutput = nullptr;
         return nullptr;
     }
     [session() addOutput:m_photoOutput.get()];

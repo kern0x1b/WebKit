@@ -1,5 +1,4 @@
 //@ skip if $addressBits <= 32
-//@ runDefaultWasm("-m", "--useWasmMemory64=1")
 import { instantiate } from "../wabt-wrapper.js";
 import * as assert from "../assert.js";
 
@@ -14,7 +13,7 @@ let wat = `
         )
     )`;
 
-const instance = await instantiate(wat, {}, {reference_types: true});
+const instance = await instantiate(wat, {}, {memory64: true});
 const {write, read} = instance.exports;
 
 const writeAddr = BigInt(Number.MAX_SAFE_INTEGER + 1);

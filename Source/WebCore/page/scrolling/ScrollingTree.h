@@ -306,6 +306,8 @@ public:
     void removeNode(ScrollingNodeID, ScrollingTreeFrameHostingNode* = nullptr);
     void removeFrameHostingNode(LayerHostingContextIdentifier);
 
+    virtual void hostedSubtreeNeedsFullCommit(FrameIdentifier) { }
+
     WEBCORE_EXPORT std::optional<FrameIdentifier> frameIDForScrollingNodeID(ScrollingNodeID);
 
 protected:
@@ -320,13 +322,18 @@ protected:
 
     WEBCORE_EXPORT virtual void applyLayerPositionsInternal() WTF_REQUIRES_LOCK(m_treeLock);
     WEBCORE_EXPORT void removeAllNodes() WTF_REQUIRES_LOCK(m_treeLock);
-    
+    void removeFromActiveNodes(ScrollingTreeNode&);
+
     virtual void hasNodeWithAnimatedScrollChanged(bool /* hasNodeWithAnimatedScroll */) { }
 
     bool hasProcessedWheelEventsRecently();
 
     HashSet<ScrollingNodeID> nodesWithActiveScrollAnimations();
     WEBCORE_EXPORT void serviceScrollAnimations(MonotonicTime) WTF_REQUIRES_LOCK(m_treeLock);
+
+#if ENABLE(COORDINATED_TOUCH_EVENTS)
+    std::optional<FloatSize> mainFrameScrollOffset() const;
+#endif
 
     void addPendingScrollUpdateInternal(ScrollUpdate&&);
     WEBCORE_EXPORT void addPendingScrollUpdate(ScrollUpdate&&);

@@ -293,6 +293,7 @@ class CppStyleTestBase(unittest.TestCase):
                              '+build/include',
                              '+build/include_order',
                              '+build/namespaces',
+                             '+build/objc_runtime_header',
                              '+runtime/rtti',
                              '+security/javascriptcore_wtf_blockptr')
         return self.perform_lint(code, filename, basic_error_rules, lines_to_check=lines_to_check)
@@ -1867,11 +1868,36 @@ class CppStyleTest(CppStyleTestBase):
     def test_dispatch_set_target_queue(self):
         self.assert_lint(
             '''\
-            globalQueue = dispatch_queue_create("My Serial Queue", DISPATCH_QUEUE_SERIAL);
+            globalQueue = dispatch_queue_create("My Serial Queue", serialQueueWithAutoreleasePoolAttrSingleton());
             dispatch_set_target_queue(globalQueue, globalDispatchQueueSingleton(DISPATCH_QUEUE_PRIORITY_HIGH, 0));''',
             'Never use dispatch_set_target_queue.  Use dispatch_queue_create_with_target instead.'
             '  [runtime/dispatch_set_target_queue] [5]')
-        self.assert_lint('globalQueue = dispatch_queue_create_with_target("My Serial Queue", DISPATCH_QUEUE_SERIAL, globalDispatchQueueSingleton(DISPATCH_QUEUE_PRIORITY_HIGH, 0));', '')
+        self.assert_lint('globalQueue = dispatch_queue_create_with_target("My Serial Queue", serialQueueWithAutoreleasePoolAttrSingleton(), globalDispatchQueueSingleton(DISPATCH_QUEUE_PRIORITY_HIGH, 0));', '')
+
+    def test_dispatch_queue_autorelease_pool(self):
+        self.assert_lint(
+            'globalQueue = dispatch_queue_create("My Serial Queue", DISPATCH_QUEUE_SERIAL);',
+            'Use serialQueueWithAutoreleasePoolAttrSingleton() instead of DISPATCH_QUEUE_SERIAL so that each work '
+            'item runs with its own autorelease pool.'
+            '  [runtime/dispatch_queue_autorelease_pool] [5]')
+        self.assert_lint(
+            'globalQueue = dispatch_queue_create("My Concurrent Queue", DISPATCH_QUEUE_CONCURRENT);',
+            'Use concurrentQueueWithAutoreleasePoolAttrSingleton() instead of DISPATCH_QUEUE_CONCURRENT so that '
+            'each work item runs with its own autorelease pool.'
+            '  [runtime/dispatch_queue_autorelease_pool] [5]')
+        self.assert_lint(
+            'globalQueue = dispatch_queue_create("My Serial Queue", DISPATCH_QUEUE_SERIAL_WITH_AUTORELEASE_POOL);',
+            'Use serialQueueWithAutoreleasePoolAttrSingleton() instead of DISPATCH_QUEUE_SERIAL_WITH_AUTORELEASE_POOL '
+            'so that static analysis knows the attribute does not need to be retained.'
+            '  [runtime/dispatch_queue_autorelease_pool] [5]')
+        self.assert_lint(
+            'globalQueue = dispatch_queue_create("My Concurrent Queue", DISPATCH_QUEUE_CONCURRENT_WITH_AUTORELEASE_POOL);',
+            'Use concurrentQueueWithAutoreleasePoolAttrSingleton() instead of '
+            'DISPATCH_QUEUE_CONCURRENT_WITH_AUTORELEASE_POOL so that static analysis knows the attribute does not '
+            'need to be retained.'
+            '  [runtime/dispatch_queue_autorelease_pool] [5]')
+        self.assert_lint('globalQueue = dispatch_queue_create("My Serial Queue", serialQueueWithAutoreleasePoolAttrSingleton());', '')
+        self.assert_lint('globalQueue = dispatch_queue_create("My Concurrent Queue", concurrentQueueWithAutoreleasePoolAttrSingleton());', '')
 
     def test_retainptr_pointer(self):
         self.assert_lint(
@@ -3605,6 +3631,23 @@ class OrderOfIncludesTest(CppStyleTestBase):
             'BlockPtr<void(WebItemProviderFileCallback)> _callback;\n',
             '',
             file_name='Source/WebCore/foo.mm')
+
+    def test_check_objc_runtime_header_include(self):
+        expected = ('Do not include <objc/objc-runtime.h>; it is not available in all SDKs.'
+                    '  Include <objc/message.h> and/or <objc/runtime.h> instead.'
+                    '  [build/objc_runtime_header] [5]')
+        self.assert_language_rules_check('Source/JavaScriptCore/API/JSWrapperMap.h',
+                                         '#import <objc/objc-runtime.h>\n', expected)
+        self.assert_language_rules_check('Source/WebCore/foo.mm',
+                                         '#import <objc/objc-runtime.h>\n', expected)
+        self.assert_language_rules_check('Source/WebCore/foo.mm',
+                                         '#include <objc/objc-runtime.h>\n', expected)
+
+        # The individual headers the umbrella pulls in are allowed.
+        self.assert_language_rules_check('Source/WebCore/foo.mm',
+                                         '#import <objc/message.h>\n', '')
+        self.assert_language_rules_check('Source/WebCore/foo.mm',
+                                         '#import <objc/runtime.h>\n', '')
 
     def test_check_line_break_after_own_header(self):
         self.assert_language_rules_check('foo.cpp',
@@ -6195,7 +6238,7 @@ class WebKitStyleTest(CppStyleTestBase):
             "  [runtime/auto_with_adopt] [4]",
             'foo.cpp')
         self.assert_lint(
-            'auto queue = adoptOSObject(dispatch_queue_create("foo", DISPATCH_QUEUE_SERIAL));',
+            'auto queue = adoptOSObject(dispatch_queue_create("foo", serialQueueWithAutoreleasePoolAttrSingleton()));',
             "Use 'OSObjectPtr' instead of 'auto' with 'adoptOSObject()'."
             "  [runtime/auto_with_adopt] [4]",
             'foo.cpp')
@@ -6508,16 +6551,16 @@ class WebKitStyleTest(CppStyleTestBase):
 
     def test_wtf_os_object_ptr(self):
         self.assert_lint(
-            'auto queue = adoptOSObject(dispatch_queue_create("foo", DISPATCH_QUEUE_SERIAL));',
+            'auto queue = adoptOSObject(dispatch_queue_create("foo", serialQueueWithAutoreleasePoolAttrSingleton()));',
             "Use 'OSObjectPtr' instead of 'auto' with 'adoptOSObject()'."
             "  [runtime/auto_with_adopt] [4]",
             'foo.cpp')
         self.assert_lint(
-            'OSObjectPtr queue = adoptOSObject(dispatch_queue_create("foo", DISPATCH_QUEUE_SERIAL));',
+            'OSObjectPtr queue = adoptOSObject(dispatch_queue_create("foo", serialQueueWithAutoreleasePoolAttrSingleton()));',
             '',
             'foo.cpp')
         self.assert_lint(
-            'OSObjectPtr<dispatch_queue_t> queue = adoptOSObject(dispatch_queue_create("foo", DISPATCH_QUEUE_SERIAL));',
+            'OSObjectPtr<dispatch_queue_t> queue = adoptOSObject(dispatch_queue_create("foo", serialQueueWithAutoreleasePoolAttrSingleton()));',
             '',
             'foo.cpp')
         self.assert_lint(
@@ -6546,7 +6589,7 @@ class WebKitStyleTest(CppStyleTestBase):
             "  [runtime/wtf_os_object_ptr] [4]",
             'foo.mm')
         self.assert_lint_one_of_many_errors_re(
-            'auto queue = adoptNS(dispatch_queue_create("foo", DISPATCH_QUEUE_SERIAL));',
+            'auto queue = adoptNS(dispatch_queue_create("foo", serialQueueWithAutoreleasePoolAttrSingleton()));',
             r"Use 'adoptOSObject\(\)' instead of 'adoptNS\(\)' for dispatch objects.",
             'foo.mm')
         self.assert_lint_one_of_many_errors_re(
@@ -6554,19 +6597,19 @@ class WebKitStyleTest(CppStyleTestBase):
             r"Use 'adoptOSObject\(\)' instead of 'adoptNS\(\)' for dispatch objects.",
             'foo.mm')
         self.assert_lint_one_of_many_errors_re(
-            'auto queue = adoptOSObject(dispatch_queue_create("foo", RetainPtr { DISPATCH_QUEUE_CONCURRENT }.get()));',
+            'auto queue = adoptOSObject(dispatch_queue_create("foo", RetainPtr { DISPATCH_QUEUE_CONCURRENT_WITH_AUTORELEASE_POOL }.get()));',
             r"Use 'OSObjectPtr' instead of 'RetainPtr' for dispatch objects.",
             'foo.mm')
         self.assert_lint_one_of_many_errors_re(
-            'auto queue = adoptOSObject(dispatch_queue_create("foo", RetainPtr { DISPATCH_QUEUE_SERIAL }.get()));',
+            'auto queue = adoptOSObject(dispatch_queue_create("foo", RetainPtr { DISPATCH_QUEUE_SERIAL_WITH_AUTORELEASE_POOL }.get()));',
             r"Use 'OSObjectPtr' instead of 'RetainPtr' for dispatch objects.",
             'foo.mm')
         self.assert_lint_one_of_many_errors_re(
-            'auto queue = adoptOSObject(dispatch_queue_create("foo", retainPtr(DISPATCH_QUEUE_CONCURRENT).get()));',
+            'auto queue = adoptOSObject(dispatch_queue_create("foo", retainPtr(DISPATCH_QUEUE_CONCURRENT_WITH_AUTORELEASE_POOL).get()));',
             r"Use 'OSObjectPtr' instead of 'RetainPtr' for dispatch objects.",
             'foo.mm')
         self.assert_lint_one_of_many_errors_re(
-            'auto queue = adoptOSObject(dispatch_queue_create("foo", retainPtr(DISPATCH_QUEUE_SERIAL).get()));',
+            'auto queue = adoptOSObject(dispatch_queue_create("foo", retainPtr(DISPATCH_QUEUE_SERIAL_WITH_AUTORELEASE_POOL).get()));',
             r"Use 'OSObjectPtr' instead of 'RetainPtr' for dispatch objects.",
             'foo.mm')
 
@@ -7704,6 +7747,58 @@ class WebKitStyleTest(CppStyleTestBase):
         self.assert_lint('} WK_API_AVAILABLE(macos(WK_MAC_TBA), ios(WK_MAC_TBA), visionos(WK_MAC_TBA));',
                          ['ios(WK_MAC_TBA) is invalid; expected WK_IOS_TBA or a major.minor version  [build/wk_api_available] [5]',
                           'visionos(WK_MAC_TBA) is invalid; expected WK_XROS_TBA or a major.minor version  [build/wk_api_available] [5]'])
+
+    def test_wk_macros(self):
+        header = 'Source/WebKit/UIProcess/API/Cocoa/WKWebView.h'
+
+        self.assert_lint('WK_HEADER_AUDIT_BEGIN(nullability, sendability)',
+                         "Use 'NS_HEADER_AUDIT_BEGIN' instead of 'WK_HEADER_AUDIT_BEGIN'.  [build/wk_macros] [5]", header)
+        self.assert_lint('WK_HEADER_AUDIT_END(nullability, sendability)',
+                         "Use 'NS_HEADER_AUDIT_END' instead of 'WK_HEADER_AUDIT_END'.  [build/wk_macros] [5]", header)
+        self.assert_lint('@property (nonatomic, readonly, copy) NSString * WK_NULLABLE_RESULT title;',
+                         "Use 'NS_NULLABLE_RESULT' instead of 'WK_NULLABLE_RESULT'.  [build/wk_macros] [5]", header)
+        self.assert_lint('- (void)fooWithCompletionHandler:(void (^)(void))completionHandler WK_SWIFT_ASYNC(2);',
+                         "Use 'NS_SWIFT_ASYNC' instead of 'WK_SWIFT_ASYNC'.  [build/wk_macros] [5]", header)
+        self.assert_lint('- (void)fooWithCompletionHandler:(void (^)(void))completionHandler WK_SWIFT_ASYNC_NAME(foo());',
+                         "Use 'NS_SWIFT_ASYNC_NAME' instead of 'WK_SWIFT_ASYNC_NAME'.  [build/wk_macros] [5]", header)
+        self.assert_lint('- (void)fooWithCompletionHandler:(void (^)(BOOL))completionHandler WK_SWIFT_ASYNC_THROWS_ON_FALSE(1);',
+                         "Use 'NS_SWIFT_ASYNC_THROWS_ON_FALSE' instead of 'WK_SWIFT_ASYNC_THROWS_ON_FALSE'.  [build/wk_macros] [5]", header)
+        self.assert_lint('- (void)foo:(WK_SWIFT_UI_ACTOR void (^)(void))handler;',
+                         "Use 'NS_SWIFT_UI_ACTOR' instead of 'WK_SWIFT_UI_ACTOR'.  [build/wk_macros] [5]", header)
+
+        # Multiple macros on one line are all reported.
+        self.assert_lint('- (void)foo:(void (^)(void))handler WK_SWIFT_ASYNC_NAME(foo()) WK_SWIFT_ASYNC(1);',
+                         ["Use 'NS_SWIFT_ASYNC' instead of 'WK_SWIFT_ASYNC'.  [build/wk_macros] [5]",
+                          "Use 'NS_SWIFT_ASYNC_NAME' instead of 'WK_SWIFT_ASYNC_NAME'.  [build/wk_macros] [5]"], header)
+
+        # The NS_ spellings and other WK_ macros are fine.
+        self.assert_lint('NS_HEADER_AUDIT_BEGIN(nullability, sendability)', '', header)
+        self.assert_lint('- (void)foo WK_API_AVAILABLE(macos(WK_MAC_TBA));', '', header)
+        self.assert_lint('- (void)foo:(NS_SWIFT_UI_ACTOR void (^)(void))handler;', '', header)
+        self.assert_lint('- (void)foo:(void (^)(void))handler NS_SWIFT_ASYNC_NAME(foo());', '', header)
+
+        # WKFoundation.h is where these macros are defined.
+        self.assert_lint('#define WK_SWIFT_ASYNC_NAME(...) NS_SWIFT_ASYNC_NAME(__VA_ARGS__)', '',
+                         'Source/WebKit/Shared/API/Cocoa/WKFoundation.h')
+        self.assert_lint('#define WK_SWIFT_UI_ACTOR NS_SWIFT_UI_ACTOR', '',
+                         'Source/WebKit/Shared/API/Cocoa/WKFoundation.h')
+        self.assert_lint('#define WK_HEADER_AUDIT_BEGIN NS_HEADER_AUDIT_BEGIN', '',
+                         'Source/WebKit/Shared/API/Cocoa/WKFoundation.h')
+
+    def test_header_audit(self):
+        header = 'Source/WebKit/UIProcess/API/Cocoa/WKWebView.h'
+
+        self.assert_lint('NS_ASSUME_NONNULL_BEGIN',
+                         "Use 'NS_HEADER_AUDIT_BEGIN(nullability, sendability)' instead of 'NS_ASSUME_NONNULL_BEGIN'.  [build/header_audit] [5]", header)
+        self.assert_lint('NS_ASSUME_NONNULL_END',
+                         "Use 'NS_HEADER_AUDIT_END(nullability, sendability)' instead of 'NS_ASSUME_NONNULL_END'.  [build/header_audit] [5]", header)
+
+        self.assert_lint('NS_HEADER_AUDIT_BEGIN(nullability, sendability)', '', header)
+        self.assert_lint('NS_HEADER_AUDIT_END(nullability, sendability)', '', header)
+
+        # WKFoundation.h defines WK_HEADER_AUDIT_BEGIN / WK_HEADER_AUDIT_END in terms of these.
+        self.assert_lint('#define WK_HEADER_AUDIT_BEGIN(...) NS_ASSUME_NONNULL_BEGIN', '',
+                         'Source/WebKit/Shared/API/Cocoa/WKFoundation.h')
 
     def test_os_version_checks(self):
         self.assert_lint('#if PLATFORM(IOS_FAMILY) && __IPHONE_OS_VERSION_MIN_REQUIRED < 110000', 'Misplaced OS version check. Please use a named macro in one of headers in the wtf/Platform.h suite of files or an appropriate internal file.  [build/version_check] [5]')

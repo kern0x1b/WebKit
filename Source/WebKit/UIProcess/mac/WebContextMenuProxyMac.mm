@@ -544,6 +544,11 @@ RetainPtr<NSMenuItem> WebContextMenuProxyMac::createShareMenuItem(ShareMenuItemT
 }
 #endif
 
+void WebContextMenuProxyMac::cancelTracking()
+{
+    [protect(m_menu) cancelTrackingWithoutAnimation];
+}
+
 void WebContextMenuProxyMac::show()
 {
 #if ENABLE(SERVICE_CONTROLS)

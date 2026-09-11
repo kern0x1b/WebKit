@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2013 Google Inc. All rights reserved.
- * Copyright (C) 2013-2020 Apple Inc. All rights reserved.
+ * Copyright (C) 2013-2026 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -31,6 +31,8 @@
 
 #include "config.h"
 #include "SourceBuffer.h"
+
+#include <wtf/text/TextStream.h>
 
 #if ENABLE(MEDIA_SOURCE)
 
@@ -1282,9 +1284,7 @@ void SourceBuffer::reportExtraMemoryAllocated(uint64_t extraMemory)
 
     Ref vm = protect(scriptExecutionContext())->vm();
     JSC::JSLockHolder lock(vm);
-    // FIXME: Adopt reportExtraMemoryVisited, and switch to reportExtraMemoryAllocated.
-    // https://bugs.webkit.org/show_bug.cgi?id=142595
-    vm->heap.deprecatedReportExtraMemory(extraMemoryCostDelta);
+    vm->heap.reportExtraMemoryAllocated(nullptr, extraMemoryCostDelta);
 }
 
 Ref<SourceBuffer::SamplesPromise> SourceBuffer::bufferedSamplesForTrackId(TrackID trackID)
@@ -1409,7 +1409,7 @@ void SourceBuffer::updateBuffered()
     //    of this attribute to intersection ranges.
     if (oldRanges != intersectionRanges) {
         m_buffered = TimeRanges::create(intersectionRanges);
-        LOG(Media, "SourceBuffer::updateBuffered(%p) - buffered = %s", this, toString(intersectionRanges).utf8().data());
+        LOG_WITH_STREAM(Media, stream << "SourceBuffer::updateBuffered("_s << this << ") - buffered = "_s << toString(intersectionRanges));
     }
 }
 

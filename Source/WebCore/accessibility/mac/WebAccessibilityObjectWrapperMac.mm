@@ -85,6 +85,7 @@
 #import "WebCoreFrameView.h"
 #import <AppKit/NSAccessibilityConstants.h>
 #import <pal/spi/cocoa/NSAccessibilitySPI.h>
+#import <wtf/HexNumber.h>
 #import <wtf/ObjCRuntimeExtras.h>
 #import <wtf/RuntimeApplicationChecks.h>
 #import <wtf/cocoa/TypeCastsCocoa.h>
@@ -446,6 +447,13 @@ static NSAttributedString *attributedStringForTextMarkerRange(const AXCoreObject
     return object.attributedStringForTextMarkerRange({ textMarkerRangeRef }, spellCheck).autorelease();
 }
 
+#if ENABLE(WRITING_TOOLS)
+static bool isTextAreaOrEditableWebArea(AXCoreObject& backingObject)
+{
+    return backingObject.role() == AccessibilityRole::TextArea || backingObject.isEditableWebArea();
+}
+#endif // ENABLE(WRITING_TOOLS)
+
 ALLOW_DEPRECATED_IMPLEMENTATIONS_BEGIN
 - (NSArray*)accessibilityActionNames
 {
@@ -466,6 +474,11 @@ ALLOW_DEPRECATED_IMPLEMENTATIONS_BEGIN
 
     static NeverDestroyed<RetainPtr<NSArray>> incrementorActions = [defaultElementActions.get() arrayByAddingObjectsFromArray:@[NSAccessibilityIncrementAction, NSAccessibilityDecrementAction]];
 
+#if ENABLE(WRITING_TOOLS)
+    static NeverDestroyed<RetainPtr<NSArray>> actionElementActionsWithShowWritingTools = [actionElementActions.get() arrayByAddingObject:NSAccessibilityShowWritingToolsAction];
+    static NeverDestroyed<RetainPtr<NSArray>> defaultElementActionsWithShowWritingTools = [defaultElementActions.get() arrayByAddingObject:NSAccessibilityShowWritingToolsAction];
+#endif // ENABLE(WRITING_TOOLS)
+
     if (backingObject->isSlider() || (backingObject->isSpinButton() && backingObject->spinButtonType() == SpinButtonType::Standalone)) {
         // Non-standalone spinbuttons should not advertise the increment and decrement actions because they have separate increment and decrement controls.
         return incrementorActions.get().get();
@@ -475,8 +488,25 @@ ALLOW_DEPRECATED_IMPLEMENTATIONS_BEGIN
         return menuElementActions.get().get();
     if (backingObject->isAttachment())
         return [[self attachmentView] accessibilityActionNames];
-    if (backingObject->supportsPressAction())
+
+#if ENABLE(WRITING_TOOLS)
+    auto shouldExposeShowWritingTools = [&] {
+        return backingObject->writingToolsAvailable() && isTextAreaOrEditableWebArea(*backingObject);
+    };
+#endif // ENABLE(WRITING_TOOLS)
+
+    if (backingObject->supportsPressAction()) {
+#if ENABLE(WRITING_TOOLS)
+        if (shouldExposeShowWritingTools())
+            return actionElementActionsWithShowWritingTools.get().get();
+#endif // ENABLE(WRITING_TOOLS)
         return actionElementActions.get().get();
+    }
+
+#if ENABLE(WRITING_TOOLS)
+    if (shouldExposeShowWritingTools())
+        return defaultElementActionsWithShowWritingTools.get().get();
+#endif // ENABLE(WRITING_TOOLS)
 
     return defaultElementActions.get().get();
 }
@@ -2194,7 +2224,7 @@ static id handleAssociatedPluginParentAttribute(WebAccessibilityObjectWrapper* w
 
 static id handleKeyShortcutsAttribute(WebAccessibilityObjectWrapper*, AXCoreObject& backingObject)
 {
-    return backingObject.keyShortcuts().createNSString().autorelease();
+    return backingObject.keyShortcutsPlatformString().createNSString().autorelease();
 }
 
 static id handleIsInDescriptionListTermAttribute(WebAccessibilityObjectWrapper*, AXCoreObject& backingObject)
@@ -3137,6 +3167,13 @@ ALLOW_DEPRECATED_IMPLEMENTATIONS_BEGIN
         backingObject->performDismissActionIgnoringResult();
     else if (AXObjectCache::clientIsInTestMode() && [action isEqualToString:@"AXLogTrees"])
         [self _accessibilityPrintTrees];
+    else if ([action isEqualToString:NSAccessibilityShowWritingToolsAction]) {
+        Accessibility::performFunctionOnMainThread([protectedSelf = retainPtr(self)] {
+            RefPtr<AXCoreObject> backingObject = protectedSelf.get().updateObjectBackingStore;
+            if (RefPtr page = backingObject ? backingObject->page() : nullptr)
+                page->chrome().client().showWritingToolsAffordance();
+        });
+    }
 }
 ALLOW_DEPRECATED_IMPLEMENTATIONS_END
 
@@ -3298,7 +3335,10 @@ static RenderObject* rendererForView(NSView* view)
 ALLOW_DEPRECATED_IMPLEMENTATIONS_BEGIN
 - (NSString*)accessibilityActionDescription:(NSString*)action
 {
-    // we have no custom actions
+#if ENABLE(WRITING_TOOLS)
+    if ([action isEqualToString:NSAccessibilityShowWritingToolsAction])
+        return AXShowWritingToolsLabel().createNSString().autorelease();
+#endif // ENABLE(WRITING_TOOLS)
     return NSAccessibilityActionDescription(action);
 }
 ALLOW_DEPRECATED_IMPLEMENTATIONS_END
@@ -3444,7 +3484,16 @@ enum class TextUnit {
             AX_ASSERT_NOT_REACHED();
             break;
         }
-        return AXTextMarker { textMarker }.lineRange(rangeType, includeTrailingLineBreak).platformData().bridgingAutorelease();
+
+        auto lineRange = AXTextMarker { textMarker }.lineRange(rangeType, includeTrailingLineBreak);
+        if (textUnit == TextUnit::Line) {
+            // The range ends at the downstream start of the next line, rather than the upstream start of this
+            // one. This enables AT line-by-line navigation and matches the live tree.
+            auto endMarker = lineRange.end();
+            endMarker.setAffinity(Affinity::Downstream);
+            lineRange = { lineRange.start(), WTF::move(endMarker) };
+        }
+        return lineRange.platformData().bridgingAutorelease();
     }
 
     return (id)Accessibility::retrieveAutoreleasedValueFromMainThread<AXTextMarkerRangeRef>([textMarker = retainPtr(textMarker), &textUnit, protectedSelf = retainPtr(self)] () ->  RetainPtr<AXTextMarkerRangeRef> {
@@ -3554,6 +3603,13 @@ static bool isMatchingPlugin(AXCoreObject& axObject, const AccessibilitySearchCr
         return markerRange ? static_cast<CGRect>(markerRange->viewportRelativeFrame()) : CGRectZero;
     }
 
+    // For a representative, offsets can address text past its own node, so resolve them against
+    // simpleRange() (the whole stitched text). visiblePositionForIndex would clamp to its first run.
+    if (backingObject.stitchGroupIfRepresentative()) {
+        if (std::optional stitchScope = backingObject.simpleRange())
+            return FloatRect(backingObject.boundsForRange(resolveCharacterRange(*stitchScope, CharacterRange(range.location, range.length))));
+    }
+
     auto start = backingObject.visiblePositionForIndex(range.location);
     auto end = backingObject.visiblePositionForIndex(range.location + range.length);
     auto webRange = makeSimpleRange({ start, end });
@@ -3632,10 +3688,7 @@ static id handleUIElementForTextMarkerAttribute(WebAccessibilityObjectWrapper*, 
     if (!object)
         return nil;
 
-    if (std::optional<AXID> representativeID = object->stitchedIntoID(); representativeID && *representativeID != object->objectID()) {
-        if (RefPtr representative = AXTextMarker { object->treeID(), *representativeID, 0 }.object())
-            object = WTF::move(representative);
-    }
+    object = object->stitchRepresentativeOrSelf();
 
     RetainPtr wrapper = object->wrapper();
     if (!wrapper)
@@ -4194,7 +4247,7 @@ static id handleLengthForTextMarkerRangeAttribute(WebAccessibilityObjectWrapper*
 {
     if (!isMainThread()) {
         AXTextMarkerRange range = { context.textMarkerRange };
-        return @(range.toString().length());
+        return @(range.length());
     }
 
     RefPtr<AXCoreObject> backingObject = wrapper.axBackingObject;

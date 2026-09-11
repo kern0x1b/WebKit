@@ -28,7 +28,6 @@
 
 #include <atomic>
 #include <ctime>
-#include <wtf/CanMakeWeakPtr.h>
 #include <wtf/FastMalloc.h>
 #include <wtf/Forward.h>
 #include <wtf/Function.h>
@@ -83,15 +82,11 @@ struct MemoryPressureHandlerConfiguration {
     Seconds pollInterval;
 };
 
-class MemoryPressureHandler : public CanMakeWeakPtr<MemoryPressureHandler> {
+class MemoryPressureHandler {
     WTF_DEPRECATED_MAKE_FAST_ALLOCATED(MemoryPressureHandler);
     friend class WTF::NeverDestroyed<MemoryPressureHandler>;
 public:
     WTF_EXPORT_PRIVATE static MemoryPressureHandler& singleton();
-
-    // Do nothing since this is a singleton.
-    void ref() const { }
-    void deref() const { }
 
     WTF_EXPORT_PRIVATE void install();
 
@@ -150,6 +145,8 @@ public:
         RELEASE_ASSERT(!m_installed);
         m_dispatchQueue = WTF::move(queue);
     }
+
+    WTF_EXPORT_PRIVATE void setDispatchQueueWithLabel(ASCIILiteral);
 #endif
 
     class ReliefLogger {
@@ -289,6 +286,7 @@ private:
 
 using WTF::Critical;
 using WTF::MemoryPressureHandler;
+using WTF::MemoryPressureHandlerConfiguration;
 using WTF::Synchronous;
 using WTF::SystemMemoryPressureStatus;
 using WTF::WebsamProcessState;

@@ -67,7 +67,7 @@ inline const Settings& RenderObject::settings() const
 
 inline bool RenderObject::renderTreeBeingDestroyed() const
 {
-    return document().renderTreeBeingDestroyed();
+    return document().renderTreeState() == Document::RenderTreeState::BeingDestroyed;
 }
 
 }

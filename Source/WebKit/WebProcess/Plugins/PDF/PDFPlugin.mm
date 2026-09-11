@@ -670,7 +670,7 @@ void PDFPlugin::createPasswordEntryForm()
 
     auto passwordField = PDFPluginPasswordField::create(this);
     m_passwordField = passwordField.ptr();
-    passwordField->attach(m_annotationContainer.get());
+    passwordField->attach(protect(m_annotationContainer));
 }
 
 void PDFPlugin::teardownPasswordEntryForm()
@@ -1090,7 +1090,14 @@ bool PDFPlugin::showContextMenuAtPoint(const IntPoint& point)
     if (!frameView)
         return false;
     IntPoint contentsPoint = frameView->contentsToRootView(point);
-    WebMouseEvent event({ WebEventType::MouseDown, OptionSet<WebEventModifier> { }, MonotonicTime::now() }, WebMouseEventButton::Right, 0, contentsPoint, contentsPoint, 0, 0, 0, 1, WebCore::ForceAtClick);
+    Ref event = WebMouseEvent::create({ WebEventType::MouseDown, OptionSet<WebEventModifier> { }, MonotonicTime::now() }, {
+        .button = WebMouseEventButton::Right,
+        .buttons = 0,
+        .position = contentsPoint,
+        .globalPosition = contentsPoint,
+        .clickCount = 1,
+        .force = WebCore::ForceAtClick,
+    });
     return handleContextMenuEvent(event);
 }
 
@@ -1227,7 +1234,7 @@ void PDFPlugin::setActiveAnnotation(SetActiveAnnotationParams&& setActiveAnnotat
 
             auto activeAnnotation = PDFPluginAnnotation::create(annotation.get(), this);
             m_activeAnnotation = activeAnnotation.get();
-            activeAnnotation->attach(m_annotationContainer.get());
+            activeAnnotation->attach(protect(m_annotationContainer));
         } else
             m_activeAnnotation = nullptr;
     });

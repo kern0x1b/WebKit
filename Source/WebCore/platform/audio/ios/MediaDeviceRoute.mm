@@ -28,13 +28,19 @@
 
 #if ENABLE(WIRELESS_PLAYBACK_MEDIA_PLAYER)
 
+#import "Logging.h"
 #import "MediaSelectionOption.h"
+#import "WebMediaDevicePlatformRoute.h"
 #import <AVKit/AVKit.h>
 #import <pal/avfoundation/MediaTimeAVFoundation.h>
+#import <wtf/BlockPtr.h>
+#import <wtf/CompletionHandler.h>
+#import <wtf/RunLoop.h>
 #import <wtf/darwin/DispatchExtras.h>
 #import <wtf/TZoneMallocInlines.h>
 
 #import <pal/cf/CoreMediaSoftLink.h>
+#import <pal/ios/AVSystemRoutingSoftLink.h>
 
 #define FOR_EACH_READONLY_KEY_PATH(Macro) \
     Macro(timeRange, TimeRange, MediaTimeRange) \
@@ -102,12 +108,12 @@ static void* WebPlaybackControlObserverContext = &WebPlaybackControlObserverCont
 + (instancetype)new NS_UNAVAILABLE;
 - (instancetype)init NS_UNAVAILABLE;
 - (instancetype)initWithRoute:(WebCore::MediaDeviceRoute&)route NS_DESIGNATED_INITIALIZER;
-@property (nonatomic, nullable, strong) AVPlaybackControl *playbackControl;
+@property (nonatomic, nullable, strong) NSObject<AVPlaybackUserInterfaceControllable> *playbackControl;
 @end
 
 @implementation WebPlaybackControlObserver {
     WeakPtr<WebCore::MediaDeviceRoute> _route;
-    RetainPtr<AVPlaybackControl> _playbackControl;
+    RetainPtr<NSObject<AVPlaybackUserInterfaceControllable>> _playbackControl;
 }
 
 - (instancetype)initWithRoute:(WebCore::MediaDeviceRoute&)route
@@ -119,12 +125,12 @@ static void* WebPlaybackControlObserverContext = &WebPlaybackControlObserverCont
     return self;
 }
 
-- (AVPlaybackControl * _Nullable)playbackControl
+- (NSObject<AVPlaybackUserInterfaceControllable> * _Nullable)playbackControl
 {
     return _playbackControl.get();
 }
 
-- (void)setPlaybackControl:(AVPlaybackControl * _Nullable)playbackControl
+- (void)setPlaybackControl:(NSObject<AVPlaybackUserInterfaceControllable> * _Nullable)playbackControl
 {
     FOR_EACH_KEY_PATH(REMOVE_OBSERVER)
 
@@ -156,9 +162,55 @@ static void* WebPlaybackControlObserverContext = &WebPlaybackControlObserverCont
 
 NS_ASSUME_NONNULL_END
 
-#import <WebKitAdditions/MediaDeviceRouteAdditions.mm>
-
 namespace WebCore {
+
+void MediaDeviceRoute::loadURL(const URL& url, CompletionHandler<void(const MediaDeviceRouteLoadURLResult&)>&& completionHandler)
+{
+    RetainPtr platformURL = url.createNSURL();
+    if (!platformURL)
+        return completionHandler(makeUnexpected(MediaDeviceRouteLoadURLError::InvalidURL));
+
+    disconnectFromSession();
+
+#if HAVE(AVSYSTEMROUTING_FRAMEWORK)
+    m_routeSession = adoptNS([PAL::allocAVSystemRouteSessionInstance() initWithURL:platformURL.get() mode:AVSystemRouteLaunchModePlayer]);
+    [platformRoute() addSession:m_routeSession.get()];
+
+    auto completionBlock = makeBlockPtr([weakThis = WeakPtr { *this }, completionHandler = WTF::move(completionHandler)](NSError * _Nullable error, AVSystemRouteMediaSession * _Nullable mediaSession) mutable {
+        RunLoop::mainSingleton().dispatch([weakThis = WTF::move(weakThis), completionHandler = WTF::move(completionHandler), error = RetainPtr { error }, mediaSession = RetainPtr { mediaSession }]() mutable {
+            if (!!error)
+                return completionHandler(makeUnexpected(MediaDeviceRouteLoadURLError::PlatformError));
+
+            RefPtr protectedThis = weakThis.get();
+            if (!protectedThis)
+                return completionHandler(makeUnexpected(MediaDeviceRouteLoadURLError::NoRoute));
+
+            RetainPtr<id> playbackControl = [mediaSession playbackControl];
+            if ([playbackControl conformsToProtocol:@protocol(AVPlaybackUserInterfaceControllable)])
+                [protectedThis->m_playbackControlObserver setPlaybackControl:(NSObject<AVPlaybackUserInterfaceControllable> *)playbackControl.get()];
+            else
+                RELEASE_LOG_ERROR(Media, "MediaDeviceRoute::loadURL: playbackControl does not conform to AVPlaybackUserInterfaceControllable");
+            completionHandler({ });
+        });
+    });
+
+    [m_routeSession startWithCompletionHandler:completionBlock.get()];
+#else
+    auto completionBlock = makeBlockPtr([weakThis = WeakPtr { *this }, completionHandler = WTF::move(completionHandler)](NSError * _Nullable error, NSObject<AVPlaybackUserInterfaceControllable> * _Nullable playbackControl) mutable {
+        if (!!error)
+            return completionHandler(makeUnexpected(MediaDeviceRouteLoadURLError::PlatformError));
+
+        RefPtr protectedThis = weakThis.get();
+        if (!protectedThis)
+            return completionHandler(makeUnexpected(MediaDeviceRouteLoadURLError::NoRoute));
+
+        [protectedThis->m_playbackControlObserver setPlaybackControl:playbackControl];
+        completionHandler({ });
+    });
+
+    [platformRoute() startWithURL:platformURL.get() completionHandler:completionBlock.get()];
+#endif
+}
 
 static float convert(float value)
 {
@@ -189,6 +241,19 @@ static MediaTimeRange convert(CMTimeRange timeRange)
 {
     MediaTime start = PAL::toMediaTime(timeRange.start);
     return { WTF::move(start), start + PAL::toMediaTime(timeRange.duration) };
+}
+
+static CMTime convert(MediaDeviceRoute::SeekTolerance tolerance)
+{
+    switch (tolerance) {
+    case MediaDeviceRoute::SeekTolerance::Precise:
+        return PAL::kCMTimeZero;
+    case MediaDeviceRoute::SeekTolerance::Approximate:
+        return PAL::kCMTimePositiveInfinity;
+    }
+
+    ASSERT_NOT_REACHED();
+    return PAL::kCMTimeZero;
 }
 
 static std::optional<MediaPlaybackSourceError> convert(NSError * _Nullable error)
@@ -234,7 +299,7 @@ void MediaDeviceRoute::disconnectFromSession()
 {
     [m_playbackControlObserver setPlaybackControl:nil];
 
-#if HAVE(AVROUTING_FRAMEWORK)
+#if HAVE(AVSYSTEMROUTING_FRAMEWORK)
     if (RetainPtr routeSession = std::exchange(m_routeSession, nil)) {
         [routeSession stop];
         [platformRoute() removeSession:routeSession.get()];
@@ -259,10 +324,9 @@ WebMediaDevicePlatformRoute *MediaDeviceRoute::platformRoute() const
     return m_platformRoute.get();
 }
 
-void MediaDeviceRoute::setPlaybackPosition(MediaTime playbackPosition)
+void MediaDeviceRoute::seekToPosition(MediaTime playbackPosition, SeekTolerance tolerance)
 {
-    // FIXME: We should introduce a proper seek-with-tolerance function on MediaDeviceRoute rather than assuming a zero tolerance here.
-    [[m_playbackControlObserver playbackControl] seekToPosition:convert(WTF::move(playbackPosition)) tolerance:PAL::kCMTimeZero];
+    [[m_playbackControlObserver playbackControl] seekToPosition:convert(WTF::move(playbackPosition)) tolerance:convert(tolerance)];
 }
 
 MediaDeviceRoute::~MediaDeviceRoute()

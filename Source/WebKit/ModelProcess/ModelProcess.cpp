@@ -129,6 +129,11 @@ void ModelProcess::sharedPreferencesForWebProcessDidChange(WebCore::ProcessIdent
     completionHandler();
 }
 
+void ModelProcess::securityFlagsDidChange(SecurityFlags&& securityFlags)
+{
+    m_securityFlags.replaceWith(securityFlags);
+}
+
 void ModelProcess::removeModelConnectionToWebProcess(ModelConnectionToWebProcess& connection)
 {
     RELEASE_LOG(Process, "%p - ModelProcess::removeModelConnectionToWebProcess: processIdentifier=%" PRIu64, this, connection.webProcessIdentifier().toUInt64());
@@ -206,6 +211,7 @@ void ModelProcess::initializeModelProcess(ModelProcessCreationParameters&& param
 {
     CompletionHandlerCallingScope callCompletionHandler(WTF::move(completionHandler));
 
+    m_securityFlags.replaceWith(parameters.securityFlags);
     m_debugEntityMemoryLimit = parameters.debugEntityMemoryLimit;
     m_debugImmersiveEntityMemoryLimit = parameters.debugImmersiveEntityMemoryLimit;
 #if HAVE(CORE_RE)
@@ -214,6 +220,11 @@ void ModelProcess::initializeModelProcess(ModelProcessCreationParameters&& param
 
     applyProcessCreationParameters(WTF::move(parameters.auxiliaryProcessParameters));
     RELEASE_LOG(Process, "%p - ModelProcess::initializeModelProcess:", this);
+
+#if ENABLE(LOGD_BLOCKING_IN_WEBCONTENT)
+    initializeLogForwarding(parameters.isDebugLoggingEnabled);
+#endif
+
     WTF::Thread::setCurrentThreadIsUserInitiated();
     WebCore::initializeCommonAtomStrings();
 

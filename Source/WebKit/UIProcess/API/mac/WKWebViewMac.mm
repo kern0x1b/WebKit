@@ -399,7 +399,7 @@ ALLOW_DEPRECATED_IMPLEMENTATIONS_END
 
 ALLOW_DEPRECATED_IMPLEMENTATIONS_BEGIN
 - (void)changeColor:(id)sender
-ALLOW_DEPRECATED_IMPLEMENTATIONS_BEGIN
+ALLOW_DEPRECATED_IMPLEMENTATIONS_END
 {
     _impl->changeFontColorFromSender(sender);
 }
@@ -1566,6 +1566,11 @@ ALLOW_DEPRECATED_DECLARATIONS_END
     [self _gestureEventWasNotHandledByWebCore:event];
 }
 
+- (void)_web_magnificationGestureEventWasNotHandledByWebCoreWithPhase:(NSEventPhase)phase magnification:(CGFloat)magnification locationInWindow:(NSPoint)locationInWindow
+{
+    [self _magnificationGestureEventWasNotHandledByWebCoreWithPhase:phase magnification:magnification locationInWindow:locationInWindow];
+}
+
 - (void)_takeFindStringFromSelectionInternal:(id)sender
 {
     [self takeFindStringFromSelection:sender];
@@ -1877,7 +1882,7 @@ ALLOW_DEPRECATED_DECLARATIONS_END
 
 #if ENABLE(CONTENT_INSET_BACKGROUND_FILL)
     _impl->updateTopScrollPocketStyle();
-    _impl->updateScrollPocketVisibilityWhenScrolledToTop();
+    _impl->updateScrollPocketVisibilityWhenScrolledToTopAndNonEditable();
     _impl->updateTopScrollPocketCaptureColor();
 #endif
 }
@@ -2097,6 +2102,11 @@ ALLOW_DEPRECATED_DECLARATIONS_END
     _impl->gestureEventWasNotHandledByWebCoreFromViewOnly(event);
 }
 
+- (void)_magnificationGestureEventWasNotHandledByWebCoreWithPhase:(NSEventPhase)phase magnification:(CGFloat)magnification locationInWindow:(NSPoint)locationInWindow
+{
+    _impl->magnificationGestureEventWasNotHandledByWebCoreFromViewOnly(phase, magnification, locationInWindow);
+}
+
 - (double)minimumMagnification
 {
     return _page->minPageZoomFactor();
@@ -2291,37 +2301,5 @@ ALLOW_DEPRECATED_DECLARATIONS_END
     SUPPRESS_RETAINPTR_CTOR_ADOPT return [[NSImage alloc] initWithCGImage:snapshot.get() size:NSZeroSize];
 }
 @end
-
-#if ENABLE(PDF_HUD)
-
-@implementation WKWebView (WKPDFHUD)
-
-- (void)_pdfZoomIn:(WebKit::PDFPluginIdentifier)pluginIdentifier frameIdentifier:(WebCore::FrameIdentifier)frameIdentifier
-{
-    if (RefPtr page = _page)
-        page->pdfZoomIn(pluginIdentifier, frameIdentifier);
-}
-
-- (void)_pdfZoomOut:(WebKit::PDFPluginIdentifier)pluginIdentifier frameIdentifier:(WebCore::FrameIdentifier)frameIdentifier
-{
-    if (RefPtr page = _page)
-        page->pdfZoomOut(pluginIdentifier, frameIdentifier);
-}
-
-- (void)_pdfOpenWithPreview:(WebKit::PDFPluginIdentifier)pluginIdentifier frameIdentifier:(WebCore::FrameIdentifier)frameIdentifier
-{
-    if (RefPtr page = _page)
-        page->pdfOpenWithPreview(pluginIdentifier, frameIdentifier);
-}
-
-- (void)_pdfSaveToPDF:(WebKit::PDFPluginIdentifier)pluginIdentifier frameIdentifier:(WebCore::FrameIdentifier)frameIdentifier
-{
-    if (RefPtr page = _page)
-        page->pdfSaveToPDF(pluginIdentifier, frameIdentifier);
-}
-
-@end
-
-#endif // ENABLE(PDF_HUD)
 
 #endif // PLATFORM(MAC)

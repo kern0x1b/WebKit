@@ -39,7 +39,7 @@
 namespace WebCore {
 
 CachedScript::CachedScript(CachedResourceRequest&& request, PAL::SessionID sessionID, const CookieJar* cookieJar, ScriptTrackingPrivacyProtectionsEnabled requiresPrivacyProtections)
-    : CachedResource(WTF::move(request), request.options().destination == FetchOptionsDestination::Json ? Type::JSON : Type::Script, sessionID, cookieJar)
+    : CachedResource(WTF::move(request), request.options().destination == FetchOptionsDestination::Json ? Type::JSON : request.options().destination == FetchOptionsDestination::Text ? Type::Text : Type::Script, sessionID, cookieJar)
     , m_requiresPrivacyProtections(requiresPrivacyProtections == ScriptTrackingPrivacyProtectionsEnabled::Yes)
     , m_decoder(TextResourceDecoder::create("text/javascript"_s, request.charset()))
 {
@@ -49,6 +49,7 @@ CachedScript::~CachedScript() = default;
 
 void CachedScript::setEncoding(const String& chs)
 {
+    assertIsOwnerThread();
     protect(m_decoder)->setEncoding(chs, TextResourceDecoder::EncodingFromHTTPHeader);
 }
 
@@ -59,6 +60,8 @@ ASCIILiteral CachedScript::encoding() const
 
 StringView CachedScript::script(ShouldDecodeAsUTF8Only shouldDecodeAsUTF8Only)
 {
+    assertIsOwnerThread();
+
     if (!m_data)
         return emptyString();
 
@@ -71,10 +74,12 @@ StringView CachedScript::script(ShouldDecodeAsUTF8Only shouldDecodeAsUTF8Only)
         && contiguousData->size()
         && charactersAreAllASCII(contiguousData->span())) {
 
+        releaseOwnerThreadAssertion();
         {
             Locker locker { m_lock };
             m_decodingState = DataAndDecodedStringHaveSameBytes;
         }
+        assertIsOwnerThread();
 
         // If the encoded and decoded data are the same, there is no decoded data cost!
         setDecodedSize(0);
@@ -102,12 +107,14 @@ StringView CachedScript::script(ShouldDecodeAsUTF8Only shouldDecodeAsUTF8Only)
             m_scriptHash = result.hash();
         ASSERT(!m_scriptHash || m_scriptHash == result.hash());
 
+        releaseOwnerThreadAssertion();
         {
             Locker locker { m_lock };
             m_script = WTF::move(result);
             m_decodingState = DataAndDecodedStringHaveDifferentBytes;
             m_wasForceDecodedAsUTF8 = shouldDecodeAsUTF8Only == ShouldDecodeAsUTF8Only::Yes;
         }
+        assertIsOwnerThread();
         setDecodedSize(m_script.sizeInBytes());
     }
 
@@ -163,6 +170,7 @@ JSC::CodeBlockHash CachedScript::codeBlockHashConcurrently(int startOffset, int 
 
 unsigned CachedScript::scriptHash(ShouldDecodeAsUTF8Only shouldDecodeAsUTF8Only)
 {
+    assertIsOwnerThread();
     if (m_decodingState == NeverDecoded || (m_decodingState == DataAndDecodedStringHaveDifferentBytes && m_wasForceDecodedAsUTF8 != (shouldDecodeAsUTF8Only == ShouldDecodeAsUTF8Only::Yes)))
         script(shouldDecodeAsUTF8Only);
     return m_scriptHash;
@@ -196,6 +204,7 @@ void CachedScript::setBodyDataFrom(const CachedResource& resource)
 
     CachedResource::setBodyDataFrom(resource);
 
+    script.assertIsOwnerThread();
     {
         Locker locker { m_lock };
         m_script = script.m_script;

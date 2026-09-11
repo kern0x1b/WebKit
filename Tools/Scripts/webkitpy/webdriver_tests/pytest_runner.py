@@ -235,7 +235,7 @@ def collect(directory, args, ignore_param=None):
     return collect_recorder.tests
 
 
-def run(path, args, timeout, env, expectations, ignore_param=None):
+def run(path, args, timeout, env, expectations, ignore_param=None, extra_plugins=None):
     harness_recorder = HarnessResultRecorder()
     subtests_recorder = SubtestResultRecorder()
     expectations_marker = TestExpectationsMarker(expectations, timeout, ignore_param)
@@ -253,7 +253,7 @@ def run(path, args, timeout, env, expectations, ignore_param=None):
                    '-p', 'no:cacheprovider']
             cmd.extend(args)
             cmd.append(path)
-            result = pytest.main(cmd, plugins=[harness_recorder, subtests_recorder, expectations_marker, TimeoutSignalHandler()])
+            result = pytest.main(cmd, plugins=[harness_recorder, subtests_recorder, expectations_marker, TimeoutSignalHandler(), *(extra_plugins or [])])
 
             if result == ExitCode.INTERNAL_ERROR:
                 harness_recorder.outcome = ('ERROR', None)

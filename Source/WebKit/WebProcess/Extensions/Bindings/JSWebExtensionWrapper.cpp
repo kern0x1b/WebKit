@@ -123,7 +123,7 @@ JSValueRef callWithArguments(JSObjectRef callbackFunction, JSRetainPtr<JSGlobalC
     if (exception) {
         JSC::JSLockHolder lock(globalObject->vm());
         auto exceptionValue = toJS(globalObject, exception);
-        RELEASE_LOG_ERROR(Extensions, "Uncaught exception in extension callback: %" PUBLIC_LOG_STRING, exceptionValue.toWTFString(globalObject).utf8().data());
+        RELEASE_LOG_ERROR(Extensions, "Uncaught exception in extension callback: %" PUBLIC_LOG_STRING, exceptionValue.toWTFString(globalObject).utf8().legacyCStringPointer());
         WebCore::reportException(globalObject, exceptionValue);
     }
 
@@ -144,7 +144,7 @@ void WebExtensionCallbackHandler::reportError(const String& message)
     if (!m_rejectFunction)
         return;
 
-    RELEASE_LOG_ERROR(Extensions, "Promise rejected: %" PUBLIC_LOG_STRING, message.utf8().data());
+    RELEASE_LOG_ERROR(Extensions, "Promise rejected: %" PUBLIC_LOG_STRING, message.utf8().legacyCStringPointer());
 
     // This is a safer cpp false positive (rdar://163760990).
     SUPPRESS_UNCOUNTED_ARG JSValueRef messageValue = JSValueMakeString(m_globalContext.get(), toJSString(message).get());
@@ -273,11 +273,18 @@ JSValueRef toJSValueRef(JSContextRef context, const String& string, NullOrEmptyS
     }
 }
 
+JSValueRef toJSValueRef(JSContextRef context, URL url, NullOrEmptyString nullOrEmptyString)
+{
+    ASSERT(context);
+
+    return toJSValueRef(context, url.string(), nullOrEmptyString);
+}
+
 JSObjectRef toJSError(JSContextRef context, const String& string)
 {
     ASSERT(context);
 
-    RELEASE_LOG_ERROR(Extensions, "Exception thrown: %" PUBLIC_LOG_STRING, string.utf8().data());
+    RELEASE_LOG_ERROR(Extensions, "Exception thrown: %" PUBLIC_LOG_STRING, string.utf8().legacyCStringPointer());
 
     JSValueRef messageArgument = toJSValueRef(context, string, NullOrEmptyString::NullStringAsEmptyString);
 
@@ -627,6 +634,107 @@ Vector<Protected<JSValueRef>> toVector<Protected<JSValueRef>>(JSContextRef conte
             result.append(Protected(JSContextGetGlobalContext(context), itemValue));
         }
     }
+
+    return result;
+}
+
+static RefPtr<JSON::Value> toJSONArray(JSContextRef context, JSValueRef value)
+{
+    ASSERT(context);
+
+    if (!JSValueIsArray(context, value))
+        return nullptr;
+
+    JSObjectRef object = JSValueToObject(context, value, nullptr);
+    if (!object)
+        return nullptr;
+
+    // This is a safer cpp false positive (rdar://163760990).
+    SUPPRESS_UNCOUNTED_ARG size_t length = JSValueToInt32(context, JSObjectGetProperty(context, object, toJSString("length"_s).get(), nullptr), nullptr);
+    Ref result = JSON::Array::create();
+
+    for (size_t i = 0; i < length; ++i) {
+        JSValueRef itemValue = JSObjectGetPropertyAtIndex(context, object, i, nullptr);
+        RefPtr jsonValue = fromJSValue(context, itemValue);
+        result->pushValue(jsonValue ? jsonValue.releaseNonNull() : JSON::Value::null());
+    }
+
+    return result;
+}
+
+RefPtr<JSON::Value> fromJSValue(JSContextRef context, JSValueRef value)
+{
+    switch (JSValueGetType(context, value)) {
+    case kJSTypeBoolean:
+        return JSON::Value::create(JSValueToBoolean(context, value));
+    case kJSTypeNumber:
+        return JSON::Value::create(JSValueToNumber(context, value, nullptr));
+    case kJSTypeString:
+        return JSON::Value::create(toString(context, value));
+    case kJSTypeObject:
+        if (JSValueIsArray(context, value))
+            return toJSONArray(context, value);
+        return toJSONValue(context, value);
+    case kJSTypeNull:
+        return JSON::Value::null();
+    case kJSTypeUndefined:
+    default:
+        return nullptr;
+    }
+
+    return JSON::Value::null();
+}
+
+RefPtr<JSON::Value> toJSONValue(JSContextRef context, JSValueRef value, NullValuePolicy nullPolicy, ValuePolicy valuePolicy)
+{
+    ASSERT(context);
+
+    if (!JSValueIsObject(context, value))
+        return nullptr;
+
+    JSObjectRef object = JSValueToObject(context, value, nullptr);
+    if (!object)
+        return nullptr;
+
+    if (!isDictionary(context, value))
+        return nullptr;
+
+    JSPropertyNameArrayRef propertyNames = JSObjectCopyPropertyNames(context, object);
+    size_t propertyNameCount = JSPropertyNameArrayGetCount(propertyNames);
+
+    Ref<JSON::Object> result = JSON::Object::create();
+
+    for (size_t i = 0; i < propertyNameCount; ++i) {
+        JSRetainPtr propertyName = JSPropertyNameArrayGetNameAtIndex(propertyNames, i);
+        if (!propertyName)
+            continue;
+
+        // This is a safer cpp false positive (rdar://163760990).
+        SUPPRESS_UNCOUNTED_ARG JSValueRef item = JSObjectGetProperty(context, object, propertyName.get(), 0);
+
+        // Chrome does not include null values in dictionaries for web extensions.
+        if (nullPolicy == NullValuePolicy::NotAllowed && JSValueIsNull(context, item))
+            continue;
+
+        auto key = toString(propertyName.get());
+        auto itemValue = fromJSValue(context, item);
+        if (!itemValue)
+            continue;
+
+        if (valuePolicy == ValuePolicy::StopAtTopLevel) {
+            if (itemValue)
+                result->setValue(key, itemValue.releaseNonNull()); // FIXME: stringify
+            continue;
+        }
+
+        if (isDictionary(context, item)) {
+            if (RefPtr itemDictionary = toJSONValue(context, item, nullPolicy))
+                result->setValue(key, itemDictionary.releaseNonNull());
+        } else
+            result->setValue(key, itemValue.releaseNonNull());
+    }
+
+    JSPropertyNameArrayRelease(propertyNames);
 
     return result;
 }

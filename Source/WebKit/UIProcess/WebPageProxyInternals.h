@@ -53,7 +53,9 @@
 #include "WindowKind.h"
 #include <WebCore/BackForwardItemIdentifier.h>
 #include <WebCore/CornerRadii.h>
+#include <WebCore/FrameIdentifier.h>
 #include <WebCore/FrameLoaderTypes.h>
+#include <WebCore/IntPointHash.h>
 #include <WebCore/PrivateClickMeasurement.h>
 #include <WebCore/RegistrableDomain.h>
 #include <WebCore/ResourceRequest.h>
@@ -111,6 +113,11 @@
 #include <WebCore/ImageAnalysisQueue.h>
 #endif
 
+#if USE(GLIB)
+#include "WebKitWebView.h"
+#include <wtf/glib/GWeakPtr.h>
+#endif
+
 namespace WebKit {
 
 struct PrivateClickMeasurementAndMetadata {
@@ -134,12 +141,12 @@ struct SpeechSynthesisData {
 #if ENABLE(TOUCH_EVENTS)
 
 struct QueuedTouchEvents {
-    QueuedTouchEvents(const NativeWebTouchEvent& event)
-        : forwardedEvent(event)
+    QueuedTouchEvents(Ref<NativeWebTouchEvent>&& event)
+        : forwardedEvent(WTF::move(event))
     {
     }
-    NativeWebTouchEvent forwardedEvent;
-    Vector<NativeWebTouchEvent> deferredTouchEvents;
+    Ref<NativeWebTouchEvent> forwardedEvent;
+    Vector<Ref<NativeWebTouchEvent>> deferredTouchEvents;
 };
 
 struct TouchEventTracking {
@@ -191,7 +198,7 @@ public:
 
 #if ENABLE(WEB_AUTHN) && ENABLE(WEBDRIVER_BIDI)
     std::optional<VirtualWalletBehavior> testingVirtualWalletBehavior;
-    CompletionHandler<void(Expected<WebCore::DigitalCredentialsResponseData, WebCore::ExceptionData>&&)> testingPendingDigitalCredentialHandler;
+    CompletionHandler<void(std::expected<WebCore::DigitalCredentialsResponseData, WebCore::ExceptionData>&&)> testingPendingDigitalCredentialHandler;
 #endif
 
     uint32_t checkedPtrCount() const { return WebPopupMenuProxy::Client::checkedPtrCount(); }
@@ -234,7 +241,7 @@ public:
     WebCore::IntSize fixedLayoutSize;
     GeolocationPermissionRequestManagerProxy geolocationPermissionRequestManager;
     HiddenPageThrottlingAutoIncreasesCounter::Token hiddenPageDOMTimerThrottlingAutoIncreasesCount;
-    Deque<NativeWebKeyboardEvent> keyEventQueue;
+    Deque<Ref<NativeWebKeyboardEvent>> keyEventQueue;
     WebCore::RectEdges<bool> mainFramePinnedState { true, true, true, true };
     WebCore::LayoutPoint maxStableLayoutViewportOrigin;
     WebCore::FloatSize maximumUnobscuredSize;
@@ -244,8 +251,8 @@ public:
     WebCore::LayoutPoint minStableLayoutViewportOrigin;
     WebCore::IntSize minimumSizeForAutoLayout;
     WebCore::FloatSize minimumUnobscuredSize;
-    Deque<NativeWebMouseEvent> mouseEventQueue;
-    Vector<WebMouseEvent> coalescedMouseEvents;
+    Deque<Ref<NativeWebMouseEvent>> mouseEventQueue;
+    Vector<Ref<WebMouseEvent>> coalescedMouseEvents;
     WebCore::MediaProducerMutedStateFlags mutedState;
     WebNotificationManagerMessageHandler notificationManagerMessageHandler;
     OptionSet<WebCore::LayoutMilestone> observedLayoutMilestones;
@@ -294,6 +301,11 @@ public:
 
     HashMap<WebCore::BackForwardItemIdentifier, Vector<Ref<WebFrameProxy>>> pendingBackForwardCachedChildren;
 
+    // Each cross-origin remote frame's origin within its immediate parent frame, keyed by frame ID.
+    // Used to compute each frame's cumulative offset in main-frame coordinates (see
+    // WebPageProxy::updateRemoteFrameOffsetInMainFrame).
+    HashMap<WebCore::FrameIdentifier, WebCore::IntPoint> remoteFrameOffsetsInParent;
+
 #if ENABLE(APPLE_PAY)
     RefPtr<WebPaymentCoordinatorProxy> paymentCoordinator;
 #endif
@@ -301,6 +313,10 @@ public:
 #if PLATFORM(COCOA)
     WeakObjCPtr<WKWebView> cocoaView;
     std::optional<TransactionID> firstLayerTreeTransactionIdAfterDidCommitLoad;
+#endif
+
+#if USE(GLIB)
+    GWeakPtr<WebKitWebView> platformView;
 #endif
 
 #if ENABLE(CONTEXT_MENUS)
@@ -326,7 +342,7 @@ public:
     RefPtr<WebColorPicker> colorPicker;
 
 #if ENABLE(MAC_GESTURE_EVENTS)
-    Deque<NativeWebGestureEvent> gestureEventQueue;
+    Deque<Ref<NativeWebGestureEvent>> gestureEventQueue;
     unsigned droppedGestureEventCount { 0 };
 #endif
 
@@ -412,7 +428,18 @@ public:
 
     std::optional<TextManipulationParameters> textManipulationParameters;
 
+    // Non-empty while the client has told us it is presenting this page as a machine translation.
+    String displayedTranslationLocaleIdentifier;
+
     EnhancedSecurityTracking enhancedSecurityTracker;
+
+    // Recorded by WebPageProxy::suspend() so resume() reaches exactly the processes that were
+    // suspended. The set of processes backing the page can change while it is suspended.
+    struct SuspendedProcess {
+        WeakPtr<WebProcessProxy> process;
+        WebCore::PageIdentifier pageID;
+    };
+    Vector<SuspendedProcess> suspendedProcesses;
 
 #if PLATFORM(IOS_FAMILY) && ENABLE(UNIFIED_PDF)
     PDFPluginDisplayMode pdfDisplayMode { PDFPluginDisplayMode::SinglePageContinuous };

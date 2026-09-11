@@ -29,9 +29,9 @@ import os
 import WebKit_Private.WKPreferencesPrivate
 
 #if ENABLE_SWIFTUI_REFRESHABLE_MODIFIER
-internal import WebKit_Private.WKWebViewPrivate
+import WebKit_Private.WKWebViewPrivate
 
-#if os(macOS)
+#if WTF_PLATFORM_MAC
 import AppKit.NSRefreshController
 typealias PlatformRefreshControl = NSRefreshController
 #else
@@ -57,7 +57,7 @@ struct WebViewRepresentable {
 
         let parent = CocoaWebViewAdapter()
         parent.webView = page.backingWebView
-        #if os(iOS)
+        #if WTF_PLATFORM_IOS_FAMILY
         parent.extrinsicSafeAreaInsets = safeAreaInsets
         #endif
         page.isBoundToWebView = true
@@ -73,7 +73,7 @@ struct WebViewRepresentable {
         setupRefreshControl(context: context)
         #endif
 
-        #if os(iOS)
+        #if WTF_PLATFORM_IOS_FAMILY
         platformView.extrinsicSafeAreaInsets = safeAreaInsets
         #endif
         platformView.webView = webView
@@ -84,7 +84,7 @@ struct WebViewRepresentable {
 
         let isOpaque = environment.webViewContentBackground != .hidden
 
-        #if os(macOS)
+        #if WTF_PLATFORM_MAC
         if webView._drawsBackground != isOpaque {
             webView._drawsBackground = isOpaque
         }
@@ -94,7 +94,7 @@ struct WebViewRepresentable {
         }
         #endif
 
-        #if os(visionOS)
+        #if WTF_PLATFORM_VISION
         if let scrollInputBehavior = environment.webViewScrollInputBehaviorContext {
             if scrollInputBehavior.input == .look {
                 webView.configuration.preferences._overlayRegionsEnabled = scrollInputBehavior.behavior != .disabled
@@ -104,7 +104,7 @@ struct WebViewRepresentable {
         }
         #endif
 
-        #if os(macOS)
+        #if WTF_PLATFORM_MAC
         if let scrollEdgeEffectStyle = environment.webViewScrollEdgeEffectStyleContext {
             webView._usesAutomaticContentInsetBackgroundFill = scrollEdgeEffectStyle.style != .hard
             webView.obscuredContentInsets = .init(top: 0, left: 0, bottom: 0, right: 0)
@@ -139,6 +139,38 @@ struct WebViewRepresentable {
         webView.configuration.preferences.isTextInteractionEnabled = environment.webViewTextSelection
         webView.configuration.preferences.isElementFullscreenEnabled = environment.webViewElementFullscreenBehavior.value == .enabled
 
+        webView._isEditable = environment.webViewContentEnvironment.storage == .editable
+
+        #if WTF_PLATFORM_IOS_FAMILY
+        // FIXME: It's a bit silly to serialize this to a dictionary only to later deserialize it back to a typed value.
+        if let viewportArguments = environment.webViewViewportConfiguration?.dictionaryRepresentation {
+            webView._overrideViewport(withArguments: viewportArguments.isEmpty ? nil : viewportArguments)
+        }
+        #endif // WTF_PLATFORM_IOS_FAMILY
+
+        if let onAttachmentActivityPhase = environment.webViewOnAttachmentActivityPhaseContext?.action {
+            page.attachmentLifecycleListeners.didInsertAttachment = {
+                // This is safe because it is contractually guaranteed by us to be a _WKAttachment.
+                // swift-format-ignore: NeverForceUnwrap
+                onAttachmentActivityPhase(.init(attachment: $0 as! _WKAttachment, kind: .inserted($1)))
+            }
+            page.attachmentLifecycleListeners.didRemoveAttachment = {
+                // This is safe because it is contractually guaranteed by us to be a _WKAttachment.
+                // swift-format-ignore: NeverForceUnwrap
+                onAttachmentActivityPhase(.init(attachment: $0 as! _WKAttachment, kind: .removed))
+            }
+
+            page.attachmentLifecycleListeners.didInvalidateDataForAttachment = {
+                // This is safe because it is contractually guaranteed by us to be a _WKAttachment.
+                // swift-format-ignore: NeverForceUnwrap
+                onAttachmentActivityPhase(.init(attachment: $0 as! _WKAttachment, kind: .dataInvalidated))
+            }
+        } else {
+            page.attachmentLifecycleListeners.didInsertAttachment = nil
+            page.attachmentLifecycleListeners.didRemoveAttachment = nil
+            page.attachmentLifecycleListeners.didInvalidateDataForAttachment = nil
+        }
+
         platformView.onScrollGeometryChange = environment.webViewOnScrollGeometryChange
 
         #if ENABLE_MODEL_ELEMENT_IMMERSIVE
@@ -147,7 +179,7 @@ struct WebViewRepresentable {
 
         context.coordinator.update(platformView, configuration: self, context: context)
 
-        #if os(macOS) && !targetEnvironment(macCatalyst)
+        #if WTF_PLATFORM_MAC
         if let menu = environment.webViewContextMenuContext?.menu {
             page.setMenuBuilder {
                 menu(.init(linkURL: $0.linkURL))
@@ -176,7 +208,7 @@ struct WebViewRepresentable {
     }
 
     static func dismantlePlatformView(_ platformView: CocoaWebViewAdapter, coordinator: WebViewCoordinator) {
-        #if os(macOS)
+        #if WTF_PLATFORM_MAC
         // This is needed to avoid a crash when dismissing a WebView with a find navigator still active,
         // since NSTextFinder deallocation engages AutoLayout on an invalidated view hierarchy.
         platformView.findInteraction = nil
@@ -219,7 +251,7 @@ final class WebViewCoordinator {
         self.refreshAction = context.environment.refresh
         #endif
 
-        #if canImport(SwiftUI, _version: "7.0.57")
+        #if canImport(SwiftUI, _version: "7.0.57") && (WTF_PLATFORM_MAC || HAVE_UIFINDINTERACTION)
         updateFindInteraction(view, context: context)
         #endif
         updateScrollPosition(view, context: context)
@@ -255,7 +287,7 @@ final class WebViewCoordinator {
         }
     }
 
-    #if canImport(SwiftUI, _version: "7.0.57")
+    #if canImport(SwiftUI, _version: "7.0.57") && (WTF_PLATFORM_MAC || HAVE_UIFINDINTERACTION)
     private func updateFindInteraction(_ view: CocoaWebViewAdapter, context: WebViewRepresentable.Context) {
         guard let webView = view.webView else {
             return
@@ -266,7 +298,7 @@ final class WebViewCoordinator {
         let findContext = environment.findContext
         view.findContext = findContext
 
-        #if os(iOS)
+        #if WTF_PLATFORM_IOS_FAMILY
         webView.isFindInteractionEnabled = findContext != nil
         #endif
 
@@ -287,7 +319,7 @@ final class WebViewCoordinator {
             }
         }
     }
-    #endif // canImport(SwiftUI, _version: "7.0.57")
+    #endif // canImport(SwiftUI, _version: "7.0.57") && (WTF_PLATFORM_MAC || HAVE_UIFINDINTERACTION)
 }
 
 #if ENABLE_SWIFTUI_REFRESHABLE_MODIFIER
@@ -302,7 +334,7 @@ extension WebViewRepresentable {
         if environment.refresh != nil {
             if webView._platformRefreshControl == nil {
                 let control = PlatformRefreshControl()
-                #if os(macOS)
+                #if WTF_PLATFORM_MAC
                 control.target = target
                 control.action = action
                 #else
@@ -329,10 +361,28 @@ extension WebViewCoordinator {
         }
     }
 }
-#endif
+#endif // ENABLE_SWIFTUI_REFRESHABLE_MODIFIER
 
-#if canImport(UIKit)
-extension WebViewRepresentable: UIViewRepresentable {
+#if WTF_PLATFORM_MAC
+extension WebViewRepresentable: NSViewRepresentable {
+    func makeNSView(context: Context) -> CocoaWebViewAdapter {
+        makePlatformView(context: context)
+    }
+
+    func updateNSView(_ nsView: CocoaWebViewAdapter, context: Context) {
+        updatePlatformView(nsView, context: context)
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: CocoaWebViewAdapter, context: Context) -> CGSize? {
+        sizeThatFits(proposal, platformView: nsView, context: context)
+    }
+
+    static func dismantleNSView(_ nsView: CocoaWebViewAdapter, coordinator: WebViewCoordinator) {
+        dismantlePlatformView(nsView, coordinator: coordinator)
+    }
+}
+#elseif WTF_PLATFORM_WATCHOS
+extension WebViewRepresentable: _UIViewRepresentable {
     func makeUIView(context: Context) -> CocoaWebViewAdapter {
         makePlatformView(context: context)
     }
@@ -350,21 +400,21 @@ extension WebViewRepresentable: UIViewRepresentable {
     }
 }
 #else
-extension WebViewRepresentable: NSViewRepresentable {
-    func makeNSView(context: Context) -> CocoaWebViewAdapter {
+extension WebViewRepresentable: UIViewRepresentable {
+    func makeUIView(context: Context) -> CocoaWebViewAdapter {
         makePlatformView(context: context)
     }
 
-    func updateNSView(_ nsView: CocoaWebViewAdapter, context: Context) {
-        updatePlatformView(nsView, context: context)
+    func updateUIView(_ uiView: CocoaWebViewAdapter, context: Context) {
+        updatePlatformView(uiView, context: context)
     }
 
-    func sizeThatFits(_ proposal: ProposedViewSize, nsView: CocoaWebViewAdapter, context: Context) -> CGSize? {
-        sizeThatFits(proposal, platformView: nsView, context: context)
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: CocoaWebViewAdapter, context: Context) -> CGSize? {
+        sizeThatFits(proposal, platformView: uiView, context: context)
     }
 
-    static func dismantleNSView(_ nsView: CocoaWebViewAdapter, coordinator: WebViewCoordinator) {
-        dismantlePlatformView(nsView, coordinator: coordinator)
+    static func dismantleUIView(_ uiView: CocoaWebViewAdapter, coordinator: WebViewCoordinator) {
+        dismantlePlatformView(uiView, coordinator: coordinator)
     }
 }
 #endif

@@ -31,16 +31,22 @@
 #include "CoordinatedPlatformLayerBufferRGB.h"
 #include "CoordinatedPlatformLayerBufferYUV.h"
 #include "DMABufBuffer.h"
+#include "GLContext.h"
 #include "PlatformDisplay.h"
-#include "TextureMapper.h"
 #include <drm_fourcc.h>
 #include <epoxy/egl.h>
 #include <epoxy/gl.h>
 #include <wtf/HashMap.h>
 #include <wtf/NeverDestroyed.h>
+#include <wtf/ThreadSafeRefCounted.h>
+
+#if USE(TEXTURE_MAPPER)
+#include "TextureMapper.h"
+#endif
 
 namespace WebCore {
 
+#if USE(TEXTURE_MAPPER)
 std::unique_ptr<CoordinatedPlatformLayerBufferDMABuf> CoordinatedPlatformLayerBufferDMABuf::create(Ref<DMABufBuffer>&& dmabuf, OptionSet<TextureMapperFlags> flags, std::unique_ptr<GLFence>&& fence)
 {
     return makeUnique<CoordinatedPlatformLayerBufferDMABuf>(WTF::move(dmabuf), flags, WTF::move(fence));
@@ -64,8 +70,37 @@ CoordinatedPlatformLayerBufferDMABuf::CoordinatedPlatformLayerBufferDMABuf(Ref<D
 {
 }
 
+#else
+
+std::unique_ptr<CoordinatedPlatformLayerBufferDMABuf> CoordinatedPlatformLayerBufferDMABuf::create(Ref<DMABufBuffer>&& dmabuf, OptionSet<TextureMapperFlags> flags, std::unique_ptr<GLFence>&& fence, const sk_sp<GrContextThreadSafeProxy>& threadSafeGrContext)
+{
+    return makeUnique<CoordinatedPlatformLayerBufferDMABuf>(WTF::move(dmabuf), flags, WTF::move(fence), threadSafeGrContext);
+}
+
+std::unique_ptr<CoordinatedPlatformLayerBufferDMABuf> CoordinatedPlatformLayerBufferDMABuf::create(Ref<DMABufBuffer>&& dmabuf, OptionSet<TextureMapperFlags> flags, UnixFileDescriptor&& fenceFD, const sk_sp<GrContextThreadSafeProxy>& threadSafeGrContext)
+{
+    return makeUnique<CoordinatedPlatformLayerBufferDMABuf>(WTF::move(dmabuf), flags, WTF::move(fenceFD), threadSafeGrContext);
+}
+
+CoordinatedPlatformLayerBufferDMABuf::CoordinatedPlatformLayerBufferDMABuf(Ref<DMABufBuffer>&& dmabuf, OptionSet<TextureMapperFlags> flags, std::unique_ptr<GLFence>&& fence, const sk_sp<GrContextThreadSafeProxy>& threadSafeGrContext)
+    : CoordinatedPlatformLayerBuffer(Type::DMABuf, dmabuf->attributes().size, flags, WTF::move(fence))
+    , m_dmabuf(WTF::move(dmabuf))
+{
+    createSkiaImageIfNeeded(threadSafeGrContext);
+}
+
+CoordinatedPlatformLayerBufferDMABuf::CoordinatedPlatformLayerBufferDMABuf(Ref<DMABufBuffer>&& dmabuf, OptionSet<TextureMapperFlags> flags, UnixFileDescriptor&& fenceFD, const sk_sp<GrContextThreadSafeProxy>& threadSafeGrContext)
+    : CoordinatedPlatformLayerBuffer(Type::DMABuf, dmabuf->attributes().size, flags, nullptr)
+    , m_dmabuf(WTF::move(dmabuf))
+    , m_fenceFD(WTF::move(fenceFD))
+{
+    createSkiaImageIfNeeded(threadSafeGrContext);
+}
+#endif
+
 CoordinatedPlatformLayerBufferDMABuf::~CoordinatedPlatformLayerBufferDMABuf() = default;
 
+#if USE(TEXTURE_MAPPER)
 static RefPtr<BitmapTexture> importToTexture(const IntSize& textureSize, const DMABufBuffer::Attributes& dmaBufAttributes, OptionSet<BitmapTexture::Flags> textureFlags)
 {
     auto& display = PlatformDisplay::sharedDisplay();
@@ -164,6 +199,8 @@ static CoordinatedPlatformLayerBufferYUV::Format yuvFormatFromDRMFourcc(uint32_t
         return CoordinatedPlatformLayerBufferYUV::Format::AYUV;
     case DRM_FORMAT_NV12:
         return CoordinatedPlatformLayerBufferYUV::Format::NV12;
+    case DRM_FORMAT_NV21:
+        return CoordinatedPlatformLayerBufferYUV::Format::NV21;
     case DRM_FORMAT_P010:
         return CoordinatedPlatformLayerBufferYUV::Format::P010;
     case DRM_FORMAT_YUV420:
@@ -180,17 +217,17 @@ static CoordinatedPlatformLayerBufferYUV::Format yuvFormatFromDRMFourcc(uint32_t
     RELEASE_ASSERT_NOT_REACHED();
 }
 
-std::unique_ptr<CoordinatedPlatformLayerBuffer> CoordinatedPlatformLayerBufferDMABuf::importYUV() const
+static std::unique_ptr<CoordinatedPlatformLayerBuffer> importYUV(const Ref<DMABufBuffer>& dmabuf, OptionSet<TextureMapperFlags> flags)
 {
     OptionSet<BitmapTexture::Flags> textureFlags;
-    if (m_flags.contains(TextureMapperFlags::ShouldBlend))
+    if (flags.contains(TextureMapperFlags::ShouldBlend))
         textureFlags.add(BitmapTexture::Flags::SupportsAlpha);
 
     Vector<RefPtr<BitmapTexture>, 4> textures;
     std::array<unsigned, 4> yuvPlane;
     std::array<unsigned, 4> yuvPlaneOffset;
 
-    const auto& attributes = m_dmabuf->attributes();
+    const auto& attributes = dmabuf->attributes();
     const auto& iter = yuvFormatPlaneInfo().find(attributes.fourcc.value);
     if (iter == yuvFormatPlaneInfo().end())
         return nullptr;
@@ -215,7 +252,7 @@ std::unique_ptr<CoordinatedPlatformLayerBuffer> CoordinatedPlatformLayerBufferDM
     auto format = yuvFormatFromDRMFourcc(attributes.fourcc.value);
 
     CoordinatedPlatformLayerBufferYUV::YuvToRgbColorSpace yuvToRgbColorSpace;
-    switch (m_dmabuf->colorSpace().value_or(DMABufBuffer::ColorSpace::Bt601)) {
+    switch (dmabuf->colorSpace().value_or(DMABufBuffer::ColorSpace::Bt601)) {
     case DMABufBuffer::ColorSpace::Bt601:
         yuvToRgbColorSpace = CoordinatedPlatformLayerBufferYUV::YuvToRgbColorSpace::Bt601;
         break;
@@ -231,7 +268,7 @@ std::unique_ptr<CoordinatedPlatformLayerBuffer> CoordinatedPlatformLayerBufferDM
     }
 
     CoordinatedPlatformLayerBufferYUV::TransferFunction transferFunction;
-    switch (m_dmabuf->transferFunction().value_or(DMABufBuffer::TransferFunction::Bt709)) {
+    switch (dmabuf->transferFunction().value_or(DMABufBuffer::TransferFunction::Bt709)) {
     case DMABufBuffer::TransferFunction::Bt709:
         transferFunction = CoordinatedPlatformLayerBufferYUV::TransferFunction::Bt709;
         break;
@@ -241,14 +278,15 @@ std::unique_ptr<CoordinatedPlatformLayerBuffer> CoordinatedPlatformLayerBufferDM
     }
 
     unsigned numberOfPlanes = textures.size();
-    return CoordinatedPlatformLayerBufferYUV::create(format, numberOfPlanes, WTF::move(textures), WTF::move(yuvPlane), WTF::move(yuvPlaneOffset), yuvToRgbColorSpace, transferFunction, m_size, m_flags, nullptr);
+    return CoordinatedPlatformLayerBufferYUV::create(format, numberOfPlanes, WTF::move(textures), WTF::move(yuvPlane), WTF::move(yuvPlaneOffset),
+        yuvToRgbColorSpace, transferFunction, attributes.size, flags, nullptr);
 }
 
 std::unique_ptr<CoordinatedPlatformLayerBuffer> CoordinatedPlatformLayerBufferDMABuf::importDMABuf() const
 {
     const auto& attributes = m_dmabuf->attributes();
     if (formatIsYUV(attributes.fourcc.value))
-        return importYUV();
+        return importYUV(m_dmabuf, m_flags);
 
     OptionSet<BitmapTexture::Flags> textureFlags;
     if (m_flags.contains(TextureMapperFlags::ShouldBlend))
@@ -273,9 +311,23 @@ void CoordinatedPlatformLayerBufferDMABuf::paintToTextureMapper(TextureMapper& t
         buffer->paintToTextureMapper(textureMapper, targetRect, modelViewMatrix, opacity);
 }
 
-#if USE(SKIA)
+#else
+
+void CoordinatedPlatformLayerBufferDMABuf::createSkiaImageIfNeeded(const sk_sp<GrContextThreadSafeProxy>& threadSafeGrContext)
+{
+    if (!threadSafeGrContext)
+        return;
+
+    auto alphaType = m_flags.contains(TextureMapperFlags::ShouldBlend) ? kPremul_SkAlphaType : kOpaque_SkAlphaType;
+    auto origin = m_flags.contains(TextureMapperFlags::ShouldFlipTexture) ? kBottomLeft_GrSurfaceOrigin : kTopLeft_GrSurfaceOrigin;
+    m_image = m_dmabuf->createPromiseImage(threadSafeGrContext, kRGBA_8888_SkColorType, alphaType, origin, WTF::move(m_fence), WTF::move(m_fenceFD));
+}
+
 sk_sp<SkImage> CoordinatedPlatformLayerBufferDMABuf::skiaImage()
 {
+    if (m_image)
+        return m_image;
+
     waitForContentsIfNeeded();
 
     if (m_fenceFD) {
@@ -283,13 +335,9 @@ sk_sp<SkImage> CoordinatedPlatformLayerBufferDMABuf::skiaImage()
             fence->serverWait();
     }
 
-    if (!m_dmabuf->buffer())
-        m_dmabuf->setBuffer(importDMABuf());
-
-    if (auto* buffer = m_dmabuf->buffer())
-        return buffer->skiaImage();
-
-    return nullptr;
+    auto alphaType = m_flags.contains(TextureMapperFlags::ShouldBlend) ? kPremul_SkAlphaType : kOpaque_SkAlphaType;
+    auto origin = m_flags.contains(TextureMapperFlags::ShouldFlipTexture) ? kBottomLeft_GrSurfaceOrigin : kTopLeft_GrSurfaceOrigin;
+    return m_dmabuf->createImage(kRGBA_8888_SkColorType, alphaType, origin);
 }
 #endif
 

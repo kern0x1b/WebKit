@@ -91,9 +91,13 @@ elseif (APPLE)
             -DMACH_EXC_SERVER_TASKIDTOKEN_STATE -isysroot ${MIG_SYSROOT}
             MachExceptions.defs
         VERBATIM)
+    if (NOT USE_GLIB)
+        list(APPEND WTF_SOURCES
+            cocoa/TimeZoneCocoa.cpp
+        )
+    endif ()
     list(APPEND WTF_SOURCES
         cocoa/MemoryFootprintCocoa.cpp
-        cocoa/TimeZoneCocoa.cpp
 
         generic/MemoryPressureHandlerGeneric.cpp
 
@@ -103,8 +107,8 @@ elseif (APPLE)
 elseif (CMAKE_SYSTEM_NAME MATCHES "Linux")
     list(APPEND WTF_SOURCES
         linux/CurrentProcessMemoryStatus.cpp
+        linux/HighPriorityThreads.cpp
         linux/MemoryFootprintLinux.cpp
-        linux/RealTimeThreads.cpp
 
         unix/MemoryPressureHandlerUnix.cpp
     )

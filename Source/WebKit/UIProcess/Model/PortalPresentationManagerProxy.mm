@@ -34,6 +34,8 @@
 #import "WKPageHostedPortalView.h"
 #import "WKWebViewIOS.h"
 #import "WebPageProxy.h"
+#import <WebCore/FloatPoint.h>
+#import <WebCore/FloatSize.h>
 #import <wtf/RefPtr.h>
 #import <wtf/TZoneMallocInlines.h>
 
@@ -57,8 +59,8 @@ RetainPtr<WKPageHostedPortalView> PortalPresentationManagerProxy::setUpModelView
     auto& modelPresentation = ensurePortalPresentation(modelContext, *webPageProxy);
     auto view = modelPresentation.pageHostedPortalView;
     CGRect frame = [view frame];
-    frame.size.width = modelContext->modelLayoutSize().width().toFloat();
-    frame.size.height = modelContext->modelLayoutSize().height().toFloat();
+    frame.origin = WebCore::FloatPoint { modelContext->modelLayoutOrigin() };
+    frame.size = WebCore::FloatSize { modelContext->modelLayoutSize() };
     [view setFrame:frame];
     [view setShouldDisablePortal:modelContext->disablePortal() == WebCore::ModelContextDisablePortal::Yes];
     [view applyBackgroundColor:modelContext->backgroundColor()];
@@ -129,13 +131,13 @@ void PortalPresentationManagerProxy::invalidateModel(const WebCore::PlatformLaye
     // If the model being removed is currently being dragged, we have to make sure the _UIRemoteView
     // stays in some window by adding it to the WKContentView's _dragPreviewContainerView.
     if (RefPtr webPageProxy = m_page.get(); m_activelyDraggedModelLayerIDs.contains(layerIdentifier)) {
-        RELEASE_LOG(ModelElement, "%p - PortalPresentationManagerProxy dragged model with layerID: %" PRIu64 " is being removed", this, layerIdentifier.object().toRawValue());
+        RELEASE_LOG(ModelElement, "%p - PortalPresentationManagerProxy dragged model with layerID: %" PRIu64 " is being removed", this, layerIdentifier.object().toUInt64());
         if (RetainPtr pageHostedPortalView = modelPresentation->pageHostedPortalView)
             [webPageProxy->cocoaView() _willInvalidateDraggedModelWithContainerView:pageHostedPortalView.get()];
     }
 
     m_portalPresentations.remove(layerIdentifier);
-    RELEASE_LOG_INFO(ModelElement, "%p - PortalPresentationManagerProxy removed model presentation for layer ID: %" PRIu64, this, layerIdentifier.object().toRawValue());
+    RELEASE_LOG_INFO(ModelElement, "%p - PortalPresentationManagerProxy removed model presentation for layer ID: %" PRIu64, this, layerIdentifier.object().toUInt64());
 }
 
 void PortalPresentationManagerProxy::invalidateAllModels()
@@ -151,14 +153,14 @@ PortalPresentationManagerProxy::PortalPresentation& PortalPresentationManagerPro
         // Update the existing PortalPresentation
         PortalPresentation& modelPresentation = *(m_portalPresentations.get(layerIdentifier));
         if (modelPresentation.modelContext->modelContentsLayerHostingContextIdentifier() != modelContext->modelContentsLayerHostingContextIdentifier()) {
-            modelPresentation.remoteModelView = adoptNS([[_UIRemoteView alloc] initWithFrame:CGRectZero pid:webPageProxy.legacyMainFrameProcessID() contextID:modelContext->modelContentsLayerHostingContextIdentifier().toRawValue()]);
+            modelPresentation.remoteModelView = adoptNS([[_UIRemoteView alloc] initWithFrame:CGRectZero pid:webPageProxy.legacyMainFrameProcessID() contextID:modelContext->modelContentsLayerHostingContextIdentifier().toUInt64()]);
             [modelPresentation.pageHostedPortalView setRemoteModelView:modelPresentation.remoteModelView.get()];
-            RELEASE_LOG_INFO(ModelElement, "%p - PortalPresentationManagerProxy updated model view for element: %" PRIu64, this, layerIdentifier.object().toRawValue());
+            RELEASE_LOG_INFO(ModelElement, "%p - PortalPresentationManagerProxy updated model view for element: %" PRIu64, this, layerIdentifier.object().toUInt64());
         }
         modelPresentation.modelContext = modelContext;
     } else {
         RetainPtr pageHostedPortalView = adoptNS([[WKPageHostedPortalView alloc] init]);
-        RetainPtr remoteModelView = adoptNS([[_UIRemoteView alloc] initWithFrame:CGRectZero pid:webPageProxy.legacyMainFrameProcessID() contextID:modelContext->modelContentsLayerHostingContextIdentifier().toRawValue()]);
+        RetainPtr remoteModelView = adoptNS([[_UIRemoteView alloc] initWithFrame:CGRectZero pid:webPageProxy.legacyMainFrameProcessID() contextID:modelContext->modelContentsLayerHostingContextIdentifier().toUInt64()]);
         [pageHostedPortalView setRemoteModelView:remoteModelView.get()];
         auto modelPresentation = PortalPresentation {
             .modelContext = modelContext,
@@ -166,7 +168,7 @@ PortalPresentationManagerProxy::PortalPresentation& PortalPresentationManagerPro
             .pageHostedPortalView = pageHostedPortalView,
         };
         m_portalPresentations.add(layerIdentifier, makeUniqueRef<PortalPresentationManagerProxy::PortalPresentation>(WTF::move(modelPresentation)));
-        RELEASE_LOG_INFO(ModelElement, "%p - PortalPresentationManagerProxy created new model presentation for element: %" PRIu64, this, layerIdentifier.object().toRawValue());
+        RELEASE_LOG_INFO(ModelElement, "%p - PortalPresentationManagerProxy created new model presentation for element: %" PRIu64, this, layerIdentifier.object().toUInt64());
     }
 
     return *(m_portalPresentations.get(layerIdentifier));

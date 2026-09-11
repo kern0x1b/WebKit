@@ -34,8 +34,10 @@
 #import <wtf/HashTraits.h>
 #import <wtf/Ref.h>
 #import <wtf/RefCountedAndCanMakeWeakPtr.h>
+#import <wtf/RetainPtr.h>
 #import <wtf/SwiftBridging.h>
 #import <wtf/TZoneMalloc.h>
+#import <wtf/ThreadSafeRefCounted.h>
 #import <wtf/Vector.h>
 #import <wtf/WeakPtr.h>
 
@@ -108,6 +110,11 @@ public:
 
     static std::pair<id<MTLBuffer>, uint64_t> clampIndirectIndexBufferToValidValues(Buffer*, Buffer&, MTLIndexType, NSUInteger indexBufferOffsetInBytes, uint64_t indirectOffset, uint32_t minVertexCount, uint32_t minInstanceCount, MTLPrimitiveType, Device&, uint32_t rasterSampleCount, RenderPassEncoder&, bool& splitEncoder);
     static std::pair<id<MTLBuffer>, uint64_t> clampIndirectBufferToValidValues(Buffer&, uint64_t indirectOffset, uint32_t minVertexCount, uint32_t minInstanceCount, Device&, uint32_t rasterSampleCount, RenderPassEncoder&, bool& splitEncoder);
+    // Batched (no-internal-barrier, per-draw-scratch) clamp helpers used by executeBundles.
+    static std::pair<id<MTLBuffer>, uint64_t> newZeroedIndirectScratch(Device&, size_t);
+    static bool clampIndirectBufferDispatchBatched(Buffer& indirectBuffer, uint64_t indirectOffset, uint32_t minVertexCount, uint32_t minInstanceCount, Device&, uint32_t rasterSampleCount, RenderPassEncoder&, id<MTLBuffer> finalScratch, uint64_t finalScratchOffset);
+    static bool clampIndirectIndexBufferDispatch1Batched(Buffer* apiIndexBuffer, Buffer& indexedIndirectBuffer, MTLIndexType, NSUInteger indexBufferOffsetInBytes, uint64_t indirectOffset, uint32_t minInstanceCount, Device&, uint32_t rasterSampleCount, RenderPassEncoder&, id<MTLBuffer> finalScratch, uint64_t finalScratchOffset, id<MTLBuffer> intermediateScratch, uint64_t intermediateScratchOffset, uint32_t& outIndexBufferCount);
+    static bool clampIndirectIndexBufferDispatch2Batched(Buffer* apiIndexBuffer, MTLIndexType, NSUInteger indexBufferOffsetInBytes, uint32_t minVertexCount, MTLPrimitiveType, uint32_t indexBufferCount, Device&, uint32_t rasterSampleCount, RenderPassEncoder&, id<MTLBuffer> finalScratch, uint64_t finalScratchOffset, id<MTLBuffer> intermediateScratch, uint64_t intermediateScratchOffset);
     enum class IndexCall { Draw, IndirectDraw, Skip, CachedIndirectDraw };
     struct DrawIndexResult {
         IndexCall result;
@@ -117,6 +124,7 @@ public:
     static DrawIndexResult clampIndexBufferToValidValues(uint32_t indexCount, uint32_t instanceCount, int32_t baseVertex, uint32_t firstInstance, MTLIndexType, NSUInteger indexBufferOffsetInBytes, Buffer*, uint32_t minVertexCount, uint32_t minInstanceCount, RenderPassEncoder&, Device&, uint32_t rasterSampleCount, MTLPrimitiveType);
     [[nodiscard]] bool splitRenderPass();
     static std::pair<uint32_t, uint32_t> computeMininumVertexInstanceCount(const RenderPipeline*, bool& needsValidationLayerWorkaround, uint64_t (^)(uint32_t));
+    void trackIndirectDeviceLostCheck(id<MTLBuffer> scratch, uint64_t scratchOffset, id<MTLBuffer> alsoRetain);
 
 private:
     RenderPassEncoder(id<MTLRenderCommandEncoder>, const WGPURenderPassDescriptor&, NSUInteger, bool depthReadOnly, bool stencilReadOnly, CommandEncoder&, id<MTLBuffer>, uint64_t maxDrawCount, Device&, MTLRenderPassDescriptor*);
@@ -224,7 +232,19 @@ private:
     bool m_passEnded { false };
     bool m_ignoreBufferCache { false };
     Vector<bool> m_bindGroupDynamicOffsetsChanged;
-} SWIFT_SHARED_REFERENCE(refRenderPassEncoder, derefRenderPassEncoder);
+
+    // Scratch records whose lostOrOOBRead flag the pass checks once, from a single completion handler,
+    // rather than one handler per clamping indirect draw. Shared with that handler, hence thread-safe.
+    struct IndirectDeviceLostChecks : public ThreadSafeRefCounted<IndirectDeviceLostChecks> {
+        struct Entry {
+            RetainPtr<id<MTLBuffer>> scratch;
+            uint64_t offset { 0 };
+            RetainPtr<id<MTLBuffer>> alsoRetain;
+        };
+        Vector<Entry> entries;
+    };
+    RefPtr<IndirectDeviceLostChecks> m_indirectDeviceLostChecks;
+} SWIFT_SHARED_REFERENCE(refRenderPassEncoder, derefRenderPassEncoder) SWIFT_RETURNED_AS_UNRETAINED_BY_DEFAULT;
 
 } // namespace WebGPU
 

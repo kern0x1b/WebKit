@@ -57,6 +57,26 @@ class DefaultPyPIIndexTest(unittest.TestCase):
         result = _pypi_indices_from_file(config)
         self.assertEqual(result, ['primary.example.com', 'extra1.example.com', 'extra2.example.com'])
 
+    def test_index_with_simple_suffix(self):
+        config = io.StringIO('[global]\nindex-url = https://internal.example.com/simple/\n')
+        self.assertEqual(_pypi_indices_from_file(config), ['internal.example.com'])
+
+    def test_index_with_path_prefix(self):
+        config = io.StringIO('[global]\nindex-url = https://internal.example.com/pypi/simple/\n')
+        self.assertEqual(_pypi_indices_from_file(config), ['internal.example.com/pypi'])
+
+    def test_index_with_path_prefix_without_simple_suffix(self):
+        config = io.StringIO('[global]\nindex-url = https://internal.example.com/pypi\n')
+        self.assertEqual(_pypi_indices_from_file(config), ['internal.example.com/pypi'])
+
+    def test_index_with_port(self):
+        config = io.StringIO('[global]\nindex-url = http://localhost:8080/pypi/simple/\n')
+        self.assertEqual(_pypi_indices_from_file(config), ['localhost:8080/pypi'])
+
+    def test_index_with_credentials(self):
+        config = io.StringIO('[global]\nindex-url = https://user:pass@internal.example.com/pypi/simple/\n')
+        self.assertEqual(_pypi_indices_from_file(config), ['internal.example.com/pypi'])
+
 
 class ArchiveTest(unittest.TestCase):
     @patch.object(AutoInstall, "_verify_index", autospec=True, return_value=None)
@@ -72,6 +92,37 @@ class ArchiveTest(unittest.TestCase):
             with self.assertRaises(URLError):
                 archive.download()
             self.assertEqual(mock_urlopen.call_count, 4)
+
+
+class IsCachedTest(unittest.TestCase):
+    def setUp(self):
+        self.temp_directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp_directory.cleanup)
+
+        self.directory_patch = patch.object(AutoInstall, 'directory', self.temp_directory.name)
+        self.manifest_patch = patch.object(AutoInstall, 'manifest', {})
+
+        self.directory_patch.start()
+        self.manifest_patch.start()
+
+        self.addCleanup(self.directory_patch.stop)
+        self.addCleanup(self.manifest_patch.stop)
+
+    def test_is_cached_rejects_loose_version_match(self):
+        package = Package('example', version=Version(1, 2, 3))
+        AutoInstall.manifest[package.name] = {
+            'index': AutoInstall.index,
+            'version': '1.2',
+        }
+        self.assertFalse(package.is_cached())
+
+    def test_is_cached_accepts_exact_version_match(self):
+        package = Package('example', version=Version(1, 2, 3))
+        AutoInstall.manifest[package.name] = {
+            'index': AutoInstall.index,
+            'version': '1.2.3',
+        }
+        self.assertTrue(package.is_cached())
 
 
 class MergeMoveTest(unittest.TestCase):

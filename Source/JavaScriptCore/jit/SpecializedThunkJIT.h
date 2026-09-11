@@ -45,7 +45,7 @@ namespace JSC {
             emitFunctionPrologue();
             emitSaveThenMaterializeTagRegisters();
             // Check that we have the expected number of arguments
-            m_failures.append(branch32(NotEqual, payloadFor(CallFrameSlot::argumentCountIncludingThis), TrustedImm32(expectedArgCount + 1)));
+            m_failures.append(branch32(NotEqual, lowWordFor(CallFrameSlot::argumentCountIncludingThis), TrustedImm32(expectedArgCount + 1)));
         }
         
         explicit SpecializedThunkJIT(VM& vm)
@@ -55,7 +55,7 @@ namespace JSC {
             emitSaveThenMaterializeTagRegisters();
         }
 
-        void loadJSArgument(int argument, JSValueRegs dst)
+        void loadJSArgument(int argument, GPRReg dst)
         {
             VirtualRegister src = virtualRegisterForArgumentIncludingThis(argument + 1);
             emitLoadJSValue(src, dst);
@@ -96,30 +96,10 @@ namespace JSC {
         {
             m_failures.append(failure);
         }
-#if USE(JSVALUE64)
-        void returnJSValue(RegisterID src)
+        void returnJSValue(GPRReg src)
         {
-            if (src != regT0)
-                move(src, regT0);
-            
-            emitRestoreSavedTagRegisters();
-            emitFunctionEpilogue();
-            ret();
-        }
-#else
-        void returnJSValue(RegisterID payload, RegisterID tag)
-        {
-            ASSERT_UNUSED(payload, payload == regT0);
-            ASSERT_UNUSED(tag, tag == regT1);
-            emitRestoreSavedTagRegisters();
-            emitFunctionEpilogue();
-            ret();
-        }
-#endif
-        void returnJSValue(JSValueRegs src)
-        {
-            if (src != JSRInfo::returnValueJSR)
-                moveValueRegs(src, JSRInfo::returnValueJSR);
+            if (src != GPRInfo::returnValueGPR)
+                move(src, GPRInfo::returnValueGPR);
 
             emitRestoreSavedTagRegisters();
             emitFunctionEpilogue();
@@ -128,7 +108,6 @@ namespace JSC {
         
         void returnDouble(FPRegisterID src)
         {
-#if USE(JSVALUE64)
             moveDoubleTo64(src, regT0);
             Jump zero = branchTest64(Zero, regT0);
             sub64(numberTagRegister, regT0);
@@ -136,15 +115,6 @@ namespace JSC {
             zero.link(this);
             move(numberTagRegister, regT0);
             done.link(this);
-#else
-            moveDoubleToInts(src, regT0, regT1);
-            Jump lowNonZero = branchTestPtr(NonZero, regT1);
-            Jump highNonZero = branchTestPtr(NonZero, regT0);
-            move(TrustedImm32(0), regT0);
-            move(TrustedImm32(JSValue::Int32Tag), regT1);
-            lowNonZero.link(this);
-            highNonZero.link(this);
-#endif
             emitRestoreSavedTagRegisters();
             emitFunctionEpilogue();
             ret();
@@ -204,18 +174,11 @@ namespace JSC {
     private:
         void tagReturnAsInt32()
         {
-#if USE(JSVALUE64)
             or64(numberTagRegister, regT0);
-#else
-            move(TrustedImm32(JSValue::Int32Tag), regT1);
-#endif
         }
 
         void tagReturnAsJSCell()
         {
-#if USE(JSVALUE32_64)
-            move(TrustedImm32(JSValue::CellTag), regT1);
-#endif
         }
         
         MacroAssembler::JumpList m_failures;

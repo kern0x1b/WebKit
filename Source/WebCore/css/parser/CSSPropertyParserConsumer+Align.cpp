@@ -196,7 +196,7 @@ RefPtr<CSSValue> consumeJustifyContent(CSSParserTokenRange& range, CSS::Property
 
 RefPtr<CSSValue> consumeAlignSelf(CSSParserTokenRange& range, CSS::PropertyParserState& state)
 {
-    // <'align-self'> = auto | normal | stretch | <baseline-position> | <overflow-position>? <self-position>
+    // <'align-self'> = auto | <overflow-position>? normal | stretch | <baseline-position> | <overflow-position>? <self-position>
     // https://drafts.csswg.org/css-align/#propdef-align-self
 
     switch (auto initial = range.peek().id(); initial) {
@@ -211,9 +211,6 @@ RefPtr<CSSValue> consumeAlignSelf(CSSParserTokenRange& range, CSS::PropertyParse
 
     // <self-position>
     case CSSValueAnchorCenter:
-        if (!state.context.propertySettings.cssAnchorPositioningEnabled)
-            return nullptr;
-        [[fallthrough]];
     case CSSValueStart:
     case CSSValueEnd:
     case CSSValueCenter:
@@ -237,10 +234,8 @@ RefPtr<CSSValue> consumeAlignSelf(CSSParserTokenRange& range, CSS::PropertyParse
     case CSSValueSafe:
         return consumeAlignmentOverflowPosition(range, state, initial, [&](auto second) {
             switch (second) {
+            case CSSValueNormal:
             case CSSValueAnchorCenter:
-                if (!state.context.propertySettings.cssAnchorPositioningEnabled)
-                    return false;
-                [[fallthrough]];
             case CSSValueStart:
             case CSSValueEnd:
             case CSSValueCenter:
@@ -261,7 +256,7 @@ RefPtr<CSSValue> consumeAlignSelf(CSSParserTokenRange& range, CSS::PropertyParse
 
 RefPtr<CSSValue> consumeJustifySelf(CSSParserTokenRange& range, CSS::PropertyParserState& state)
 {
-    // <'justify-self'> = auto | normal | stretch | <baseline-position> | <overflow-position>? [ <self-position> | left | right ]
+    // <'justify-self'> = auto | <overflow-position>? normal | stretch | <baseline-position> | <overflow-position>? [ <self-position> | left | right ]
     // https://drafts.csswg.org/css-align/#propdef-justify-self
 
     switch (auto initial = range.peek().id(); initial) {
@@ -276,9 +271,6 @@ RefPtr<CSSValue> consumeJustifySelf(CSSParserTokenRange& range, CSS::PropertyPar
 
     // [ <self-position> | left | right ]
     case CSSValueAnchorCenter:
-        if (!state.context.propertySettings.cssAnchorPositioningEnabled)
-            return nullptr;
-        [[fallthrough]];
     case CSSValueStart:
     case CSSValueEnd:
     case CSSValueCenter:
@@ -304,10 +296,8 @@ RefPtr<CSSValue> consumeJustifySelf(CSSParserTokenRange& range, CSS::PropertyPar
     case CSSValueSafe:
         return consumeAlignmentOverflowPosition(range, state, initial, [&](auto second) {
             switch (second) {
+            case CSSValueNormal:
             case CSSValueAnchorCenter:
-                if (!state.context.propertySettings.cssAnchorPositioningEnabled)
-                    return false;
-                [[fallthrough]];
             case CSSValueStart:
             case CSSValueEnd:
             case CSSValueCenter:
@@ -330,7 +320,7 @@ RefPtr<CSSValue> consumeJustifySelf(CSSParserTokenRange& range, CSS::PropertyPar
 
 RefPtr<CSSValue> consumeAlignItems(CSSParserTokenRange& range, CSS::PropertyParserState& state)
 {
-    // <'align-items'> = normal | stretch | <baseline-position> | <overflow-position>? <self-position>
+    // <'align-items'> = <overflow-position>? normal | stretch | <baseline-position> | <overflow-position>? <self-position>
     // https://drafts.csswg.org/css-align/#propdef-align-items
 
     switch (auto initial = range.peek().id(); initial) {
@@ -343,9 +333,6 @@ RefPtr<CSSValue> consumeAlignItems(CSSParserTokenRange& range, CSS::PropertyPars
 
     // <self-position>
     case CSSValueAnchorCenter:
-        if (!state.context.propertySettings.cssAnchorPositioningEnabled)
-            return nullptr;
-        [[fallthrough]];
     case CSSValueStart:
     case CSSValueEnd:
     case CSSValueCenter:
@@ -369,10 +356,8 @@ RefPtr<CSSValue> consumeAlignItems(CSSParserTokenRange& range, CSS::PropertyPars
     case CSSValueSafe:
         return consumeAlignmentOverflowPosition(range, state, initial, [&](auto second) {
             switch (second) {
+            case CSSValueNormal:
             case CSSValueAnchorCenter:
-                if (!state.context.propertySettings.cssAnchorPositioningEnabled)
-                    return false;
-                [[fallthrough]];
             case CSSValueStart:
             case CSSValueEnd:
             case CSSValueCenter:
@@ -393,7 +378,7 @@ RefPtr<CSSValue> consumeAlignItems(CSSParserTokenRange& range, CSS::PropertyPars
 
 RefPtr<CSSValue> consumeJustifyItems(CSSParserTokenRange& range, CSS::PropertyParserState& state)
 {
-    // <'justify-items'> = normal | stretch | <baseline-position> | <overflow-position>? [ <self-position> | left | right ] | legacy | legacy && [ left | right | center ]
+    // <'justify-items'> = <overflow-position>? normal | stretch | <baseline-position> | <overflow-position>? [ <self-position> | left | right ] | legacy | legacy && [ left | right | center ]
     // https://drafts.csswg.org/css-align/#propdef-justify-items
 
     switch (auto initial = range.peek().id(); initial) {
@@ -406,9 +391,6 @@ RefPtr<CSSValue> consumeJustifyItems(CSSParserTokenRange& range, CSS::PropertyPa
 
     // [ <self-position> | left | right ] - NOTE: `left`, `right`, and `center` handled further below to account for additional `legacy` keyword.
     case CSSValueAnchorCenter:
-        if (!state.context.propertySettings.cssAnchorPositioningEnabled)
-            return nullptr;
-        [[fallthrough]];
     case CSSValueStart:
     case CSSValueEnd:
     case CSSValueSelfStart:
@@ -431,10 +413,8 @@ RefPtr<CSSValue> consumeJustifyItems(CSSParserTokenRange& range, CSS::PropertyPa
     case CSSValueSafe:
         return consumeAlignmentOverflowPosition(range, state, initial, [&](auto second) {
             switch (second) {
+            case CSSValueNormal:
             case CSSValueAnchorCenter:
-                if (!state.context.propertySettings.cssAnchorPositioningEnabled)
-                    return false;
-                [[fallthrough]];
             case CSSValueStart:
             case CSSValueEnd:
             case CSSValueCenter:

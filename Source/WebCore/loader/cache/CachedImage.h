@@ -23,11 +23,13 @@
 #pragma once
 
 #include <WebCore/CachedResource.h>
+#include <WebCore/FloatSize.h>
 #include <WebCore/Image.h>
 #include <WebCore/ImageObserver.h>
 #include <WebCore/IntRect.h>
 #include <WebCore/LayoutSize.h>
 #include <WebCore/SVGImageCache.h>
+#include <WebCore/StyleLinkParameters.h>
 #include <wtf/HashMap.h>
 #include <wtf/HashSet.h>
 
@@ -36,8 +38,8 @@ namespace WebCore {
 class CachedImageClient;
 class CachedResourceLoader;
 class WeakPtrImplWithEventTargetData;
-class FloatSize;
 class MemoryCache;
+class NativeImage;
 class RenderElement;
 class RenderObject;
 class SecurityOrigin;
@@ -64,7 +66,7 @@ public:
     void setAllowsOrientationOverride(bool b) { m_allowsOrientationOverride = b; }
     bool allowsOrientationOverride() const { return m_allowsOrientationOverride; }
 
-    void setContainerContextForClient(const CachedImageClient&, const LayoutSize&, float, const URL&);
+    void setContainerContextForClient(const CachedImageClient&, const LayoutSize&, float, const URL&, const Style::LinkParameters&);
     bool usesImageContainerSize() const { return m_image && m_image->usesContainerSize(); }
     bool imageHasNaturalAspectRatio() const { return m_image && m_image->hasNaturalAspectRatio(); }
     bool imageHasRelativeWidth() const { return m_image && m_image->hasRelativeWidth(); }
@@ -104,6 +106,13 @@ public:
 
     bool isVisibleInViewport(const Document&) const;
     bool allowsAnimation(const Image&) const;
+
+#if ENABLE(AX_CUSTOM_COLOR_MODE)
+    std::optional<bool> axCustomColorModeShouldAdjust() const { return m_axCustomColorModeShouldAdjust; }
+    void setAXCustomColorModeShouldAdjust(bool value) { m_axCustomColorModeShouldAdjust = value; }
+    NativeImage* axCustomColorModeAdjustedTile(const FloatSize& forSize) const;
+    void setAXCustomColorModeAdjustedTile(RefPtr<NativeImage>&&, const FloatSize&);
+#endif
 
 private:
     FloatSize internalImageSizeForRenderer(const RenderElement*, float multiplier, SizeType, float density) const;
@@ -191,6 +200,7 @@ private:
         LayoutSize containerSize;
         float containerZoom;
         URL imageURL;
+        Style::LinkParameters linkParameters { CSS::Keyword::None { } };
     };
 
     using ContainerContextRequests = HashMap<SingleThreadWeakRef<const CachedImageClient>, ContainerContext>;
@@ -201,6 +211,12 @@ private:
     RefPtr<CachedImageObserver> m_imageObserver;
     RefPtr<Image> m_image;
     std::unique_ptr<SVGImageCache> m_svgImageCache;
+
+#if ENABLE(AX_CUSTOM_COLOR_MODE)
+    std::optional<bool> m_axCustomColorModeShouldAdjust;
+    RefPtr<NativeImage> m_axCustomColorModeAdjustedTile;
+    FloatSize m_axCustomColorModeAdjustedTileSize;
+#endif
 
     MonotonicTime m_lastUpdateImageDataTime;
 

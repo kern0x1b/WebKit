@@ -379,7 +379,7 @@ void PageClientImplCocoa::updateScreenTimeWebpageControllerURL(WKWebView *webVie
         return;
 
     RefPtr pageProxy = [webView _page].get();
-    if (pageProxy && !pageProxy->preferences().screenTimeEnabled()) {
+    if (pageProxy && !protect(pageProxy->preferences())->screenTimeEnabled()) {
         [webView _uninstallScreenTimeWebpageController];
         return;
     }
@@ -414,14 +414,14 @@ void PageClientImplCocoa::setURLIsPlayingVideoForScreenTime(bool value)
 void PageClientImplCocoa::viewIsBecomingVisible()
 {
 #if ENABLE(SCREEN_TIME)
-    [m_webView _updateScreenTimeBasedOnWindowVisibility];
+    [webView() _updateScreenTimeBasedOnWindowVisibility];
 #endif
 }
 
 void PageClientImplCocoa::viewIsBecomingInvisible()
 {
 #if ENABLE(SCREEN_TIME)
-    [m_webView _updateScreenTimeBasedOnWindowVisibility];
+    [webView() _updateScreenTimeBasedOnWindowVisibility];
 #endif
 }
 
@@ -533,5 +533,14 @@ void PageClientImplCocoa::handleSmartMagnificationInformationForPotentialTap(Web
 }
 
 #endif // ENABLE(TWO_PHASE_CLICKS)
+
+void PageClientImplCocoa::translateAccessibilityAnnouncementStrings(Vector<String>&& strings, String&& targetLocaleIdentifier, CompletionHandler<void(Vector<String>&&)>&& completion)
+{
+    RetainPtr webView = this->webView();
+    if (!webView)
+        return completion({ });
+
+    [webView _translateAccessibilityAnnouncementStrings:createNSArray(strings).get() targetLocaleIdentifier:targetLocaleIdentifier.createNSString().get() completionHandler:WTF::move(completion)];
+}
 
 } // namespace WebKit

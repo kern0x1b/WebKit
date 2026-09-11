@@ -63,7 +63,6 @@
 #include <WebCore/CredentialStorage.h>
 #include <WebCore/DatabaseTracker.h>
 #include <WebCore/HTMLMediaElement.h>
-#include <WebCore/NetworkStorageSession.h>
 #include <WebCore/NotificationResources.h>
 #include <WebCore/OriginLock.h>
 #include <WebCore/RegistrableDomain.h>
@@ -72,7 +71,10 @@
 #include <WebCore/SearchPopupMenu.h>
 #include <WebCore/SecurityOrigin.h>
 #include <WebCore/SecurityOriginData.h>
+#include <WebCore/Site.h>
 #include <WebCore/StorageUtilities.h>
+#include <WebCore/ThirdPartyCookieBlockingMode.h>
+#include <WebCore/TrackingPreventionTypes.h>
 #include <WebCore/WebLockRegistry.h>
 #include <algorithm>
 #include <wtf/Borrow.h>
@@ -173,7 +175,7 @@ WebsiteDataStore::WebsiteDataStore(Ref<WebsiteDataStoreConfiguration>&& configur
     , m_client(makeUniqueRef<WebsiteDataStoreClient>())
     , m_webLockRegistry(WebCore::LocalWebLockRegistry::create())
 {
-    RELEASE_LOG(Storage, "%p - WebsiteDataStore::WebsiteDataStore sessionID=%" PRIu64 " identifier=%" PUBLIC_LOG_STRING, this, m_sessionID.toUInt64(), m_configuration->identifier() ? m_configuration->identifier()->toString().utf8().data() : "null"_s);
+    RELEASE_LOG(Storage, "%p - WebsiteDataStore::WebsiteDataStore sessionID=%" PRIu64 " identifier=%" PUBLIC_LOG_STRING, this, m_sessionID.toUInt64(), m_configuration->identifier() ? m_configuration->identifier()->toString().utf8().legacyCStringPointer() : "null"_s);
 
 #if PLATFORM(COCOA)
     determineTrackingPreventionState();
@@ -475,6 +477,9 @@ static void resolveDirectories(WebsiteDataStoreConfiguration::Directories& direc
 
     if (!directories.enhancedSecurityDirectory.isEmpty())
         directories.enhancedSecurityDirectory = resolveAndCreateReadWriteDirectoryForSandboxExtension(directories.enhancedSecurityDirectory);
+
+    if (!directories.isolatedSitesDirectory.isEmpty())
+        directories.isolatedSitesDirectory = resolveAndCreateReadWriteDirectoryForSandboxExtension(directories.isolatedSitesDirectory);
 }
 
 const WebsiteDataStoreConfiguration::Directories& WebsiteDataStore::resolvedDirectories() const
@@ -548,27 +553,9 @@ void WebsiteDataStore::handleResolvedDirectoriesAsynchronously(const WebsiteData
     });
 }
 
-void WebsiteDataStore::fetchDomainsWithUserInteraction(CompletionHandler<void(const HashSet<WebCore::RegistrableDomain>&)>&& completionHandler)
+void WebsiteDataStore::fetchDomainsWithUserInteraction(CompletionHandler<void(std::optional<HashMap<WebCore::RegistrableDomain, WallTime>>&&)>&& completionHandler)
 {
-    if (m_domainsWithUserInteractions)
-        return completionHandler(*m_domainsWithUserInteractions);
-
-    bool shouldFetch = m_domainsWithUserInteractionsCompletionHandler.isEmpty();
-    m_domainsWithUserInteractionsCompletionHandler.append(WTF::move(completionHandler));
-
-    if (!shouldFetch)
-        return;
-
-    protect(networkProcess())->sendWithAsyncReply(Messages::NetworkProcess::FetchWebsitesWithUserInteractions(sessionID()), [this, protectedThis = Ref { *this }](HashSet<WebCore::RegistrableDomain>&& domains) {
-        domains.addAll(platformAdditionalDomainsWithUserInteraction());
-        m_domainsWithUserInteractions = WTF::move(domains);
-
-        for (auto& domain : std::exchange(m_pendingDomainsWithUserInteractions, { }))
-            m_domainsWithUserInteractions->add(domain);
-
-        for (auto& completionHandler : std::exchange(m_domainsWithUserInteractionsCompletionHandler, { }))
-            completionHandler(*m_domainsWithUserInteractions);
-    });
+    protect(networkProcess())->sendWithAsyncReply(Messages::NetworkProcess::FetchWebsitesWithUserInteractions(sessionID()), WTF::move(completionHandler));
 }
 
 #if !PLATFORM(COCOA)
@@ -631,7 +618,7 @@ void WebsiteDataStore::fetchDataAndApply(OptionSet<WebsiteDataType> dataTypes, O
                 for (auto& record : records)
                     allTypes.add(record.types);
                 apply(WTF::move(records));
-                RELEASE_LOG(Storage, "WebsiteDataStore::fetchDataAndApply finished fetching data for session %" PRIu64 " ( fetched types: %" PUBLIC_LOG_STRING ")", sessionID.toUInt64(), loggingString(allTypes).utf8().data());
+                RELEASE_LOG(Storage, "WebsiteDataStore::fetchDataAndApply finished fetching data for session %" PRIu64 " ( fetched types: %" PUBLIC_LOG_STRING ")", sessionID.toUInt64(), loggingString(allTypes).utf8().legacyCStringPointer());
             });
         }
 
@@ -823,6 +810,16 @@ private:
             callbackAggregator->addWebsiteData(WTF::move(websiteData));
         });
     }
+
+    if (dataTypes.contains(WebsiteDataType::IsolatedSiteRecord)) {
+        protect(isolatedSiteStore())->allDomains([callbackAggregator] (Vector<WebCore::RegistrableDomain>&& isolatedSites) {
+            WebsiteData websiteData;
+            websiteData.entries = WTF::map(isolatedSites, [](auto& domain) {
+                return WebsiteData::Entry { WebCore::SecurityOriginData { "https"_s, domain.string(), std::nullopt }, WebsiteDataType::IsolatedSiteRecord, 0 };
+            });
+            callbackAggregator->addWebsiteData(WTF::move(websiteData));
+        });
+    }
 }
 
 void WebsiteDataStore::fetchDataForRegistrableDomains(OptionSet<WebsiteDataType> dataTypes, OptionSet<WebsiteDataFetchOption> fetchOptions, Vector<WebCore::RegistrableDomain>&& domains, CompletionHandler<void(Vector<WebsiteDataRecord>&&, HashSet<WebCore::RegistrableDomain>&&)>&& completionHandler)
@@ -981,6 +978,14 @@ void WebsiteDataStore::removeData(OptionSet<WebsiteDataType> dataTypes, WallTime
 
     if (dataTypes.contains(WebsiteDataType::EnhancedSecurityRecord) && isPersistent())
         removeAllEnhancedSecuritySites([callbackAggregator] { });
+
+    if (dataTypes.contains(WebsiteDataType::IsolatedSiteRecord)) {
+        Ref siteStore = isolatedSiteStore();
+        if (modifiedSince <= WallTime())
+            siteStore->removeAllSites([callbackAggregator] { });
+        else
+            siteStore->removeSitesUpdatedSince(modifiedSince, [callbackAggregator] { });
+    }
 }
 
 void WebsiteDataStore::removeData(OptionSet<WebsiteDataType> dataTypes, const Vector<WebsiteDataRecord>& dataRecords, Function<void()>&& completionHandler)
@@ -1088,6 +1093,17 @@ void WebsiteDataStore::removeData(OptionSet<WebsiteDataType> dataTypes, const Ve
 #endif
     if (dataTypes.contains(WebsiteDataType::EnhancedSecurityRecord) && isPersistent())
         removeEnhancedSecuritySites(origins, [callbackAggregator] { });
+
+    if (dataTypes.contains(WebsiteDataType::IsolatedSiteRecord)) {
+        HashSet<WebCore::RegistrableDomain> domainsToRemove;
+        for (auto& origin : origins)
+            domainsToRemove.add(WebCore::RegistrableDomain { origin });
+        for (auto& dataRecord : dataRecords) {
+            for (auto& domain : dataRecord.resourceLoadStatisticsRegistrableDomains)
+                domainsToRemove.add(domain);
+        }
+        protect(isolatedSiteStore())->removeSites(copyToVector(domainsToRemove), [callbackAggregator] { });
+    }
 }
 
 DeviceIdHashSaltStorage& WebsiteDataStore::ensureDeviceIdHashSaltStorage()
@@ -1528,21 +1544,79 @@ void WebsiteDataStore::setTimeToLiveUserInteraction(Seconds seconds, CompletionH
     protect(networkProcess())->setTimeToLiveUserInteraction(m_sessionID, seconds, WTF::move(completionHandler));
 }
 
-void WebsiteDataStore::didHaveUserInteractionForSiteIsolation(const URL& url)
+IsolatedSiteStore& WebsiteDataStore::isolatedSiteStore()
 {
-    if (url.protocolIsAbout() || url.isEmpty())
+    ASSERT(RunLoop::isMain());
+
+    if (!m_isolatedSiteStore) {
+        IsolatedSiteStore::UserInteractionDomainFetcher fetcher = [weakThis = WeakPtr { *this }](CompletionHandler<void(std::optional<HashMap<WebCore::RegistrableDomain, WallTime>>&&)>&& completionHandler) mutable {
+            RefPtr protectedThis = weakThis.get();
+            if (!protectedThis || !protectedThis->trackingPreventionEnabled())
+                return completionHandler(std::nullopt);
+
+            protectedThis->fetchDomainsWithUserInteraction(WTF::move(completionHandler));
+        };
+
+        lazyInitialize(m_isolatedSiteStore, IsolatedSiteStore::create(isPersistent() ? resolvedDirectories().isolatedSitesDirectory : String { }, WTF::move(fetcher), computeSiteIsolationHighValueFraudTargetDomainsEnabled(), platformAdditionalDomainsWithUserInteraction()));
+    }
+
+    return *m_isolatedSiteStore;
+}
+
+bool WebsiteDataStore::computeSiteIsolationHighValueFraudTargetDomainsEnabled() const
+{
+    for (Ref page : m_pages) {
+        if (protect(page->preferences())->siteIsolationHighValueFraudTargetDomainsEnabled())
+            return true;
+    }
+
+    return false;
+}
+
+void WebsiteDataStore::updateIsolatedSiteStoreSettings()
+{
+    bool highValueFraudTargetDomainsEnabled = computeSiteIsolationHighValueFraudTargetDomainsEnabled();
+
+#if ENABLE(ADVANCED_PRIVACY_PROTECTIONS)
+    // Constructing the controller starts fetching the list, so that it is more likely to be ready
+    // for the first lookup.
+    if (highValueFraudTargetDomainsEnabled)
+        HighValueFraudTargetDomainsController::singleton();
+#endif
+
+    if (!m_isolatedSiteStore)
         return;
 
-    WebCore::RegistrableDomain registrableDomain { url };
-    if (m_domainsWithUserInteractions)
-        m_domainsWithUserInteractions->add(registrableDomain);
-    else if (!m_domainsWithUserInteractionsCompletionHandler.isEmpty()) {
-        // Currently waiting for the network process's reply.
-        // Add this domain to the hash set we get from the network process
-        // since the network process may have replied before it had
-        // notififed of user interaction by the web content process.
-        m_pendingDomainsWithUserInteractions.append(registrableDomain);
-    }
+    m_isolatedSiteStore->setHighValueFraudTargetDomainsEnabled(highValueFraudTargetDomainsEnabled);
+}
+
+std::optional<OptionSet<IsolatedSiteStore::Signal>> WebsiteDataStore::isolatedSiteSignalsForTesting(const URL& url)
+{
+    WebCore::Site site { url };
+    Ref siteStore = isolatedSiteStore();
+    if (!siteStore->contains(site))
+        return std::nullopt;
+
+    return siteStore->reasonsFor(site);
+}
+
+void WebsiteDataStore::setHighValueFraudTargetDomainsForTesting(Vector<String>&& domains)
+{
+#if ENABLE(ADVANCED_PRIVACY_PROTECTIONS)
+    HashSet<WebCore::RegistrableDomain> registrableDomains;
+    registrableDomains.reserveInitialCapacity(domains.size());
+    for (auto& domain : domains)
+        registrableDomains.add(WebCore::RegistrableDomain::fromRawString(WTF::move(domain)));
+
+    HighValueFraudTargetDomainsController::singleton().setDomainsForTesting(WTF::move(registrableDomains));
+#else
+    UNUSED_PARAM(domains);
+#endif
+}
+
+void WebsiteDataStore::setMaximumIsolatedSiteCountForTesting(size_t maximumSiteCount)
+{
+    protect(isolatedSiteStore())->setMaximumSiteCountForTesting(maximumSiteCount);
 }
 
 void WebsiteDataStore::logUserInteraction(const URL& url, CompletionHandler<void()>&& completionHandler)
@@ -2088,6 +2162,10 @@ bool WebsiteDataStore::computeIsOptInCookiePartitioningEnabled() const
 
 void WebsiteDataStore::propagateSettingUpdates()
 {
+    // Intentionally above the guards below: this setting has nothing to do with the network process,
+    // and is needed even on ports without OPT_IN_PARTITIONED_COOKIES.
+    updateIsolatedSiteStoreSettings();
+
 #if ENABLE(OPT_IN_PARTITIONED_COOKIES)
     RefPtr networkProcess = networkProcessIfExists();
     if (!networkProcess)
@@ -2230,6 +2308,7 @@ WebsiteDataStoreParameters WebsiteDataStore::parameters()
     networkSessionParameters.overrideServiceWorkerRegistrationCountTestingValue = m_configuration->overrideServiceWorkerRegistrationCountTestingValue();
     networkSessionParameters.preventsSystemHTTPProxyAuthentication = m_configuration->preventsSystemHTTPProxyAuthentication();
     networkSessionParameters.allowsHSTSWithUntrustedRootCertificate = m_configuration->allowsHSTSWithUntrustedRootCertificate();
+    networkSessionParameters.qualifiedServerTrustDebugEnabledForTesting = m_configuration->qualifiedServerTrustDebugEnabledForTesting();
     networkSessionParameters.pcmMachServiceName = m_configuration->pcmMachServiceName();
     networkSessionParameters.webPushMachServiceName = m_configuration->webPushMachServiceName();
     networkSessionParameters.webPushPartitionString = m_configuration->webPushPartitionString();
@@ -2282,9 +2361,6 @@ WebsiteDataStoreParameters WebsiteDataStore::parameters()
     parameters.networkSessionParameters = WTF::move(networkSessionParameters);
     parameters.networkSessionParameters.resourceLoadStatisticsParameters.enabled = trackingPreventionEnabled();
     platformSetNetworkParameters(parameters);
-#if PLATFORM(COCOA)
-    parameters.networkSessionParameters.useNetworkLoader = useNetworkLoader();
-#endif
 
 #if PLATFORM(IOS_FAMILY)
     if (isPersistent()) {
@@ -2395,6 +2471,15 @@ String WebsiteDataStore::defaultIndexedDBDatabaseDirectory(const String& baseDat
     return websiteDataDirectoryFileSystemRepresentation(String::fromUTF8("databases" G_DIR_SEPARATOR_S "indexeddb"), baseDataDirectory);
 #else
     return websiteDataDirectoryFileSystemRepresentation("IndexedDB"_s, baseDataDirectory);
+#endif
+}
+
+String WebsiteDataStore::defaultIsolatedSitesDirectory(const String& baseDataDirectory)
+{
+#if PLATFORM(PLAYSTATION) || USE(GLIB)
+    return websiteDataDirectoryFileSystemRepresentation("isolatedsites"_s, baseDataDirectory);
+#else
+    return websiteDataDirectoryFileSystemRepresentation("IsolatedSites"_s, baseDataDirectory);
 #endif
 }
 
@@ -2581,7 +2666,7 @@ void WebsiteDataStore::forwardAppBoundDomainsToITPIfInitialized(CompletionHandle
         store->setAppBoundDomainsForITP(domains, [callbackAggregator] { });
     };
 
-    propagateAppBoundDomains(protectedGlobalDefaultDataStore().get(), *appBoundDomains);
+    propagateAppBoundDomains(protect(protectedGlobalDefaultDataStore()), *appBoundDomains);
 
     for (auto& store : allDataStores().values())
         propagateAppBoundDomains(protect(store).ptr(), *appBoundDomains);
@@ -2722,9 +2807,9 @@ void WebsiteDataStore::getNotifications(const URL& registrationalURL, Completion
 
 #if ENABLE(INSPECTOR_NETWORK_THROTTLING)
 
-void WebsiteDataStore::setEmulatedConditions(std::optional<int64_t>&& bytesPerSecondLimit)
+void WebsiteDataStore::setEmulatedConditions(std::optional<uint64_t> bandwidthBytesPerSecond, Seconds latency)
 {
-    protect(networkProcess())->setEmulatedConditions(sessionID(), WTF::move(bytesPerSecondLimit));
+    protect(networkProcess())->setEmulatedConditions(sessionID(), bandwidthBytesPerSecond, latency);
 }
 
 #endif // ENABLE(INSPECTOR_NETWORK_THROTTLING)
@@ -2980,9 +3065,9 @@ void WebsiteDataStore::isStorageSuspendedForTesting(CompletionHandler<void(bool)
 }
 
 #if HAVE(WEBCONTENTRESTRICTIONS)
-void WebsiteDataStore::installMockParentalControlsURLFilterForTesting(Vector<URL>&& blockedURLs, CompletionHandler<void()>&& completionHandler)
+void WebsiteDataStore::installMockParentalControlsURLFilterForTesting(Vector<URL>&& blockedURLs, std::span<const uint8_t> replacementData, CompletionHandler<void()>&& completionHandler)
 {
-    protect(networkProcess())->installMockParentalControlsURLFilterForTesting(WTF::move(blockedURLs), WTF::move(completionHandler));
+    protect(networkProcess())->installMockParentalControlsURLFilterForTesting(WTF::move(blockedURLs), replacementData, WTF::move(completionHandler));
 }
 #endif
 

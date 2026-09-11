@@ -38,6 +38,7 @@ G_BEGIN_DECLS
 #define WEBKIT_USER_CONTENT_FILTER_ERROR         webkit_user_content_filter_error_quark ()
 #if ENABLE(2022_GLIB_API)
 #define WEBKIT_WEB_EXTENSION_ERROR               webkit_web_extension_error_quark ()
+#define WEBKIT_WEB_EXTENSION_CONTEXT_ERROR       webkit_web_extension_context_error_quark ()
 #endif
 #define WEBKIT_WEB_EXTENSION_MATCH_PATTERN_ERROR webkit_web_extension_match_pattern_error_quark ()
 
@@ -56,6 +57,11 @@ G_BEGIN_DECLS
  * @WEBKIT_NETWORK_ERROR_UNKNOWN_PROTOCOL: Load failure due to unknown protocol
  * @WEBKIT_NETWORK_ERROR_CANCELLED: Load failure due to cancellation
  * @WEBKIT_NETWORK_ERROR_FILE_DOES_NOT_EXIST: Load failure due to missing file
+ * @WEBKIT_NETWORK_ERROR_HTTPS_UPGRADE_REDIRECT_LOOP: Load failure due to a redirect
+ *     loop caused by upgrading the navigation to HTTPS. Since: 2.56
+ * @WEBKIT_NETWORK_ERROR_HTTP_NAVIGATION_WITH_HTTPS_ONLY: Load failure due to the
+ *     navigation being for a non-upgradable HTTP URI while
+ *     %WEBKIT_UPGRADE_TO_HTTPS_POLICY_ERROR_ON_FAILURE is in effect. Since: 2.56
  *
  * Enum values used to denote the various network errors.
  **/
@@ -64,7 +70,9 @@ typedef enum {
     WEBKIT_NETWORK_ERROR_TRANSPORT = 300,
     WEBKIT_NETWORK_ERROR_UNKNOWN_PROTOCOL = 301,
     WEBKIT_NETWORK_ERROR_CANCELLED = 302,
-    WEBKIT_NETWORK_ERROR_FILE_DOES_NOT_EXIST = 303
+    WEBKIT_NETWORK_ERROR_FILE_DOES_NOT_EXIST = 303,
+    WEBKIT_NETWORK_ERROR_HTTPS_UPGRADE_REDIRECT_LOOP = 304,
+    WEBKIT_NETWORK_ERROR_HTTP_NAVIGATION_WITH_HTTPS_ONLY = 305
 } WebKitNetworkError;
 
 /**
@@ -189,6 +197,30 @@ typedef enum {
     WEBKIT_WEB_EXTENSION_ERROR_INVALID_BACKGROUND_PERSISTENCE = 806,
     WEBKIT_WEB_EXTENSION_ERROR_INVALID_ARCHIVE = 807,
 } WebKitWebExtensionError;
+
+/**
+ * WebKitWebExtensionContextError:
+ * @WEBKIT_WEB_EXTENSION_CONTEXT_ERROR_UNKNOWN: An unknown error occured.
+ * @WEBKIT_WEB_EXTENSION_CONTEXT_ERROR_ALREADY_LOADED: The context is already loaded by a controller.
+ * @WEBKIT_WEB_EXTENSION_CONTEXT_ERROR_NOT_LOADED: The context is not loaded by a controller.
+ * @WEBKIT_WEB_EXTENSION_CONTEXT_ERROR_BASE_URL_ALREADY_IN_USE: Another context is already using the specified base URL.
+ * @WEBKIT_WEB_EXTENSION_CONTEXT_ERROR_NO_BACKGROUND_CONTENT: The extension does not have background content.
+ * @WEBKIT_WEB_EXTENSION_CONTEXT_ERROR_BACKGROUND_CONTENT_FAILED_TO_LOAD: An error occured when loading the background content.
+ * @WEBKIT_WEB_EXTENSION_CONTEXT_ERROR_SCRIPT_EXECUTION: A script error occurred, such as an uncaught exception, unhandled promise rejection, or a call to console.error().
+ *
+ * Enum values used to denote errors happening when loading a [class@WebExtensionContext].
+ *
+ * Since: 2.56
+ */
+typedef enum {
+    WEBKIT_WEB_EXTENSION_CONTEXT_ERROR_UNKNOWN = 999,
+    WEBKIT_WEB_EXTENSION_CONTEXT_ERROR_ALREADY_LOADED = 900,
+    WEBKIT_WEB_EXTENSION_CONTEXT_ERROR_NOT_LOADED = 901,
+    WEBKIT_WEB_EXTENSION_CONTEXT_ERROR_BASE_URL_ALREADY_IN_USE = 902,
+    WEBKIT_WEB_EXTENSION_CONTEXT_ERROR_NO_BACKGROUND_CONTENT = 903,
+    WEBKIT_WEB_EXTENSION_CONTEXT_ERROR_BACKGROUND_CONTENT_FAILED_TO_LOAD = 904,
+    WEBKIT_WEB_EXTENSION_CONTEXT_ERROR_SCRIPT_EXECUTION = 905,
+} WebKitWebExtensionContextError;
 #endif
 
 /**
@@ -265,6 +297,9 @@ webkit_snapshot_error_quark                    (void);
 #if ENABLE(2022_GLIB_API)
 WEBKIT_API GQuark
 webkit_web_extension_error_quark               (void);
+
+WEBKIT_API GQuark
+webkit_web_extension_context_error_quark       (void);
 #endif
 
 WEBKIT_API GQuark

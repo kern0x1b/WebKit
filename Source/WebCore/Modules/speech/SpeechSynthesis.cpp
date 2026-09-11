@@ -228,7 +228,9 @@ void SpeechSynthesis::resumeSynthesis()
 void SpeechSynthesis::handleSpeakingCompleted(SpeechSynthesisUtterance& utterance, bool errorOccurred)
 {
     // Ignore callbacks for stale utterances. This can happen when cancel() is called
-    // and a new utterance is queued before the platform's async cancel callback fires.
+    // and a new utterance is queued before the platform's async cancel callback fires, or when
+    // stopPlatformSpeech() already cleared m_currentSpeechUtterance and the platform cancel()
+    // fired this callback synchronously (e.g. the mock).
     if (!m_currentSpeechUtterance || &utterance != currentSpeechUtterance())
         return;
 

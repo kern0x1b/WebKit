@@ -26,6 +26,7 @@
 #pragma once
 
 #include "MessageReceiver.h"
+#include "Untrusted.h"
 #include "WebPageInspectorAgentBase.h"
 #include <JavaScriptCore/InspectorBackendDispatchers.h>
 #include <JavaScriptCore/InspectorFrontendDispatchers.h>
@@ -33,7 +34,6 @@
 #include <WebCore/InspectorResourceUtilities.h>
 #include <WebCore/PageIdentifier.h>
 #include <WebCore/ProcessIdentifier.h>
-#include <WebCore/ScriptExecutionContextIdentifier.h>
 #include <WebCore/SecurityOriginData.h>
 #include <wtf/CheckedPtr.h>
 #include <wtf/HashMap.h>
@@ -108,7 +108,7 @@ private:
     void didReceiveMessage(IPC::Connection&, IPC::Decoder&) override;
 
     // IPC message handlers from WebProcess PageAgentProxy
-    void frameNavigated(WebCore::FrameIdentifier, const URL&, const String& mimeType, WebCore::SecurityOriginData&&, std::optional<WebCore::FrameIdentifier> parentFrameID, const String& name, WebCore::ScriptExecutionContextIdentifier loaderId);
+    void frameNavigated(WebCore::FrameIdentifier, const URL&, const String& mimeType, IPC::Untrusted<WebCore::SecurityOriginData>&&, std::optional<WebCore::FrameIdentifier> parentFrameID, const String& name, const String& loaderId);
     void domContentEventFired(double timestamp);
     void loadEventFired(double timestamp);
     void frameDetached(WebCore::FrameIdentifier);
@@ -123,6 +123,10 @@ private:
 
     bool m_enabled { false };
     HashMap<std::pair<WebCore::ProcessIdentifier, WebCore::PageIdentifier>, unsigned> m_instrumentedProcessPageCounts;
+
+    // Latest paint-rects toggle, fanned out to every WebContent process and replayed to any
+    // process that registers later (e.g. a cross-origin navigation spawns a new one).
+    bool m_showPaintRects { false };
 
     // Pin each instrumented WebProcessProxy alive while we hold an IPC message
     // receiver registration on it. Without this, the process can be destructed
@@ -139,7 +143,7 @@ private:
         URL url;
         String mimeType;
         WebCore::SecurityOriginData securityOrigin;
-        std::optional<WebCore::ScriptExecutionContextIdentifier> loaderId;
+        String loaderId;
     };
     HashMap<WebCore::FrameIdentifier, CachedFrameDocumentInfo> m_cachedFrameDocumentInfo;
 };

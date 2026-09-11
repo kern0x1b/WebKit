@@ -28,17 +28,42 @@
 
 #include "CSSParserTokenRange.h"
 #include "CSSParserTokenRangeGuard.h"
+#include "CSSPropertyParser.h"
 #include "CSSPropertyParserConsumer+Ident.h"
 #include "CSSPropertyParserConsumer+MetaConsumer.h"
 #include "CSSPropertyParserConsumer+NumberDefinitions.h"
 #include "CSSPropertyParserState.h"
 #include "CSSValueKeywords.h"
 #include <wtf/StdLibExtras.h>
+#include <wtf/text/StringToIntegerConversion.h>
 
 namespace WebCore {
 namespace CSSPropertyParserHelpers {
 
-std::optional<CSSCalc::Random::Sharing> consumeUnresolvedRandomKey(CSSParserTokenRange& tokens, CSS::PropertyParserState& state, NOESCAPE const Function<CSSCalc::RandomSharingOptions::Auto()>& makeAuto)
+// <random-ua-ident> = ua- PROPERTY [ - INDEX ]?, where INDEX is 1-based. Returns nullopt when the
+// ident does not name a known property, which makes the whole <random-key> invalid.
+// FIXME: § 9.4.1 also spells an in-custom-function form, ua-FUNCTIONNAME-PROPERTY[-INDEX]. Both names
+// can contain hyphens, so splitting it is ambiguous; see https://github.com/w3c/csswg-drafts/issues/14330
+static std::optional<Variant<CSSCalc::Random::Key::PropertyScoped, CSSCalc::Random::Key::PropertyIndexScoped>> parseRandomUAIdent(StringView ident)
+{
+    auto body = ident.substring(3);
+
+    if (auto lastHyphen = body.reverseFind('-'); lastHyphen != notFound) {
+        if (auto index = parseInteger<unsigned>(body.substring(lastHyphen + 1)); index >= 1) {
+            auto property = cssPropertyID(body.left(lastHyphen));
+            if (property == CSSPropertyInvalid)
+                return { };
+            return { CSSCalc::Random::Key::PropertyIndexScoped { CSSCalc::RandomScopedProperty { property, nullAtom() }, *index - 1 } };
+        }
+    }
+
+    auto property = cssPropertyID(body);
+    if (property == CSSPropertyInvalid)
+        return { };
+    return { CSSCalc::Random::Key::PropertyScoped { CSSCalc::RandomScopedProperty { property, nullAtom() } } };
+}
+
+std::optional<CSSCalc::Random::Sharing> consumeUnresolvedRandomKey(CSSParserTokenRange& tokens, CSS::PropertyParserState& state, const RandomKeySource& source, NOESCAPE const Function<unsigned()>& consumeIndex)
 {
     // <random-key> = auto | <random-cache-key> | fixed <number [0,1]>
     // <random-cache-key> = <dashed-ident> || element-scoped || [ property-scoped | property-index-scoped | <random-ua-ident> ]
@@ -66,58 +91,89 @@ std::optional<CSSCalc::Random::Sharing> consumeUnresolvedRandomKey(CSSParserToke
         return CSSCalc::Random::Sharing { CSSCalc::Random::SharingFixed { .value = WTF::move(*number) } };
     }
 
-    std::optional<Variant<CSSCalc::RandomSharingOptions::Auto, CSS::CustomIdent>> identifier;
-    std::optional<CSS::Keyword::ElementScoped> elementScoped;
+    // `auto` is a standalone <random-key> alternative (its scoping is chosen by the caller); it does not
+    // combine with the <random-cache-key> keywords, so it is handled before the || loop below.
+    if (tokens.peek().id() == CSSValueAuto) {
+        tokens.consumeIncludingWhitespace();
+        return CSSCalc::Random::Sharing { randomSharingAuto(source, consumeIndex()) };
+    }
+
+    CSSCalc::Random::Key key;
 
     CSSParserTokenRangeGuard guard { tokens };
 
-    auto consumeIdentifier = [&] -> bool {
-        if (identifier)
+    auto consumeName = [&] -> bool {
+        if (key.name)
             return false;
-        if (tokens.peek().id() == CSSValueAuto) {
-            tokens.consumeIncludingWhitespace();
-            identifier = makeAuto();
-            return true;
-        }
         if (auto dashedIdent = consumeUnresolvedDashedIdent(tokens, state)) {
-            identifier = WTF::move(*dashedIdent);
+            key.name = WTF::move(*dashedIdent);
             return true;
         }
         return false;
     };
     auto consumeElementScoped = [&] -> bool {
-        if (elementScoped)
+        if (key.elementScoped)
             return false;
         if (tokens.peek().id() == CSSValueElementScoped) {
             tokens.consumeIncludingWhitespace();
-            elementScoped = CSS::Keyword::ElementScoped { };
+            key.elementScoped = CSS::Keyword::ElementScoped { };
             return true;
         }
         return false;
     };
+    // property-scoped and property-index-scoped are mutually exclusive, so a single lambda handles both.
+    auto consumeProperty = [&] -> bool {
+        if (key.propertyScoped)
+            return false;
+        if (tokens.peek().id() == CSSValuePropertyScoped) {
+            tokens.consumeIncludingWhitespace();
+            // No index is consumed: property-scoped keys on the property alone, and taking an index here
+            // would shift the index of any later `auto` or property-index-scoped in the same value.
+            key.propertyScoped = CSSCalc::Random::Key::PropertyScoped { source.property };
+            return true;
+        }
+        if (tokens.peek().id() == CSSValuePropertyIndexScoped) {
+            tokens.consumeIncludingWhitespace();
+            key.propertyScoped = CSSCalc::Random::Key::PropertyIndexScoped { source.property, consumeIndex() };
+            return true;
+        }
+        // <random-ua-ident> = <custom-ident> starting with `ua-`. It spells out the property, and
+        // optionally the index, that the keywords derive implicitly, so `ua-height-1` names the same
+        // key as property-index-scoped does while parsing `height`. The index is 1-based in the ident.
+        // No index is consumed from the caller: the ident says which one it means.
+        if (tokens.peek().type() == IdentToken) {
+            if (auto identValue = tokens.peek().value(); startsWithLettersIgnoringASCIICase(identValue, "ua-"_s)) {
+                if (auto scoped = parseRandomUAIdent(identValue)) {
+                    tokens.consumeIncludingWhitespace();
+                    key.propertyScoped = WTF::move(*scoped);
+                    return true;
+                }
+                return false;
+            }
+        }
+        return false;
+    };
 
-    for (unsigned i = 0; i < 2; ++i) {
-        if (consumeIdentifier() || consumeElementScoped())
+    for (unsigned i = 0; i < 3; ++i) {
+        if (consumeName() || consumeElementScoped() || consumeProperty())
             continue;
         break;
     }
 
-    if (!identifier && !elementScoped)
+    if (!key.name && !key.elementScoped && !key.propertyScoped)
         return { };
 
     guard.commit();
 
-    return CSSCalc::Random::Sharing { CSSCalc::Random::SharingOptions {
-        .identifier = identifier.value_or(CSS::CustomIdent { nullAtom() }),
-        .elementScoped = elementScoped
-    } };
+    return CSSCalc::Random::Sharing { WTF::move(key) };
 }
 
-CSSCalc::RandomSharingOptions::Auto autoRandomSharingKey(const CSS::PropertyParserState& state)
+CSSCalc::RandomSharingAuto randomSharingAuto(const RandomKeySource& source, unsigned index)
 {
     return {
-        .property = state.currentProperty,
-        .index = state.cssRandomFunctionCount
+        .property = source.property,
+        .index = index,
+        .elementScoped = source.autoElementScoped
     };
 }
 

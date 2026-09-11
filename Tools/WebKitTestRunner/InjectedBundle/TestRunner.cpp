@@ -34,7 +34,6 @@
 #include "PlatformWebView.h"
 #include "TestController.h"
 #include <JavaScriptCore/JSCTestRunnerUtils.h>
-#include <WebCore/NetworkStorageSession.h>
 #include <WebCore/ResourceLoadObserver.h>
 #include <WebKit/WKBase.h>
 #include <WebKit/WKBundle.h>
@@ -220,7 +219,7 @@ void TestRunner::waitUntilDone()
         [[maybe_unused]] WTF::String testURL = "(unknown test)"_s;
         if (WKURLRef url = m_testURL.get())
             testURL = toWTFString(adoptWK(WKURLCopyString(url)));
-        LOG_ERROR("(%s) testRunner.waitUntilDone() called after test has terminated. Possibly an async handler was not awaited.", testURL.utf8().data());
+        LOG_ERROR("(%s) testRunner.waitUntilDone() called after test has terminated. Possibly an async handler was not awaited.", testURL.utf8().legacyCStringPointer());
         return;
     }
 
@@ -247,11 +246,10 @@ void TestRunner::notifyDone()
     auto& injectedBundle = InjectedBundle::singleton();
     if (!injectedBundle.isTestRunning())
         return;
-    // notifyDone() defers the dump while the main frame is still loading (see InjectedBundlePage::notifyDone),
-    // so it can only complete synchronously once loading has finished. When called mid-load, fall back to the
-    // asynchronous path that dumps after load, matching non-site-isolation behavior.
-    bool canCompleteSynchronously = injectedBundle.pageHasLocalMainFrame() && !injectedBundle.topLoadingFrame();
-    if (!postSynchronousMessageReturningBoolean("ResolveNotifyDone", adoptWK(WKBooleanCreate(canCompleteSynchronously))))
+    // The UI process replies true when this came from the main-frame process; then the injected bundle
+    // completes notifyDone() locally (deferring while loading, as without site isolation). Otherwise the UI
+    // process routes the dump to the process that owns the main frame.
+    if (!postSynchronousPageMessageReturningBoolean("ResolveNotifyDone"))
         return;
     if (!injectedBundle.page())
         return;
@@ -263,8 +261,8 @@ void TestRunner::forceImmediateCompletion()
     auto& injectedBundle = InjectedBundle::singleton();
     if (!injectedBundle.isTestRunning())
         return;
-    bool canCompleteSynchronously = injectedBundle.pageHasLocalMainFrame();
-    if (!postSynchronousMessageReturningBoolean("ResolveForceImmediateCompletion", adoptWK(WKBooleanCreate(canCompleteSynchronously))))
+    // Reply true when this came from the main-frame process; otherwise the UI process routes the dump.
+    if (!postSynchronousPageMessageReturningBoolean("ResolveForceImmediateCompletion"))
         return;
     if (!injectedBundle.page())
         return;
@@ -1523,13 +1521,13 @@ void TestRunner::simulatePrivateClickMeasurementSessionRestart()
 void TestRunner::setPrivateClickMeasurementTokenPublicKeyURLForTesting(JSStringRef urlString)
 {
     postSynchronousPageMessage("SetPrivateClickMeasurementTokenPublicKeyURLForTesting",
-        adoptWK(WKURLCreateWithUTF8CString(toWTFString(urlString).utf8().data())));
+        adoptWK(WKURLCreateWithUTF8CString(toWTFString(urlString).utf8().legacyCStringPointer())));
 }
 
 void TestRunner::setPrivateClickMeasurementTokenSignatureURLForTesting(JSStringRef urlString)
 {
     postSynchronousPageMessage("SetPrivateClickMeasurementTokenSignatureURLForTesting",
-        adoptWK(WKURLCreateWithUTF8CString(toWTFString(urlString).utf8().data())));
+        adoptWK(WKURLCreateWithUTF8CString(toWTFString(urlString).utf8().legacyCStringPointer())));
 }
 
 void TestRunner::setPrivateClickMeasurementAttributionReportURLsForTesting(JSStringRef sourceURLString, JSStringRef destinationURLString)

@@ -24,6 +24,7 @@
 #include "RenderDeprecatedFlexibleBox.h"
 
 #include "FontCascade.h"
+#include "InlineIteratorBox.h"
 #include "InlineIteratorLineBox.h"
 #include "LayoutIntegrationLineLayout.h"
 #include "LayoutRepainter.h"
@@ -332,7 +333,7 @@ bool RenderDeprecatedFlexibleBox::hasClampingAndNoFlexing() const
         return false;
 
     auto& style = this->style();
-    if (style.lineClamp().isNone() || style.lineClamp().isPercentage())
+    if (style.lineClamp().isNone())
         return false;
     if (!style.logicalHeight().isAuto() || !firstChildBox->style().logicalHeight().isAuto())
         return false;
@@ -1049,30 +1050,36 @@ void RenderDeprecatedFlexibleBox::layoutVerticalBox(RelayoutChildren relayoutChi
         setBorderBoxHeight(oldHeight);
 }
 
-static size_t lineCountFor(const RenderBlockFlow& blockFlow)
+static CheckedPtr<RenderBlockFlow> blockContainerForLastFormattedLine(RenderBlock& enclosingBlockContainer)
 {
-    if (blockFlow.childrenInline())
-        return blockFlow.lineCount();
-
-    size_t count = 0;
-    for (auto& child : childrenOfType<RenderBlockFlow>(blockFlow)) {
-        if (blockFlow.isFloatingOrOutOfFlowPositioned() || !blockFlow.style().height().isAuto())
-            continue;
-        count += lineCountFor(child);
+    if (CheckedPtr blockFlow = dynamicDowncast<RenderBlockFlow>(enclosingBlockContainer); blockFlow && blockFlow->childrenInline()) {
+        // The lines tell us where the last formatted line is: either it is one of this container's own lines, or it is inside the block level box sitting on the last line.
+        auto blockLevelBoxOnLastFormattedLine = [&]() -> CheckedPtr<RenderBlock> {
+            for (auto lineBox = InlineIterator::lastLineBoxFor(*blockFlow); lineBox; --lineBox) {
+                if (!lineBox->hasContentfulInFlowBox()) {
+                    // Out-of-flow content could initiate a line with no inline content.
+                    continue;
+                }
+                if (!lineBox->hasBlockContent()) {
+                    // The last formatted line is one of this inline formatting context's own lines.
+                    return { };
+                }
+                auto blockBox = lineBox->blockLevelBox();
+                return blockBox ? dynamicDowncast<RenderBlock>(const_cast<RenderObject&>(blockBox->renderer())) : nullptr;
+            }
+            return { };
+        };
+        if (CheckedPtr blockOnLastFormattedLine = blockLevelBoxOnLastFormattedLine())
+            return blockContainerForLastFormattedLine(*blockOnLastFormattedLine);
+        return blockFlow->hasContentfulInlineLine() ? blockFlow : nullptr;
     }
-    return count;
-}
 
-static RenderBlockFlow* blockContainerForLastFormattedLine(const RenderBlock& enclosingBlockContainer)
-{
     for (auto* child = enclosingBlockContainer.lastChild(); child; child = child->previousSibling()) {
         CheckedPtr blockContainer = dynamicDowncast<RenderBlock>(*child);
         if (!blockContainer)
             continue;
-        if (auto* descendantRoot = blockContainerForLastFormattedLine(*blockContainer))
+        if (CheckedPtr descendantRoot = blockContainerForLastFormattedLine(*blockContainer))
             return descendantRoot;
-        if (CheckedPtr blockFlow = dynamicDowncast<RenderBlockFlow>(*blockContainer); blockFlow && blockFlow->hasContentfulInlineLine())
-            return blockFlow.unsafeGet();
     }
     return { };
 }
@@ -1110,20 +1117,6 @@ RenderDeprecatedFlexibleBox::ClampedContent RenderDeprecatedFlexibleBox::applyLi
         },
         [](const Style::WebkitLineClamp::Integer& integer) -> size_t {
             return integer.value;
-        },
-        [&](const Style::WebkitLineClamp::Percentage& percentage) -> size_t {
-            size_t numberOfLines = 0;
-            for (auto* child = iterator.first(); child; child = iterator.next()) {
-                if (childDoesNotAffectWidthOrFlexing(child))
-                    continue;
-
-                child->layoutIfNeeded();
-                if (auto* blockFlow = dynamicDowncast<RenderBlockFlow>(*child))
-                    numberOfLines += lineCountFor(*blockFlow);
-                // FIXME: This should be turned into a partial damage.
-                child->setChildNeedsLayout(MarkingBehavior::MarkOnlyThis);
-            }
-            return std::max<size_t>(1, (numberOfLines + 1) * percentage.value / 100.f);
         }
     );
 
@@ -1135,7 +1128,7 @@ RenderDeprecatedFlexibleBox::ClampedContent RenderDeprecatedFlexibleBox::applyLi
         child->markForPaginationRelayoutIfNeeded();
         child->layoutIfNeeded();
     }
-    if (auto* lastRoot = blockContainerForLastFormattedLine(*this)) {
+    if (CheckedPtr lastRoot = blockContainerForLastFormattedLine(*this)) {
         if (auto* inlineLayout = lastRoot->inlineLayout(); inlineLayout && inlineLayout->hasEllipsisInBlockDirectionOnLastFormattedLine()) {
             auto currentLineClamp = layoutState.legacyLineClamp();
 

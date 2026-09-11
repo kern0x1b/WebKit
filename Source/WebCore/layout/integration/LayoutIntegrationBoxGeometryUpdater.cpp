@@ -61,7 +61,7 @@ extern "C" unsigned g_webkitIOS6BoxGeometryCount;
 #include "RenderLineBreak.h"
 #include "RenderListBox.h"
 #include "RenderListItem.h"
-#include "RenderListMarker.h"
+#include "RenderListOutsideMarker.h"
 #include "RenderMathMLBlock.h"
 #include "RenderMenuList.h"
 #include "RenderModel.h"
@@ -90,41 +90,22 @@ static LayoutUnit usedValueOrZero(const Style::PaddingEdge& paddingEdge, std::op
     return Style::evaluateMinimum<LayoutUnit>(paddingEdge, availableWidth.value_or(0_lu), usedZoom);
 }
 
-static inline void adjustBorderForTableAndFieldset(const RenderBoxModelObject& renderer, RectEdges<LayoutUnit>& borderWidths)
+static inline void adjustBorderForTable(const RenderBoxModelObject& renderer, RectEdges<LayoutUnit>& borderWidths)
 {
     if (auto* table = dynamicDowncast<RenderTable>(renderer); table && table->collapseBorders()) {
         borderWidths = table->borderWidths();
         return;
     }
 
-    if (auto* tableCell = dynamicDowncast<RenderTableCell>(renderer); tableCell && tableCell->table()->collapseBorders()) {
+    if (auto* tableCell = dynamicDowncast<RenderTableCell>(renderer); tableCell && tableCell->table()->collapseBorders())
         borderWidths = tableCell->borderWidths();
-        return;
-    }
+}
 
-    if (renderer.isFieldset()) {
-        auto adjustment = downcast<RenderBlock>(renderer).intrinsicBorderForFieldset();
-        // Note that this adjustment is coming from _inside_ the fieldset so its own flow direction is what is relevant here.
-        auto& style = renderer.style();
-        switch (style.writingMode().blockDirection()) {
-        case FlowDirection::TopToBottom:
-            borderWidths.top() += adjustment;
-            break;
-        case FlowDirection::BottomToTop:
-            borderWidths.bottom() += adjustment;
-            break;
-        case FlowDirection::LeftToRight:
-            borderWidths.left() += adjustment;
-            break;
-        case FlowDirection::RightToLeft:
-            borderWidths.right() += adjustment;
-            break;
-        default:
-            ASSERT_NOT_REACHED();
-            return;
-        }
-        return;
-    }
+static inline LayoutUnit intrinsicBorder(const RenderBoxModelObject& renderer)
+{
+    if (auto* block = dynamicDowncast<RenderBlock>(renderer); block && renderer.isFieldset())
+        return block->intrinsicBorderForFieldset();
+    return { };
 }
 
 static inline Layout::BoxGeometry::VerticalEdges NODELETE intrinsicPaddingForTableCell(const RenderBox& renderer)
@@ -146,10 +127,10 @@ void BoxGeometryUpdater::clear()
     m_nestedListMarkerOffsets.clear();
 }
 
-void BoxGeometryUpdater::setListMarkerOffsetForMarkerOutside(const RenderListMarker& listMarker)
+void BoxGeometryUpdater::setListMarkerOffsetForMarkerOutside(const RenderListOutsideMarker& listMarker)
 {
     CheckedRef layoutBox = *listMarker.layoutBox();
-    ASSERT(layoutBox->isListMarkerOutside());
+    ASSERT(layoutBox->isListMarkerBox());
     auto* ancestor = listMarker.containingBlock();
 
     auto offsetFromParentListItem = [&] {
@@ -196,14 +177,24 @@ void BoxGeometryUpdater::setListMarkerOffsetForMarkerOutside(const RenderListMar
     }
 }
 
-static inline LayoutUnit contentLogicalWidthForRenderer(const RenderBox& renderer)
+static inline LayoutUnit contentLogicalWidthForRenderer(const RenderBox& renderer, LayoutUnit logicalSpaceAroundContent)
 {
-    return renderer.parent()->writingMode().isHorizontal() ? renderer.contentBoxWidth() : renderer.contentBoxHeight();
+    auto containerWritingMode = renderer.parent()->writingMode();
+    auto contentBoxLogicalWidth = containerWritingMode.isHorizontal() ? renderer.contentBoxWidth() : renderer.contentBoxHeight();
+    if (!renderer.isFieldset() || !renderer.writingMode().isOrthogonal(containerWritingMode))
+        return contentBoxLogicalWidth;
+    auto borderBoxLogicalWidth = containerWritingMode.isHorizontal() ? renderer.borderBoxWidth() : renderer.borderBoxHeight();
+    return std::max(contentBoxLogicalWidth, borderBoxLogicalWidth - logicalSpaceAroundContent);
 }
 
-static inline LayoutUnit contentLogicalHeightForRenderer(const RenderBox& renderer)
+static inline LayoutUnit contentLogicalHeightForRenderer(const RenderBox& renderer, LayoutUnit logicalSpaceAroundContent)
 {
-    return renderer.parent()->writingMode().isHorizontal() ? renderer.contentBoxHeight() : renderer.contentBoxWidth();
+    auto containerWritingMode = renderer.parent()->writingMode();
+    auto contentBoxLogicalHeight = containerWritingMode.isHorizontal() ? renderer.contentBoxHeight() : renderer.contentBoxWidth();
+    if (!renderer.isFieldset() || renderer.writingMode().isOrthogonal(containerWritingMode))
+        return contentBoxLogicalHeight;
+    auto borderBoxLogicalHeight = containerWritingMode.isHorizontal() ? renderer.borderBoxHeight() : renderer.borderBoxWidth();
+    return std::max(contentBoxLogicalHeight, borderBoxLogicalHeight - logicalSpaceAroundContent);
 }
 
 Layout::BoxGeometry::HorizontalEdges BoxGeometryUpdater::horizontalLogicalMargin(const RenderBoxModelObject& renderer, std::optional<LayoutUnit> availableWidth, WritingMode writingMode)
@@ -245,7 +236,7 @@ Layout::BoxGeometry::Edges BoxGeometryUpdater::logicalBorder(const RenderBoxMode
     });
 
     if (!isIntrinsicWidthMode)
-        adjustBorderForTableAndFieldset(renderer, borderWidths);
+        adjustBorderForTable(renderer, borderWidths);
 
     if (writingMode.isHorizontal()) {
         auto borderInlineStart = writingMode.isInlineLeftToRight() ? borderWidths.left() : borderWidths.right();
@@ -538,7 +529,7 @@ static std::optional<LayoutUnit> baselineForBox(const RenderBox& renderBox)
         return { };
     }
 
-    if (CheckedPtr listMarker = dynamicDowncast<RenderListMarker>(renderBox)) {
+    if (CheckedPtr listMarker = dynamicDowncast<RenderListOutsideMarker>(renderBox)) {
         if (CheckedPtr listItem = listMarker->listItem(); listItem && !listMarker->isImage())
             return fontMetricsBasedBaseline(*listMarker);
         return { };
@@ -580,7 +571,7 @@ static inline void setIntegrationBaseline(const RenderBox& renderBox)
         return;
 
     auto hasNonSyntheticBaseline = [&] {
-        if (auto* renderListMarker = dynamicDowncast<RenderListMarker>(renderBox))
+        if (auto* renderListMarker = dynamicDowncast<RenderListOutsideMarker>(renderBox))
             return !renderListMarker->isImage();
 
         if (is<RenderReplaced>(renderBox) && renderBox.style().display() == Style::DisplayType::InlineFlow)
@@ -660,7 +651,7 @@ void BoxGeometryUpdater::updateLayoutBoxDimensions(const RenderBox& renderBox, s
         boxGeometry.setHorizontalSpaceForScrollbar(scrollbarSize.width());
         auto contentBoxLogicalWidth = [&] {
             auto widthContribution = *intrinsicWidthMode == Layout::IntrinsicWidthMode::Minimum ? renderBox.minContentLogicalWidthContribution() : renderBox.maxContentLogicalWidthContribution();
-            return widthContribution - (border.horizontal.start + border.horizontal.end + padding.horizontal.start + padding.horizontal.end);
+            return widthContribution - (border.horizontal.start + border.horizontal.end + padding.horizontal.start + padding.horizontal.end + scrollbarSize.width());
         };
         boxGeometry.setContentBoxWidth(contentBoxLogicalWidth());
         boxGeometry.setHorizontalMargin(inlineMargin);
@@ -671,8 +662,10 @@ void BoxGeometryUpdater::updateLayoutBoxDimensions(const RenderBox& renderBox, s
 
     boxGeometry.setSpaceForScrollbar(scrollbarSize);
     if (!renderBox.isOutOfFlowPositioned()) {
-        boxGeometry.setContentBoxWidth(contentLogicalWidthForRenderer(renderBox));
-        boxGeometry.setContentBoxHeight(contentLogicalHeightForRenderer(renderBox));
+        auto inlineSpaceAroundContent = border.horizontal.start + border.horizontal.end + padding.horizontal.start + padding.horizontal.end + scrollbarSize.width();
+        auto blockSpaceAroundContent = border.vertical.before + border.vertical.after + padding.vertical.before + padding.vertical.after + scrollbarSize.height();
+        boxGeometry.setContentBoxWidth(contentLogicalWidthForRenderer(renderBox, inlineSpaceAroundContent));
+        boxGeometry.setContentBoxHeight(contentLogicalHeightForRenderer(renderBox, blockSpaceAroundContent));
     }
     boxGeometry.setVerticalMargin(verticalLogicalMargin(renderBox, availableWidth, writingMode));
     boxGeometry.setHorizontalMargin(inlineMargin);
@@ -730,8 +723,9 @@ void BoxGeometryUpdater::setFormattingContextContentGeometry(std::optional<Layou
 
     if (rootLayoutBox().establishesInlineFormattingContext()) {
         for (auto walker = InlineWalker(downcast<RenderBlockFlow>(rootRenderer())); !walker.atEnd(); walker.advance()) {
-            if (!is<RenderText>(walker.current()))
-                updateBoxGeometry(downcast<RenderElement>(*walker.current()), availableLogicalWidth, intrinsicWidthMode);
+            if (walker.current()->isExcludedMarker() || is<RenderText>(walker.current()))
+                continue;
+            updateBoxGeometry(downcast<RenderElement>(*walker.current()), availableLogicalWidth, intrinsicWidthMode);
         }
         return;
     }
@@ -754,6 +748,7 @@ void BoxGeometryUpdater::setFormattingContextRootGeometry(LayoutUnit availableWi
 
     auto padding = logicalPadding(rootRenderer, availableWidth, writingMode);
     auto border = logicalBorder(rootRenderer, writingMode);
+    border.vertical.before += intrinsicBorder(rootRenderer);
     if (writingMode.isVertical() && !rootLayoutBox().writingMode().isBlockFlipped()) {
         padding.vertical = { padding.vertical.after, padding.vertical.before };
         border.vertical = { border.vertical.after, border.vertical.before };
@@ -780,6 +775,7 @@ Layout::ConstraintsForInlineContent BoxGeometryUpdater::formattingContextConstra
 
     auto padding = logicalPadding(rootRenderer, availableWidth, writingMode);
     auto border = logicalBorder(rootRenderer, writingMode);
+    border.vertical.before += intrinsicBorder(rootRenderer);
     if (writingMode.isVertical() && writingMode.isLineInverted()) {
         padding.vertical = { padding.vertical.after, padding.vertical.before };
         border.vertical = { border.vertical.after, border.vertical.before };
@@ -821,11 +817,10 @@ void BoxGeometryUpdater::updateBoxGeometryAfterIntegrationLayout(const Layout::E
         // FIXME: These should eventually be all absorbed by LFC layout.
         setIntegrationBaseline(*renderBox);
 
-        if (CheckedPtr renderListMarker = dynamicDowncast<RenderListMarker>(*renderBox)) {
+        if (CheckedPtr renderListMarker = dynamicDowncast<RenderListOutsideMarker>(*renderBox)) {
             CheckedRef style = layoutBox.parent().style();
             boxGeometry.setHorizontalMargin(horizontalLogicalMargin(*renderListMarker, { }, style->writingMode()));
-            if (!renderListMarker->isInside())
-                setListMarkerOffsetForMarkerOutside(*renderListMarker);
+            setListMarkerOffsetForMarkerOutside(*renderListMarker);
             const_cast<Layout::ElementBox&>(layoutBox).setListMarkerLayoutBounds(renderListMarker->layoutBounds());
         }
 
@@ -865,7 +860,7 @@ void BoxGeometryUpdater::updateBoxGeometry(const RenderElement& renderer, std::o
 
     if (auto* renderBox = dynamicDowncast<RenderBox>(renderer)) {
         updateLayoutBoxDimensions(*renderBox, availableWidth, intrinsicWidthMode);
-        if (auto* renderListMarker = dynamicDowncast<RenderListMarker>(renderer); renderListMarker && !renderListMarker->isInside())
+        if (auto* renderListMarker = dynamicDowncast<RenderListOutsideMarker>(renderer))
             setListMarkerOffsetForMarkerOutside(*renderListMarker);
         return;
     }

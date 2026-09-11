@@ -21,76 +21,58 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
 // THE POSSIBILITY OF SUCH DAMAGE.
 
-#if HAVE_APPKIT_GESTURES_SUPPORT
+#if compiler(>=6.4) && !SWIFT_WEBKIT_TOOLCHAIN
 
 import Foundation
 import WebKit_Internal
 import WebCore_Private
 
+// This is safe because all conformances to the protocol are safe as long as they don't
+// implement any of the requirements themselves.
+extension WebKit.WebPageProxy.SelectWithGestureCompletionHandler: @unsafe CxxCompletionHandler {
+    typealias Argument = WebKit.SelectWithGestureResult
+}
+
+#if HAVE_NEW_CODABLE
+// This is safe because all conformances to the protocol are safe as long as they don't
+// implement any of the requirements themselves.
+extension WebKit.WebPageProxy.RunJavaScriptInFrameCompletionHandler: CxxConsumingCompletionHandler {
+    typealias Argument = WebKit.RunJavaScriptResult
+}
+#endif // HAVE_NEW_CODABLE
+
 extension WebKit.WebPageProxy {
+    #if HAVE_NEW_CODABLE
     @MainActor
-    func selectWithGesture(
-        at point: WebCore.IntPoint,
-        type: WebKit.GestureType,
-        state: WebKit.GestureRecognizerState,
-        isInteractingWithFocusedElement: Bool
-    ) async {
-        await withCheckedContinuation { continuation in
-            selectWithGesture(
-                point,
-                type,
-                state,
-                isInteractingWithFocusedElement,
-                consuming: .init({ _, _, _, _ in continuation.resume() }, WTF.ThreadLikeAssertion(WTF.CurrentThreadLike()))
-            )
-        }
-    }
+    func runJavaScriptInMainFrame(
+        parameters: consuming WebKit.RunJavaScriptParameters,
+        wantsResult: Bool
+    ) async throws -> WebKit.JavaScriptEvaluationResult {
+        let parametersBox = unsafe CopyableBox(value: parameters)
 
-    @MainActor
-    func selectPosition(at point: WebCore.IntPoint, isInteractingWithFocusedElement: Bool) async {
-        await withCheckedContinuation { continuation in
-            selectPositionAtPoint(
-                point,
-                isInteractingWithFocusedElement,
-                consuming: .init({ continuation.resume() }, WTF.ThreadLikeAssertion(WTF.CurrentThreadLike()))
+        let box = try await withCheckedThrowingContinuation { continuation in
+            // Guaranteed to be non-nil since `take` is only called once, here.
+            // swift-format-ignore: NeverForceUnwrap
+            unsafe runJavaScriptInMainFrame(
+                consuming: parametersBox.take()!,
+                wantsResult,
+                consuming: .init { result in
+                    do {
+                        let evaluationResult = try unsafe result.consume()
+                        let box = CopyableBox(value: evaluationResult)
+                        continuation.resume(returning: box)
+                    } catch {
+                        continuation.resume(throwing: error)
+                    }
+                }
             )
         }
-    }
 
-    @MainActor
-    func selectText(
-        at point: WebCore.IntPoint,
-        by granularity: WebCore.TextGranularity,
-        isInteractingWithFocusedElement: Bool
-    ) async {
-        await withCheckedContinuation { continuation in
-            selectTextWithGranularityAtPoint(
-                point,
-                granularity,
-                isInteractingWithFocusedElement,
-                consuming: .init({ continuation.resume() }, WTF.ThreadLikeAssertion(WTF.CurrentThreadLike()))
-            )
-        }
+        // Guaranteed to be non-nil since `take` is only called once, here.
+        // swift-format-ignore: NeverForceUnwrap
+        return box.take()!
     }
-
-    @MainActor
-    @discardableResult
-    func updateSelection(
-        withExtentPoint point: WebCore.IntPoint,
-        by granularity: WebCore.TextGranularity,
-        isInteractingWithFocusedElement: Bool,
-        source: WebKit.TextInteractionSource,
-    ) async -> Bool {
-        await withCheckedContinuation { continuation in
-            updateSelectionWithExtentPointAndBoundary(
-                point,
-                granularity,
-                isInteractingWithFocusedElement,
-                source,
-                consuming: .init({ continuation.resume(returning: $0) }, WTF.ThreadLikeAssertion(WTF.CurrentThreadLike()))
-            )
-        }
-    }
+    #endif // HAVE_NEW_CODABLE
 
     private borrowing func editorStateCopy() -> WebKit.EditorState {
         unsafe __editorStateUnsafe().pointee
@@ -101,4 +83,4 @@ extension WebKit.WebPageProxy {
     }
 }
 
-#endif // HAVE_APPKIT_GESTURES_SUPPORT
+#endif // compiler(>=6.4) && !SWIFT_WEBKIT_TOOLCHAIN

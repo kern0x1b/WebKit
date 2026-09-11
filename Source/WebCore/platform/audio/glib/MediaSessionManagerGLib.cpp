@@ -31,6 +31,7 @@
 #include "PlatformMediaSession.h"
 #include "PlatformStrategies.h"
 #include <gio/gio.h>
+#include <wtf/RunLoop.h>
 #include <wtf/TZoneMallocInlines.h>
 #include <wtf/glib/GUniquePtr.h>
 
@@ -140,6 +141,12 @@ MediaSessionManagerGLib::MediaSessionManagerGLib(GRefPtr<GDBusNodeInfo>&& mprisI
 
 MediaSessionManagerGLib::~MediaSessionManagerGLib() = default;
 
+void MediaSessionManagerGLib::resetToConsistentStateForTesting()
+{
+    PlatformMediaSessionManager::resetToConsistentStateForTesting();
+    setDBusNotificationsEnabled(false);
+}
+
 void MediaSessionManagerGLib::beginInterruption(PlatformMediaSession::InterruptionType type)
 {
     if (type == PlatformMediaSession::InterruptionType::SystemInterruption) {
@@ -163,18 +170,9 @@ void MediaSessionManagerGLib::scheduleSessionStatusUpdate()
     });
 }
 
-void MediaSessionManagerGLib::sessionWillBeginPlayback(PlatformMediaSessionInterface& session, CompletionHandler<void(bool)>&& completionHandler)
+void MediaSessionManagerGLib::sessionDidCompleteAdmission(PlatformMediaSessionInterface&)
 {
-    PlatformMediaSessionManager::sessionWillBeginPlayback(session, [weakThis = ThreadSafeWeakPtr { *this }, completionHandler = WTF::move(completionHandler)](bool willBegin) mutable {
-        RefPtr protectedThis = weakThis.get();
-        if (!protectedThis || !willBegin) {
-            completionHandler(false);
-            return;
-        }
-
-        protectedThis->scheduleSessionStatusUpdate();
-        completionHandler(true);
-    });
+    scheduleSessionStatusUpdate();
 }
 
 void MediaSessionManagerGLib::sessionDidEndRemoteScrubbing(PlatformMediaSessionInterface&)
@@ -309,7 +307,7 @@ void MediaSessionManagerGLib::updateNowPlayingInfo()
     if (!platformSession) {
         if (m_registeredAsNowPlayingApplication) {
             ALWAYS_LOG(LOGIDENTIFIER, "clearing now playing info");
-            m_nowPlayingManager->clearNowPlayingInfo();
+            m_nowPlayingManager->clearNowPlayingInfoForPage(pageIdentifier());
         }
 
         m_registeredAsNowPlayingApplication = false;
@@ -349,7 +347,7 @@ void MediaSessionManagerGLib::updateNowPlayingInfo()
     m_lastUpdatedNowPlayingInfoUniqueIdentifier = nowPlayingInfo->uniqueIdentifier;
 
     double currentTime = nowPlayingInfo->currentTime;
-    if (std::isfinite(currentTime) && currentTime != MediaPlayer::invalidTime() && nowPlayingInfo->supportsSeeking)
+    if (std::isfinite(currentTime) && currentTime != MediaPlayer::invalidTime())
         m_lastUpdatedNowPlayingElapsedTime = currentTime;
 
     m_nowPlayingActive = nowPlayingInfo->allowsNowPlayingControlsVisibility;

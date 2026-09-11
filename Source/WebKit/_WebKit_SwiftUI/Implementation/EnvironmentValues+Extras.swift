@@ -67,6 +67,15 @@ extension EnvironmentValues {
     @Entry
     var webViewImmersiveEnvironmentRequestContext: ImmersiveEnvironmentRequestContext? = nil
     #endif
+
+    @Entry
+    var webViewContentEnvironment = WebView.ContentEnvironment_v0.standard
+
+    @Entry
+    var webViewViewportConfiguration: WebView.ViewportConfiguration_v0? = nil
+
+    @Entry
+    var webViewOnAttachmentActivityPhaseContext: OnAttachmentActivityPhaseContext? = nil
 }
 
 #endif

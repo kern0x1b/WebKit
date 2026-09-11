@@ -88,7 +88,7 @@ public:
     void legibleMediaSelectionOptionsChanged(const Vector<WebCore::MediaSelectionOption>& options, uint64_t index);
     void audioMediaSelectionIndexChanged(uint64_t selectedIndex);
     void legibleMediaSelectionIndexChanged(uint64_t selectedIndex);
-    void externalPlaybackChanged(bool, PlaybackSessionModel::ExternalPlaybackTargetType, const String&);
+    void externalPlaybackChanged(bool, PlaybackSessionModel::ExternalPlaybackTargetType, const String&, const String&);
     void wirelessVideoPlaybackDisabledChanged(bool);
     void mutedChanged(bool);
     void volumeChanged(double);
@@ -176,6 +176,7 @@ private:
     bool externalPlaybackEnabled() const final { return m_externalPlaybackEnabled; }
     PlaybackSessionModel::ExternalPlaybackTargetType externalPlaybackTargetType() const final { return m_externalPlaybackTargetType; }
     String externalPlaybackLocalizedDeviceName() const final { return m_externalPlaybackLocalizedDeviceName; }
+    String externalPlaybackLocalizedRouteName() const final { return m_externalPlaybackLocalizedRouteName; }
     bool isMuted() const final { return m_muted; }
     double volume() const final { return m_volume; }
     bool isPictureInPictureSupported() const final { return m_pictureInPictureSupported; }
@@ -225,6 +226,7 @@ private:
     bool m_externalPlaybackEnabled { false };
     PlaybackSessionModel::ExternalPlaybackTargetType m_externalPlaybackTargetType { PlaybackSessionModel::ExternalPlaybackTargetType::TargetTypeNone };
     String m_externalPlaybackLocalizedDeviceName;
+    String m_externalPlaybackLocalizedRouteName;
     bool m_wirelessVideoPlaybackDisabled { false };
     bool m_muted { false };
     double m_volume { 0 };
@@ -269,6 +271,7 @@ public:
 
     // For testing.
     bool wirelessVideoPlaybackDisabled();
+    WebCore::PlatformTimeRanges seekableRanges();
 
 private:
     friend class PlaybackSessionModelContext;
@@ -285,40 +288,44 @@ private:
     const ModelInterfaceTuple& ensureModelAndInterface(PlaybackSessionContextIdentifier);
     Ref<PlaybackSessionModelContext> ensureModel(PlaybackSessionContextIdentifier);
     WebCore::PlatformPlaybackSessionInterface& ensureInterface(PlaybackSessionContextIdentifier);
+
+    // Qualifies an identifier from IPC with the sending process rather than trusting the sender.
+    PlaybackSessionContextIdentifier contextIdForConnection(IPC::Connection&, WebCore::HTMLMediaElementIdentifier) const;
+    Ref<PlaybackSessionModelContext> ensureModel(IPC::Connection&, WebCore::HTMLMediaElementIdentifier);
     void addClientForContext(PlaybackSessionContextIdentifier);
     void removeClientForContext(PlaybackSessionContextIdentifier);
 
     std::optional<PlaybackSessionContextIdentifier> controlsManagerContextId() const { return m_controlsManagerContextId; }
 
     // Messages from PlaybackSessionManager
-    void setUpPlaybackControlsManagerWithID(PlaybackSessionContextIdentifier, bool isVideo);
+    void setUpPlaybackControlsManagerWithID(IPC::Connection&, WebCore::HTMLMediaElementIdentifier, bool isVideo);
     void clearPlaybackControlsManager();
-    void swapFullscreenModes(PlaybackSessionContextIdentifier, PlaybackSessionContextIdentifier);
-    void currentTimeChanged(PlaybackSessionContextIdentifier, double currentTime, double hostTime);
-    void bufferedTimeChanged(PlaybackSessionContextIdentifier, double bufferedTime);
-    void seekableRangesVectorChanged(PlaybackSessionContextIdentifier, const WebCore::PlatformTimeRanges&, double lastModifiedTime, double liveUpdateInterval);
-    void canPlayFastReverseChanged(PlaybackSessionContextIdentifier, bool value);
-    void audioMediaSelectionOptionsChanged(PlaybackSessionContextIdentifier, Vector<WebCore::MediaSelectionOption> options, uint64_t selectedIndex);
-    void legibleMediaSelectionOptionsChanged(PlaybackSessionContextIdentifier, Vector<WebCore::MediaSelectionOption> options, uint64_t selectedIndex);
-    void audioMediaSelectionIndexChanged(PlaybackSessionContextIdentifier, uint64_t selectedIndex);
-    void legibleMediaSelectionIndexChanged(PlaybackSessionContextIdentifier, uint64_t selectedIndex);
-    void externalPlaybackPropertiesChanged(PlaybackSessionContextIdentifier, bool enabled, WebCore::PlaybackSessionModel::ExternalPlaybackTargetType, String localizedDeviceName);
-    void wirelessVideoPlaybackDisabledChanged(PlaybackSessionContextIdentifier, bool);
-    void durationChanged(PlaybackSessionContextIdentifier, double duration);
-    void playbackStartedTimeChanged(PlaybackSessionContextIdentifier, double playbackStartedTime);
-    void rateChanged(PlaybackSessionContextIdentifier, OptionSet<WebCore::PlaybackSessionModel::PlaybackState>, double rate, double defaultPlaybackRate);
-    void handleControlledElementIDResponse(PlaybackSessionContextIdentifier, String) const;
-    void mutedChanged(PlaybackSessionContextIdentifier, bool muted);
-    void volumeChanged(PlaybackSessionContextIdentifier, double volume);
-    void pictureInPictureSupportedChanged(PlaybackSessionContextIdentifier, bool pictureInPictureSupported);
-    void isInWindowFullscreenActiveChanged(PlaybackSessionContextIdentifier, bool isInWindow);
+    void swapFullscreenModes(IPC::Connection&, WebCore::HTMLMediaElementIdentifier, WebCore::HTMLMediaElementIdentifier);
+    void currentTimeChanged(IPC::Connection&, WebCore::HTMLMediaElementIdentifier, double currentTime, double hostTime);
+    void bufferedTimeChanged(IPC::Connection&, WebCore::HTMLMediaElementIdentifier, double bufferedTime);
+    void seekableRangesVectorChanged(IPC::Connection&, WebCore::HTMLMediaElementIdentifier, const WebCore::PlatformTimeRanges&, double lastModifiedTime, double liveUpdateInterval);
+    void canPlayFastReverseChanged(IPC::Connection&, WebCore::HTMLMediaElementIdentifier, bool value);
+    void audioMediaSelectionOptionsChanged(IPC::Connection&, WebCore::HTMLMediaElementIdentifier, Vector<WebCore::MediaSelectionOption> options, uint64_t selectedIndex);
+    void legibleMediaSelectionOptionsChanged(IPC::Connection&, WebCore::HTMLMediaElementIdentifier, Vector<WebCore::MediaSelectionOption> options, uint64_t selectedIndex);
+    void audioMediaSelectionIndexChanged(IPC::Connection&, WebCore::HTMLMediaElementIdentifier, uint64_t selectedIndex);
+    void legibleMediaSelectionIndexChanged(IPC::Connection&, WebCore::HTMLMediaElementIdentifier, uint64_t selectedIndex);
+    void externalPlaybackPropertiesChanged(IPC::Connection&, WebCore::HTMLMediaElementIdentifier, bool enabled, WebCore::PlaybackSessionModel::ExternalPlaybackTargetType, String localizedDeviceName, String localizedRouteName);
+    void wirelessVideoPlaybackDisabledChanged(IPC::Connection&, WebCore::HTMLMediaElementIdentifier, bool);
+    void durationChanged(IPC::Connection&, WebCore::HTMLMediaElementIdentifier, double duration);
+    void playbackStartedTimeChanged(IPC::Connection&, WebCore::HTMLMediaElementIdentifier, double playbackStartedTime);
+    void rateChanged(IPC::Connection&, WebCore::HTMLMediaElementIdentifier, OptionSet<WebCore::PlaybackSessionModel::PlaybackState>, double rate, double defaultPlaybackRate);
+    void handleControlledElementIDResponse(IPC::Connection&, WebCore::HTMLMediaElementIdentifier, String) const;
+    void mutedChanged(IPC::Connection&, WebCore::HTMLMediaElementIdentifier, bool muted);
+    void volumeChanged(IPC::Connection&, WebCore::HTMLMediaElementIdentifier, double volume);
+    void pictureInPictureSupportedChanged(IPC::Connection&, WebCore::HTMLMediaElementIdentifier, bool pictureInPictureSupported);
+    void isInWindowFullscreenActiveChanged(IPC::Connection&, WebCore::HTMLMediaElementIdentifier, bool isInWindow);
 #if HAVE(PIP_SKIP_PREROLL)
-    void canSkipAdChanged(PlaybackSessionContextIdentifier, bool value);
+    void canSkipAdChanged(IPC::Connection&, WebCore::HTMLMediaElementIdentifier, bool value);
 #endif
 #if ENABLE(LINEAR_MEDIA_PLAYER)
-    void supportsLinearMediaPlayerChanged(PlaybackSessionContextIdentifier, bool);
+    void supportsLinearMediaPlayerChanged(IPC::Connection&, WebCore::HTMLMediaElementIdentifier, bool);
 #endif
-    void immersiveVideoMetadataChanged(PlaybackSessionContextIdentifier, const std::optional<WebCore::ImmersiveVideoMetadata>&);
+    void immersiveVideoMetadataChanged(IPC::Connection&, WebCore::HTMLMediaElementIdentifier, const std::optional<WebCore::ImmersiveVideoMetadata>&);
 
     // Messages to PlaybackSessionManager
 #if HAVE(PIP_SKIP_PREROLL)
@@ -364,7 +371,7 @@ private:
     void updateVideoControlsManager(PlaybackSessionContextIdentifier);
 
 #if !RELEASE_LOG_DISABLED
-    void setLogIdentifier(PlaybackSessionContextIdentifier, uint64_t);
+    void setLogIdentifier(IPC::Connection&, WebCore::HTMLMediaElementIdentifier, uint64_t);
 
     const Logger& logger() const { return m_logger; }
     uint64_t logIdentifier() const { return m_logIdentifier; }

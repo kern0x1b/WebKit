@@ -25,67 +25,129 @@ import json
 import time
 
 from cassandra.cqlengine import columns
+from cassandra.cqlengine.models import Model
 from datetime import datetime
-from resultsdbpy.model.commit_context import CommitContext
+
 from resultsdbpy.model.configuration_context import ClusteredByConfiguration
-from resultsdbpy.model.test_context import Expectations
 from resultsdbpy.model.upload_context import UploadCallbackContext
 
 
-TTL_SECONDS = 30 * 24 * 60 * 60
-FLAKY_TTL_SECONDS = 7 * 24 * 60 * 60
-
-
 class EWSContext(UploadCallbackContext):
-    DEFAULT_LIMIT = 100
+    FLAKY_TTL_SECONDS = 90 * 24 * 60 * 60
 
     class EWSResultsBase(ClusteredByConfiguration):
         suite = columns.Text(partition_key=True, required=True)
         branch = columns.Text(partition_key=True, required=True)
-        uuid = columns.BigInt(primary_key=True, required=True, clustering_order='DESC')
-        start_time = columns.DateTime(primary_key=True, required=True)
-        result = columns.Integer(required=True)
-        remote = columns.Text(required=False)
-        pr_number = columns.Integer(required=False)
-        commit_hash = columns.Text(required=False)
-        details = columns.Text(required=False)  # Catch all json blob after deploy
+        test = columns.Text(partition_key=True, required=True)
+
+        start_time = columns.DateTime(primary_key=True, required=True, clustering_order='DESC')
+        uuid = columns.BigInt(primary_key=True, required=True)
+
+        result = columns.Text(required=True)  # JSON run-webkit-tests result leaf
+        details = columns.Text(required=False)  # Catch-all JSON blob: {authors, pr_number, build_number, build_url, ...}
 
         def unpack(self):
             results = dict(
                 uuid=self.uuid,
                 start_time=calendar.timegm(self.start_time.timetuple()),
-                result=Expectations.state_ids_to_string([self.result]),
+                result=json.loads(self.result),
             )
-            if self.remote:
-                results['remote'] = self.remote
-            if self.pr_number is not None:
-                results['pr_number'] = self.pr_number
-            if self.commit_hash:
-                results['commit_hash'] = self.commit_hash
             if self.details:
                 results['details'] = json.loads(self.details)
             return results
 
-    class EWSFailedTestsByCommit(EWSResultsBase):
-        # test in the partition: one test's failure history is a single-partition read.
-        __table_name__ = 'ews_failed_tests_by_commit'
-        test = columns.Text(partition_key=True, required=True)
+    class EWSFailedTestsByStartTime(EWSResultsBase):
+        __table_name__ = 'ews_failed_tests_by_start_time'
 
-    class EWSFlakyTestsByCommit(EWSResultsBase):
-        # test as the leading clustering key: the (configuration, suite, branch) partition
-        # holds the small set of flaky tests, so we can list them all or check one cheaply.
-        __table_name__ = 'ews_flaky_tests_by_commit'
-        test = columns.Text(primary_key=True, required=True)
-        flaky_type = columns.Text(required=True)  # InterStep, IntraStep, etc.
+    class EWSFlakesByStartTime(EWSResultsBase):
+        __table_name__ = 'ews_flakes_by_start_time'
+        flaky_type = columns.Text(primary_key=True, required=True)
 
         def unpack(self):
             results = super().unpack()
             results['flaky_type'] = self.flaky_type
             return results
 
+    class EWSTestNameBySuite(Model):
+        """Which tests each table holds, across every configuration and branch."""
+        __table_name__ = 'ews_test_names_by_suite'
+        suite = columns.Text(partition_key=True, required=True)
+        flaky = columns.Boolean(partition_key=True, required=True)
+        test = columns.Text(primary_key=True, required=True)
+
     def __init__(self, *args, **kwargs):
         super(EWSContext, self).__init__('ews-results', *args, **kwargs)
 
         with self:
-            self.cassandra.create_table(self.EWSFailedTestsByCommit)
-            self.cassandra.create_table(self.EWSFlakyTestsByCommit)
+            self.cassandra.create_table(self.EWSFailedTestsByStartTime)
+            self.cassandra.create_table(self.EWSFlakesByStartTime)
+            self.cassandra.create_table(self.EWSTestNameBySuite)
+
+    def record_results(self, configuration, commits, suite, test_results, timestamp=None, flaky_type=None, details=None):
+        stored = set()
+        uuid = self.commit_context.uuid_for_commits(commits)
+        timestamp = timestamp or time.time()
+        if isinstance(timestamp, datetime):
+            timestamp = calendar.timegm(timestamp.timetuple())
+
+        # Not relative to commit timestamp since an old commit may cause the short FLAKY TTL to expire immediately.
+        ttl = self.FLAKY_TTL_SECONDS if flaky_type is not None else self.ttl_seconds
+        ttl = int(ttl) if ttl else None
+
+        extra = dict(flaky_type=flaky_type) if flaky_type is not None else {}
+        table = self.EWSFlakesByStartTime if flaky_type is not None else self.EWSFailedTestsByStartTime
+
+        with self, self.cassandra.batch_query_context():
+            for branch in self.commit_context.branch_keys_for_commits(commits):
+                for test, result in (test_results.get('results') or {}).items():
+                    self.configuration_context.insert_row_with_configuration(
+                        table.__table_name__, configuration=configuration, suite=suite, branch=branch,
+                        test=test, result=json.dumps(result),
+                        uuid=uuid, start_time=timestamp, ttl=ttl,
+                        details=json.dumps(details) if details else None,
+                        **extra,
+                    )
+                    stored.add(test)
+                self.configuration_context.register_configuration(configuration, branch=branch, timestamp=timestamp)
+
+            for test in stored:
+                self.cassandra.insert_row(
+                    self.EWSTestNameBySuite.__table_name__,
+                    suite=suite, flaky=flaky_type is not None, test=test, ttl=ttl,
+                )
+        return sorted(stored)
+
+    def names(self, suite, flaky, test=None, limit=100):
+        """Test names recorded for a suite, optionally restricted to a name prefix."""
+        with self:
+            args = {'suite': suite, 'flaky': flaky, 'limit': limit}
+            if test:
+                args.update(test__gte=test, test__lte=test + '~')
+            return [row.test for row in self.cassandra.select_from_table(self.EWSTestNameBySuite.__table_name__, **args)]
+
+    def find_for_tests(self, configurations, suite, tests, flaky, branch=None, recent=True, begin_query_time=None, end_query_time=None, limit=100):
+        """Results for several tests at once, keyed by test name."""
+        table = self.EWSFlakesByStartTime if flaky else self.EWSFailedTestsByStartTime
+
+        def get_time(time):
+            return time if isinstance(time, datetime) else datetime.utcfromtimestamp(int(time)) if time else None
+
+        found = {}
+        with self:
+            branch = branch or self.commit_context.DEFAULT_BRANCH_KEY
+            complete_configurations = self.configuration_context.complete_configurations_for(
+                configurations, branch=branch, recent=recent,
+            )
+            for test in tests:
+                by_configuration = {
+                    config: [row.unpack() for row in rows]
+                    for config, rows in self.configuration_context.select_from_table_with_complete_configurations(
+                        table.__table_name__, complete_configurations,
+                        suite=suite, branch=branch, test=test,
+                        start_time__gte=get_time(begin_query_time), start_time__lte=get_time(end_query_time),
+                        limit=limit,
+                    ).items()
+                }
+                if by_configuration:
+                    found[test] = by_configuration
+        return found

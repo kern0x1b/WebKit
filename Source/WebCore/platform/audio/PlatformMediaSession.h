@@ -54,7 +54,8 @@ public:
     void endInterruption(OptionSet<EndInterruptionFlags>) final;
 
     void clientWillBeginAutoplaying() override;
-    void clientWillBeginPlayback(CompletionHandler<void(bool)>&&) override;
+    Ref<GenericPromise> clientWillBeginPlayback() override;
+    bool commitPlaybackAdmission(State stateAtStart) override;
     bool clientWillPausePlayback() override;
 
     void clientWillBeDOMSuspended() final;
@@ -71,7 +72,7 @@ public:
     bool activeAudioSessionRequired() const final;
     void canProduceAudioChanged() final;
 
-    bool preparingToPlay() const final { return m_preparingToPlay; }
+    bool preparingToPlay() const override;
 
 #if !RELEASE_LOG_DISABLED
     const Logger& logger() const override;

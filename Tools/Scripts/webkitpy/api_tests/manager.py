@@ -26,7 +26,7 @@ import os
 import re
 import time
 
-from webkitpy.api_tests.runner import Runner
+from webkitpy.api_tests.runner import EarlyExitException, Runner
 from webkitpy.api_tests.test_expectations import (
     APITestExpectations, PASS, FAIL, CRASH, TIMEOUT,
     runner_status_to_expectation,
@@ -360,9 +360,12 @@ class Manager(object):
         try:
             _log.info('Running tests')
             runner = Runner(self._port, self._stream, expectations=self._expectations)
+            runner.exit_after_n_failures = getattr(self._options, 'exit_after_n_failures', None)
             for i in range(self._options.iterations):
                 _log.debug(f'\nIteration {i + 1}')
                 runner.run(test_names, int(self._options.child_processes) if self._options.child_processes else None)
+        except EarlyExitException as e:
+            self._stream.writeln(f'\nExiting early after {e.failure_count} failures.')
         except KeyboardInterrupt:
             # If we receive a KeyboardInterrupt, print results.
             self._stream.writeln('')
@@ -490,6 +493,25 @@ class Manager(object):
                 result_dictionary['UnexpectedPasses'].append({'name': test})
             self._stream.writeln('')
 
+        status_to_test_result = {
+            runner.STATUS_PASSED: None,
+            runner.STATUS_FAILED: Upload.Expectations.FAIL,
+            runner.STATUS_CRASHED: Upload.Expectations.CRASH,
+            runner.STATUS_TIMEOUT: Upload.Expectations.TIMEOUT,
+        }
+        upload_results = {}
+        for test, test_result in iteritems(runner.results):
+            if test_result[0] not in status_to_test_result:
+                continue
+            upload_results[test] = Upload.create_test_result(
+                expected=self._expected_results_for_upload(self._expectations.get_expectation(test, current_config)),
+                actual=status_to_test_result[test_result[0]],
+                time=int(test_result[2] * 1000),
+            )
+
+        # A passing test has no 'actual' and passing tests are not worth the size when reporting.
+        result_dictionary['results'] = {test: test_result for test, test_result in upload_results.items() if test_result.get('actual')}
+
         if json_output:
             self.host.filesystem.write_text_file(json_output, json.dumps(result_dictionary, indent=4))
 
@@ -497,21 +519,6 @@ class Manager(object):
             self._stream.writeln('\n')
             self._stream.write_update('Preparing upload data ...')
 
-            status_to_test_result = {
-                runner.STATUS_PASSED: None,
-                runner.STATUS_FAILED: Upload.Expectations.FAIL,
-                runner.STATUS_CRASHED: Upload.Expectations.CRASH,
-                runner.STATUS_TIMEOUT: Upload.Expectations.TIMEOUT,
-            }
-            upload_results = {}
-            for test, result in iteritems(runner.results):
-                if result[0] not in status_to_test_result:
-                    continue
-                upload_results[test] = Upload.create_test_result(
-                    expected=self._expected_results_for_upload(self._expectations.get_expectation(test, current_config)),
-                    actual=status_to_test_result[result[0]],
-                    time=int(result[2] * 1000),
-                )
             upload = Upload(
                 suite=self._options.suite or 'api-tests',
                 configuration=configuration_for_upload,

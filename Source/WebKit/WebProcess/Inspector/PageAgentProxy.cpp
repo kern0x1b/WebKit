@@ -36,16 +36,25 @@
 #include "WebPage.h"
 #include "WebProcess.h"
 #include <WebCore/Document.h>
+#include <WebCore/DocumentLoader.h>
+#include <WebCore/DocumentView.h>
 #include <WebCore/ElementInlines.h>
+#include <WebCore/FloatRect.h>
 #include <WebCore/FrameDestructionObserverInlines.h>
 #include <WebCore/FrameInlines.h>
+#include <WebCore/FrameLoader.h>
 #include <WebCore/FrameTree.h>
 #include <WebCore/HTMLFrameOwnerElement.h>
 #include <WebCore/HTMLNames.h>
+#include <WebCore/InspectorBackendClient.h>
 #include <WebCore/InspectorIdentifierRegistry.h>
+#include <WebCore/InstrumentingAgents.h>
+#include <WebCore/LayoutRect.h>
 #include <WebCore/LocalFrameInlines.h>
+#include <WebCore/LocalFrameView.h>
 #include <WebCore/Page.h>
 #include <WebCore/PageInspectorController.h>
+#include <WebCore/RenderObjectInlines.h>
 #include <WebCore/SecurityOrigin.h>
 #include <WebCore/SecurityOriginData.h>
 #include <wtf/Stopwatch.h>
@@ -70,7 +79,7 @@ PageAgentProxy::~PageAgentProxy()
     // Clear the enabledPageProxy slot on our InstrumentingAgents so a later frame commit
     // doesn't dereference this freed proxy from InspectorInstrumentation. Mirrors
     // FrameNetworkAgentProxy::~FrameNetworkAgentProxy().
-    disable();
+    std::ignore = disable();
 }
 
 void PageAgentProxy::didCreateFrontendAndBackend()
@@ -79,7 +88,7 @@ void PageAgentProxy::didCreateFrontendAndBackend()
 
 void PageAgentProxy::willDestroyFrontendAndBackend(Inspector::DisconnectReason)
 {
-    disable();
+    std::ignore = disable();
 }
 
 CommandResult<void> PageAgentProxy::enable()
@@ -148,11 +157,18 @@ void PageAgentProxy::frameNavigated(LocalFrame& frame)
             name = ownerElement->attributeWithoutSynchronization(WebCore::HTMLNames::idAttr);
     }
 
-    // Send the committed document's ScriptExecutionContextIdentifier as the loaderId; the
-    // UIProcess derives the deterministic, hosting-process-qualified protocol loaderId string
-    // from it (consistent across processes, unlike the per-process IdentifierRegistry loaderId).
-    // See webkit.org/b/308895.
-    auto loaderId = document->identifier();
+    // Send the loaderId for the just-committed DocumentLoader. The registry memoizes one string
+    // per loader, so this matches the id the network path already reported for the same loader.
+    Ref inspectedPage = m_inspectedPage.get();
+    Ref registry = inspectedPage->inspectorController().identifierRegistry();
+    RefPtr documentLoader = frame.loader().documentLoader();
+    auto loaderId = registry->loaderId(documentLoader.get());
+
+    // The frameId reported to the frontend is computed in the UIProcess from the FrameIdentifier
+    // below, so nothing in this process assigns one. Register the frame here so that commands the
+    // in-process agents still serve (Page.getResourceContent, Page.searchInResource, and the CSS and
+    // DOM commands that take a frameId) can resolve it through frameForId() / assertFrame().
+    registry->registerFrame(frame);
 
     RefPtr connection = WebProcess::singleton().parentProcessConnection();
     if (!connection)
@@ -202,8 +218,41 @@ void PageAgentProxy::didClearWindowObjectInWorld(LocalFrame&, DOMWrapperWorld&)
 {
 }
 
-void PageAgentProxy::didPaint(RenderObject&, const LayoutRect&)
+void PageAgentProxy::didPaint(RenderObject& renderer, const LayoutRect& rect)
 {
+    if (!m_showPaintRects)
+        return;
+
+    // The main-frame process has a real, enabled InspectorPageAgent that already drew this paint via
+    // the enabledPageAgent() branch in didPaintImpl; drawing again here would double-flash it. This
+    // proxy only draws where no real page agent is enabled -- the cross-origin subframe processes.
+    Ref agents = m_instrumentingAgents.get();
+    if (agents->enabledPageAgent())
+        return;
+
+    Ref inspectedPage = m_inspectedPage.get();
+    auto* client = inspectedPage->inspectorController().inspectorBackendClient();
+    if (!client)
+        return;
+
+    RefPtr view = renderer.document().view();
+    if (!view)
+        return;
+
+    // Draw in this frame's own contents coordinate space. The overlay's layer lives inside the
+    // scrolled-contents layer that the compositor already offsets by -scrollPosition, so passing
+    // contents coords applies that offset exactly once. Do NOT convert with contentsToRootView()
+    // (double-counts scroll) or remap through the main frame (it is a RemoteFrame here).
+    // FIXME: localToAbsoluteQuad is frame-local, so coords are in the painting frame's own space --
+    // correct only when that frame is its own local root. A same-site child frame nested inside a
+    // local root in the same process, or a local subframe reached through a remote ancestor, is
+    // drawn at the wrong offset. See webkit.org/b/308899.
+    LayoutRect absoluteRect = LayoutRect(renderer.localToAbsoluteQuad(FloatRect(rect)).boundingBox());
+
+    // Scope to this frame's local root: the overlay for that root is attached to its own compositing
+    // tree, so sibling local roots in one process each flash independently.
+    Ref rootFrame = view->frame().rootFrame();
+    client->showPaintRect(rootFrame.get(), snappedIntRect(absoluteRect));
 }
 
 void PageAgentProxy::didLayout()

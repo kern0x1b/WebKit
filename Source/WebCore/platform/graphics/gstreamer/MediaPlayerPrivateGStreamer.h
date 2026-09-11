@@ -176,7 +176,7 @@ public:
     AudioSourceProvider* audioSourceProvider() final;
 #endif
     void paint(GraphicsContext&, const FloatRect&) final;
-    DestinationColorSpace colorSpace() final;
+    ColorSpace colorSpace() final;
     bool supportsFullscreen() const final;
     MediaPlayer::MovieLoadType movieLoadType() const final;
 
@@ -191,8 +191,10 @@ public:
     GstElement* pipeline() const { return m_pipeline.get(); }
 
 #if USE(COORDINATED_GRAPHICS)
-    PlatformLayer* NODELETE platformLayer() const override;
+    PlatformLayer* NODELETE platformLayer() const override { return nullptr; }
     bool supportsAcceleratedRendering() const override { return true; }
+    void setPlatformLayerBufferProxy(Ref<CoordinatedPlatformLayerBufferProxy>&&) override;
+    RefPtr<CoordinatedPlatformLayerBufferProxy> platformLayerBufferProxy() const override;
 #endif
 
 #if ENABLE(ENCRYPTED_MEDIA)
@@ -311,9 +313,11 @@ protected:
     virtual void sourceSetup(GstElement*);
     virtual void updatePlaybackRate();
 
+    enum class IsInitialBuffer : bool { No, Yes };
+
     bool isHolePunchRenderingEnabled() const;
     GstElement* createHolePunchVideoSink();
-    void pushNextHolePunchBuffer();
+    void pushNextHolePunchBuffer(IsInitialBuffer = IsInitialBuffer::No);
     bool shouldIgnoreIntrinsicSize() final;
 
 #if USE(GSTREAMER_GL)
@@ -321,7 +325,8 @@ protected:
 #endif
 
 #if USE(COORDINATED_GRAPHICS)
-    void pushTextureToCompositor(bool isDuplicateSample);
+    enum class IsDuplicateSample : bool { No, Yes };
+    void pushTextureToCompositor(IsDuplicateSample, IsInitialBuffer = IsInitialBuffer::No);
 #endif
 
     GstElement* videoSink() const { return m_videoSink.get(); }
@@ -354,9 +359,7 @@ protected:
     void loadingFailed(MediaPlayer::NetworkState, MediaPlayer::ReadyState = MediaPlayer::ReadyState::HaveNothing, bool forceNotifications = false);
     void loadStateChanged();
 
-#if USE(TEXTURE_MAPPER)
     void updateTextureMapperFlags();
-#endif
 
     void setCachedPosition(const MediaTime&) const;
 
@@ -414,9 +417,7 @@ protected:
     // Reflects whether the pipeline was suspended due to the HTMLMediaElement being both muted and invisible in the viewport.
     bool isSuspended() const { return m_isSuspended; };
 
-#if USE(TEXTURE_MAPPER)
     OptionSet<TextureMapperFlags> m_textureMapperFlags;
-#endif
 
     GRefPtr<GstElement> m_audioSink;
     GRefPtr<GstElement> m_videoSink;
@@ -463,13 +464,7 @@ protected:
 
     String errorMessage() const override { return m_errorMessage; }
 
-    void incrementDecodedVideoFramesCount() { m_decodedVideoFrames++; }
-    uint64_t decodedVideoFramesCount() const { return m_decodedVideoFrames; }
-
     bool updateVideoSinkStatistics();
-
-    uint64_t m_framesReceived { 0 };
-    uint64_t m_decodedKeyFrames { 0 };
 
 private:
     class TaskAtMediaTimeScheduler {
@@ -662,11 +657,6 @@ private:
 
     uint64_t m_totalVideoFrames { 0 };
     uint64_t m_droppedVideoFrames { 0 };
-    uint64_t m_decodedVideoFrames { 0 };
-    double m_averageFrameRate { 0 };
-
-    // https://www.w3.org/TR/webrtc-stats/#dom-rtcinboundrtpstreamstats-totaldecodetime
-    MediaTime m_totalVideoDecodeTime { MediaTime::zeroTime() };
 
     DataMutex<TaskAtMediaTimeScheduler> m_TaskAtMediaTimeSchedulerDataMutex;
 
@@ -705,7 +695,6 @@ private:
     // Specific to MediaStream playback.
     MediaTime m_startTime;
     std::optional<MediaTime> m_pausedTime;
-    String m_videoDecoderName;
 
     void setupCodecProbe(GstElement*);
     Lock m_decoderConfigurationLock;
@@ -719,8 +708,6 @@ private:
     HashMap<const GStreamerQuirk*, std::unique_ptr<GStreamerQuirkBase::GStreamerQuirkState>> m_quirkStates;
 
     std::optional<VideoFrameGStreamer::Info> m_videoInfo;
-    RefPtr<PadProbeHandle<MediaPlayerPrivateGStreamer>> m_videoFrameInputProbe WTF_GUARDED_BY_LOCK(m_decoderConfigurationLock);
-    RefPtr<PadProbeHandle<MediaPlayerPrivateGStreamer>> m_videoFrameOutputProbe WTF_GUARDED_BY_LOCK(m_decoderConfigurationLock);
 
     bool m_volumeLocked { false };
 

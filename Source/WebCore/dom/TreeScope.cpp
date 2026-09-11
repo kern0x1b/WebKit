@@ -370,7 +370,7 @@ static std::optional<LayoutPoint> absolutePointIfNotClipped(Document& document, 
     const auto& settings = document.frame()->settings();
     if (settings.visualViewportEnabled() && settings.clientCoordinatesRelativeToLayoutViewport()) {
         document.updateLayout();
-        if (!document.view() || !document.hasLivingRenderTree())
+        if (!document.view() || document.renderTreeState() != Document::RenderTreeState::Built)
             return std::nullopt;
         RefPtr view = document.view();
         FloatPoint layoutViewportPoint = view->clientToLayoutViewportPoint(clientPoint);
@@ -415,7 +415,7 @@ RefPtr<Node> TreeScope::nodeFromPoint(const LayoutPoint& clientPoint, LayoutPoin
 
 RefPtr<Element> TreeScope::elementFromPoint(double clientX, double clientY, HitTestSource source)
 {
-    if (!documentScope().hasLivingRenderTree())
+    if (documentScope().renderTreeState() != Document::RenderTreeState::Built)
         return nullptr;
 
     auto node = nodeFromPoint(LayoutPoint { clientX, clientY }, nullptr, source);
@@ -438,7 +438,7 @@ Vector<Ref<Element>> TreeScope::elementsFromPoint(double clientX, double clientY
     Vector<Ref<Element>> elements;
 
     Ref document = documentScope();
-    if (!document->hasLivingRenderTree())
+    if (document->renderTreeState() != Document::RenderTreeState::Built)
         return elements;
 
     auto absolutePoint = absolutePointIfNotClipped(document, LayoutPoint(clientX, clientY));
@@ -765,17 +765,11 @@ void TreeScope::removeElementFromPendingSVGResources(SVGElement& element)
     }
 
     if (!svgResourcesMap().pendingResourcesForRemoval.isEmpty()) {
-        Vector<AtomString> toBeRemoved;
-        for (auto& resource : svgResourcesMap().pendingResourcesForRemoval) {
-            auto& elements = resource.value;
-            elements.remove(element);
-            if (elements.isEmptyIgnoringNullReferences())
-                toBeRemoved.append(resource.key);
-        }
-
-        // We use m_pendingResourcesForRemoval here because it deals with set lifetime correctly.
-        for (auto& resource : toBeRemoved)
-            svgResourcesMap().pendingResourcesForRemoval.remove(resource);
+        // We remove from m_pendingResourcesForRemoval directly here because it deals with set lifetime correctly.
+        svgResourcesMap().pendingResourcesForRemoval.removeIf([&](auto& resource) {
+            resource.value.remove(element);
+            return resource.value.isEmptyIgnoringNullReferences();
+        });
     }
 }
 

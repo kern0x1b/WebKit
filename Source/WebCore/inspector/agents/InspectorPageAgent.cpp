@@ -78,6 +78,7 @@
 #include <JavaScriptCore/ContentSearchUtilities.h>
 #include <JavaScriptCore/IdentifiersFactory.h>
 #include <JavaScriptCore/RegularExpression.h>
+#include <wtf/HashSet.h>
 #include <wtf/ListHashSet.h>
 #include <wtf/Stopwatch.h>
 #include <wtf/TZoneMallocInlines.h>
@@ -161,6 +162,7 @@ Inspector::Protocol::ErrorStringOr<void> InspectorPageAgent::disable()
     auto& inspectedPageSettings = m_inspectedPage->settings();
     inspectedPageSettings.setAuthorAndUserStylesEnabledInspectorOverride(std::nullopt);
     inspectedPageSettings.setFixedBackgroundsPaintRelativeToDocumentInspectorOverride(std::nullopt);
+    inspectedPageSettings.setFullScreenEnabledInspectorOverride(std::nullopt);
     inspectedPageSettings.setICECandidateFilteringEnabledInspectorOverride(std::nullopt);
     inspectedPageSettings.setImagesEnabledInspectorOverride(std::nullopt);
     inspectedPageSettings.setInputTypeMonthEnabledInspectorOverride(std::nullopt);
@@ -168,21 +170,13 @@ Inspector::Protocol::ErrorStringOr<void> InspectorPageAgent::disable()
     inspectedPageSettings.setMediaCaptureRequiresSecureConnectionInspectorOverride(std::nullopt);
     inspectedPageSettings.setMockCaptureDevicesEnabledInspectorOverride(std::nullopt);
     inspectedPageSettings.setNeedsSiteSpecificQuirksInspectorOverride(std::nullopt);
+    inspectedPageSettings.setNotificationsEnabledInspectorOverride(std::nullopt);
+    inspectedPageSettings.setPointerLockEnabledInspectorOverride(std::nullopt);
+    inspectedPageSettings.setPushAPIEnabledInspectorOverride(std::nullopt);
     inspectedPageSettings.setScriptEnabledInspectorOverride(std::nullopt);
     inspectedPageSettings.setShowDebugBordersInspectorOverride(std::nullopt);
     inspectedPageSettings.setShowRepaintCounterInspectorOverride(std::nullopt);
     inspectedPageSettings.setWebSecurityEnabledInspectorOverride(std::nullopt);
-
-#if ENABLE(FULLSCREEN_API)
-    overrideSettingByModifyingValue(m_fullScreenEnabledBeforeOverride, std::nullopt, &Settings::fullScreenEnabled, &Settings::setFullScreenEnabled);
-#endif
-#if ENABLE(NOTIFICATIONS)
-    overrideSettingByModifyingValue(m_notificationsEnabledBeforeOverride, std::nullopt, &Settings::notificationsEnabled, &Settings::setNotificationsEnabled);
-#endif
-#if ENABLE(POINTER_LOCK)
-    overrideSettingByModifyingValue(m_pointerLockEnabledBeforeOverride, std::nullopt, &Settings::pointerLockEnabled, &Settings::setPointerLockEnabled);
-#endif
-    overrideSettingByModifyingValue(m_pushAPIEnabledBeforeOverride, std::nullopt, &Settings::pushAPIEnabled, &Settings::setPushAPIEnabled);
 
     inspectedPageSettings.setForcedPrefersReducedMotionAccessibilityValue(ForcedAccessibilityValue::System);
     inspectedPageSettings.setForcedPrefersContrastAccessibilityValue(ForcedAccessibilityValue::System);
@@ -223,19 +217,6 @@ Inspector::Protocol::ErrorStringOr<void> InspectorPageAgent::overrideUserAgent(c
     return { };
 }
 
-void InspectorPageAgent::overrideSettingByModifyingValue(std::optional<bool>& savedValue, std::optional<bool> value, bool (Settings::*getter)() const, void (Settings::*setter)(bool))
-{
-    Ref inspectedPageSettings = m_inspectedPage->settings();
-    if (value) {
-        if (!savedValue)
-            savedValue = (inspectedPageSettings.get().*getter)();
-        (inspectedPageSettings.get().*setter)(*value);
-    } else if (savedValue) {
-        (inspectedPageSettings.get().*setter)(*savedValue);
-        savedValue = std::nullopt;
-    }
-}
-
 Inspector::Protocol::ErrorStringOr<void> InspectorPageAgent::overrideSetting(Inspector::Protocol::Page::Setting setting, std::optional<bool>&& value)
 {
     auto& inspectedPageSettings = m_inspectedPage->settings();
@@ -254,9 +235,7 @@ Inspector::Protocol::ErrorStringOr<void> InspectorPageAgent::overrideSetting(Ins
         return { };
 
     case Inspector::Protocol::Page::Setting::FullScreenEnabled:
-#if ENABLE(FULLSCREEN_API)
-        overrideSettingByModifyingValue(m_fullScreenEnabledBeforeOverride, value, &Settings::fullScreenEnabled, &Settings::setFullScreenEnabled);
-#endif
+        inspectedPageSettings.setFullScreenEnabledInspectorOverride(value);
         return { };
 
     case Inspector::Protocol::Page::Setting::ICECandidateFilteringEnabled:
@@ -294,19 +273,15 @@ Inspector::Protocol::ErrorStringOr<void> InspectorPageAgent::overrideSetting(Ins
         return { };
 
     case Inspector::Protocol::Page::Setting::NotificationsEnabled:
-#if ENABLE(NOTIFICATIONS)
-        overrideSettingByModifyingValue(m_notificationsEnabledBeforeOverride, value, &Settings::notificationsEnabled, &Settings::setNotificationsEnabled);
-#endif
+        inspectedPageSettings.setNotificationsEnabledInspectorOverride(value);
         return { };
 
     case Inspector::Protocol::Page::Setting::PointerLockEnabled:
-#if ENABLE(POINTER_LOCK)
-        overrideSettingByModifyingValue(m_pointerLockEnabledBeforeOverride, value, &Settings::pointerLockEnabled, &Settings::setPointerLockEnabled);
-#endif
+        inspectedPageSettings.setPointerLockEnabledInspectorOverride(value);
         return { };
 
     case Inspector::Protocol::Page::Setting::PushAPIEnabled:
-        overrideSettingByModifyingValue(m_pushAPIEnabledBeforeOverride, value, &Settings::pushAPIEnabled, &Settings::setPushAPIEnabled);
+        inspectedPageSettings.setPushAPIEnabledInspectorOverride(value);
         return { };
 
     case Inspector::Protocol::Page::Setting::ScriptEnabled:
@@ -710,12 +685,14 @@ void InspectorPageAgent::searchInResources(const String& text, std::optional<boo
     auto regex = ContentSearchUtilities::createRegularExpressionForString(text, searchType, searchCaseSensitive);
 
     // FIXME: rework this frame tree traversal as it won't work with Site Isolation enabled.
+    HashSet<String> searchedURLs;
     for (RefPtr frame = &m_inspectedPage->mainFrame(); frame; frame = frame->tree().traverseNext()) {
         RefPtr localFrame = dynamicDowncast<LocalFrame>(frame);
         if (!localFrame)
             continue;
         for (RefPtr cachedResource : ResourceUtilities::cachedResourcesForFrame(localFrame.get())) {
             if (auto textContent = ResourceUtilities::textContentForCachedResource(*cachedResource)) {
+                searchedURLs.add(cachedResource->url().string());
                 int matchesCount = ContentSearchUtilities::countRegularExpressionMatches(regex, *textContent);
                 if (matchesCount)
                     result->addItem(buildObjectForSearchResult(frameId(localFrame.get()), cachedResource->url().string(), matchesCount));
@@ -724,7 +701,7 @@ void InspectorPageAgent::searchInResources(const String& text, std::optional<boo
     }
 
     if (CheckedPtr networkAgent = Ref { m_instrumentingAgents.get() }->enabledNetworkAgent())
-        networkAgent->searchOtherRequests(regex, result);
+        networkAgent->searchOtherRequests(regex, result, searchedURLs);
 
     callback->sendSuccess(WTF::move(result));
 }
@@ -1034,7 +1011,7 @@ Inspector::Protocol::ErrorStringOr<String> InspectorPageAgent::snapshotNode(Insp
     if (!localMainFrame)
         return makeUnexpected("Main frame isn't local"_s);
 
-    RefPtr snapshot = WebCore::snapshotNode(*localMainFrame, *node, { { }, PixelFormat::BGRA8, DestinationColorSpace::SRGB() });
+    RefPtr snapshot = WebCore::snapshotNode(*localMainFrame, *node, { { }, PixelFormat::BGRA8, ColorSpace::SRGB() });
     if (!snapshot)
         return makeUnexpected("Could not capture snapshot"_s);
     return encodeDataURL(WTF::move(snapshot), "image/png"_s);
@@ -1042,7 +1019,7 @@ Inspector::Protocol::ErrorStringOr<String> InspectorPageAgent::snapshotNode(Insp
 
 Inspector::Protocol::ErrorStringOr<String> InspectorPageAgent::snapshotRect(int x, int y, int width, int height, Inspector::Protocol::Page::CoordinateSystem coordinateSystem)
 {
-    SnapshotOptions options { { }, PixelFormat::BGRA8, DestinationColorSpace::SRGB() };
+    SnapshotOptions options { { }, PixelFormat::BGRA8, ColorSpace::SRGB() };
     if (coordinateSystem == Inspector::Protocol::Page::CoordinateSystem::Viewport)
         options.flags.add(SnapshotFlags::InViewCoordinates);
 

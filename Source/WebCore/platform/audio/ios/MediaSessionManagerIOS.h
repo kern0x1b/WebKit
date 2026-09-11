@@ -70,10 +70,15 @@ protected:
     void resetRestrictions() override;
 #endif
 
-    void sessionWillBeginPlayback(PlatformMediaSessionInterface&, CompletionHandler<void(bool)>&&) override;
+    void sessionDidCompleteAdmission(PlatformMediaSessionInterface&) override;
 
 private:
+    void applyActiveVideoRouteToSession(PlatformMediaSessionInterface&);
+    void activeNowPlayingSessionChanged(PlatformMediaSessionInterface*) final;
     void configureWirelessTargetMonitoring() final;
+#if ENABLE(WIRELESS_PLAYBACK_MEDIA_PLAYER)
+    void ensureMediaDeviceRouteControllerMonitoring() final;
+#endif
     void sessionWillEndPlayback(PlatformMediaSessionInterface&, DelayCallingUpdateNowPlaying) final;
 
     // AudioSessionInterruptionObserver

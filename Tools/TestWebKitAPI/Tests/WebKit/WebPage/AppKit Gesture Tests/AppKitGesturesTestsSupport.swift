@@ -28,7 +28,6 @@ import struct Foundation.URL
 @_spi(WebKitAdditions_Testing) @_spi(Testing) import WebKit
 import SwiftUI
 import struct Swift.String
-import struct _Concurrency.Task
 import struct TestWebKitAPILibrary.DOMRect
 import Testing
 import TestWebKitAPILibrary
@@ -51,8 +50,44 @@ actor Recap {
     }
 }
 
+/// Presents a SwiftUI view in a key window, and closes that window once this object is deallocated.
+///
+/// Test suites should hold onto this rather than creating a window directly, so that the window does not
+/// outlive the suite. The window itself cannot perform this cleanup in its own `deinit`, since AppKit keeps
+/// an on-screen window alive until it is ordered out.
 @MainActor
-protocol AppKitGestureTestSuite {
+final class TestWindowHost {
+    let window: NSWindow
+
+    init(size: NSSize, shouldBecomeKey: Bool = true, @ViewBuilder rootView: () -> some View) {
+        self.window =
+            shouldBecomeKey
+            ? NSWindow(size: size, rootView: rootView)
+            : NonKeyWindow(size: size, rootView: rootView)
+        self.window.setFrameOrigin(.zero)
+
+        NSApp.activate(ignoringOtherApps: true)
+
+        if shouldBecomeKey {
+            self.window.makeKeyAndOrderFront(nil)
+        } else {
+            self.window.orderFront(nil)
+        }
+    }
+
+    isolated deinit {
+        window.resignKey()
+        window.orderOut(nil)
+    }
+}
+
+private final class NonKeyWindow: NSWindow {
+    override var canBecomeKey: Bool { false }
+    override var isKeyWindow: Bool { false }
+}
+
+@MainActor
+protocol AppKitGestureTestSuite: AnyObject {
     static var text: String { get }
 
     static var topInset: CGFloat { get }
@@ -61,7 +96,7 @@ protocol AppKitGestureTestSuite {
 
     var page: WebPage { get }
 
-    var window: NSWindow { get }
+    var windowHost: TestWindowHost { get }
 
     init() async throws
 }
@@ -69,6 +104,10 @@ protocol AppKitGestureTestSuite {
 extension AppKitGestureTestSuite {
     static var topInset: CGFloat {
         0
+    }
+
+    var window: NSWindow {
+        windowHost.window
     }
 }
 

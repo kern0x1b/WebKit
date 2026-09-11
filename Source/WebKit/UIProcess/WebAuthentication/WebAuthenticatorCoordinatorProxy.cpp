@@ -32,6 +32,7 @@
 #include "AuthenticatorManager.h"
 #include "LocalService.h"
 #include "Logging.h"
+#include "RelatedOriginsValidator.h"
 #include "WebAuthenticationFlags.h"
 #include "WebAuthenticatorCoordinatorProxyMessages.h"
 #include "WebFrameProxy.h"
@@ -100,8 +101,10 @@ void WebAuthenticatorCoordinatorProxy::makeCredential(IPC::Connection& connectio
     handleRequest({ { }, WTF::move(options), *webPageProxy, WebAuthenticationPanelResult::Unavailable, nullptr, GlobalFrameIdentifier { webPageProxy->webPageIDInMainFrameProcess(), frameId }, WTF::move(frameInfo), String(), nullptr, mediation, std::nullopt }, WTF::move(handler));
 }
 
-void WebAuthenticatorCoordinatorProxy::getAssertion(IPC::Connection& connection, FrameIdentifier frameId, FrameInfoData&& frameInfo, PublicKeyCredentialRequestOptions&& options, MediationRequirement mediation, std::optional<WebCore::SecurityOriginData> parentOrigin, RequestCompletionHandler&& handler)
+void WebAuthenticatorCoordinatorProxy::getAssertion(IPC::Connection& connection, FrameIdentifier frameId, FrameInfoData&& frameInfo, PublicKeyCredentialRequestOptions&& options, MediationRequirement mediation, IPC::Untrusted<std::optional<WebCore::SecurityOriginData>>&& untrustedParentOrigin, RequestCompletionHandler&& handler)
 {
+    auto parentOrigin = WTF::move(untrustedParentOrigin).unsafeExtractWithoutValidation(IPC::UnvalidatedReason::NeedsReview);
+
     RefPtr webPageProxy = m_webPageProxy.get();
     if (!webPageProxy) {
         handler({ }, (AuthenticatorAttachment)0, ExceptionData { ExceptionCode::NotSupportedError, "This request is not supported at this time."_s });
@@ -152,8 +155,14 @@ void WebAuthenticatorCoordinatorProxy::handleRequest(WebAuthenticationRequestDat
     bool shouldRequestConditionalRegistration = std::holds_alternative<PublicKeyCredentialCreationOptions>(data.options) && data.mediation == MediationRequirement::Conditional;
 
     String username;
-    if (shouldRequestConditionalRegistration)
-        username = std::get<PublicKeyCredentialCreationOptions>(data.options).user.name;
+    SecurityOriginData callerOrigin;
+    String relyingPartyIdentifier;
+    if (shouldRequestConditionalRegistration) {
+        const auto& options = std::get<PublicKeyCredentialCreationOptions>(data.options);
+        username = options.user.name;
+        callerOrigin = data.frameInfo->securityOrigin;
+        relyingPartyIdentifier = options.rp.id;
+    }
 
     CompletionHandler<void(bool)> afterConsent = [weakThis = WeakPtr { *this }, data = WTF::move(data), handler = WTF::move(handler)] (bool result) mutable {
         RefPtr protectedThis = weakThis.get();
@@ -211,16 +220,39 @@ void WebAuthenticatorCoordinatorProxy::handleRequest(WebAuthenticationRequestDat
 
     Ref authenticatorManager = m_webPageProxy->websiteDataStore().authenticatorManager();
     if (shouldRequestConditionalRegistration && !authenticatorManager->isMock() && !authenticatorManager->isVirtual()) {
-        m_webPageProxy->uiClient().requestWebAuthenticationConditonalMediationRegistration(username, [weakThis = WeakPtr { *this }, username, afterConsent = WTF::move(afterConsent), origin = origin->securityOrigin()] (std::optional<bool> consented) mutable {
+        auto callDelegateWithOrigins = [weakThis = WeakPtr { *this }, username, afterConsent = WTF::move(afterConsent), origin = origin->securityOrigin()](Vector<String>&& origins) mutable {
             RefPtr protectedThis = weakThis.get();
             if (!protectedThis)
                 return afterConsent(false);
+            protectedThis->m_webPageProxy->uiClient().requestWebAuthenticationConditonalMediationRegistration(username, WTF::move(origins), [weakThis, username, afterConsent = WTF::move(afterConsent), origin](std::optional<bool> consented) mutable {
+                RefPtr protectedThis = weakThis.get();
+                if (!protectedThis)
+                    return afterConsent(false);
 #if HAVE(WEB_AUTHN_AS_MODERN)
-            afterConsent(consented ? *consented : protectedThis->removeMatchingAutofillEventForUsername(username, origin));
+                afterConsent(consented ? *consented : protectedThis->removeMatchingAutofillEventForUsername(username, origin));
 #else
-            afterConsent(consented && *consented);
+                afterConsent(consented && *consented);
 #endif
-        });
+            });
+        };
+
+        if (relyingPartyIdentifier.isEmpty())
+            callDelegateWithOrigins({ });
+        else {
+            RefPtr webPageProxy = m_webPageProxy.get();
+            if (!webPageProxy) {
+                callDelegateWithOrigins({ });
+                return;
+            }
+            bool callerMatchesRelyingParty = callerOrigin.securityOrigin()->isMatchingRegistrableDomainSuffix(relyingPartyIdentifier);
+            RelatedOriginsValidation::validate(*webPageProxy, callerOrigin, relyingPartyIdentifier, [callDelegateWithOrigins = WTF::move(callDelegateWithOrigins), callerMatchesRelyingParty](RelatedOriginsValidation::Result&& result) mutable {
+                if (!callerMatchesRelyingParty && !result.isRelated) {
+                    callDelegateWithOrigins({ });
+                    return;
+                }
+                callDelegateWithOrigins(WTF::move(result.origins));
+            });
+        }
         return;
     }
 
@@ -234,13 +266,17 @@ void WebAuthenticatorCoordinatorProxy::cancel(CompletionHandler<void()>&& comple
     completionHandler();
 }
 
-void WebAuthenticatorCoordinatorProxy::isUserVerifyingPlatformAuthenticatorAvailable(const SecurityOriginData&, QueryCompletionHandler&& handler)
+void WebAuthenticatorCoordinatorProxy::isUserVerifyingPlatformAuthenticatorAvailable(IPC::Untrusted<WebCore::SecurityOriginData>&& untrustedOrigin, QueryCompletionHandler&& handler)
 {
+    auto origin = WTF::move(untrustedOrigin).unsafeExtractWithoutValidation(IPC::UnvalidatedReason::NeedsReview);
+
     handler(LocalService::isAvailable());
 }
 
-void WebAuthenticatorCoordinatorProxy::isConditionalMediationAvailable(const SecurityOriginData&, QueryCompletionHandler&& handler)
+void WebAuthenticatorCoordinatorProxy::isConditionalMediationAvailable(IPC::Untrusted<WebCore::SecurityOriginData>&& untrustedOrigin, QueryCompletionHandler&& handler)
 {
+    auto origin = WTF::move(untrustedOrigin).unsafeExtractWithoutValidation(IPC::UnvalidatedReason::NeedsReview);
+
     handler(false);
 }
 #endif // !HAVE(UNIFIED_ASC_AUTH_UI) && !HAVE(WEB_AUTHN_AS_MODERN)

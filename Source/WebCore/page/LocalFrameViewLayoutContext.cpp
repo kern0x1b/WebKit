@@ -58,6 +58,7 @@ extern "C" unsigned g_webkitIOS6LayoutCount;
 #include "RenderLayerCompositor.h"
 #include "RenderLayerModelObject.h"
 #include "RenderLayoutState.h"
+#include "RenderListItem.h"
 #include "RenderSVGModelObject.h"
 #include "RenderSVGText.h"
 #include "RenderObjectInlines.h"
@@ -984,7 +985,6 @@ bool LocalFrameViewLayoutContext::canPerformLayout() const
     return true;
 }
 
-#if ENABLE(TEXT_AUTOSIZING)
 void LocalFrameViewLayoutContext::applyTextSizingIfNeeded(RenderElement& layoutRoot)
 {
     ASSERT(document());
@@ -1002,13 +1002,12 @@ void LocalFrameViewLayoutContext::applyTextSizingIfNeeded(RenderElement& layoutR
         textAutosizingWidth = overrideWidth;
     if (!idempotentMode && !textAutosizingWidth)
         return;
-    layoutRoot.adjustComputedFontSizesOnBlocks(minimumZoomFontSize, textAutosizingWidth);
+    layoutRoot.adjustFontSizesOnBlocks(minimumZoomFontSize, textAutosizingWidth);
     if (!layoutRoot.needsLayout())
         return;
     LOG(TextAutosizing, "Text Autosizing: minimumZoomFontSize=%.2f textAutosizingWidth=%.2f", minimumZoomFontSize, textAutosizingWidth);
     layoutRoot.layout();
 }
-#endif
 
 void LocalFrameViewLayoutContext::updateStyleForLayout()
 {
@@ -1204,6 +1203,21 @@ bool LocalFrameViewLayoutContext::isPercentHeightResolveDisabledFor(const Render
     return m_percentHeightIgnoreList.contains(flexItem);
 }
 
+void LocalFrameViewLayoutContext::addIntrinsicLogicalHeightComputationFor(const RenderBox& box)
+{
+    m_intrinsicLogicalHeightComputationList.add(box);
+}
+
+void LocalFrameViewLayoutContext::removeIntrinsicLogicalHeightComputationFor(const RenderBox& box)
+{
+    m_intrinsicLogicalHeightComputationList.remove(box);
+}
+
+bool LocalFrameViewLayoutContext::isComputingIntrinsicLogicalHeightFor(const RenderBox& box) const
+{
+    return m_intrinsicLogicalHeightComputationList.contains(box);
+}
+
 #ifndef NDEBUG
 void LocalFrameViewLayoutContext::checkLayoutState()
 {
@@ -1297,6 +1311,20 @@ RenderView* LocalFrameViewLayoutContext::renderView() const
 Document* LocalFrameViewLayoutContext::document() const
 {
     return frame().document();
+}
+
+ListItemExcludedMarkerScope::ListItemExcludedMarkerScope(LocalFrameViewLayoutContext& layoutContext, RenderListOutsideMarker& excludedMarker)
+    : m_layoutContext(layoutContext)
+{
+    // Nested list items lay out inside their ancestor's layout, so this is a stack: an ancestor stays in it while
+    // its descendant list item lays out, because the line that descendant produces may well be the ancestor's
+    // first formatted line too, and then it has to align both markers.
+    layoutContext.m_excludedMarkers.append(excludedMarker);
+}
+
+ListItemExcludedMarkerScope::~ListItemExcludedMarkerScope()
+{
+    m_layoutContext->m_excludedMarkers.removeLast();
 }
 
 } // namespace WebCore

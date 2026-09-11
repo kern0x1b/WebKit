@@ -79,6 +79,7 @@ struct InteractionDescription {
     String description;
     Vector<String> stringsToValidate;
     bool didFindTargetNode { true };
+    bool describesInteractionTarget { true };
 };
 
 enum class EventListenerCategory : uint8_t {
@@ -101,6 +102,7 @@ struct Request {
     std::optional<FloatRect> collectionRectInRootView;
     std::optional<JSHandleIdentifier> targetNodeHandleIdentifier;
     Vector<JSHandleIdentifier> handleIdentifiersOfNodesToSkip;
+    std::optional<NodeIdentifier> contextMenuTargetNodeIdentifier;
     bool mergeParagraphs { false };
     bool skipNearlyTransparentContent { false };
     NodeIdentifierInclusion nodeIdentifierInclusion { NodeIdentifierInclusion::None };
@@ -248,7 +250,6 @@ struct Result {
 
     Item rootItem;
     unsigned visibleTextLength { 0 };
-    std::optional<String> pdfMarkdownContent;
 };
 
 struct PageResults {

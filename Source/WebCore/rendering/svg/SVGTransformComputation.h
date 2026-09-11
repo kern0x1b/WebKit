@@ -70,10 +70,8 @@ public:
                     ancestorContainer = enclosingLayerRenderer;
             } else
                 ancestorContainer = stopAtRenderer;
-        } else if (trackingMode == TransformState::TrackSVGScreenCTMMatrix && stopAtRenderer) {
-            ASSERT(stopAtRenderer->isComposited());
+        } else if (trackingMode == TransformState::TrackSVGScreenCTMMatrix && stopAtRenderer)
             ancestorContainer = ancestorsOfType<RenderLayerModelObject>(*stopAtRenderer).first();
-        }
 
         TransformState transformState(TransformState::ApplyTransformDirection, FloatPoint { });
         transformState.setTransformMatrixTracking(trackingMode);
@@ -107,6 +105,26 @@ public:
         return ctm;
     }
 
+    AffineTransform computeTransformToSVGRoot() const
+    {
+        auto* svgRoot = ancestorsOfType<RenderSVGRoot>(m_renderer.get()).first();
+        if (!svgRoot)
+            return { };
+
+        // Accumulate up to and including the anonymous RenderSVGViewportContainer, which carries the 'viewBox'
+        // transformation (and page zoom) -- but stop before the transform of 'svgRoot' itself.
+        auto* viewportContainer = svgRoot->viewportContainer();
+        if (!viewportContainer)
+            return { };
+
+        auto ctm = computeAccumulatedTransform(viewportContainer, TransformState::TrackSVGScreenCTMMatrix);
+        auto zoom = svgRoot->style().usedZoom();
+        if (zoom == 1)
+            return ctm;
+
+        return AffineTransform::makeScale({ 1 / zoom, 1 / zoom }).multiply(ctm);
+    }
+
     FloatSize calculateAccumulatedSVGAncestorTransformScale()
     {
         AffineTransform accumulatedTransform = computeAccumulatedTransform(nullptr, TransformState::TrackSVGScreenCTMMatrix);
@@ -132,10 +150,11 @@ public:
             layer = layer->parent();
         }
 
+        // TrackSVGScreenCTMMatrix deliberately produces a zoom independent matrix (getScreenCTM() semantics),
+        // whereas the scaling factor has to match the actual on-screen resolution -- re-apply the zoom.
         auto ctm = computeAccumulatedTransform(stopAtLayer ? &stopAtLayer->renderer() : nullptr, TransformState::TrackSVGScreenCTMMatrix);
         ctm.scale(protect(m_renderer->document())->deviceScaleFactor());
-        if (!m_renderer->document().isSVGDocument())
-            ctm.scale(m_renderer->style().usedZoom());
+        ctm.scale(m_renderer->style().usedZoom());
         return narrowPrecisionToFloat(std::hypot(ctm.xScale(), ctm.yScale()) / std::numbers::sqrt2);
     }
 

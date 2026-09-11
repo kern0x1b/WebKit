@@ -53,11 +53,13 @@ namespace InlineIterator {
 class LineBoxIterator;
 }
 
-#if ENABLE(TEXT_AUTOSIZING)
+namespace Style {
+enum class MarginTrimSide : uint8_t;
+}
+
 enum LineCount {
     NOT_SET = 0, NO_LINE = 1, ONE_LINE = 2, MULTI_LINE = 3
 };
-#endif
 
 class MarginValues {
 public:
@@ -163,13 +165,14 @@ protected:
 
 public:
     MarginValues marginValuesForChild(RenderBox& child) const;
+    inline bool shouldTrimChildMargin(Style::MarginTrimSide, const RenderBox&) const;
     void dirtyForLayoutFromPercentageHeightDescendant(RenderBox&);
 
     class MarginInfo {
     public:
         enum class IgnoreScrollbarForAfterMargin : bool { No, Yes };
         MarginInfo(const RenderBlockFlow&, IgnoreScrollbarForAfterMargin = IgnoreScrollbarForAfterMargin::Yes);
-        MarginInfo(bool canCollapseWithChildren, bool canCollapseMarginBeforeWithChildren, bool canCollapseMarginAfterWithChildren, bool quirkContainer, bool atBeforeSideOfBlock, bool atAfterSideOfBlock,  bool hasMarginBeforeQuirk, bool hasMarginAfterQuirk, bool determinedMarginBeforeQuirk, LayoutUnit positiveMargin, LayoutUnit negativeMargin);
+        MarginInfo(bool canCollapseWithChildren, bool canCollapseMarginBeforeWithChildren, bool canCollapseMarginAfterWithChildren, bool quirkContainer, bool atBeforeSideOfBlock, bool atAfterSideOfBlock,  bool hasMarginBeforeQuirk, bool hasMarginAfterQuirk, bool determinedMarginBeforeQuirk, LayoutUnit positiveMargin, LayoutUnit negativeMargin, LayoutUnit marginBeforeWithClearance);
         MarginInfo() = default;
 
         void setAtBeforeSideOfBlock(bool atBeforeSideOfBlock) { m_atBeforeSideOfBlock = atBeforeSideOfBlock; }
@@ -178,6 +181,7 @@ public:
         {
             m_positiveMargin = { };
             m_negativeMargin = { };
+            m_marginBeforeWithClearance = { };
         }
         void setHasMarginBeforeQuirk(bool hasMarginBeforeQuirk) { m_hasMarginBeforeQuirk = hasMarginBeforeQuirk; }
         void setHasMarginAfterQuirk(bool hasMarginAfterQuirk) { m_hasMarginAfterQuirk = hasMarginAfterQuirk; }
@@ -192,6 +196,7 @@ public:
             setNegativeMargin(negativeMargin);
         }
         void setCanCollapseMarginAfterWithChildren(bool canCollapse) { m_canCollapseMarginAfterWithChildren = canCollapse; }
+        void setMarginBeforeWithClearance(LayoutUnit marginBeforeWithClearance) { m_marginBeforeWithClearance = marginBeforeWithClearance; }
 
         bool atBeforeSideOfBlock() const { return m_atBeforeSideOfBlock; }
         bool atAfterSideOfBlock() const { return m_atAfterSideOfBlock; }
@@ -207,6 +212,11 @@ public:
         LayoutUnit positiveMargin() const { return m_positiveMargin; }
         LayoutUnit negativeMargin() const { return m_negativeMargin; }
         LayoutUnit margin() const { return m_positiveMargin - m_negativeMargin; }
+        // The margin before of a box that collapsed through with clearance. Such a box keeps its margins for the
+        // content after it (CSS 2.2 8.3.1), and its clearance sits between them and the content before it, so that
+        // clearance plus this margin reaches the float's bottom edge (CSS 2.2 9.5.2). The content after the box starts
+        // at the box's border box, past this margin, so only the rest of the collapsed margin is left to place.
+        LayoutUnit marginBeforeWithClearance() const { return m_marginBeforeWithClearance; }
 
     private:
         // Collapsing flags for whether we can collapse our margins with our children's margins.
@@ -237,9 +247,9 @@ public:
         // These flags track the previous maximal positive and negative margins.
         LayoutUnit m_positiveMargin;
         LayoutUnit m_negativeMargin;
+        LayoutUnit m_marginBeforeWithClearance;
     };
 
-    bool shouldTrimChildMargin(Style::MarginTrimSide, const RenderBox&) const;
     void performBlockStepSizing(RenderBox& child, LayoutUnit blockStepSizeForChild) const;
 
     void layoutBlockChild(RenderBox& child, MarginInfo&, LayoutUnit& previousFloatLogicalBottom, LayoutUnit& maxFloatLogicalBottom);
@@ -249,11 +259,12 @@ public:
         MarginInfo marginInfo;
     };
     BlockPositionAndMargin layoutBlockChildFromInlineLayout(RenderBox& child, LayoutUnit blockLogicalTop, MarginInfo); // Called from IFC when laying out block in inline.
+    std::optional<LayoutUnit> selfCollapsingMarginBeforeWithClear(RenderObject* candidate);
 
     void adjustOutOfFlowBlock(RenderBox& child, const MarginInfo&);
     void adjustFloatingBlock(const MarginInfo&);
 
-    void trimBlockEndChildrenMargins();
+    void adjustBlockEndChildrenForMarginTrim();
 
     void setStaticInlinePositionForChild(RenderBox& child, LayoutUnit inlinePosition);
 
@@ -395,8 +406,6 @@ public:
     std::optional<LayoutUnit> lastLineBaseline() const override;
 
 protected:
-    bool isChildEligibleForMarginTrim(Style::MarginTrimSide, const RenderBox&) const final;
-
     bool shouldResetLogicalHeightBeforeLayout() const override { return true; }
 
     std::pair<LayoutUnit, LayoutUnit> computeIntrinsicLogicalWidths() const override;
@@ -445,6 +454,8 @@ protected:
     void layoutExcludedChildren(RelayoutChildren) override;
 
 private:
+    bool isChildEligibleForMarginTrim(Style::MarginTrimSide, const RenderBox&) const;
+
     bool recomputeLogicalWidthAndColumnWidth();
     LayoutUnit columnGap() const;
     
@@ -520,14 +531,12 @@ private:
 
     void dirtyForLayoutFromPercentageHeightDescendants();
 
-#if ENABLE(TEXT_AUTOSIZING)
     int m_widthForTextAutosizing;
     unsigned m_lineCountForTextAutosizing : 2;
-#endif
+
     // FIXME: This is temporary until after we remove the forced "line layout codepath" invalidation.
     std::optional<std::pair<LayoutUnit, LayoutUnit>> m_previousInlineLayoutContentTopAndBottomIncludingInkOverflow;
 
-    std::optional<LayoutUnit> selfCollapsingMarginBeforeWithClear(RenderObject* candidate);
 
 public:
     struct LinePaginationAdjustment {
@@ -545,14 +554,12 @@ public:
     Layout::InlineContentCache& ensureInlineContentCache();
     void resetInlineContentCache();
 
-#if ENABLE(TEXT_AUTOSIZING)
-    void adjustComputedFontSizes(float size, float visibleWidth);
-    void resetComputedFontSize()
+    void adjustFontSizes(float size, float visibleWidth);
+    void resetFontSize()
     {
         m_widthForTextAutosizing = -1;
         m_lineCountForTextAutosizing = NOT_SET;
     }
-#endif
 
 protected:
     std::unique_ptr<FloatingObjects> m_floatingObjects;

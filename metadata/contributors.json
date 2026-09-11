@@ -3786,7 +3786,8 @@
          "i_gower@apple.com"
       ],
       "github" : "igower",
-      "name" : "Ian Gower"
+      "name" : "Ian Gower",
+      "status" : "committer"
    },
    {
       "emails" : [
@@ -3906,7 +3907,8 @@
          "issacroy05@gmail.com"
       ],
       "github" : "TheBoyRoy05",
-      "name" : "Issac Roy"
+      "name" : "Issac Roy",
+      "status" : "committer"
    },
    {
       "emails" : [
@@ -4409,7 +4411,7 @@
       "nicks" : [
          "jlee53"
       ],
-      "status" : "committer"
+      "status" : "reviewer"
    },
    {
       "emails" : [
@@ -4431,6 +4433,14 @@
       "nicks" : [
          "jeez_"
       ]
+   },
+   {
+      "emails" : [
+         "jespinal23@apple.com"
+      ],
+      "github" : "JEspinal01",
+      "name" : "Jetzel Espinal",
+      "status" : "committer"
    },
    {
       "emails" : [
@@ -5822,7 +5832,7 @@
       "nicks" : [
          "marcosc"
       ],
-      "status" : "committer"
+      "status" : "reviewer"
    },
    {
       "emails" : [
@@ -6431,6 +6441,18 @@
       "github" : "mogey",
       "name" : "Mohsin Qureshi",
       "status" : "committer"
+   },
+   {
+      "emails" : [
+         "morne@apple.com",
+         "morne@morneveldsman.com"
+      ],
+      "expertise" : "Web Compatibility",
+      "github" : "mveldsman",
+      "name" : "Morne Veldsman",
+      "nicks" : [
+         "mveldsman"
+      ]
    },
    {
       "emails" : [
@@ -7774,7 +7796,8 @@
       "name" : "Sergey Rubanov",
       "nicks" : [
          "chicoxyzzy"
-      ]
+      ],
+      "status" : "committer"
    },
    {
       "emails" : [
@@ -8968,7 +8991,7 @@
    },
    {
       "emails" : [
-         "yousuke.kimoto@sony.com"
+         "yousuke.kimoto@gmail.com"
       ],
       "github" : "ykimot",
       "name" : "Yousuke Kimoto",

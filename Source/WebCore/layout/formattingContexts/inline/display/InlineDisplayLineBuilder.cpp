@@ -78,7 +78,8 @@ InlineDisplayLineBuilder::EnclosingLineGeometry InlineDisplayLineBuilder::collec
             rootInlineBoxWidth -= lineLayoutResult.hangingContent.logicalWidth;
         }
         auto rootInlineBoxHorizontalOverflow = rootInlineBoxWidth - rect.width();
-        if (rootInlineBoxHorizontalOverflow > 0)
+        // A block box contributes its own through layoutOverflowRectForPropagation(), which uses the margin the box ended up with.
+        if (rootInlineBoxHorizontalOverflow > 0 && !lineLayoutResult.isBlockContent())
             isLeftToRightDirection ? rect.shiftRightBy(rootInlineBoxHorizontalOverflow) : rect.shiftLeftBy(-rootInlineBoxHorizontalOverflow);
         return rect;
     }();
@@ -137,8 +138,13 @@ InlineDisplay::Line InlineDisplayLineBuilder::build(const LineLayoutResult& line
         ? rootInlineBoxRect.left()
         : lineBoxLogicalRect.width() - lineLayoutResult.contentGeometry.logicalRightIncludingNegativeMargin; // Note that with hanging content lineLayoutResult.contentGeometry.logicalRight is not the same as rootLineBoxRect.right().
 
-    auto hasInflowContent = [&] {
+    auto hasContentfulContent = [&] {
         if (lineLayoutResult.hasContentfulInFlowContent())
+            return true;
+        return lineLayoutResult.isFirstLast.isFirstFormattedLine == IsFirstFormattedLine::Yes && !formattingContext().layoutState().excludedMarkerLayoutBounds().isEmpty();
+    };
+    auto hasInflowContent = [&] {
+        if (hasContentfulContent())
             return true;
         for (auto& run : lineLayoutResult.runs) {
             if (!run.isOutOfFlow())
@@ -148,7 +154,7 @@ InlineDisplay::Line InlineDisplayLineBuilder::build(const LineLayoutResult& line
     };
     auto writingMode = root().writingMode();
     return InlineDisplay::Line { hasInflowContent()
-        , lineLayoutResult.hasContentfulInFlowContent()
+        , hasContentfulContent()
         , lineLayoutResult.isBlockContent()
         , lineBoxLogicalRect
         , mapLineRectLogicalToVisual(lineBoxLogicalRect, constraints.formattingRootBorderBoxSize(), writingMode)
@@ -493,7 +499,20 @@ std::optional<InlineDisplay::Line::Ellipsis> InlineDisplayLineBuilder::applyElli
         return { };
 
     auto ellipsisText = [&] -> AtomString {
-        if (truncationPolicy == LineEndingTruncationPolicy::WhenContentOverflowsInInlineDirection || isLegacyLineClamp) {
+        if (truncationPolicy == LineEndingTruncationPolicy::WhenContentOverflowsInInlineDirection) {
+            return WTF::switchOn(displayBoxes[0].layoutBox().style().textOverflow(),
+                [&](const CSS::Keyword::Clip&) -> AtomString {
+                    return nullAtom();
+                },
+                [&](const CSS::Keyword::Ellipsis&) -> AtomString {
+                    return TextUtil::ellipsisTextInInlineDirection(displayLine.isHorizontal());
+                },
+                [&](const Style::String& string) -> AtomString {
+                    return AtomString { string.value };
+                }
+            );
+        }
+        if (isLegacyLineClamp) {
             // Legacy line clamp always uses ...
             return TextUtil::ellipsisTextInInlineDirection(displayLine.isHorizontal());
         }

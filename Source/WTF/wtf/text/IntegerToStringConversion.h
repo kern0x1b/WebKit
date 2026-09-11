@@ -129,7 +129,7 @@ constexpr size_t writeDecimalDigitsBackward(UnsignedIntegerType number, std::spa
 }
 
 template<typename T, typename UnsignedIntegerType, PositiveOrNegativeNumber NumberType, typename AdditionalArgumentType>
-static typename IntegerToStringConversionTrait<T>::ReturnType numberToStringImpl(UnsignedIntegerType number, AdditionalArgumentType additionalArgument)
+static inline typename IntegerToStringConversionTrait<T>::ReturnType numberToStringImpl(UnsignedIntegerType number, AdditionalArgumentType additionalArgument)
 {
     std::array<Latin1Character, sizeof(UnsignedIntegerType) * 3 + 1> buffer;
     auto index = writeDecimalDigitsBackward(number, std::span<Latin1Character> { buffer }, buffer.size());
@@ -155,7 +155,7 @@ inline typename IntegerToStringConversionTrait<T>::ReturnType numberToStringUnsi
 }
 
 template<typename CharacterType, typename UnsignedIntegerType, PositiveOrNegativeNumber NumberType>
-static void writeIntegerToBufferImpl(UnsignedIntegerType number, std::span<CharacterType> destination)
+static inline void writeIntegerToBufferImpl(UnsignedIntegerType number, std::span<CharacterType> destination)
 {
     static_assert(!std::is_same_v<bool, std::remove_cv_t<UnsignedIntegerType>>, "'bool' not supported");
     // The digit count is exact, so the digits can be filled in place from the back and the

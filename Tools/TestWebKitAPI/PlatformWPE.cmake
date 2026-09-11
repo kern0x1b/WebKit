@@ -37,12 +37,13 @@ list(APPEND TestJavaScriptCore_SOURCES
 list(APPEND TestWebCore_SOURCES
     ${test_main_SOURCES}
 
-    Tests/WebCore/UserAgentQuirks.cpp
+    Tests/WebCore/ImageDecoderTests.cpp
 
     Tests/WebCore/glib/Damage.cpp
     Tests/WebCore/glib/GraphicsContextGLTextureMapper.cpp
     Tests/WebCore/glib/RunLoopObserver.cpp
     Tests/WebCore/glib/SkiaCompositingLayerDamage.cpp
+    Tests/WebCore/glib/UserAgentQuirks.cpp
 
     Tests/WebCore/gstreamer/GStreamerTest.cpp
     Tests/WebCore/gstreamer/GstElementHarness.cpp

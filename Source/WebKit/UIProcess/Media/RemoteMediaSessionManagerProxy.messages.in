@@ -29,8 +29,8 @@
     EnabledBy=RemoteMediaSessionManagerEnabled || SiteIsolationEnabled
 ]
 messages -> RemoteMediaSessionManagerProxy {
-    void UpdateMediaSessionState()
-    void AddMediaSession(struct WebKit::RemoteMediaSessionState session);
+    void UpdateMediaSessionStates(WebCore::PageIdentifier pageIdentifier, Vector<WebKit::RemoteMediaSessionState> sessions, uint64_t audioCaptureSourceCount)
+    void AddMediaSession(struct WebKit::RemoteMediaSessionState session)
     void RemoveMediaSession(struct WebKit::RemoteMediaSessionState session);
     void SetCurrentMediaSession(struct WebKit::RemoteMediaSessionState session);
     void MediaSessionStateChanged(struct WebKit::RemoteMediaSessionState session);
@@ -39,7 +39,7 @@ messages -> RemoteMediaSessionManagerProxy {
     void RemoveMediaSessionRestriction(enum:uint8_t WebCore::PlatformMediaSessionMediaType type, WebCore::MediaSessionRestrictions restrictions);
     void ResetMediaSessionRestrictions();
 
-    MediaSessionWillBeginPlayback(struct WebKit::RemoteMediaSessionState session) -> (bool granted)
+    void MediaSessionWillBeginPlayback(struct WebKit::RemoteMediaSessionState session)
 
 #if PLATFORM(COCOA)
     void RemoteAudioHardwareDidBecomeActive();

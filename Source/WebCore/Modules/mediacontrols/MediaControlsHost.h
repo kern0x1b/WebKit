@@ -41,6 +41,7 @@ class AudioTrack;
 class AudioTrackList;
 class ContextMenuItem;
 class DOMPromise;
+class DOMRect;
 class Element;
 class WeakPtrImplWithEventTargetData;
 class HTMLElement;
@@ -109,6 +110,9 @@ public:
     bool supportsRewind() const;
     bool needsChromeMediaControlsPseudoElement() const;
     bool isMediaControlsMacInlineSizeSpecsEnabled() const;
+    bool spatialVideoRenderingEnabled() const;
+    String spatialVideoProjectionKind() const;
+    std::optional<int32_t> spatialVideoHorizontalFieldOfView() const;
     bool NODELETE isAVExperienceControllerFullscreenEnabled() const;
 
     void captionPreferencesChanged();
@@ -135,6 +139,7 @@ public:
 
 #if ENABLE(MEDIA_CONTROLS_CONTEXT_MENUS)
     Vector<MediaControlsContextMenuItem> mediaControlsContextMenuItemsForBindings(String&& optionsJSONString);
+    Ref<DOMRect> mediaControlsContextMenuAnchorRectForBindings(HTMLElement&);
     bool showMediaControlsContextMenu(HTMLElement&, String&& optionsJSONString, Ref<VoidCallback>&&);
     void showCaptionDisplaySettingsPreview();
     void hideCaptionDisplaySettingsPreview();

@@ -25,14 +25,15 @@
 
 public import SwiftUI
 @_spi(CrossImportOverlay) public import WebKit
+@_spiOnly public import WebKit_Private
 
 /// A view that displays some web content.
 ///
 /// Connect a ``WebView`` with a ``WebPage`` to fully control the browsing experience, including essential functionality such as loading a URL.
 /// Any updates to the webpage propagate the information to the view.
 @available(anyAppleOSAndDownlevels 26.0, *)
-@available(watchOS, unavailable)
-@available(tvOS, unavailable)
+@_spi_available(watchOSAndOpenSourceTBA, *)
+@_spi_available(tvOSAndOpenSourceTBA, *)
 public struct WebView: View {
     /// Create a new WebView.
     ///
@@ -73,7 +74,7 @@ public struct WebView: View {
 
     @ViewBuilder
     private var representable: some View {
-        #if os(iOS)
+        #if WTF_PLATFORM_IOS_FAMILY
         GeometryReader { proxy in
             WebViewRepresentable(page: storage.webPage, safeAreaInsets: proxy.safeAreaInsets)
                 .ignoresSafeArea()
@@ -96,11 +97,14 @@ public struct WebView: View {
     }
 }
 
+@available(anyAppleOSAndDownlevels 26.0, *)
+@_spi_available(watchOSAndOpenSourceTBA, *)
+@_spi_available(tvOSAndOpenSourceTBA, *)
 extension WebView {
     /// A type that defines the behavior of how horizontal swipe gestures trigger backward and forward page navigation.
     @available(anyAppleOSAndDownlevels 26.0, *)
-    @available(watchOS, unavailable)
-    @available(tvOS, unavailable)
+    @_spi_available(watchOSAndOpenSourceTBA, *)
+    @_spi_available(tvOSAndOpenSourceTBA, *)
     public struct BackForwardNavigationGesturesBehavior: Sendable {
         enum Value {
             case automatic
@@ -133,8 +137,8 @@ extension WebView {
 
     /// The options for controlling the behavior for how magnification gestures interact with web views.
     @available(anyAppleOSAndDownlevels 26.0, *)
-    @available(watchOS, unavailable)
-    @available(tvOS, unavailable)
+    @_spi_available(watchOSAndOpenSourceTBA, *)
+    @_spi_available(tvOSAndOpenSourceTBA, *)
     public struct MagnificationGesturesBehavior: Sendable {
         enum Value {
             case automatic
@@ -167,8 +171,8 @@ extension WebView {
 
     /// A type specifying the behavior for the presentation of link previews when pressing a link.
     @available(anyAppleOSAndDownlevels 26.0, *)
-    @available(watchOS, unavailable)
-    @available(tvOS, unavailable)
+    @_spi_available(watchOSAndOpenSourceTBA, *)
+    @_spi_available(tvOSAndOpenSourceTBA, *)
     public struct LinkPreviewBehavior: Sendable {
         enum Value {
             case automatic
@@ -201,8 +205,8 @@ extension WebView {
 
     /// The behavior that determines whether a web view can display content full screen.
     @available(anyAppleOSAndDownlevels 26.0, *)
-    @available(watchOS, unavailable)
-    @available(tvOS, unavailable)
+    @_spi_available(watchOSAndOpenSourceTBA, *)
+    @_spi_available(tvOSAndOpenSourceTBA, *)
     public struct ElementFullscreenBehavior: Sendable {
         enum Value {
             case automatic
@@ -237,11 +241,57 @@ extension WebView {
     ///
     /// For links, the information contains the URL that is linked to.
     @available(anyAppleOSAndDownlevels 26.0, *)
-    @available(watchOS, unavailable)
-    @available(tvOS, unavailable)
+    @_spi_available(watchOSAndOpenSourceTBA, *)
+    @_spi_available(tvOSAndOpenSourceTBA, *)
     public struct ActivatedElementInfo: Hashable, Sendable {
         /// The URL of the link that the user clicked.
         public let linkURL: URL?
+    }
+
+    /// Defines a specific set of semantics representing how the webpage contents are used.
+    @_spi(Experimental)
+    public struct ContentEnvironment_v0: Sendable {
+        enum Storage: Sendable {
+            case standard
+            case editable
+        }
+
+        /// The standard environment with no specialized behavior changes.
+        @_spi(Experimental)
+        public static let standard = Self(storage: .standard)
+
+        /// An environment suitable for editable contents.
+        ///
+        /// This environment imbues `contenteditable` and other affordances that are designed for editable use cases.
+        @_spi(Experimental)
+        public static let editable = Self(storage: .editable)
+
+        let storage: Storage
+    }
+
+    /// The current attachment and its state.
+    @_spi(Experimental)
+    public struct AttachmentActivityPhase {
+        /// The possible kinds of phase an attachment may be in during its lifetime.
+        @_spi(Experimental)
+        public enum Kind: Sendable {
+            /// The attachment was inserted.
+            case inserted(_ source: String)
+
+            /// The attachment was removed.
+            case removed
+
+            /// The attachment has had its data invalidated.
+            case dataInvalidated
+        }
+
+        /// The attachment this activity phase belongs to.
+        @_spi(Experimental)
+        public let attachment: _WKAttachment
+
+        /// The kind of activity this phase represents.
+        @_spi(Experimental)
+        public let kind: Kind
     }
 }
 

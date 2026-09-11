@@ -9,7 +9,7 @@ if (NOT HAS_RUN_WEBKIT_COMMON)
     # Preset values are not replayed on auto-reconfigure; if CMake's "compiler
     # changed" path wipes the cache, these silently revert. Stamp them outside
     # the cache and refuse to proceed if any go missing.
-    set(WEBKIT_IDENTITY_VARS CMAKE_BUILD_TYPE PORT DEVELOPER_MODE ENABLE_SANITIZERS CMAKE_IOS_SIMULATOR CMAKE_OSX_SYSROOT)
+    set(WEBKIT_IDENTITY_VARS CMAKE_BUILD_TYPE PORT DEVELOPER_MODE ENABLE_SANITIZERS WEBKIT_SDK_NAME CMAKE_OSX_SYSROOT)
     set(_config_stamp "${CMAKE_BINARY_DIR}/.webkit-config-stamp")
     if (EXISTS "${_config_stamp}")
         file(STRINGS "${_config_stamp}" _stamp_lines)
@@ -73,6 +73,7 @@ if (NOT HAS_RUN_WEBKIT_COMMON)
     # Determine which port will be built
     # -----------------------------------------------------------------------------
     set(ALL_PORTS
+        Cocoa
         GTK
         IOS
         JSCOnly
@@ -86,10 +87,16 @@ if (NOT HAS_RUN_WEBKIT_COMMON)
     list(FIND ALL_PORTS ${PORT} RET)
     if (${RET} EQUAL -1)
         if (APPLE AND PORT STREQUAL "NOPORT")
-            set(PORT "Mac" CACHE STRING "choose which WebKit port to build (one of ${ALL_PORTS})" FORCE)
+            set(PORT "Cocoa" CACHE STRING "choose which WebKit port to build (one of ${ALL_PORTS})" FORCE)
         else ()
             message(FATAL_ERROR "Please choose which WebKit port to build (one of ${ALL_PORTS})")
         endif ()
+    endif ()
+
+    # Mac and IOS are aliases for the Cocoa port; the target platform is selected
+    # by the SDK (CMAKE_OSX_SYSROOT / WEBKIT_SDK_NAME), not by the port name.
+    if (PORT STREQUAL "Mac" OR PORT STREQUAL "IOS")
+        set(PORT "Cocoa" CACHE STRING "choose which WebKit port to build (one of ${ALL_PORTS})" FORCE)
     endif ()
 
     string(TOLOWER ${PORT} WEBKIT_PORT_DIR)
@@ -125,8 +132,8 @@ if (NOT HAS_RUN_WEBKIT_COMMON)
     endif ()
 
     if (${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU")
-        if (${CMAKE_CXX_COMPILER_VERSION} VERSION_LESS "12.2.0")
-            message(FATAL_ERROR "GCC 12.2 or newer is required to build WebKit. Use a newer GCC version or Clang.")
+        if (${CMAKE_CXX_COMPILER_VERSION} VERSION_LESS "13.1.0")
+            message(FATAL_ERROR "GCC 13.1 or newer is required to build WebKit. Use a newer GCC version or Clang.")
         endif ()
     endif ()
 
@@ -321,6 +328,7 @@ if (NOT HAS_RUN_WEBKIT_COMMON)
     include(WebKitCompilerFlags)
     include(WebKitStaticAnalysis)
     include(WebKitFeatures)
+    include(WebKitEntitlements)
 
     if (USE_APPLE_INTERNAL_SDK)
         list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/../Internal/WebKit/WebKitAdditions/CMake")
@@ -329,6 +337,13 @@ if (NOT HAS_RUN_WEBKIT_COMMON)
 
     include(OptionsCommon)
     include(Options${PORT})
+
+    # This has to come after Options${PORT} to see any ENABLE_THREAD_SAFETY_WARNING.
+    if (ENABLE_THREAD_SAFETY_WARNING)
+        WEBKIT_PREPEND_GLOBAL_CXX_FLAGS(-Wthread-safety)
+    endif ()
+
+    include(WebKitSwiftFlags)
 
     # Check gperf after including OptionsXXX.cmake since gperf is required only when ENABLE_WEBCORE is true,
     # and ENABLE_WEBCORE is configured in OptionsXXX.cmake.
@@ -374,7 +389,7 @@ if (NOT HAS_RUN_WEBKIT_COMMON)
         # LTO builds error out on duplicate __llvm_profile_filename definitions.
         set(PGO_LINK_FLAGS "${PGO_COMPILE_OPTIONS}")
         if (LD_SUPPORTS_ALLOW_MULTIPLE_DEFINITION)
-            string(PREPEND PGO_LINK_FLAGS "-Wl,--allow-multiple-definition ")
+            add_link_options("LINKER:--allow-multiple-definition")
         endif ()
         string(PREPEND CMAKE_EXE_LINKER_FLAGS "${PGO_LINK_FLAGS} ")
         string(PREPEND CMAKE_SHARED_LINKER_FLAGS "${PGO_LINK_FLAGS} ")

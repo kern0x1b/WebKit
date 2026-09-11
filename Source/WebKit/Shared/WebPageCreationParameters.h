@@ -35,6 +35,7 @@
 #include "UserContentControllerParameters.h"
 #include "ViewWindowCoordinates.h"
 #include "VisitedLinkTableIdentifier.h"
+#include <WebCore/ColorSpace.h>
 #include "WebPageGroupData.h"
 #include "WebPageProxyIdentifier.h"
 #include "WebPreferencesStore.h"
@@ -45,7 +46,7 @@
 #include <WebCore/Color.h>
 #include <WebCore/ContentSecurityPolicy.h>
 #include <WebCore/CornerRadii.h>
-#include <WebCore/DestinationColorSpace.h>
+#include <WebCore/DocumentSyncData.h>
 #include <WebCore/FloatSize.h>
 #include <WebCore/FrameIdentifier.h>
 #include <WebCore/HighlightVisibility.h>
@@ -108,6 +109,7 @@ struct RemotePageParameters {
     URL initialMainDocumentURL;
     FrameTreeCreationParameters frameTreeParameters;
     std::optional<WebsitePoliciesData> websitePoliciesData;
+    Ref<WebCore::DocumentSyncData> topDocumentSyncData;
 };
 
 struct WebPageCreationParameters {
@@ -175,6 +177,7 @@ struct WebPageCreationParameters {
     bool openedByDOM { false };
     bool mayStartMediaWhenInWindow { false };
     bool mediaPlaybackIsSuspended { false };
+    bool areActiveDOMObjectsAndAnimationsSuspended { false };
 
     WebCore::IntSize minimumSizeForAutoLayout { };
     WebCore::IntSize sizeToContentAutoSizeMaximumSize { };
@@ -200,7 +203,7 @@ struct WebPageCreationParameters {
     bool backgroundTextExtractionEnabled { false };
 
 #if PLATFORM(MAC)
-    std::optional<WebCore::DestinationColorSpace> colorSpace { };
+    std::optional<WebCore::ColorSpace> colorSpace { };
     bool useFormSemanticContext { false };
     int headerBannerHeight { 0 };
     int footerBannerHeight { 0 };
@@ -387,6 +390,8 @@ struct WebPageCreationParameters {
 #if ENABLE(IMAGE_ANALYSIS)
     std::optional<WebCore::ImageTranslationLanguageIdentifiers> imageTranslationLanguageIdentifiers { std::nullopt };
 #endif
+
+    String displayedTranslationLocaleIdentifier { };
 
     std::optional<TextManipulationParameters> textManipulationParameters { std::nullopt };
 

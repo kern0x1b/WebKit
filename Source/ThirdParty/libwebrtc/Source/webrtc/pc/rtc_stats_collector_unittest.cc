@@ -53,8 +53,12 @@
 #include "api/video_codecs/scalability_mode.h"
 #include "call/call.h"
 #include "common_video/include/quality_limitation_reason.h"
+#if defined(WEBRTC_WEBKIT_BUILD)
+#include "json/json.h"
+#else
 #include "json/reader.h"
 #include "json/value.h"
+#endif
 #include "media/base/fake_media_engine.h"
 #include "media/base/media_channel.h"
 #include "media/base/stream_params.h"
@@ -3183,7 +3187,7 @@ TEST_P(RTCStatsCollectorTest, CollectRTCTransportStatsWithCrypto) {
   expected_rtp_transport.tls_version = "0203";
   expected_rtp_transport.dtls_role = "client";
   expected_rtp_transport.dtls_cipher = "TLS_RSA_WITH_AES_128_CBC_SHA";
-  expected_rtp_transport.srtp_cipher = "AES_CM_128_HMAC_SHA1_80";
+  expected_rtp_transport.srtp_cipher = "SRTP_AES128_CM_HMAC_SHA1_80";
   // CCFB stats.
   expected_rtp_transport.ccfb_messages_received = 5;
 

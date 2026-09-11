@@ -54,7 +54,6 @@
 #include <wtf/NeverDestroyed.h>
 #include <wtf/TZoneMallocInlines.h>
 #include <wtf/URL.h>
-#include <wtf/text/CString.h>
 #include <wtf/text/MakeString.h>
 
 namespace WebCore::ContentExtensions {
@@ -195,7 +194,7 @@ auto ContentExtensionsBackend::actionsForResourceLoad(const ResourceLoadInfo& re
 
 #if CONTENT_EXTENSIONS_PERFORMANCE_REPORTING
     MonotonicTime addedTimeEnd = MonotonicTime::now();
-    dataLogF("Time added: %f microseconds %s \n", (addedTimeEnd - addedTimeStart).microseconds(), resourceLoadInfo.resourceURL.string().utf8().data());
+    dataLogLn("Time added: "_s, (addedTimeEnd - addedTimeStart).microseconds(), " microseconds "_s, resourceLoadInfo.resourceURL.string());
 #endif
     return actionsVector;
 }
@@ -315,6 +314,9 @@ ContentRuleListResults ContentExtensionsBackend::processContentRuleListsForLoad(
                     results.summary.modifyHeadersActions.append(action);
                 }
             }, [&] (const RedirectAction& redirectAction) {
+                if (results.summary.redirected)
+                    return;
+
                 if (initiatingDocumentLoader.allowsActiveContentRuleListActionsForURL(contentRuleListIdentifier, url)) {
                     if (results.summary.blockedLoad)
                         return;

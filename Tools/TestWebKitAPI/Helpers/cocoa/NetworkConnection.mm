@@ -27,34 +27,17 @@
 #import "Helpers/cocoa/NetworkConnection.h"
 
 #import "Helpers/cocoa/HTTPServer.h"
-#import <pal/spi/cocoa/NetworkSPI.h>
+#import "Helpers/cocoa/NetworkSPI.h"
+#import <Security/Security.h>
 #import <wtf/BlockPtr.h>
 #import <wtf/SHA1.h>
-#import <wtf/SoftLinking.h>
 #import <wtf/StdLibExtras.h>
 #import <wtf/ThreadSafeRefCounted.h>
 #import <wtf/cocoa/VectorCocoa.h>
 #import <wtf/darwin/DispatchExtras.h>
 #import <wtf/text/Base64.h>
+#import <wtf/text/MakeString.h>
 #import <wtf/text/StringToIntegerConversion.h>
-
-#if PLATFORM(COCOA)
-SOFT_LINK_FRAMEWORK(Network)
-SOFT_LINK_MAY_FAIL(Network, nw_webtransport_metadata_set_local_draining, void, (nw_protocol_metadata_t metadata), (metadata))
-#define nw_webtransport_metadata_set_local_draining softLinknw_webtransport_metadata_set_local_draining
-SOFT_LINK_MAY_FAIL(Network, nw_connection_abort_reads, void, (nw_connection_t connection, uint64_t error_code), (connection, error_code))
-#define nw_connection_abort_reads softLinknw_connection_abort_reads
-SOFT_LINK_MAY_FAIL(Network, nw_connection_abort_writes, void, (nw_connection_t connection, uint64_t error_code), (connection, error_code))
-#define nw_connection_abort_writes softLinknw_connection_abort_writes
-SOFT_LINK_MAY_FAIL(Network, nw_webtransport_metadata_set_remote_receive_error_handler, void, (nw_protocol_metadata_t metadata, nw_webtransport_receive_error_handler_t handler, dispatch_queue_t queue), (metadata, handler, queue))
-#define nw_webtransport_metadata_set_remote_receive_error_handler softLinknw_webtransport_metadata_set_remote_receive_error_handler
-SOFT_LINK_MAY_FAIL(Network, nw_webtransport_metadata_set_remote_send_error_handler, void, (nw_protocol_metadata_t metadata, nw_webtransport_send_error_handler_t handler, dispatch_queue_t queue), (metadata, handler, queue))
-#define nw_webtransport_metadata_set_remote_send_error_handler softLinknw_webtransport_metadata_set_remote_send_error_handler
-SOFT_LINK_WITH_NS_RETURNS_RETAINED(Network, nw_protocol_copy_webtransport_definition, nw_protocol_definition_t, (void), ())
-SOFT_LINK_WITH_NS_RETURNS_RETAINED(Network, nw_webtransport_create_options, nw_protocol_options_t, (void), ())
-SOFT_LINK(Network, nw_webtransport_options_set_is_unidirectional, void, (nw_protocol_options_t options, bool is_unidirectional), (options, is_unidirectional))
-SOFT_LINK(Network, nw_webtransport_options_set_is_datagram, void, (nw_protocol_options_t options, bool is_datagram), (options, is_datagram))
-#endif // PLATFORM(COCOA)
 
 namespace TestWebKitAPI {
 
@@ -117,6 +100,85 @@ void ReceiveHTTPRequestOperation::await_suspend(std::coroutine_handle<> handle)
         handle();
     });
 }
+
+#if HAVE(NETWORK_FRAMEWORK_HTTP_MESSAGING)
+
+void Connection::receiveHTTPMessagingRequest(CompletionHandler<void(HTTPRequestData&&)>&& completionHandler, HTTPRequestData&& partial) const
+{
+    nw_connection_receive_message(m_connection.get(), makeBlockPtr([connection = *this, completionHandler = WTF::move(completionHandler), partial = WTF::move(partial)](dispatch_data_t content, nw_content_context_t context, bool isComplete, nw_error_t error) mutable {
+        __block HTTPRequestData blockPartial = WTF::move(partial);
+        // Discard any headers/body already accumulated from earlier chunks: an error mid-stream (e.g. the
+        // client resets the stream after sending headers but before finishing the body) must not be mistaken
+        // by callers for a successfully-received request just because path happens to already be set.
+        if (error)
+            return completionHandler({ });
+
+        if (context) {
+            if (RetainPtr metadata = adoptNS(nw_content_context_copy_protocol_metadata(context, adoptNS(nw_protocol_copy_http_definition()).get()))) {
+                if (nw_http_metadata_get_type(metadata.get()) == nw_http_metadata_type_request) {
+                    if (RetainPtr request = adoptNS(nw_http_metadata_copy_request(metadata.get()))) {
+                        nw_http_request_access_method(request.get(), ^(const char* method) {
+                            blockPartial.method = String::fromUTF8(method);
+                        });
+                        nw_http_request_access_path(request.get(), ^(const char* path) {
+                            if (path)
+                                blockPartial.path = String::fromUTF8(path);
+                        });
+                        nw_http_request_access_authority(request.get(), ^(const char* authority) {
+                            if (authority)
+                                blockPartial.authority = String::fromUTF8(authority);
+                        });
+                        if (RetainPtr fields = adoptNS(nw_http_request_copy_header_fields(request.get()))) {
+                            nw_http_fields_enumerate(fields.get(), ^bool(const char* name, size_t nameLength, const char* value, size_t valueLength) {
+                                String fieldName = String::fromUTF8(std::span(name, nameLength));
+                                String fieldValue = String::fromUTF8(std::span(value, valueLength));
+                                auto addResult = blockPartial.headerFields.add(fieldName, fieldValue);
+                                if (!addResult.isNewEntry) {
+                                    // RFC 7540 8.1.2.5: cookie crumbling splits a single Cookie header into multiple
+                                    // header fields on the wire, which must be rejoined with "; " to reconstruct the
+                                    // original Cookie header value. All other repeated fields are combined per RFC
+                                    // 7230 3.2.2 by joining with a comma.
+                                    ASCIILiteral separator = fieldName == "cookie"_s ? "; "_s : ", "_s;
+                                    addResult.iterator->value = makeString(addResult.iterator->value, separator, fieldValue);
+                                }
+                                return true;
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        if (content)
+            blockPartial.body.appendVector(vectorFromData(content));
+
+        if (isComplete)
+            return completionHandler(WTF::move(blockPartial));
+
+        connection.receiveHTTPMessagingRequest(WTF::move(completionHandler), WTF::move(blockPartial));
+    }).get());
+}
+
+void Connection::sendHTTPMessagingResponse(const HTTPResponse& response, CompletionHandler<void()>&& completionHandler) const
+{
+    RetainPtr httpResponse = adoptNS(nw_http_response_create(response.statusCode, nullptr));
+    RetainPtr fields = adoptNS(nw_http_fields_create());
+    for (auto& pair : response.headerFields)
+        nw_http_fields_append(fields.get(), pair.key.utf8().legacyCStringPointer(), pair.value.utf8().legacyCStringPointer());
+    nw_http_response_set_header_fields(httpResponse.get(), fields.get());
+
+    RetainPtr metadata = adoptNS(nw_http_create_metadata_for_response(httpResponse.get()));
+    RetainPtr context = adoptNS(nw_content_context_create("response"));
+    nw_content_context_set_metadata_for_protocol(context.get(), metadata.get());
+
+    nw_connection_send(m_connection.get(), makeDispatchData(Vector<uint8_t>(response.body)).get(), context.get(), true, makeBlockPtr([completionHandler = WTF::move(completionHandler)](nw_error_t error) mutable {
+        ASSERT_UNUSED(error, !error);
+        if (completionHandler)
+            completionHandler();
+    }).get());
+}
+
+#endif // HAVE(NETWORK_FRAMEWORK_HTTP_MESSAGING)
 
 ReceiveBytesOperation Connection::awaitableReceiveBytes() const
 {
@@ -213,32 +275,32 @@ void Connection::webSocketHandshake(CompletionHandler<void()>&& connectionHandle
 
 void Connection::terminate(CompletionHandler<void()>&& completionHandler)
 {
-    nw_connection_set_state_changed_handler(m_connection.get(), makeBlockPtr([completionHandler = WTF::move(completionHandler)] (nw_connection_state_t state, nw_error_t error) mutable {
-        ASSERT_UNUSED(error, !error);
+    nw_connection_set_state_changed_handler(m_connection.get(), makeBlockPtr([completionHandler = WTF::move(completionHandler)] (nw_connection_state_t state, nw_error_t) mutable {
+        // The error reported here describes the connection, not the cancellation: a connection that
+        // failed its TLS handshake still reports "bad certificate" once cancelled. Cancelling
+        // cannot itself fail, so there is nothing to check.
         if (state == nw_connection_state_cancelled && completionHandler)
             completionHandler();
     }).get());
     nw_connection_cancel(m_connection.get());
 }
 
-#if PLATFORM(COCOA)
+#if HAVE(WEBTRANSPORT)
 
 void Connection::abortReads(uint64_t errorCode)
 {
-    if (canLoadnw_connection_abort_reads())
-        nw_connection_abort_reads(m_connection.get(), errorCode);
+    nw_connection_abort_reads(m_connection.get(), errorCode);
 }
 
 void Connection::abortWrites(uint64_t errorCode)
 {
-    if (canLoadnw_connection_abort_writes())
-        nw_connection_abort_writes(m_connection.get(), errorCode);
+    nw_connection_abort_writes(m_connection.get(), errorCode);
 }
 
 void Connection::setRemoteReceiveErrorHandler(CompletionHandler<void(uint64_t)>&& completionHandler)
 {
     RetainPtr metadata = adoptNS(nw_connection_copy_protocol_metadata(m_connection.get(), adoptNS(nw_protocol_copy_webtransport_definition()).get()));
-    if (metadata && canLoadnw_webtransport_metadata_set_remote_receive_error_handler()) {
+    if (metadata) {
         nw_webtransport_metadata_set_remote_receive_error_handler(metadata.get(), makeBlockPtr([completionHandler = WTF::move(completionHandler)] (uint64_t errorCode) mutable {
             completionHandler(errorCode);
         }).get(), mainDispatchQueueSingleton());
@@ -248,7 +310,7 @@ void Connection::setRemoteReceiveErrorHandler(CompletionHandler<void(uint64_t)>&
 void Connection::setRemoteSendErrorHandler(CompletionHandler<void(uint64_t)>&& completionHandler)
 {
     RetainPtr metadata = adoptNS(nw_connection_copy_protocol_metadata(m_connection.get(), adoptNS(nw_protocol_copy_webtransport_definition()).get()));
-    if (metadata && canLoadnw_webtransport_metadata_set_remote_send_error_handler()) {
+    if (metadata) {
         nw_webtransport_metadata_set_remote_send_error_handler(metadata.get(), makeBlockPtr([completionHandler = WTF::move(completionHandler)] (uint64_t errorCode) mutable {
             completionHandler(errorCode);
         }).get(), mainDispatchQueueSingleton());
@@ -340,10 +402,42 @@ void ConnectionGroup::receiveIncomingConnection(Connection connection)
 void ConnectionGroup::drainWebTransportSession()
 {
     RetainPtr metadata = nw_connection_group_copy_protocol_metadata(m_data->group.get(), adoptNS(nw_protocol_copy_webtransport_definition()).get());
-    if (metadata && canLoadnw_webtransport_metadata_set_local_draining())
+    if (metadata)
         nw_webtransport_metadata_set_local_draining(metadata.get());
 }
 
-#endif // PLATFORM(COCOA)
+static RetainPtr<sec_protocol_metadata_t> securityMetadata(nw_connection_group_t group)
+{
+    RetainPtr sessionMetadata = nw_connection_group_copy_protocol_metadata(group, adoptNS(nw_protocol_copy_webtransport_definition()).get());
+    if (!sessionMetadata)
+        return nullptr;
+    switch (nw_webtransport_metadata_get_transport_mode(sessionMetadata.get())) {
+    case nw_webtransport_transport_mode_unknown:
+        return nullptr;
+    case nw_webtransport_transport_mode_http2: {
+        RetainPtr tlsMetadata = nw_connection_group_copy_protocol_metadata(group, adoptNS(nw_protocol_copy_tls_definition()).get());
+        return adoptNS(nw_tls_copy_sec_protocol_metadata(tlsMetadata.get()));
+    }
+    case nw_webtransport_transport_mode_http3: {
+        RetainPtr quicMetadata = nw_connection_group_copy_protocol_metadata(group, adoptNS(nw_protocol_copy_quic_connection_definition()).get());
+        return adoptNS(nw_quic_connection_copy_sec_protocol_metadata(quicMetadata.get()));
+    }
+    }
+    ASSERT_NOT_REACHED();
+    return nullptr;
+}
+
+Vector<uint8_t> ConnectionGroup::exportKeyingMaterial(std::span<const uint8_t> label, std::span<const uint8_t> context, uint32_t outputLength) const
+{
+    RetainPtr metadata = securityMetadata(m_data->group.get());
+    if (!metadata)
+        return { };
+    RetainPtr secret = adoptNS(sec_protocol_metadata_create_secret_with_context(metadata.get(), label.size(), reinterpret_cast<const char*>(label.data()), context.size(), context.data(), outputLength));
+    if (!secret)
+        return { };
+    return vectorFromData(secret.get());
+}
+
+#endif // HAVE(WEBTRANSPORT)
 
 } // namespace TestWebKitAPI

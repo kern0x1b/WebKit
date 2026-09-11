@@ -48,14 +48,15 @@
 #include "Settings.h"
 #include "StyleAdjuster.h"
 #include "StyleBuilderGenerated.h"
+#include "StyleBuilderStateInlines.h"
 #include "StyleComputedStyle+GettersInlines.h"
 #include "StyleComputedStyle+InitialInlines.h"
 #include "StyleComputedStyle+SettersInlines.h"
-#include "StyleCustomIdent.h"
 #include "StyleCustomProperty.h"
 #include "StyleCustomPropertyData.h"
 #include "StyleCustomPropertyRegistry.h"
 #include "StyleFontSizeFunctions.h"
+#include "StyleLocalPropertyRegistry.h"
 #include "StylePropertyShorthand.h"
 #include "StyleSubstitutionResolver.h"
 #include <wtf/SetForScope.h>
@@ -125,6 +126,15 @@ void Builder::applyAllProperties()
     adjustAfterApplying();
 }
 
+// The values are computed values from the parent highlight style, so this doesn't depend on the
+// high priority properties having been applied.
+void Builder::applyHighlightInheritance()
+{
+    ASSERT(m_state->isBuildingHighlightStyle());
+
+    BuilderGenerated::applyHighlightInheritAllProperties(m_state);
+}
+
 // Top priority properties affect resolution of high priority properties.
 void Builder::applyTopPriorityProperties()
 {
@@ -161,7 +171,7 @@ void Builder::applyNonHighPriorityProperties()
 
 void Builder::adjustAfterApplying()
 {
-    Adjuster::adjustFromBuilder(m_state->renderStyle());
+    Adjuster::adjustFromBuilder(m_state->style());
 }
 
 void Builder::applyLogicalGroupProperties()
@@ -236,15 +246,17 @@ void Builder::applyCustomProperty(const AtomString& name)
     applyCustomPropertyImpl(name, iterator->value);
 }
 
-// A custom property absent from a function's cascade is either a parameter (locally registered: it
-// shadows inheritance and resolves to its registered value) or one inherited from the calling context
-// (resolved lazily). https://drafts.csswg.org/css-mixins/#evaluating-custom-functions
+// A custom property absent from a function's cascade is either declared by this function (a parameter or
+// local: it shadows inheritance and resolves to its registered value) or one inherited from the calling
+// context (resolved lazily). An enclosing function's parameter is registered here but not declared here,
+// so it inherits. https://drafts.csswg.org/css-mixins/#evaluating-custom-functions
 void Builder::applyCustomPropertyFromCallingContext(const AtomString& name)
 {
     auto* callingContextBuilder = m_state->callingContextBuilder();
     ASSERT(callingContextBuilder);
 
-    if (m_state->registeredProperty(name))
+    auto* localRegistry = m_state->localPropertyRegistry();
+    if (localRegistry && localRegistry->declares(name))
         applyCustomProperty(name, CSSWideKeyword::Initial);
     else {
         callingContextBuilder->applyCustomProperty(name);
@@ -285,7 +297,7 @@ void Builder::applyCustomPropertyImpl(const AtomString& name, const PropertyCasc
         return CSSWideKeyword::Unset;
     };
 
-    SetForScope levelScope(m_state->m_currentProperty, &property);
+    BuilderStatePropertyScope levelScope(m_state, &property);
     SetForScope scopedLinkMatchMutation(m_state->m_linkMatch, SelectorChecker::MatchDefault);
 
     auto resolvedValue = resolveCustomPropertyValue(customPropertyValue.get());
@@ -301,7 +313,7 @@ void Builder::applyCustomPropertyImpl(const AtomString& name, const PropertyCasc
 
 inline void Builder::applyCascadeProperty(const PropertyCascade::Property& property)
 {
-    SetForScope levelScope(m_state->m_currentProperty, &property);
+    BuilderStatePropertyScope levelScope(m_state, &property);
 
     auto applyWithLinkMatch = [&](SelectorChecker::LinkMatchMask linkMatch) {
         if (property.cssValue[linkMatch]) {
@@ -338,7 +350,7 @@ bool Builder::applyRollbackCascadeProperty(const PropertyCascade& rollbackCascad
         return false;
 
     if (RefPtr value = rollbackProperty->cssValue[linkMatchMask]) {
-        SetForScope levelScope(m_state->m_currentProperty, rollbackProperty);
+        BuilderStatePropertyScope levelScope(m_state, rollbackProperty);
         applyProperty(propertyID, *value, linkMatchMask, rollbackProperty->origin);
     }
     return true;
@@ -354,7 +366,7 @@ bool Builder::applyRollbackCascadeCustomProperty(const PropertyCascade& rollback
     if (RefPtr value = rollbackProperty.cssValue[SelectorChecker::MatchDefault]) {
         Ref customPropertyValue = downcast<CSSCustomPropertyValue>(*value);
 
-        SetForScope levelScope(m_state->m_currentProperty, &rollbackProperty);
+        BuilderStatePropertyScope levelScope(m_state, &rollbackProperty);
         auto resolvedValue = resolveCustomPropertyValue(customPropertyValue);
         if (!resolvedValue)
             resolvedValue = CustomProperty::createForGuaranteedInvalid(name);
@@ -443,7 +455,14 @@ void Builder::applyProperty(CSSPropertyID id, CSSValue& value, SelectorChecker::
         return CSSProperty::isInheritedProperty(id);
     };
 
+    // https://drafts.csswg.org/css-pseudo-4/#highlight-cascade
+    // In a highlight pseudo-element the properties that inherit from the corresponding highlight
+    // pseudo-element of the originating element's parent do so whether or not they are inherited
+    // properties. The ones that apply without inheriting through the chain, fill and stroke, are
+    // inherited properties, so unset means inherit for them too.
     auto unsetValueType = [&] {
+        if (m_state->isBuildingHighlightStyle())
+            return ApplyValueType::Inherit;
         // https://drafts.csswg.org/css-cascade-4/#inherit-initial
         // The unset CSS-wide keyword acts as either inherit or initial, depending on whether the property is inherited or not.
         return isInheritedProperty() ? ApplyValueType::Inherit : ApplyValueType::Initial;
@@ -460,8 +479,8 @@ void Builder::applyProperty(CSSPropertyID id, CSSValue& value, SelectorChecker::
     if (valueType == ApplyValueType::Inherit && !isInheritedProperty())
         style.setHasExplicitlyInheritedProperties();
 
-    if (RefPtr paintImageValue = dynamicDowncast<CSSPaintImageValue>(valueToApply)) {
-        auto name = toStyle(paintImageValue->name(), m_state).value;
+    if (RefPtr paintImageValue = dynamicDowncast<CSSPaintImageValue>(valueToApply.get())) {
+        auto& name = paintImageValue->name().value;
         if (RefPtr paintWorklet = const_cast<Document&>(m_state->document()).paintWorkletGlobalScopeForName(name)) {
             Locker locker { paintWorklet->paintDefinitionLock() };
             if (auto* registration = paintWorklet->paintDefinitionMap().get(name)) {
@@ -471,12 +490,20 @@ void Builder::applyProperty(CSSPropertyID id, CSSValue& value, SelectorChecker::
         }
     }
 
-    if (id == CSSPropertySize && valueType == ApplyValueType::Value) [[unlikely]] {
-        applyPageSizeDescriptor(valueToApply);
+    if (id == CSSPropertyPageSize && valueType == ApplyValueType::Value) [[unlikely]] {
+        applyPageSizeDescriptor(valueToApply.get());
         return;
     }
 
-    BuilderGenerated::applyProperty(id, m_state, valueToApply, valueType);
+    auto apply = [&](ApplyValueType valueType) {
+        if (m_state->isBuildingHighlightStyle()) {
+            BuilderGenerated::applyHighlightProperty(id, m_state, valueToApply.get(), valueType);
+            return;
+        }
+        BuilderGenerated::applyProperty(id, m_state, valueToApply.get(), valueType);
+    };
+
+    apply(valueType);
 
     if (!isAnyRevert)
         m_state->disableNativeAppearanceIfNeeded(id, cascadeOrigin);
@@ -487,7 +514,7 @@ void Builder::applyProperty(CSSPropertyID id, CSSValue& value, SelectorChecker::
         // When this happens, the computed value is one of the following...
         // Otherwise: Either the property’s inherited value or its initial value depending on whether the property
         // is inherited or not, respectively, as if the property’s value had been specified as the unset keyword
-        BuilderGenerated::applyProperty(id, m_state, valueToApply, unsetValueType());
+        apply(unsetValueType());
     }
 }
 
@@ -642,6 +669,8 @@ Ref<CSSValue> Builder::resolveSubstitutionFunctions(CSSPropertyID propertyID, CS
 
 RefPtr<const CustomProperty> Builder::resolveCustomPropertyForContainerQueries(const CSSCustomPropertyValue& value)
 {
+    m_state->setIsResolvingContainerQueries();
+
     auto resolvedValue = resolveCustomPropertyValue(const_cast<CSSCustomPropertyValue&>(value));
     if (!resolvedValue)
         return CustomProperty::createForGuaranteedInvalid(value.name());
@@ -700,7 +729,7 @@ std::optional<Builder::CustomPropertyOrKeyword> Builder::resolveFunctionResult()
     if (!m_cascade.hasNormalProperty(CSSPropertyResult))
         return { };
 
-    SetForScope resultScope(m_state->m_currentProperty, &m_cascade.functionResultProperty());
+    BuilderStatePropertyScope resultScope(m_state, &m_cascade.functionResultProperty());
 
     // Apply all local variables, not just those reached by result. A local can be in a cycle with the
     // function even when result never references it.
@@ -768,7 +797,14 @@ std::optional<Builder::CustomPropertyOrKeyword> Builder::resolveCustomPropertyVa
     if (!registered)
         return { { CustomProperty::createForVariableData(name, *resolvedData) } };
 
-    auto dependencies = CSSPropertyParser::collectParsedCustomPropertyValueDependencies(registered->syntax, resolvedData->tokens(), resolvedData->context());
+    return computeCustomPropertyValueForSyntax(name, registered->syntax, *resolvedData);
+}
+
+// Parses an already-substituted value against a syntax and computes it on this builder's element.
+// Shared by registered custom properties and by custom function parameters.
+std::optional<Builder::CustomPropertyOrKeyword> Builder::computeCustomPropertyValueForSyntax(const AtomString& name, const CSSCustomPropertySyntax& syntax, const CSSVariableData& resolvedData)
+{
+    auto dependencies = CSSPropertyParser::collectParsedCustomPropertyValueDependencies(syntax, resolvedData.tokens(), resolvedData.context());
 
     // https://drafts.css-houdini.org/css-properties-values-api/#dependency-cycles
     bool hasCycles = false;
@@ -796,18 +832,18 @@ std::optional<Builder::CustomPropertyOrKeyword> Builder::resolveCustomPropertyVa
     if (isFontDependent)
         m_state->updateFont();
 
-    auto isAttrTainted = resolvedData->isAttrTainted();
+    auto isAttrTainted = resolvedData.isAttrTainted();
 
     // https://drafts.csswg.org/css-values-5/#attr-security
     // A registered custom property with <url> or <image> syntax resolved from attr()-tainted data is IACVT.
     if (isAttrTainted == IsAttrTainted::Yes) {
-        for (auto& component : registered->syntax.definition) {
+        for (auto& component : syntax.definition) {
             if (component.type == CSSCustomPropertySyntax::Type::URL || component.type == CSSCustomPropertySyntax::Type::Image)
                 return { };
         }
     }
 
-    return CSSPropertyParser::parseTypedCustomPropertyValue(name, registered->syntax, resolvedData->tokens(), m_state, resolvedData->context(), isAttrTainted);
+    return CSSPropertyParser::parseTypedCustomPropertyValue(name, syntax, resolvedData.tokens(), m_state, resolvedData.context(), isAttrTainted);
 }
 
 void Builder::applyPageSizeDescriptor(CSSValue& value)
@@ -849,7 +885,7 @@ const PropertyCascade* Builder::ensureRollbackCascadeForRevert()
 
 const PropertyCascade* Builder::ensureRollbackCascadeForRevertLayer()
 {
-    auto& property = *m_state->m_currentProperty;
+    const auto& property = *m_state->m_currentProperty;
     auto rollbackLayerPriority = property.cascadeLayerPriority;
     if (!rollbackLayerPriority)
         return ensureRollbackCascadeForRevert();

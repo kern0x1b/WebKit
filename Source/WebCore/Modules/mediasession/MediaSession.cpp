@@ -281,9 +281,14 @@ void MediaSession::setPlaybackState(MediaSessionPlaybackState state)
 
     updateReportedPosition();
 
-    if (state == MediaSessionPlaybackState::Playing)
-        m_platformSession->clientWillBeginPlayback([] (bool) { });
-    else if (m_playbackState == MediaSessionPlaybackState::Playing)
+    if (state == MediaSessionPlaybackState::Playing) {
+        // Registers this session in the manager's sessions() set synchronously, the same way
+        // HTMLMediaElement::playInternal() already does — independent of whether the admission below
+        // ever completes, so beginInterruption()'s forEachSession() can find this session immediately,
+        // not just once its (now always asynchronous) admission settles.
+        m_platformSession->setActive(true);
+        m_platformSession->clientWillBeginPlayback();
+    } else if (m_playbackState == MediaSessionPlaybackState::Playing)
         m_platformSession->clientWillPausePlayback();
 
     m_playbackState = state;
@@ -292,8 +297,8 @@ void MediaSession::setPlaybackState(MediaSessionPlaybackState state)
 
 ExceptionOr<void> MediaSession::setActionHandler(MediaSessionAction action, RefPtr<MediaSessionActionHandler>&& handler)
 {
-#if ENABLE(MEDIA_STREAM)
     RefPtr document = this->document();
+#if ENABLE(MEDIA_STREAM)
     if (document && !document->settings().mediaSessionCaptureToggleAPIEnabled() && (action == MediaSessionAction::Togglecamera || action == MediaSessionAction::Togglemicrophone || action == MediaSessionAction::Togglescreenshare || action == MediaSessionAction::Voiceactivity))
         return Exception { ExceptionCode::TypeError, makeString("Argument 1 ('action') to MediaSession.setActionHandler must be a value other than '"_s, convertEnumerationToString(action), "'"_s) };
 
@@ -306,7 +311,7 @@ ExceptionOr<void> MediaSession::setActionHandler(MediaSessionAction action, RefP
         document->setShouldListenToVoiceActivity(!!handler);
 #endif
 
-    if (RefPtr document = this->document(); document && !document->settings().mediaSessionExtendedActionsEnabled() && (action == MediaSessionAction::Hangup || action == MediaSessionAction::Previousslide || action == MediaSessionAction::Nextslide || action == MediaSessionAction::Enterpictureinpicture))
+    if (document && !document->settings().mediaSessionExtendedActionsEnabled() && (action == MediaSessionAction::Hangup || action == MediaSessionAction::Previousslide || action == MediaSessionAction::Nextslide || action == MediaSessionAction::Enterpictureinpicture))
         return Exception { ExceptionCode::TypeError, makeString("Argument 1 ('action') to MediaSession.setActionHandler must be a value other than '"_s, convertEnumerationToString(action), "'"_s) };
 
     RefPtr sessionManager = this->sessionManager();
@@ -651,6 +656,7 @@ void MediaSession::updateCaptureState(bool isActive, DOMPromiseDeferred<void>&& 
                 promise.reject(WTF::move(*exception));
                 return;
             }
+
             promise.resolve();
         });
     });

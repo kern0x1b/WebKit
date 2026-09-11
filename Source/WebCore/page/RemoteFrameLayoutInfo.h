@@ -25,6 +25,8 @@
 
 #pragma once
 
+#include <WebCore/FloatRect.h>
+#include <WebCore/IntRect.h>
 #include <WebCore/LayoutRect.h>
 #include <WebCore/TransformationMatrix.h>
 #include <wtf/RefCounted.h>
@@ -48,9 +50,14 @@ class RemoteFrameLayoutInfo : public RefCounted<RemoteFrameLayoutInfo> {
     WTF_MAKE_TZONE_ALLOCATED_EXPORT(RemoteFrameLayoutInfo, WEBCORE_EXPORT);
 
 public:
-    WEBCORE_EXPORT static Ref<RemoteFrameLayoutInfo> create(std::optional<LayoutRect>, TransformationMatrix, TransformationMatrix, float, LayoutPoint, OptionSet<FrameOwnerElementAppearance>);
+    template<typename... Args> static Ref<RemoteFrameLayoutInfo> create(Args&&... args) { return adoptRef(*new RemoteFrameLayoutInfo(std::forward<Args>(args)...)); }
 
     std::optional<LayoutRect> visibleRectInParent() const { return m_visibleRectInParent; }
+    IntRect onScreenRectInChildView() const { return m_onScreenRectInChildView; }
+#if PLATFORM(IOS_FAMILY)
+    FloatRect exposedContentRectInChildView() const { return m_exposedContentRectInChildView; }
+#endif
+    bool ownerHasRenderer() const { return m_ownerHasRenderer; }
     const TransformationMatrix& childFrameOwnerToRootContentTransform() const { return m_childFrameOwnerToRootContentTransform; }
     const TransformationMatrix& absoluteToChildFrameOwnerLocalTransform() const { return m_absoluteToChildFrameOwnerLocalTransform; }
     float usedZoom() const { return m_usedZoom; }
@@ -58,11 +65,37 @@ public:
     OptionSet<FrameOwnerElementAppearance> ownerElementAppearance() const { return m_ownerElementAppearance; }
 
 private:
-    RemoteFrameLayoutInfo(std::optional<LayoutRect>, TransformationMatrix, TransformationMatrix, float, LayoutPoint, OptionSet<FrameOwnerElementAppearance>);
+    WEBCORE_EXPORT RemoteFrameLayoutInfo(
+        std::optional<LayoutRect> visibleRectInParent,
+        IntRect onScreenRectInChildView,
+#if PLATFORM(IOS_FAMILY)
+        FloatRect exposedContentRectInChildView,
+#endif
+        bool ownerHasRenderer,
+        TransformationMatrix childFrameOwnerToRootContentTransform,
+        TransformationMatrix absoluteToChildFrameOwnerLocalTransform,
+        float usedZoom,
+        LayoutPoint contentBoxLocation,
+        OptionSet<FrameOwnerElementAppearance>
+    );
 
-    // Rectangle of the visible portion of the frame in its parent frame,
-    // in the coordinate space of the document of the parent frame.
+    // The visible portion of this frame in the parent frame's content coordinate space. This is
+    // clipped by the compositor tree but not by the viewport, because IntersectionObserver applies
+    // its own viewport clip (layoutViewportRect) at each recursion step.
     std::optional<LayoutRect> m_visibleRectInParent;
+
+    // The portion of this frame that is on screen, in the frame's own view space (i.e.
+    // visibleRectOfChild intersected with windowClipRect mapped to the frame's view space).
+    IntRect m_onScreenRectInChildView;
+
+#if PLATFORM(IOS_FAMILY)
+    // The portion of this frame that should be tiled, in the frame's own view space. Empty means
+    // tile nothing.
+    FloatRect m_exposedContentRectInChildView;
+#endif
+
+    // Whether the frame's owner element has a renderer (e.g. not display:none).
+    bool m_ownerHasRenderer;
 
     // The transformation matrix to project from the frame owner's
     // coordinate space to its RenderView's (root) coordinate space.
@@ -83,5 +116,8 @@ private:
 
     OptionSet<FrameOwnerElementAppearance> m_ownerElementAppearance;
 };
+
+WEBCORE_EXPORT WTF::TextStream& operator<<(WTF::TextStream&, FrameOwnerElementAppearance);
+WEBCORE_EXPORT WTF::TextStream& operator<<(WTF::TextStream&, const RemoteFrameLayoutInfo&);
 
 };

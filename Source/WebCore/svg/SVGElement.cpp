@@ -1,7 +1,7 @@
 /*
  * Copyright (C) 2004, 2005, 2006, 2007, 2008 Nikolas Zimmermann <zimmermann@kde.org>
  * Copyright (C) 2004, 2005, 2006, 2008 Rob Buis <buis@kde.org>
- * Copyright (C) 2008-2025 Apple Inc. All rights reserved.
+ * Copyright (C) 2008-2026 Apple Inc. All rights reserved.
  * Copyright (C) 2024 Google Inc. All rights reserved.
  * Copyright (C) 2008 Alp Toker <alp@atoker.com>
  * Copyright (C) 2009 Cameron McCormack <cam@mcc.id.au>
@@ -51,6 +51,7 @@
 #include "SVGElementRareData.h"
 #include "SVGElementTypeHelpers.h"
 #include "SVGEllipseElement.h"
+#include "SVGFEImageElement.h"
 #include "SVGForeignObjectElement.h"
 #include "SVGGraphicsElement.h"
 #include "SVGImageElement.h"
@@ -78,6 +79,7 @@
 #include <wtf/HashMap.h>
 #include <wtf/NeverDestroyed.h>
 #include <wtf/RobinHoodHashMap.h>
+#include <wtf/RobinHoodHashSet.h>
 #include <wtf/StdLibExtras.h>
 #include <wtf/TZoneMallocInlines.h>
 #include <wtf/text/MakeString.h>
@@ -193,6 +195,8 @@ void SVGElement::removingSteps(RemovalType removalType, ContainerNode& oldParent
 {
     StyledElement::removingSteps(removalType, oldParentOfRemovedTree);
 
+    m_isInSVGResourceContainer = TriState::Indeterminate;
+
     if (!parentNode()) {
         m_hasRegisteredWithParentForRelativeLengths = false;
         if (RefPtr oldParent = dynamicDowncast<SVGElement>(oldParentOfRemovedTree))
@@ -285,12 +289,23 @@ void SVGElement::addReferencingElement(SVGElement& element)
     auto& rareDataOfReferencingElement = element.ensureSVGRareData();
     RELEASE_ASSERT(!rareDataOfReferencingElement.referenceTarget());
     rareDataOfReferencingElement.setReferenceTarget(*this);
+    invalidateLayerRequirementForFEImageReference(element);
 }
 
 void SVGElement::removeReferencingElement(SVGElement& element)
 {
     ensureSVGRareData().removeReferencingElement(element);
     element.ensureSVGRareData().setReferenceTarget(nullptr);
+    invalidateLayerRequirementForFEImageReference(element);
+}
+
+void SVGElement::invalidateLayerRequirementForFEImageReference(const SVGElement& referencingElement)
+{
+    if (!is<SVGFEImageElement>(referencingElement))
+        return;
+    if (!document().settings().layerBasedSVGEngineEnabled())
+        return;
+    invalidateStyleAndLayerComposition();
 }
 
 void SVGElement::removeElementReference()
@@ -299,6 +314,17 @@ void SVGElement::removeElementReference()
         return;
     if (RefPtr destination = m_svgRareData->referenceTarget())
         destination->removeReferencingElement(*this);
+}
+
+bool SVGElement::isReferencedByFEImage() const
+{
+    if (!m_svgRareData)
+        return false;
+    for (Ref element : m_svgRareData->referencingElements()) {
+        if (is<SVGFEImageElement>(element))
+            return true;
+    }
+    return false;
 }
 
 Vector<WeakPtr<SVGResourceElementClient>> SVGElement::referencingCSSClients() const
@@ -535,10 +561,10 @@ void SVGElement::attributeChanged(const QualifiedName& name, const AtomString& o
         m_className->setBaseValInternal(newValue);
         break;
     case AttributeNames::tabindexAttr:
-        if (newValue.isEmpty())
-            setTabIndexExplicitly(std::nullopt);
-        else if (auto optionalTabIndex = parseHTMLInteger(newValue))
+        if (auto optionalTabIndex = parseHTMLInteger(newValue))
             setTabIndexExplicitly(optionalTabIndex.value());
+        else
+            setTabIndexExplicitly(std::nullopt);
         break;
     default:
         if (auto& eventName = HTMLElement::eventNameForEventHandlerAttribute(name); !eventName.isNull())
@@ -1014,6 +1040,8 @@ CSSPropertyID SVGElement::cssPropertyIdForSVGAttributeName(const QualifiedName& 
         return CSSPropertyTextAnchor;
     case AttributeNames::text_decorationAttr:
         return CSSPropertyTextDecoration;
+    case AttributeNames::text_overflowAttr:
+        return CSSPropertyTextOverflow;
     case AttributeNames::text_renderingAttr:
         return CSSPropertyTextRendering;
     case AttributeNames::unicode_bidiAttr:
@@ -1096,6 +1124,8 @@ Node::NeedsPostConnectionSteps SVGElement::insertionSteps(InsertionType insertio
 {
     StyledElement::insertionSteps(insertionType, parentOfInsertedTree);
 
+    m_isInSVGResourceContainer = TriState::Indeterminate;
+
     if (!m_hasInitializedRelativeLengthsState)
         updateRelativeLengthsInformation();
     else if (RefPtr parentElement = dynamicDowncast<SVGElement>(parentNode()); parentElement && &parentOfInsertedTree == parentNode())
@@ -1114,6 +1144,42 @@ Node::NeedsPostConnectionSteps SVGElement::insertionSteps(InsertionType insertio
 void SVGElement::postConnectionSteps()
 {
     buildPendingResourcesIfNeeded();
+}
+
+bool SVGElement::isResourceContainerTagName(const QualifiedName& tagName)
+{
+    if (tagName.namespaceURI() != SVGNames::svgNamespaceURI)
+        return false;
+
+    static NeverDestroyed resourceContainerLocalNames = MemoryCompactLookupOnlyRobinHoodHashSet<AtomString> {
+        SVGNames::clipPathTag->localName(),
+        SVGNames::filterTag->localName(),
+        SVGNames::linearGradientTag->localName(),
+        SVGNames::markerTag->localName(),
+        SVGNames::maskTag->localName(),
+        SVGNames::patternTag->localName(),
+        SVGNames::radialGradientTag->localName(),
+    };
+    return resourceContainerLocalNames.get().contains(tagName.localName());
+}
+
+bool SVGElement::isInSVGResourceContainer() const
+{
+    if (m_isInSVGResourceContainer == TriState::Indeterminate) {
+        bool result = false;
+        // Walk composed-tree element ancestors (crosses shadow boundaries for <use> and
+        // HTML inside <foreignObject>). Stop at the first SVG ancestor and reuse its cached
+        // answer, so repeated calls become O(1) once the ancestor cache is populated.
+        for (RefPtr<Element> ancestor = parentElementInComposedTree(); ancestor; ancestor = ancestor->parentElementInComposedTree()) {
+            RefPtr svgAncestor = dynamicDowncast<SVGElement>(ancestor.get());
+            if (!svgAncestor)
+                continue;
+            result = isResourceContainerTagName(svgAncestor->tagQName()) || svgAncestor->isInSVGResourceContainer();
+            break;
+        }
+        m_isInSVGResourceContainer = triState(result);
+    }
+    return m_isInSVGResourceContainer == TriState::True;
 }
 
 void SVGElement::buildPendingResourcesIfNeeded()

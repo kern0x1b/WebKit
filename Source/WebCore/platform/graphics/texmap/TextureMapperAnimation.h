@@ -19,7 +19,7 @@
 
 #pragma once
 
-#if USE(TEXTURE_MAPPER)
+#if USE(TEXTURE_MAPPER) || USE(COORDINATED_GRAPHICS)
 #include "GraphicsLayer.h"
 #include "GraphicsLayerAnimation.h"
 #include "GraphicsLayerKeyframeValueList.h"
@@ -62,10 +62,12 @@ public:
 private:
     void applyInternal(ApplicationResult&, const GraphicsLayerAnimationValue& from, const GraphicsLayerAnimationValue& to, float progress);
     Seconds computeTotalRunningTime(MonotonicTime);
+    const TimingFunction& timingFunctionForKeyframe(const GraphicsLayerAnimationValue& from) const;
 
     String m_name;
     GraphicsLayerKeyframeValueList m_keyframes { AnimatedProperty::Invalid };
     RefPtr<TimingFunction> m_timingFunction;
+    RefPtr<TimingFunction> m_defaultTimingFunctionForKeyframes;
     double m_iterationCount { 0 };
     double m_duration { 0 };
     GraphicsLayerAnimation::Direction m_direction { GraphicsLayerAnimation::Direction::Normal };
@@ -117,4 +119,4 @@ private:
 
 } // namespace WebCore
 
-#endif // USE(TEXTURE_MAPPER)
+#endif // USE(TEXTURE_MAPPER) || USE(COORDINATED_GRAPHICS)

@@ -36,6 +36,7 @@
 #include <wtf/HashCountedSet.h>
 #include <wtf/HashSet.h>
 #include <wtf/Identified.h>
+#include <wtf/ListHashSet.h>
 #include <wtf/MonotonicTime.h>
 #include <wtf/RefCountedAndCanMakeWeakPtr.h>
 #include <wtf/TZoneMalloc.h>
@@ -95,6 +96,7 @@ public:
     void controlClient(ScriptExecutionContextIdentifier);
 
     void clear();
+    void terminateWorkersForServiceWorkerPageDisconnect();
     bool tryClear();
     void tryActivate();
     void didFinishActivation(ServiceWorkerIdentifier);
@@ -112,6 +114,7 @@ public:
 
     bool isAppInitiated() const { return m_isAppInitiated; }
     std::optional<ScriptExecutionContextIdentifier> serviceWorkerPageIdentifier() const { return m_serviceWorkerPageIdentifier; }
+    void setServiceWorkerPageIdentifier(std::optional<ScriptExecutionContextIdentifier> identifier) { m_serviceWorkerPageIdentifier = identifier; }
 
     WEBCORE_EXPORT std::optional<ExceptionData> enableNavigationPreload();
     WEBCORE_EXPORT std::optional<ExceptionData> disableNavigationPreload();
@@ -142,7 +145,7 @@ private:
     RefPtr<SWServerWorker> m_waitingWorker;
     RefPtr<SWServerWorker> m_activeWorker;
 
-    HashSet<CookieChangeSubscription> m_cookieChangeSubscriptions;
+    ListHashSet<CookieChangeSubscription> m_cookieChangeSubscriptions;
 
     WallTime m_lastUpdateTime;
     

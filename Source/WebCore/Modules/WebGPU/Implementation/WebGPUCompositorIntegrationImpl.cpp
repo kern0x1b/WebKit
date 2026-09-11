@@ -59,6 +59,13 @@ void CompositorIntegrationImpl::prepareForDisplay(uint32_t frameIndex, Completio
     m_onSubmittedWorkScheduledCallback(WTF::move(completionHandler));
 }
 
+Seconds CompositorIntegrationImpl::lastFrameGPUCost() const
+{
+    if (RefPtr presentationContext = m_presentationContext)
+        return presentationContext->lastFrameGPUCost();
+    return 0_s;
+}
+
 void CompositorIntegrationImpl::updateContentsHeadroom(float headroom)
 {
 #if HAVE(SUPPORT_HDR_DISPLAY)
@@ -70,7 +77,7 @@ void CompositorIntegrationImpl::updateContentsHeadroom(float headroom)
 }
 
 #if PLATFORM(COCOA)
-Vector<MachSendRight> CompositorIntegrationImpl::recreateRenderBuffers(int width, int height, WebCore::DestinationColorSpace&& colorSpace, WebCore::AlphaPremultiplication alphaMode, TextureFormat textureFormat, unsigned bufferCount, Device& device)
+Vector<MachSendRight> CompositorIntegrationImpl::recreateRenderBuffers(int width, int height, WebCore::ColorSpace&& colorSpace, WebCore::AlphaPremultiplication alphaMode, TextureFormat textureFormat, unsigned bufferCount, Device& device)
 {
     m_renderBuffers.clear();
     m_device = device;

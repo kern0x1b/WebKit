@@ -725,10 +725,6 @@ BMPImageReader::ProcessingResult BMPImageReader::processNonRLEData(bool inRLE, i
                     // caller won't read it.
                     uint32_t pixel;
                     memcpySpan(asMutableByteSpan(pixel), m_data->span().subspan(m_decodedOffset + offset, 3));
-#if CPU(BIG_ENDIAN)
-                    pixel = ((pixel & 0xff00) << 8) | ((pixel & 0xff0000) >> 8) | ((pixel & 0xff000000) >> 24);
-#endif
-
                     return pixel;
                 }
 

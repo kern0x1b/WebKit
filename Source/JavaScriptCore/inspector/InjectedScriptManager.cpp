@@ -136,7 +136,7 @@ void InjectedScriptManager::clearExceptionValue()
         injectedScript.clearExceptionValue();
 }
 
-Expected<JSObject*, NakedPtr<Exception>> InjectedScriptManager::createInjectedScript(JSGlobalObject* globalObject, int id)
+std::expected<JSObject*, NakedPtr<Exception>> InjectedScriptManager::createInjectedScript(JSGlobalObject* globalObject, int id)
 {
     VM& vm = globalObject->vm();
     JSLockHolder lock(vm);
@@ -153,13 +153,13 @@ Expected<JSObject*, NakedPtr<Exception>> InjectedScriptManager::createInjectedSc
     if (callData.type == CallData::Type::None)
         return nullptr;
 
-    MarkedArgumentBuffer args;
-    args.append(m_injectedScriptHost->wrapper(globalObject));
-    args.append(globalThisValue);
-    args.append(jsNumber(id));
-    ASSERT(!args.hasOverflowed());
+    std::array<JSC::EncodedJSValue, 3> args { {
+        JSC::JSValue::encode(m_injectedScriptHost->wrapper(globalObject)),
+        JSC::JSValue::encode(globalThisValue),
+        JSC::JSValue::encode(jsNumber(id)),
+    } };
 
-    JSValue result = JSC::call(globalObject, functionValue, callData, globalThisValue, args);
+    JSValue result = JSC::call(globalObject, functionValue, callData, globalThisValue, JSC::ArgList { args.data(), args.size() });
     RETURN_IF_EXCEPTION(scope, makeUnexpected(scope.exception()));
     return result.getObject();
 }
@@ -189,7 +189,7 @@ InjectedScript InjectedScriptManager::injectedScriptFor(JSGlobalObject* globalOb
         auto& stack = error->stack();
         if (stack.size() > 0)
             lineColumn = stack[0].computeLineAndColumn();
-        WTFLogAlways("Error when creating injected script: %s (%d:%d)\n", error->value().toWTFString(globalObject).utf8().data(), lineColumn.line, lineColumn.column);
+        WTFLogAlways("Error when creating injected script: %s (%d:%d)\n", error->value().toWTFString(globalObject).utf8().legacyCStringPointer(), lineColumn.line, lineColumn.column);
         RELEASE_ASSERT_NOT_REACHED();
     }
     if (!createResult.value()) {

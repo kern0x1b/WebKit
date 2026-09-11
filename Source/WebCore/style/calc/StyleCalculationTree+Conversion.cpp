@@ -37,10 +37,8 @@
 #include "CSSUnevaluatedCalc.h"
 #include "StyleBuilderState.h"
 #include "StyleCalculationTree.h"
-#include "StyleComputedStyle+GettersInlines.h"
 #include "StyleLengthResolution.h"
 #include "StylePrimitiveNumericTypes+Conversions.h"
-#include "StyleZoomPrimitivesInlines.h"
 #include <wtf/MathExtras.h>
 #include <wtf/StdLibExtras.h>
 
@@ -51,7 +49,6 @@ namespace Calculation {
 struct ToCSSConversionOptions {
     CSSCalc::CanonicalDimension::Dimension canonicalDimension;
     CSSCalc::SimplificationOptions simplification;
-    const Style::ComputedStyle& style;
 };
 
 struct ToStyleConversionOptions {
@@ -69,7 +66,6 @@ static auto toCSS(const Child&, const ToCSSConversionOptions&) -> CSSCalc::Child
 static auto toCSS(const Number&, const ToCSSConversionOptions&) -> CSSCalc::Child;
 static auto toCSS(const Percentage&, const ToCSSConversionOptions&) -> CSSCalc::Child;
 static auto toCSS(const Dimension&, const ToCSSConversionOptions&) -> CSSCalc::Child;
-static auto toCSS(const IndirectNode<Blend>&, const ToCSSConversionOptions&) -> CSSCalc::Child;
 template<typename CalculationOp> auto toCSS(const IndirectNode<CalculationOp>&, const ToCSSConversionOptions&) -> CSSCalc::Child;
 
 static auto toStyle(const CSSCalc::Random::Sharing&, const ToStyleConversionOptions&) -> Random::Fixed;
@@ -173,48 +169,7 @@ CSSCalc::Child toCSS(const Percentage& percentage, const ToCSSConversionOptions&
 
 CSSCalc::Child toCSS(const Dimension& root, const ToCSSConversionOptions& options)
 {
-    switch (options.canonicalDimension) {
-    case CSSCalc::CanonicalDimension::Dimension::Length:
-        return CSSCalc::makeChild(CSSCalc::CanonicalDimension { .value = Style::adjustFloatForAbsoluteZoom(root.value, options.style), .dimension = options.canonicalDimension });
-
-    case CSSCalc::CanonicalDimension::Dimension::Angle:
-    case CSSCalc::CanonicalDimension::Dimension::Time:
-    case CSSCalc::CanonicalDimension::Dimension::Frequency:
-    case CSSCalc::CanonicalDimension::Dimension::Resolution:
-    case CSSCalc::CanonicalDimension::Dimension::Flex:
-        break;
-    }
-
     return CSSCalc::makeChild(CSSCalc::CanonicalDimension { .value = root.value, .dimension = options.canonicalDimension });
-}
-
-CSSCalc::Child toCSS(const IndirectNode<Blend>& root, const ToCSSConversionOptions& options)
-{
-    // FIXME: (http://webkit.org/b/122036) Create a CSSCalc::Tree equivalent of Blend.
-
-    auto createBlendHalf = [](const auto& child, const auto& options, auto progress) -> CSSCalc::Child {
-        auto product = multiply(
-            toCSS(child, options),
-            CSSCalc::makeChild(CSSCalc::Number { .value = progress })
-        );
-
-        if (auto replacement = CSSCalc::simplify(product, options.simplification))
-            return WTF::move(*replacement);
-
-        auto type = toType(product);
-        return CSSCalc::makeChild(WTF::move(product), *type);
-    };
-
-    auto sum = add(
-        createBlendHalf(root->from, options, 1 - root->progress),
-        createBlendHalf(root->to, options, root->progress)
-    );
-
-    if (auto replacement = simplify(sum, options.simplification))
-        return WTF::move(*replacement);
-
-    auto type = CSSCalc::toType(sum);
-    return CSSCalc::makeChild(WTF::move(sum), *type);
 }
 
 template<typename CalculationOp> CSSCalc::Child toCSS(const IndirectNode<CalculationOp>& root, const ToCSSConversionOptions& options)
@@ -237,44 +192,24 @@ auto toStyle(const CSSCalc::Random::Sharing& randomSharing, const ToStyleConvers
     ASSERT(options.evaluation.conversionData);
     ASSERT(options.evaluation.conversionData->styleBuilderState());
 
-    return WTF::switchOn(randomSharing,
-        [&](const CSSCalc::Random::SharingOptions& sharingOptions) -> Random::Fixed {
-            CheckedPtr builderState = options.evaluation.conversionData->styleBuilderState();
-
-            if (!sharingOptions.elementScoped.has_value()) {
-                ASSERT(builderState->element());
+    if (auto* sharingFixed = std::get_if<CSSCalc::Random::SharingFixed>(&randomSharing)) {
+        return WTF::switchOn(sharingFixed->value,
+            [&](const CSS::Number<CSS::ClosedUnitRange>::Raw& raw) -> Random::Fixed {
+                return Random::Fixed { raw.value };
+            },
+            [&](const CSS::Number<CSS::ClosedUnitRange>::Calc& calc) -> Random::Fixed {
+                return Random::Fixed { calc.evaluate(*protect(options.evaluation.conversionData->styleBuilderState())) };
             }
+        );
+    }
 
-            return WTF::switchOn(sharingOptions.identifier,
-                [&](const CSSCalc::Random::SharingOptions::Auto& autoValue) {
-                    return Random::Fixed {
-                        builderState->lookupCSSRandomBaseValue(
-                            autoValue,
-                            sharingOptions.elementScoped
-                        )
-                    };
-                },
-                [&](const CSS::CustomIdent& customIdent) {
-                    return Random::Fixed {
-                        builderState->lookupCSSRandomBaseValue(
-                            Style::toStyle(customIdent, *builderState),
-                            sharingOptions.elementScoped
-                        )
-                    };
-                }
-            );
-        },
-        [&](const CSSCalc::Random::SharingFixed& sharingFixed) -> Random::Fixed {
-            return WTF::switchOn(sharingFixed.value,
-                [&](const CSS::Number<CSS::ClosedUnitRange>::Raw& raw) -> Random::Fixed {
-                    return Random::Fixed { raw.value };
-                },
-                [&](const CSS::Number<CSS::ClosedUnitRange>::Calc& calc) -> Random::Fixed {
-                    return Random::Fixed { calc.evaluate(*protect(options.evaluation.conversionData->styleBuilderState())) };
-                }
-            );
-        }
-    );
+    // resolveRandomBaseValue only returns nullopt for element-scoped sharing with no element, which does not
+    // happen during element style building. Assert the invariant rather than letting a future violation
+    // silently resolve to min.
+    CheckedPtr builderState = options.evaluation.conversionData->styleBuilderState();
+    auto baseValue = resolveRandomBaseValue(randomSharing, *builderState);
+    ASSERT(baseValue);
+    return Random::Fixed { baseValue.value_or(0) };
 }
 
 std::optional<Child> toStyle(const std::optional<CSSCalc::Child>& optionalChild, const ToStyleConversionOptions& options)
@@ -331,11 +266,11 @@ Child toStyle(const CSSCalc::Percentage& root, const ToStyleConversionOptions&)
 
 Child toStyle(const CSSCalc::CanonicalDimension& root, const ToStyleConversionOptions& options)
 {
-    ASSERT(options.evaluation.conversionData);
-
     switch (root.dimension) {
     case CSSCalc::CanonicalDimension::Dimension::Length:
-        return dimension(Style::computeNonCalcLengthDouble(root.value, CSS::LengthUnit::Px, *options.evaluation.conversionData));
+        if (options.evaluation.conversionData)
+            return dimension(resolveLength(root.value, CSS::LengthUnit::Px, *options.evaluation.conversionData));
+        return dimension(resolveLength(root.value, CSS::LengthUnit::Px, NoConversionDataRequiredToken { }));
 
     case CSSCalc::CanonicalDimension::Dimension::Angle:
     case CSSCalc::CanonicalDimension::Dimension::Time:
@@ -411,7 +346,6 @@ CSSCalc::Tree toCSS(const Tree& tree, const ToCSSOptions& toCSSOptions)
             .symbolTable = { },
             .allowZeroValueLengthRemovalFromSum = true,
         },
-        .style = toCSSOptions.style,
     };
 
     auto root = toCSS(tree.root, conversionOptions);

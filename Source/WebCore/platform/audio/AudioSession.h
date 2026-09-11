@@ -27,10 +27,12 @@
 
 #if USE(AUDIO_SESSION)
 
+#include <WebCore/PlatformMediaSessionTypes.h>
 #include <memory>
 #include <wtf/AbstractRefCountedAndCanMakeWeakPtr.h>
 #include <wtf/AbstractThreadSafeRefCountedAndCanMakeWeakPtr.h>
 #include <wtf/CompletionHandler.h>
+#include <wtf/NativePromise.h>
 #include <wtf/NeverDestroyed.h>
 #include <wtf/Noncopyable.h>
 #include <wtf/Observer.h>
@@ -46,30 +48,6 @@ class Logger;
 }
 
 namespace WebCore {
-
-enum class RouteSharingPolicy : uint8_t {
-    Default,
-    LongFormAudio,
-    Independent,
-    LongFormVideo
-};
-
-enum class AudioSessionCategory : uint8_t {
-    None,
-    AmbientSound,
-    SoloAmbientSound,
-    MediaPlayback,
-    RecordAudio,
-    PlayAndRecord,
-    AudioProcessing,
-};
-
-enum class AudioSessionMode : uint8_t {
-    // FIXME: This is not exhaustive.
-    Default,
-    VideoChat,
-    MoviePlayback,
-};
 
 enum class AudioSessionSoundStageSize : uint8_t {
     Automatic,
@@ -104,6 +82,7 @@ public:
 
     static bool NODELETE enableMediaPlayback();
 
+    using SetActivePromise = GenericPromise;
     using ChangedObserver = WTF::Observer<void(AudioSession&)>;
     static void addAudioSessionChangedObserver(const ChangedObserver&);
 
@@ -126,7 +105,7 @@ public:
     virtual size_t numberOfOutputChannels() const;
     virtual size_t maximumNumberOfOutputChannels() const;
 
-    bool tryToSetActive(bool);
+    Ref<SetActivePromise> tryToSetActive(bool);
 
     virtual size_t preferredBufferSize() const;
     virtual void setPreferredBufferSize(size_t);
@@ -148,6 +127,16 @@ public:
 
     virtual void beginInterruptionForTesting() { beginInterruption(); }
     virtual void endInterruptionForTesting() { endInterruption(MayResume::Yes); }
+
+    // The category applied to the real audio session.
+    using CategoryPromise = NativePromise<AudioSessionCategory, void>;
+    virtual Ref<CategoryPromise> systemCategoryForTesting() { return CategoryPromise::createAndResolve(category()); }
+
+    // How many times the audio session has been made active, counting only transitions from inactive to active.
+    using ActivationCountPromise = NativePromise<uint64_t, void>;
+    virtual Ref<ActivationCountPromise> systemActivationCountForTesting();
+    uint64_t activationCountForTesting() const;
+
     virtual void clearInterruptionFlagForTesting() { }
 
     static void addInterruptionObserver(AudioSessionInterruptionObserver&);
@@ -176,7 +165,7 @@ protected:
     friend class NeverDestroyed<AudioSession>;
     AudioSession();
 
-    virtual bool tryToSetActiveInternal(bool);
+    virtual Ref<SetActivePromise> tryToSetActiveInternal(bool);
     void setActive(bool);
     void activeStateChanged();
 
@@ -191,6 +180,7 @@ protected:
     AudioSession::CategoryType m_categoryOverride { AudioSession::CategoryType::None };
     bool m_active { false }; // Used only for testing.
     bool m_isInterrupted { false };
+    uint64_t m_activationCountForTesting { 0 };
 };
 
 class AudioSessionInterruptionObserver : public AbstractRefCountedAndCanMakeWeakPtr<AudioSessionInterruptionObserver> {

@@ -49,6 +49,7 @@
 #include "ScriptController.h"
 #include "ScriptDisallowedScope.h"
 #include "ShadowRoot.h"
+#include "StyleAdjuster.h"
 #include "StyleComputedStyle+SettersInlines.h"
 #include "StyleLengthResolution.h"
 #include "StyleResolver.h"
@@ -98,7 +99,7 @@ std::optional<Style::UnadjustedStyle> TextControlInnerContainer::resolveCustomSt
     auto elementStyle = resolveStyle(resolutionContext);
     CheckedRef elementStyleStyle = *elementStyle.style;
     if (isStrongPasswordTextField(shadowHost.get())) {
-        elementStyleStyle->setFlexWrap(FlexWrap::Wrap);
+        elementStyleStyle->setFlexWrap(Style::FlexWrapType::Wrap);
         elementStyleStyle->setOverflowX(Overflow::Hidden);
         elementStyleStyle->setOverflowY(Overflow::Hidden);
     }
@@ -133,12 +134,19 @@ std::optional<Style::UnadjustedStyle> TextControlInnerElement::resolveCustomStyl
     // We don't want the shadow DOM to be editable, so we set this block to read-only in case the input itself is editable.
     newStyle->setUserModify(UserModify::ReadOnly);
 
+    // The used value of user-select needs adjusting here because the adjuster won't run
+    // on this style later (because it was not produced by the cascade).
+    Style::Adjuster adjuster(document(), *shadowHostStyle, nullptr, nullptr);
+    adjuster.adjustUsedUserSelect(*newStyle);
+
     if (isStrongPasswordTextField(shadowHost())) {
         newStyle->setFlexShrink(0);
-        newStyle->setTextOverflow(TextOverflow::Clip);
+        newStyle->setTextOverflow(CSS::Keyword::Clip { });
         newStyle->setOverflowX(Overflow::Hidden);
         newStyle->setOverflowY(Overflow::Hidden);
-        newStyle->setFlexBasis(Style::FlexBasis::Fixed { static_cast<float>(Style::emToPx<int>(1, *newStyle)) });
+
+        // FIXME: This should probably use the unzoomed Style::emToPx conversion. Like this, zoom is being applied twice. Once now, once at use time.
+        newStyle->setFlexBasis(Style::FlexBasis::Fixed { static_cast<float>(Style::emToPxZoomed<int>(1, *newStyle)) });
     }
 
     return Style::UnadjustedStyle { WTF::move(newStyle) };
@@ -233,7 +241,10 @@ std::optional<Style::UnadjustedStyle> TextControlPlaceholderElement::resolveCust
     styleStyle->setDisplay(controlElement->isPlaceholderVisible() ? Style::DisplayType::BlockFlow : Style::DisplayType::None);
 
     if (RefPtr inputElement = dynamicDowncast<HTMLInputElement>(controlElement)) {
-        styleStyle->setTextOverflow(inputElement->shouldTruncateText(*shadowHostStyle) ? TextOverflow::Ellipsis : TextOverflow::Clip);
+        if (inputElement->shouldTruncateText(*shadowHostStyle))
+            styleStyle->setTextOverflow(CSS::Keyword::Ellipsis { });
+        else
+            styleStyle->setTextOverflow(CSS::Keyword::Clip { });
         styleStyle->setPaddingTop(0_css_px);
         styleStyle->setPaddingBottom(0_css_px);
     }

@@ -33,90 +33,13 @@ namespace JSC {
 void JITRightShiftGenerator::generateFastPath(CCallHelpers& jit)
 {
     ASSERT(m_scratchGPR != InvalidGPRReg);
-    ASSERT(m_scratchGPR != m_left.payloadGPR());
-    ASSERT(m_scratchGPR != m_right.payloadGPR());
-#if USE(JSVALUE32_64)
-    ASSERT(m_scratchGPR != m_left.tagGPR());
-    ASSERT(m_scratchGPR != m_right.tagGPR());
-#endif
+    ASSERT(m_scratchGPR != m_left);
+    ASSERT(m_scratchGPR != m_right);
 
     ASSERT(!m_leftOperand.isConstInt32() || !m_rightOperand.isConstInt32());
 
     m_didEmitFastPath = true;
 
-#if USE(JSVALUE32_64)
-    if (m_rightOperand.isConstInt32()) {
-        // Try to do (intVar >> intConstant).
-        CCallHelpers::Jump notInt = jit.branchIfNotInt32(m_left);
-
-        jit.moveValueRegs(m_left, m_result);
-        int32_t shiftAmount = m_rightOperand.asConstInt32() & 0x1f;
-        if (shiftAmount) {
-            if (m_shiftType == SignedShift)
-                jit.rshift32(CCallHelpers::Imm32(shiftAmount), m_result.payloadGPR());
-            else
-                jit.urshift32(CCallHelpers::Imm32(shiftAmount), m_result.payloadGPR());
-        }
-        m_endJumpList.append(jit.jump()); // Terminate the above case before emitting more code.
-
-        // Try to do (doubleVar >> intConstant).
-        notInt.link(&jit);
-
-        m_slowPathJumpList.append(jit.branchIfNotNumber(m_left, m_scratchGPR));
-
-        jit.unboxDoubleNonDestructive(m_left, m_leftFPR, m_scratchGPR);
-        m_slowPathJumpList.append(jit.branchTruncateDoubleToInt32(m_leftFPR, m_scratchGPR));
-
-        if (shiftAmount) {
-            if (m_shiftType == SignedShift)
-                jit.rshift32(CCallHelpers::Imm32(shiftAmount), m_scratchGPR);
-            else
-                jit.urshift32(CCallHelpers::Imm32(shiftAmount), m_scratchGPR);
-        }
-        jit.boxInt32(m_scratchGPR, m_result);
-        return;
-    }
-
-    // Try to do (intConstant >> intVar) or (intVar >> intVar).
-    m_slowPathJumpList.append(jit.branchIfNotInt32(m_right));
-
-    GPRReg rightOperandGPR = m_right.payloadGPR();
-    if (rightOperandGPR == m_result.payloadGPR())
-        rightOperandGPR = m_scratchGPR;
-
-    CCallHelpers::Jump leftNotInt;
-    if (m_leftOperand.isConstInt32()) {
-        jit.move(m_right.payloadGPR(), rightOperandGPR);
-        jit.move(m_right.tagGPR(), m_result.tagGPR());
-        jit.move(CCallHelpers::Imm32(m_leftOperand.asConstInt32()), m_result.payloadGPR());
-    } else {
-        leftNotInt = jit.branchIfNotInt32(m_left);
-        jit.move(m_right.payloadGPR(), rightOperandGPR);
-        jit.moveValueRegs(m_left, m_result);
-    }
-
-    if (m_shiftType == SignedShift)
-        jit.rshift32(rightOperandGPR, m_result.payloadGPR());
-    else
-        jit.urshift32(rightOperandGPR, m_result.payloadGPR());
-    if (m_leftOperand.isConstInt32())
-        return;
-
-    m_endJumpList.append(jit.jump()); // Terminate the above case before emitting more code.
-
-    // Try to do (doubleVar >> intVar).
-    leftNotInt.link(&jit);
-
-    m_slowPathJumpList.append(jit.branchIfNotNumber(m_left, m_scratchGPR));
-    jit.unboxDoubleNonDestructive(m_left, m_leftFPR, m_scratchGPR);
-    m_slowPathJumpList.append(jit.branchTruncateDoubleToInt32(m_leftFPR, m_scratchGPR));
-
-    if (m_shiftType == SignedShift)
-        jit.rshift32(m_right.payloadGPR(), m_scratchGPR);
-    else
-        jit.urshift32(m_right.payloadGPR(), m_scratchGPR);
-    jit.boxInt32(m_scratchGPR, m_result);
-#else
     if (m_rightOperand.isConstInt32()) {
         // Try to do (intVar >> intConstant).
         CCallHelpers::Jump notInt = jit.branchIfNotInt32(m_left);
@@ -124,18 +47,18 @@ void JITRightShiftGenerator::generateFastPath(CCallHelpers& jit)
         int32_t shiftAmount = m_rightOperand.asConstInt32() & 0x1f;
         if (shiftAmount) {
             if (m_shiftType == SignedShift)
-                jit.rshift32(m_left.payloadGPR(), CCallHelpers::Imm32(shiftAmount), m_result.payloadGPR());
+                jit.rshift32(m_left, CCallHelpers::Imm32(shiftAmount), m_result);
             else
-                jit.urshift32(m_left.payloadGPR(), CCallHelpers::Imm32(shiftAmount), m_result.payloadGPR());
-            jit.boxInt32(m_result.payloadGPR(), m_result);
+                jit.urshift32(m_left, CCallHelpers::Imm32(shiftAmount), m_result);
+            jit.boxInt32(m_result, m_result);
         } else
-            jit.moveValueRegs(m_left, m_result);
+            jit.move(m_left, m_result);
         m_endJumpList.append(jit.jump()); // Terminate the above case before emitting more code.
 
         // Try to do (doubleVar >> intConstant).
         notInt.link(&jit);
-        m_slowPathJumpList.append(jit.branchIfNotNumber(m_left, m_scratchGPR));
-        jit.unboxDoubleNonDestructive(m_left, m_leftFPR, m_scratchGPR);
+        m_slowPathJumpList.append(jit.branchIfNotNumber(m_left));
+        jit.unboxDouble(m_left, m_scratchGPR, m_leftFPR);
 #if CPU(ARM64)
         if (MacroAssemblerARM64::supportsDoubleToInt32ConversionUsingJavaScriptSemantics())
             jit.convertDoubleToInt32UsingJavaScriptSemantics(m_leftFPR, m_scratchGPR);
@@ -159,25 +82,25 @@ void JITRightShiftGenerator::generateFastPath(CCallHelpers& jit)
 
     if (m_leftOperand.isConstInt32()) {
         if (m_shiftType == SignedShift)
-            jit.rshift32(CCallHelpers::Imm32(m_leftOperand.asConstInt32()), m_right.payloadGPR(), m_result.payloadGPR());
+            jit.rshift32(CCallHelpers::Imm32(m_leftOperand.asConstInt32()), m_right, m_result);
         else
-            jit.urshift32(CCallHelpers::Imm32(m_leftOperand.asConstInt32()), m_right.payloadGPR(), m_result.payloadGPR());
-        jit.boxInt32(m_result.payloadGPR(), m_result);
+            jit.urshift32(CCallHelpers::Imm32(m_leftOperand.asConstInt32()), m_right, m_result);
+        jit.boxInt32(m_result, m_result);
         return;
     }
 
     CCallHelpers::Jump leftNotInt = jit.branchIfNotInt32(m_left);
     if (m_shiftType == SignedShift)
-        jit.rshift32(m_left.payloadGPR(), m_right.payloadGPR(), m_result.payloadGPR());
+        jit.rshift32(m_left, m_right, m_result);
     else
-        jit.urshift32(m_left.payloadGPR(), m_right.payloadGPR(), m_result.payloadGPR());
-    jit.boxInt32(m_result.payloadGPR(), m_result);
+        jit.urshift32(m_left, m_right, m_result);
+    jit.boxInt32(m_result, m_result);
     m_endJumpList.append(jit.jump()); // Terminate the above case before emitting more code.
 
     // Try to do (doubleVar >> intVar).
     leftNotInt.link(&jit);
-    m_slowPathJumpList.append(jit.branchIfNotNumber(m_left, m_scratchGPR));
-    jit.unboxDoubleNonDestructive(m_left, m_leftFPR, m_scratchGPR);
+    m_slowPathJumpList.append(jit.branchIfNotNumber(m_left));
+    jit.unboxDouble(m_left, m_scratchGPR, m_leftFPR);
 #if CPU(ARM64)
     if (MacroAssemblerARM64::supportsDoubleToInt32ConversionUsingJavaScriptSemantics())
         jit.convertDoubleToInt32UsingJavaScriptSemantics(m_leftFPR, m_scratchGPR);
@@ -188,11 +111,10 @@ void JITRightShiftGenerator::generateFastPath(CCallHelpers& jit)
     }
 
     if (m_shiftType == SignedShift)
-        jit.rshift32(m_right.payloadGPR(), m_scratchGPR);
+        jit.rshift32(m_right, m_scratchGPR);
     else
-        jit.urshift32(m_right.payloadGPR(), m_scratchGPR);
+        jit.urshift32(m_right, m_scratchGPR);
     jit.boxInt32(m_scratchGPR, m_result);
-#endif
 }
 
 } // namespace JSC

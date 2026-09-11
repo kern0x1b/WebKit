@@ -28,11 +28,11 @@
 
 #if ENABLE(OFFSCREEN_CANVAS)
 
-#include "BitmapImage.h"
 #include "CSSValuePool.h"
 #include "CanvasRenderingContext.h"
 #include "ContextDestructionObserverInlines.h"
 #include "Chrome.h"
+#include "DOMMatrix.h"
 #include "Document.h"
 #include "EventDispatcher.h"
 #include "EventNames.h"
@@ -171,11 +171,15 @@ void OffscreenCanvas::setSizeForControllingContext(IntSize newSize)
 
 void OffscreenCanvas::didUpdateSizeProperties(bool sizeChanged)
 {
-    clearCopiedImage();
     if (m_context)
         m_context->didUpdateCanvasSizeProperties(sizeChanged);
     notifyObserversCanvasResized();
     scheduleCommitToPlaceholderCanvas();
+}
+
+ExceptionOr<Ref<DOMMatrix>> OffscreenCanvas::getElementTransform(const CanvasElementImageSource&, DOMMatrix&)
+{
+    return Exception { ExceptionCode::InvalidStateError };
 }
 
 ExceptionOr<std::optional<OffscreenRenderingContext>> OffscreenCanvas::getContext(JSC::JSGlobalObject& state, RenderingContextType contextType, FixedVector<JSC::Strong<JSC::Unknown>>&& arguments)
@@ -286,7 +290,6 @@ ExceptionOr<RefPtr<ImageBitmap>> OffscreenCanvas::transferToImageBitmap()
         return Exception { ExceptionCode::InvalidStateError };
     if (size().isEmpty())
         return { RefPtr<ImageBitmap> { nullptr } };
-    clearCopiedImage();
     bool bitmapOriginClean = originClean();
     RefPtr buffer = m_context->transferToImageBuffer();
     if (!buffer)
@@ -342,29 +345,10 @@ void OffscreenCanvas::convertToBlob(ImageEncodeOptions&& options, Ref<DeferredPr
     promise->resolveWithNewlyCreated<IDLInterface<Blob>>(WTF::move(blob));
 }
 
-void OffscreenCanvas::didDraw(const std::optional<FloatRect>& rect, ShouldApplyPostProcessingToDirtyRect shouldApplyPostProcessingToDirtyRect)
+void OffscreenCanvas::willUpdateContents(const std::optional<FloatRect>& rect, ShouldApplyPostProcessingToDirtyRect shouldApplyPostProcessingToDirtyRect)
 {
-    clearCopiedImage();
     scheduleCommitToPlaceholderCanvas();
-    CanvasBase::didDraw(rect, shouldApplyPostProcessingToDirtyRect);
-}
-
-Image* OffscreenCanvas::copiedImage() const
-{
-    if (m_detached)
-        return nullptr;
-
-    if (!m_copiedImage) {
-        RefPtr buffer = const_cast<OffscreenCanvas*>(this)->makeRenderingResultsAvailable(ShouldApplyPostProcessingToDirtyRect::No);
-        if (buffer)
-            m_copiedImage = BitmapImage::create(buffer->copyNativeImage());
-    }
-    return m_copiedImage.get();
-}
-
-void OffscreenCanvas::clearCopiedImage() const
-{
-    m_copiedImage = nullptr;
+    CanvasBase::willUpdateContents(rect, shouldApplyPostProcessingToDirtyRect);
 }
 
 SecurityOrigin* OffscreenCanvas::securityOrigin() const

@@ -27,6 +27,8 @@
 #include "config.h"
 #include "WebInspectorBackendProxy.h"
 
+#include <wtf/StdLibExtras.h>
+
 namespace WebKit {
 
 WebInspectorBackendProxy::~WebInspectorBackendProxy() = default;
@@ -56,15 +58,20 @@ void WebInspectorBackendProxy::timelineRecordingChanged(bool active)
     m_proxy->timelineRecordingChanged(active);
 }
 
+void WebInspectorBackendProxy::showPaintRectsChanged(bool show)
+{
+    protect(m_proxy)->showPaintRectsChanged(show);
+}
+
 void WebInspectorBackendProxy::setDeveloperPreferenceOverride(WebCore::InspectorBackendClient::DeveloperPreference developerPreference, std::optional<bool> overrideValue)
 {
     protect(m_proxy)->setDeveloperPreferenceOverride(developerPreference, overrideValue);
 }
 
 #if ENABLE(INSPECTOR_NETWORK_THROTTLING)
-void WebInspectorBackendProxy::setEmulatedConditions(std::optional<int64_t> bytesPerSecondLimit)
+void WebInspectorBackendProxy::setEmulatedConditions(std::optional<uint64_t> bandwidthBytesPerSecond, Seconds latency)
 {
-    protect(m_proxy)->setEmulatedConditions(bytesPerSecondLimit);
+    protect(m_proxy)->setEmulatedConditions(bandwidthBytesPerSecond, latency);
 }
 #endif
 

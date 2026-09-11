@@ -90,7 +90,7 @@ bool RenderSVGViewportContainer::updateLayoutSizeIfNeeded()
     auto previousViewportSize = viewportSize();
     m_viewport = { computeViewportLocation(), computeViewportSize() };
     if (previousViewportSize != viewportSize()) {
-        svgSVGElement().invalidateCachedViewportSizeExcludingZoom();
+        svgSVGElement().invalidateCachedViewportSizes();
         return true;
     }
     return selfNeedsLayout();
@@ -106,6 +106,8 @@ bool RenderSVGViewportContainer::needsHasSVGTransformFlags() const
         if (useSVGSVGElement->useCurrentView())
             return true;
         if (!useSVGSVGElement->currentTranslateValue().isZero() || useSVGSVGElement->renderer()->style().usedZoom() != 1)
+            return true;
+        if (useSVGSVGElement->hasSynthesizedViewBoxForSVGImage())
             return true;
         // Need transform flags when the SVG root has a non-zero content box location
         // (e.g., due to border or padding), so that the content box offset is propagated
@@ -172,26 +174,28 @@ void RenderSVGViewportContainer::updateLayerTransform()
     } else if (!m_viewport.location().isZero())
         m_supplementalLayerTransform.translate(m_viewport.location());
 
-    bool hasCurrentViewEmptyViewBox = true;
-    if (useSVGSVGElement->useCurrentView())
-        hasCurrentViewEmptyViewBox = useSVGSVGElement->currentView().hasEmptyViewBox();
-    if (useSVGSVGElement->hasAttribute(SVGNames::viewBoxAttr) || !hasCurrentViewEmptyViewBox) {
-        // An empty viewBox disables the rendering -- dirty the visible descendant status!
-        if (useSVGSVGElement->hasEmptyViewBox() && hasCurrentViewEmptyViewBox) {
-            if (hasLayer())
-                layer()->dirtyVisibleContentStatus();
-        } else if (!useSVGSVGElement->viewBox().isEmpty() || !hasCurrentViewEmptyViewBox) {
-            if (auto viewBoxTransform = viewBoxToViewTransform(useSVGSVGElement, viewportSize); !viewBoxTransform.isIdentity()) {
-                if (m_supplementalLayerTransform.isIdentity())
-                    m_supplementalLayerTransform = viewBoxTransform;
-                else
-                    m_supplementalLayerTransform.multiply(viewBoxTransform);
-            }
-        }
+    // An empty viewBox disables painting -- dirty the visible descendant status!
+    if (useSVGSVGElement->viewBoxDisablesPainting()) {
+        if (hasLayer())
+            layer()->dirtyVisibleContentStatus();
+    } else if (auto viewBoxTransform = viewBoxToViewTransform(useSVGSVGElement, viewportSize); !viewBoxTransform.isIdentity()) {
+        if (m_supplementalLayerTransform.isIdentity())
+            m_supplementalLayerTransform = viewBoxTransform;
+        else
+            m_supplementalLayerTransform.multiply(viewBoxTransform);
     }
 
     // After updating the supplemental layer transform we're able to use it in RenderLayerModelObjects::updateLayerTransform().
     RenderSVGContainer::updateLayerTransform();
+}
+
+void RenderSVGViewportContainer::paint(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
+{
+    Ref useSVGSVGElement = svgSVGElement();
+    if (useSVGSVGElement->viewBoxDisablesPainting())
+        return;
+
+    RenderSVGContainer::paint(paintInfo, paintOffset);
 }
 
 void RenderSVGViewportContainer::applyTransform(TransformationMatrix& transform, const Style::ComputedStyle& style, const FloatRect& boundingBox, OptionSet<Style::TransformResolverOption> options) const
@@ -208,16 +212,12 @@ LayoutRect RenderSVGViewportContainer::overflowClipRect(const LayoutPoint& locat
         return LayoutRect::infiniteRect();
     Ref useSVGSVGElement = svgSVGElement();
 
-    auto clipRect = enclosingLayoutRect(viewport());
-    if (useSVGSVGElement->hasAttribute(SVGNames::viewBoxAttr)) {
-        if (useSVGSVGElement->hasEmptyViewBox())
-            return { };
+    if (useSVGSVGElement->hasEmptyViewBox())
+        return { };
 
-        if (!useSVGSVGElement->viewBox().isEmpty()) {
-            if (auto viewBoxTransform = viewBoxToViewTransform(useSVGSVGElement, viewportSize()); !viewBoxTransform.isIdentity())
-                clipRect = enclosingLayoutRect(viewBoxTransform.inverse().value_or(AffineTransform { }).mapRect(viewport()));
-        }
-    }
+    auto clipRect = enclosingLayoutRect(viewport());
+    if (auto viewBoxTransform = viewBoxToViewTransform(useSVGSVGElement, viewportSize()); !viewBoxTransform.isIdentity())
+        clipRect = enclosingLayoutRect(viewBoxTransform.inverse().value_or(AffineTransform { }).mapRect(viewport()));
 
     clipRect.moveBy(location);
     return clipRect;

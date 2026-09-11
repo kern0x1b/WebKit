@@ -168,7 +168,7 @@ ALLOW_DEPRECATED_DECLARATIONS_END
 ALLOW_DEPRECATED_DECLARATIONS_BEGIN
 - (_WKProcessPoolConfiguration *)_configuration
 {
-    return wrapper(_processPool->configuration().copy()).autorelease();
+    return wrapper(protect(_processPool->configuration())->copy()).autorelease();
 }
 ALLOW_DEPRECATED_DECLARATIONS_END
 
@@ -406,7 +406,7 @@ ALLOW_DEPRECATED_IMPLEMENTATIONS_END
 
 - (void)_clearWebProcessCache
 {
-    _processPool->webProcessCache().clear();
+    protect(_processPool->webProcessCache())->clear();
 }
 
 - (void)_setCachedProcessLifetimeForTesting:(NSTimeInterval)lifetime
@@ -437,9 +437,10 @@ ALLOW_DEPRECATED_IMPLEMENTATIONS_END
 - (BOOL)_requestWebProcessTermination:(pid_t)pid
 {
     for (Ref process : borrow(_processPool->processes()).get()) {
-        if (process->processID() == pid)
+        if (process->processID() == pid) {
             process->requestTermination(WebKit::ProcessTerminationReason::RequestedByClient);
-        return YES;
+            return YES;
+        }
     }
     return NO;
 }
@@ -720,7 +721,7 @@ ALLOW_DEPRECATED_IMPLEMENTATIONS_END
     return result.autorelease();
 }
 
-+ (NSArray<_WKProcessInfo *> *)_webContentProcessInfo
+static NSArray<_WKProcessInfo *> *allWebContentProcessInfo()
 {
     RetainPtr result = adoptNS([NSMutableArray new]);
 
@@ -732,6 +733,16 @@ ALLOW_DEPRECATED_IMPLEMENTATIONS_END
     }
 
     return result.autorelease();
+}
+
++ (NSArray<_WKProcessInfo *> *)_webContentProcessInfo
+{
+    return allWebContentProcessInfo();
+}
+
++ (NSArray<_WKProcessInfo *> *)_webContentProcessInfoForTesting
+{
+    return allWebContentProcessInfo();
 }
 
 #if PLATFORM(MAC)

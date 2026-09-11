@@ -26,18 +26,32 @@
 
 #include "ContainerNodeInlines.h"
 #include "CSSFontSelector.h"
+#include "DocumentInlines.h"
 #include "ElementInlines.h"
 #include "ElementTraversal.h"
 #include "HTMLNames.h"
 #include "HTMLOListElement.h"
 #include "HTMLUListElement.h"
+#include "LocalFrameView.h"
+#include "LocalFrameViewLayoutContext.h"
 #include "PseudoElement.h"
+#include "RenderBlockInlines.h"
 #include "RenderBoxInlines.h"
 #include "RenderBoxModelObjectInlines.h"
+#include "RenderChildIterator.h"
 #include "RenderElementStyleInlines.h"
+#include "RenderImage.h"
+#include "RenderInline.h"
+#include "RenderMenuList.h"
+#include "RenderMultiColumnFlow.h"
+#include "RenderMultiColumnSet.h"
+#include "RenderMultiColumnSpannerPlaceholder.h"
 #include "RenderObjectInlines.h"
+#include "RenderTable.h"
+#include "RenderText.h"
 #include "RenderTreeBuilder.h"
 #include "RenderView.h"
+#include "StyleComputedStyle+GettersInlines.h"
 #include "StyleComputedStyle+SettersInlines.h"
 #include "UnicodeBidi.h"
 #include <wtf/StackStats.h>
@@ -49,6 +63,88 @@ namespace WebCore {
 using namespace HTMLNames;
 
 WTF_MAKE_TZONE_ALLOCATED_IMPL(RenderListItem);
+
+enum class MarkerSearchBoxType : uint8_t {
+    BlockContainer,
+    SpannerPlaceholder,
+    InlineContent,
+    Opaque,
+    NestedListInQuirksMode,
+    TableRubyOrReplaced,
+};
+static MarkerSearchBoxType markerSearchBoxType(const RenderObject& box)
+{
+    if (box.isFloating() || box.isOutOfFlowPositioned())
+        return MarkerSearchBoxType::Opaque;
+    if (is<RenderMultiColumnSpannerPlaceholder>(box))
+        return MarkerSearchBoxType::SpannerPlaceholder;
+    // A nested list item's own marker is inline level but takes no part in any line, so it must not make its list item
+    // the answer: that list item may well have nothing but block level children and never run inline layout.
+    if (box.isExcludedMarker())
+        return MarkerSearchBoxType::Opaque;
+    // Before the form control check below: a control on a line is inline content like any other.
+    if (box.isInline())
+        return MarkerSearchBoxType::InlineContent;
+    if (is<RenderMenuList>(box))
+        return MarkerSearchBoxType::Opaque;
+    if (auto* renderBox = dynamicDowncast<RenderBox>(box); renderBox && renderBox->isWritingModeRoot())
+        return MarkerSearchBoxType::Opaque;
+    if (is<RenderListItem>(box.parent()) && box.document().inQuirksMode() && box.node() && isHTMLListElement(*box.node()))
+        return MarkerSearchBoxType::NestedListInQuirksMode;
+    if (!is<RenderBlock>(box) || is<RenderTable>(box) || box.style().display() == Style::DisplayType::BlockRuby)
+        return MarkerSearchBoxType::TableRubyOrReplaced;
+    return MarkerSearchBoxType::BlockContainer;
+}
+
+static LayoutUnit excludedMarkerLogicalLeftOffsetFor(const RenderBlockFlow& firstFormattedLineRoot, const RenderListItem& listItem, bool isLineStartConstrainedByFloat)
+{
+    // <ul><li id=o><ul><li id=i><div style="border-left: 5px solid">text</div></li></ul></li></ul>
+    // UA sets 40px start padding on <ul>
+    // x=0        40         80     85
+    // |          |          |      |
+    // |[o marker]|[i marker]|      text
+    // |          |          |      |
+    // +----------+----------+------+-------------
+    //                       |<-----|  toEnclosingListItem = -5
+    //            |<---------|         toAssociatedListItem = -40
+    //            |<----------------|  return value = -45
+    // Both markers on the same line and these values are for the outer marker. The second offset is zero unless the line is inside a nested list item.
+    auto toEnclosingListItem = LayoutUnit { };
+    auto hasAccountedForBorderAndPadding = false;
+    CheckedPtr<const RenderBlock> ancestor = &firstFormattedLineRoot;
+    for (; ancestor; ancestor = ancestor->containingBlock()) {
+        if (!hasAccountedForBorderAndPadding)
+            toEnclosingListItem -= ancestor->borderAndPaddingStart();
+        if (is<RenderListItem>(*ancestor))
+            break;
+
+        toEnclosingListItem -= ancestor->marginStart();
+        if (ancestor->isFlexItem()) {
+            toEnclosingListItem -= ancestor->logicalLeft();
+            hasAccountedForBorderAndPadding = true;
+            continue;
+        }
+        hasAccountedForBorderAndPadding = false;
+    }
+
+    auto toAssociatedListItem = LayoutUnit { };
+    if (ancestor && ancestor.get() != &listItem) {
+        for (CheckedPtr<const RenderBlock> box = ancestor->containingBlock(); box; box = box->containingBlock()) {
+            toAssociatedListItem -= (box->marginStart() + box->borderAndPaddingStart());
+            if (box.get() == &listItem)
+                break;
+        }
+        // A float pushing the line start inwards also constrains the marker, so it stays with the line rather than
+        // moving out to its own list item. Nesting list items then all end up with their marker in the same place.
+        if (isLineStartConstrainedByFloat)
+            toAssociatedListItem = { };
+    }
+
+    // The offsets above are inline start relative (negative means further towards the inline start), while what we return is a logical left offset, so in a right to left inline direction it points the other way.
+    if (!listItem.writingMode().isLogicalLeftInlineStart())
+        return -(toEnclosingListItem + toAssociatedListItem);
+    return toEnclosingListItem + toAssociatedListItem;
+}
 
 RenderListItem::RenderListItem(Element& element, Style::ComputedStyle&& style)
     : RenderBlockFlow(Type::ListItem, element, WTF::move(style))
@@ -88,6 +184,17 @@ Style::ComputedStyle RenderListItem::computeMarkerStyle() const
         markerStyle.setTextTransform({ });
         return markerStyle;
     }();
+
+    markerStyle.setPseudoElementIdentifier({ { PseudoElementType::Marker } });
+
+    // A disclosure triangle is drawn from the system font rather than from the one the marker inherited, so that is the
+    // font the marker has: it is what the glyph is measured with too, the way it is for every other marker.
+    if (listMarkerIsDisclosure(markerStyle, protect(document()))) {
+        auto fontDescription = FontCascadeDescription { markerStyle.fontDescription() };
+        fontDescription.setFamilies({ { "system-ui"_s, FontFamilyKind::Generic } });
+        markerStyle.setFontDescription(WTF::move(fontDescription));
+        markerStyle.fontCascade().update(&protect(document())->fontSelector());
+    }
 
     // The marker box is a text-decoration boundary: the originating element's text-decoration must
     // not propagate into the marker's generated contents, matching list-style-type markers which are
@@ -202,7 +309,7 @@ static RenderListItem* previousListItem(const Element& list, const RenderListIte
 void RenderListItem::updateItemValuesForOrderedList(const HTMLOListElement& list)
 {
     for (auto* listItem = firstListItem(list); listItem; listItem = nextListItem(list, *listItem))
-        listItem->updateValue();
+        listItem->updateValueAndMarkerContent();
 }
 
 unsigned RenderListItem::itemCountForOrderedList(const HTMLOListElement& list)
@@ -286,25 +393,139 @@ void RenderListItem::updateValueNow() const
 void RenderListItem::updateValue()
 {
     m_value = std::nullopt;
-    if (m_marker)
-        m_marker->setNeedsLayoutAndInvalidateContentLogicalWidths();
+    if (CheckedPtr marker = markerBox()) {
+        marker->setNeedsLayoutAndInvalidateContentLogicalWidths();
+        if (marker->excludedPosition())
+            marker->invalidateExcludedMarkerContainer();
+    }
+}
+
+void RenderListItem::updateMarkerContent()
+{
+    if (CheckedPtr markerBox = this->markerBox()) {
+        markerBox->updateInlineMarginsAndContent();
+        return;
+    }
+
+    CheckedPtr marker = dynamicDowncast<RenderInline>(m_marker.get());
+    // css-lists-3 §3.3: with a non-normal `content` the marker's contents are the author's, not ours to fill in.
+    if (!marker || marker->style().content().isData())
+        return;
+
+    if (CheckedPtr imageRenderer = dynamicDowncast<RenderImage>(marker->firstChild())) {
+        // The image is a renderer of its own; all the marker owes the line is the room after it, which the image keeps
+        // on its own end edge so that the inline formatting context puts it on the side the line runs towards.
+        setListMarkerInlineMargins(imageRenderer->mutableStyle(), writingMode(), { }, listMarkerImagePadding);
+        return;
+    }
+
+    CheckedPtr textRenderer = dynamicDowncast<RenderText>(marker->firstChild());
+    if (!textRenderer)
+        return;
+
+    auto textContent = listMarkerTextContent(marker->style(), *this);
+    if (!listMarkerSynthesizesGlyph(marker->style(), protect(document()))) {
+        textRenderer->setText(textContent.textWithSuffix);
+        return;
+    }
+
+    // The glyph stands alone and the room after it is a margin rather than the suffix space, so that word-spacing and
+    // letter-spacing leave it be. TextBoxPainter draws it at a size the font metrics give it rather than at the counter
+    // style character's, so the room after it is measured from that same size (see Layout::TextUtil::width).
+    textRenderer->setText(textContent.textWithoutSuffix().toString());
+    auto& fontMetrics = marker->style().metricsOfPrimaryFont();
+    auto glyphWidth = LayoutUnit { (fontMetrics.intAscent() * 2 / 3 + 1) / 2 + 2 };
+    setListMarkerInlineMargins(marker->mutableStyle(), writingMode(), -1_lu, fontMetrics.intAscent() - glyphWidth + 1);
+}
+
+void RenderListItem::updateValueAndMarkerContent()
+{
+    updateValue();
+    // Nothing is changing the render tree here, so there is nothing to wait for: fill the marker's text in right away
+    // rather than leave it to layout (see RenderTreeBuilder::updateListMarkerContents()).
+    updateMarkerContent();
 }
 
 void RenderListItem::styleDidChange(Style::Difference diff, const Style::ComputedStyle* oldStyle)
 {
     RenderBlockFlow::styleDidChange(diff, oldStyle);
 
-    if (diff == Style::DifferenceResult::Layout && oldStyle && oldStyle->usedCounterDirectives().map.get("list-item"_s) != style().usedCounterDirectives().map.get("list-item"_s))
-        usedCounterDirectivesChanged();
+    if (diff == Style::DifferenceResult::Layout) {
+        if (oldStyle && oldStyle->usedCounterDirectives().map.get("list-item"_s) != style().usedCounterDirectives().map.get("list-item"_s))
+            usedCounterDirectivesChanged();
+        if (CheckedPtr marker = markerBox(); marker && marker->excludedPosition())
+            marker->invalidateExcludedMarkerContainer();
+    }
 }
 
 void RenderListItem::computeIntrinsicLogicalWidthContributions()
 {
-    // FIXME: RenderListMarker::updateInlineMargins() mutates margin style which affects preferred widths.
-    if (m_marker && m_marker->hasInvalidContentLogicalWidths())
-        m_marker->updateInlineMarginsAndContent();
+    // FIXME: RenderListOutsideMarker::updateInlineMargins() mutates margin style which affects preferred widths.
+    if (CheckedPtr marker = markerBox(); marker && marker->hasInvalidContentLogicalWidths())
+        marker->updateInlineMarginsAndContent();
 
     RenderBlockFlow::computeIntrinsicLogicalWidthContributions();
+}
+
+std::pair<LayoutUnit, LayoutUnit> RenderListItem::computeIntrinsicLogicalWidths() const
+{
+    if (CheckedPtr excludedMarker = this->excludedMarker(); excludedMarker && !excludedMarker->nextSibling())
+        return { };
+
+    return RenderBlockFlow::computeIntrinsicLogicalWidths();
+}
+
+RenderListOutsideMarker* RenderListItem::excludedMarker() const
+{
+    auto* marker = markerBox();
+    return marker && marker->isExcludedMarker() ? marker : nullptr;
+}
+
+void RenderListItem::layoutBlock(RelayoutChildren relayoutChildren, LayoutUnit pageLogicalHeight)
+{
+    CheckedPtr excludedMarker = this->excludedMarker();
+    if (!excludedMarker)
+        return RenderBlockFlow::layoutBlock(relayoutChildren, pageLogicalHeight);
+
+    auto markerScope = ListItemExcludedMarkerScope { view().frameView().layoutContext(), *excludedMarker };
+    RenderBlockFlow::layoutBlock(relayoutChildren, pageLogicalHeight);
+    placeExcludedMarker(*excludedMarker);
+    addOverflowFromContainedBox(*excludedMarker);
+}
+
+void RenderListItem::layoutExcludedChildren(RelayoutChildren relayoutChildren)
+{
+    CheckedPtr excludedMarker = this->excludedMarker();
+    if (!excludedMarker)
+        return RenderBlockFlow::layoutExcludedChildren(relayoutChildren);
+
+    auto markerNeedsOwnLine = [&] {
+        // Quirks mode puts the marker of a list item that starts with a nested list on a line of its own above that list, rather than on the line its first item makes.
+        if (!document().inQuirksMode())
+            return false;
+        for (CheckedPtr child = firstChild(); child; child = child->nextSibling()) {
+            if (child.get() == m_marker.get() || child->isFloatingOrOutOfFlowPositioned() || is<RenderMenuList>(*child))
+                continue;
+            return child->node() && isHTMLListElement(*child->node());
+        }
+        return false;
+    };
+
+    // The marker takes no part in layout, so a line of its own is room this list item makes for it before its block
+    // children are placed. layoutBlockChildren calls us right after it starts them at the content edge.
+    if (!childrenInline() && markerNeedsOwnLine())
+        setLogicalHeight(logicalHeight() + lineHeight());
+
+    excludedMarker->setIsExcludedFromNormalLayout(true);
+    if (relayoutChildren == RelayoutChildren::Yes)
+        excludedMarker->setNeedsLayout(MarkingBehavior::MarkOnlyThis);
+    auto oldLayoutBounds = excludedMarker->layoutBounds();
+    excludedMarker->layoutIfNeeded();
+
+    if (excludedMarker->excludedPosition() && excludedMarker->layoutBounds() != oldLayoutBounds)
+        excludedMarker->invalidateExcludedMarkerContainer();
+
+    RenderBlockFlow::layoutExcludedChildren(relayoutChildren);
 }
 
 void RenderListItem::paint(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
@@ -315,39 +536,73 @@ void RenderListItem::paint(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
     RenderBlockFlow::paint(paintInfo, paintOffset);
 }
 
-String RenderListItem::markerTextWithoutSuffix() const
+void RenderListItem::paintObject(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
 {
-    if (!m_marker)
-        return { };
-    return m_marker->textWithoutSuffix();
+    if (CheckedPtr excludedMarker = this->excludedMarker(); excludedMarker && !excludedMarker->hasSelfPaintingLayer())
+        excludedMarker->paintAsInlineBlock(paintInfo, flipForWritingModeForChild(*excludedMarker, paintOffset));
+
+    RenderBlockFlow::paintObject(paintInfo, paintOffset);
 }
 
-String RenderListItem::markerTextWithSuffix() const
+bool RenderListItem::hasLineIfEmpty() const
 {
-    if (!m_marker)
+    if (excludedMarker())
+        return true;
+
+    return RenderBlockFlow::hasLineIfEmpty();
+}
+
+bool RenderListItem::nodeAtPoint(const HitTestRequest& request, HitTestResult& result, const HitTestLocation& locationInContainer, const LayoutPoint& accumulatedOffset, HitTestAction hitTestAction)
+{
+    if (RenderBlockFlow::nodeAtPoint(request, result, locationInContainer, accumulatedOffset, hitTestAction))
+        return true;
+
+    CheckedPtr excludedMarker = this->excludedMarker();
+    if (!excludedMarker || excludedMarker->hasSelfPaintingLayer())
+        return false;
+
+    // The marker's own location is relative to us, so it needs our adjusted one, the way hitTestChildren gets it.
+    auto adjustedLocation = accumulatedOffset + location();
+    return excludedMarker->nodeAtPoint(request, result, locationInContainer, flipForWritingModeForChild(*excludedMarker, adjustedLocation), hitTestAction);
+}
+
+RenderListOutsideMarker* RenderListItem::markerBox() const
+{
+    return dynamicDowncast<RenderListOutsideMarker>(m_marker.get());
+}
+
+String RenderListItem::markerText(ListMarkerIncludeSuffix includeSuffix) const
+{
+    CheckedPtr marker = m_marker.get();
+    if (!marker)
         return { };
-    return m_marker->textWithSuffix();
+
+    if (listMarkerHasContent(marker->style(), protect(document())) || listMarkerImage(marker->style()))
+        return { };
+
+    auto textContent = listMarkerTextContent(marker->style(), const_cast<RenderListItem&>(*this));
+    return includeSuffix == ListMarkerIncludeSuffix::Yes ? textContent.textWithSuffix : textContent.textWithoutSuffix().toString();
 }
 
 void RenderListItem::usedCounterDirectivesChanged()
 {
-    if (m_marker)
-        m_marker->setNeedsLayoutAndInvalidateContentLogicalWidths();
+    if (CheckedPtr marker = markerBox())
+        marker->setNeedsLayoutAndInvalidateContentLogicalWidths();
 
-    updateValue();
+    updateValueAndMarkerContent();
     RefPtr list = enclosingList(*this);
     if (!list)
         return;
     auto* item = this;
     while ((item = nextListItem(*list, *item)))
-        item->updateValue();
+        item->updateValueAndMarkerContent();
 }
 
-void RenderListItem::updateListMarkerNumbers()
+Vector<CheckedRef<RenderListItem>> RenderListItem::updateListMarkerNumbers()
 {
     RefPtr list = enclosingList(*this);
     if (!list)
-        return;
+        return { };
 
     bool isInReversedOrderedList = false;
     if (auto* orderedList = dynamicDowncast<HTMLOListElement>(*list)) {
@@ -357,16 +612,156 @@ void RenderListItem::updateListMarkerNumbers()
 
     // If an item has been marked for update before, we know that all following items have, too.
     // This gives us the opportunity to stop and avoid marking the same nodes again.
+    Vector<CheckedRef<RenderListItem>> itemsNeedingMarkerUpdate;
     auto* item = this;
     auto subsequentListItem = isInReversedOrderedList ? previousListItem : nextListItem;
-    while ((item = subsequentListItem(*list, *item)) && item->m_value)
+    while ((item = subsequentListItem(*list, *item)) && item->m_value) {
         item->updateValue();
+        itemsNeedingMarkerUpdate.append(*item);
+    }
+    return itemsNeedingMarkerUpdate;
 }
 
 bool RenderListItem::isInReversedOrderedList() const
 {
     RefPtr list = dynamicDowncast<HTMLOListElement>(enclosingList(*this));
     return list && list->isReversed();
+}
+
+void RenderListItem::placeExcludedMarker(RenderListOutsideMarker& marker)
+{
+    auto excludedPosition = marker.excludedPosition();
+    CheckedPtr firstFormattedLineRoot = excludedPosition ? excludedPosition->firstFormattedLineRoot.get() : nullptr;
+    if (!firstFormattedLineRoot) {
+        // Reached only when no line took the marker: we have no formatted line to align it with, either because we have no content at all.
+        // Let's top align it at our content edge; the marker contributes no height, which is what a marker on a collapsed line inside such content would have done.
+        setLogicalTopForChild(marker, borderAndPaddingBefore());
+        auto markerLogicalLeft = writingMode().isLogicalLeftInlineStart() ? marginStartForChild(marker) : logicalWidth() - logicalWidthForChild(marker) - marginStartForChild(marker);
+        setLogicalLeftForChild(marker, markerLogicalLeft);
+        return;
+    }
+
+    // Line layout placed the marker on the line as if it belonged to the list item establishing that formatting context.
+    // Take it from there: out to our own border box start, then across the in-flow content up to us.
+    auto logicalTop = LayoutUnit { excludedPosition->topLeft.y() };
+    auto logicalLeft = LayoutUnit { excludedPosition->topLeft.x() } + excludedMarkerLogicalLeftOffsetFor(*firstFormattedLineRoot, *this, excludedPosition->isLineStartConstrainedByFloat);
+    for (CheckedPtr<RenderBlock> ancestor = firstFormattedLineRoot; ancestor && ancestor != this; ancestor = ancestor->containingBlock()) {
+        // Inside a fragmented flow the coordinates are in flow thread space, where the content is one continuous
+        // strip. The column the line ended up in is a sibling of the flow thread rather than an ancestor, so leave
+        // the flow thread for that column set and carry on from there, in visual space.
+        if (CheckedPtr fragmentedFlow = dynamicDowncast<RenderMultiColumnFlow>(ancestor.get())) {
+            CheckedPtr columnSet = dynamicDowncast<RenderMultiColumnSet>(static_cast<const RenderFragmentedFlow&>(*fragmentedFlow).fragmentAtBlockOffset(fragmentedFlow.get(), logicalTop, true));
+            if (!columnSet)
+                continue;
+            auto translation = fragmentedFlow->physicalTranslationOffsetFromFlowToFragment(columnSet.get(), logicalTop);
+            logicalTop += translation.height();
+            logicalLeft += translation.width();
+            ancestor = columnSet.get();
+        }
+        logicalTop += ancestor->logicalTop();
+        logicalLeft += ancestor->logicalLeft();
+    }
+    setLogicalTopForChild(marker, logicalTop);
+    setLogicalLeftForChild(marker, logicalLeft);
+}
+
+RenderListItem::FirstFormattedLineCandidate RenderListItem::firstFormattedLineRootFor(RenderBlock& blockContainer, const RenderBoxModelObject& marker)
+{
+    RenderBlock* fallbackParent = is<RenderListItem>(blockContainer) && blockContainer.childrenInline() ? &blockContainer : nullptr;
+
+    auto firstFormattedLineRootIn = [&](RenderBlock& block) -> CheckedPtr<RenderBlock> {
+        auto nestedResult = firstFormattedLineRootFor(block, marker);
+        if (nestedResult.parent)
+            return nestedResult.parent;
+
+        if (!fallbackParent) {
+            if (nestedResult.fallbackParent)
+                fallbackParent = nestedResult.fallbackParent.get();
+            else if (auto* firstInFlowChild = block.firstInFlowChild(); !firstInFlowChild || firstInFlowChild == &marker)
+                fallbackParent = &block;
+        }
+        return { };
+    };
+
+    for (auto& child : childrenOfType<RenderObject>(blockContainer)) {
+        if (&child == &marker)
+            continue;
+
+        switch (markerSearchBoxType(child)) {
+        case MarkerSearchBoxType::Opaque:
+            break;
+        case MarkerSearchBoxType::NestedListInQuirksMode:
+            return { { }, fallbackParent };
+        case MarkerSearchBoxType::TableRubyOrReplaced:
+            return { { }, fallbackParent };
+        case MarkerSearchBoxType::InlineContent:
+            // Neither an empty inline (e.g. <a id="anchor"></a>) nor collapsible whitespace produces a line.
+            if (CheckedPtr text = dynamicDowncast<RenderText>(child); text && text->containsOnlyCollapsibleWhitespace()) {
+                fallbackParent = &blockContainer;
+                break;
+            }
+            if (CheckedPtr inlineBox = dynamicDowncast<RenderInline>(child)) {
+                if (isEmptyInline(*inlineBox)) {
+                    fallbackParent = &blockContainer;
+                    break;
+                }
+                // An inside marker takes a line ahead of the block, so only an outside marker follows the content in.
+                if (is<RenderListOutsideMarker>(marker)) {
+                    if (CheckedPtr leadingBlock = dynamicDowncast<RenderBlock>(firstContentfulChild(*inlineBox))) {
+                        if (auto firstFormattedLineRoot = firstFormattedLineRootIn(*leadingBlock))
+                            return { firstFormattedLineRoot, { } };
+                        break;
+                    }
+                }
+            }
+            return { &blockContainer, { } };
+        case MarkerSearchBoxType::BlockContainer:
+        case MarkerSearchBoxType::SpannerPlaceholder: {
+            auto blockToDescendInto = [&] {
+                if (CheckedPtr placeholder = dynamicDowncast<RenderMultiColumnSpannerPlaceholder>(child))
+                    return dynamicDowncast<RenderBlock>(placeholder->spanner());
+                return dynamicDowncast<RenderBlock>(child);
+            };
+            if (CheckedPtr block = blockToDescendInto()) {
+                if (auto firstFormattedLineRoot = firstFormattedLineRootIn(*block))
+                    return { firstFormattedLineRoot, { } };
+            }
+            break;
+        }
+        }
+    }
+    return { { }, fallbackParent };
+}
+
+CheckedPtr<RenderListOutsideMarker> RenderListItem::excludedMarkerAnchoredTo(const RenderBlockFlow& firstFormattedLineRoot)
+{
+    for (CheckedPtr<const RenderBlock> ancestor = &firstFormattedLineRoot; ancestor; ancestor = ancestor->containingBlock()) {
+        CheckedPtr listItem = dynamicDowncast<RenderListItem>(ancestor.get());
+        CheckedPtr marker = listItem ? listItem->markerBox() : nullptr;
+        if (!marker || !marker->isExcludedMarker())
+            continue;
+        auto excludedPosition = marker->excludedPosition();
+        if (excludedPosition && excludedPosition->firstFormattedLineRoot.get() == &firstFormattedLineRoot)
+            return marker;
+    }
+    return { };
+}
+
+Vector<CheckedPtr<RenderListOutsideMarker>> RenderListItem::excludedMarkersForContainer(const RenderBlockFlow& inlineRoot, const Vector<SingleThreadWeakPtr<RenderListOutsideMarker>>& allExcludedMarkers)
+{
+    auto markersForContainer = Vector<CheckedPtr<RenderListOutsideMarker>> { };
+    for (auto& marker : allExcludedMarkers) {
+        ASSERT(marker->isExcludedMarker());
+        CheckedPtr listItem = marker->listItem();
+        if (!listItem) {
+            ASSERT_NOT_REACHED();
+            continue;
+        }
+        auto candidate = firstFormattedLineRootFor(*listItem, *marker);
+        if ((candidate.parent ? candidate.parent : candidate.fallbackParent) == &inlineRoot)
+            markersForContainer.append(marker.get());
+    }
+    return markersForContainer;
 }
 
 } // namespace WebCore

@@ -32,6 +32,7 @@
 #include <WebCore/Credential.h>
 #include <WebCore/FrameLoaderTypes.h>
 #include <WebCore/NetworkLoadMetrics.h>
+#include <WebCore/PendingStreamIdentifier.h>
 #include <WebCore/ResourceLoaderOptions.h>
 #include <WebCore/ResourceRequest.h>
 #include <WebCore/StoredCredentialsPolicy.h>
@@ -82,6 +83,10 @@ public:
     virtual bool shouldCaptureExtraNetworkLoadMetrics() const { return false; }
 
     virtual void didNegotiateModernTLS(const URL&) { }
+
+#if ENABLE(INSPECTOR_NETWORK_THROTTLING)
+    virtual void emulatedConditionsDidChange() { }
+#endif // ENABLE(INSPECTOR_NETWORK_THROTTLING)
 
     void didCompleteWithError(const WebCore::ResourceError& error)
     {
@@ -140,14 +145,14 @@ public:
     bool isInitiatedByDedicatedWorker() const { return m_isInitiatedByDedicatedWorker; }
 
     virtual String description() const;
-    virtual void setH2PingCallback(const URL&, CompletionHandler<void(Expected<WTF::Seconds, WebCore::ResourceError>&&)>&&);
+    virtual void setH2PingCallback(const URL&, CompletionHandler<void(std::expected<WTF::Seconds, WebCore::ResourceError>&&)>&&);
 
     virtual void setPriority(WebCore::ResourceLoadPriority) { }
     String attributedBundleIdentifier(WebPageProxyIdentifier);
 
 #if ENABLE(INSPECTOR_NETWORK_THROTTLING)
-    virtual void setEmulatedConditions(const std::optional<int64_t>& /* bytesPerSecondLimit */) { }
-#endif
+    void notifyEmulatedConditionsChanged();
+#endif // ENABLE(INSPECTOR_NETWORK_THROTTLING)
 
     PAL::SessionID sessionID() const { return m_session->sessionID(); }
     const NetworkSession* networkSession() const { return m_session.get(); }
@@ -156,6 +161,8 @@ public:
     virtual void setTimingAllowFailedFlag() { }
 
     size_t bytesTransferredOverNetwork() const { return m_bytesTransferredOverNetwork; }
+
+    bool hasPendingStreamBody() const;
 
 protected:
     NetworkDataTask(NetworkSession&, NetworkDataTaskClient&, const WebCore::ResourceRequest&, WebCore::StoredCredentialsPolicy, bool shouldClearReferrerOnHTTPSToHTTPRedirect, bool dataTaskIsForMainFrameNavigation, bool isInitiatedByDedicatedWorker);

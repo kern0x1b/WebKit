@@ -26,7 +26,7 @@
 #include "config.h"
 #include "ServiceWorkerInternals.h"
 
-#include "DestinationColorSpace.h"
+#include "ColorSpace.h"
 #include "FetchEvent.h"
 #include "FetchRequest.h"
 #include "GraphicsClient.h"
@@ -223,13 +223,13 @@ String ServiceWorkerInternals::effectiveRenderingModeOfNewlyCreatedAcceleratedCa
     if (!graphicsClient)
         return "no-client"_s;
 
-    RefPtr imageBuffer = ImageBuffer::create({ 100, 100 }, RenderingMode::Accelerated, RenderingPurpose::Canvas, 1, DestinationColorSpace::SRGB(), PixelFormat::BGRA8, graphicsClient);
+    RefPtr imageBuffer = ImageBuffer::create({ 100, 100 }, RenderingMode::Accelerated, RenderingPurpose::Canvas, 1, ColorSpace::SRGB(), PixelFormat::BGRA8, graphicsClient);
     if (!imageBuffer)
         return "none"_s;
-    imageBuffer->ensureBackendCreated();
-    if (!imageBuffer->hasBackend())
+    auto renderingMode = imageBuffer->getEffectiveRenderingModeForTesting();
+    if (!renderingMode)
         return "none"_s;
-    if (imageBuffer->renderingMode() != RenderingMode::Accelerated)
+    if (*renderingMode != RenderingMode::Accelerated)
         return "unaccelerated"_s;
     return imageBuffer->isRemoteImageBufferProxy() ? "remote"_s : "local-iosurface"_s;
 }

@@ -723,11 +723,14 @@ class Manager(object):
             if initial_results.keyboard_interrupted:
                 exit_code = INTERRUPTED_EXIT_STATUS
             else:
-                if self._options.show_results and (initial_results.unexpected_results_by_name or
+                if (initial_results.unexpected_results_by_name or
                     (self._options.full_results_html and initial_results.total_failures)):
                     if len(self._driver_names) > 1 or not any(self._subdirectories.values()):
                         results_path = self._filesystem.join(self._base_port.results_directory(), "results.html")
-                        self._port.show_results_html_file(results_path)
+                        if self._options.show_results:
+                            self._port.show_results_html_file(results_path)
+                        else:
+                            _log.info("Results are available at %s" % results_path)
                 exit_code = self._port.exit_code_from_summarized_results(summarized_results)
         return test_run_results.RunDetails(exit_code, summarized_results, initial_results, retry_results, enabled_pixel_tests_in_retry)
 
@@ -1081,7 +1084,7 @@ class Manager(object):
                         # Don't print this line if an ancestor directory is all pass also
                         ancestor_dirname = os.path.dirname(dirname)
                         while ancestor_dirname and ancestor_dirname not in device_test_stats:
-                            ancestor_dirname = os.path.dirname(dirname)
+                            ancestor_dirname = os.path.dirname(ancestor_dirname)
                         if ancestor_dirname and device_test_stats[ancestor_dirname]['pass'] == device_test_stats[ancestor_dirname]['count']:
                             continue
                         print(srow_format.format(truncated_dirname, str(count), u"██ PASS", u' ███████', u'████████', u'████████'))
@@ -1090,7 +1093,7 @@ class Manager(object):
                         # Don't print this line if an ancestor directory is all skip also
                         ancestor_dirname = os.path.dirname(dirname)
                         while ancestor_dirname and ancestor_dirname not in device_test_stats:
-                            ancestor_dirname = os.path.dirname(dirname)
+                            ancestor_dirname = os.path.dirname(ancestor_dirname)
                         if ancestor_dirname and device_test_stats[ancestor_dirname]['skip'] == device_test_stats[ancestor_dirname]['count']:
                             continue
                         print(srow_format.format(truncated_dirname, str(count), u'░░░░░░░', u"░░░ SKIP", u' ░░░░░░░', u'░░░░░░░░'))

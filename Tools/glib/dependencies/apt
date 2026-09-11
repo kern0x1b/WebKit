@@ -33,6 +33,7 @@ PACKAGES=(
     autopoint
     autotools-dev
     bubblewrap
+    clang
     cmake
     flite1-dev
     gawk
@@ -85,6 +86,7 @@ PACKAGES=(
     $(aptIfExists libsoup-3.0-dev)
     $(aptIfExists libsysprof-capture-4-dev)
     $(aptIfExists libyuv-dev)
+    $(aptIfExists libbacktrace-dev)
 
     # These are dependencies necessary for running tests.
     apache2
@@ -96,6 +98,9 @@ PACKAGES=(
     hyphen-en-us
     gdb
     libcgi-pm-perl
+    $(aptIfExists monado-cli)
+    $(aptIfExists monado-service)
+    $(aptIfExists libopenxr1-monado)
     psmisc
     $(aptIfExists python3-legacy-cgi)
     pulseaudio-utils

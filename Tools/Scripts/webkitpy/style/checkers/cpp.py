@@ -1232,6 +1232,21 @@ _RE_PATTERN_XCODE_MAX_ALLOWED_MACRO = re.compile(
 _RE_PATTERN_PLATFORM_HEADER = re.compile(
     r'Source/WTF/wtf/Platform[a-zA-Z]+\.h')
 
+# Macros defined by WKFoundation.h which are now just aliases for the
+# identically named NS_ macro, and so should no longer be used.
+_WK_MACROS_WITH_NS_EQUIVALENTS = (
+    'WK_HEADER_AUDIT_BEGIN',
+    'WK_HEADER_AUDIT_END',
+    'WK_NULLABLE_RESULT',
+    'WK_SWIFT_ASYNC',
+    'WK_SWIFT_ASYNC_NAME',
+    'WK_SWIFT_ASYNC_THROWS_ON_FALSE',
+    'WK_SWIFT_UI_ACTOR',
+)
+
+_RE_PATTERN_WK_FOUNDATION_HEADER = re.compile(
+    r'(?:.*[\\/])?WKFoundation\.h$')
+
 
 def check_os_version_checks(filename, clean_lines, line_number, error):
     """ Checks for mistakes using VERSION_MIN_REQUIRED and VERSION_MAX_ALLOWED macros:
@@ -2641,7 +2656,7 @@ def check_namespace_indentation(clean_lines, line_number, file_extension, file_s
 _ALLOW_ALL_UPPERCASE_ENUM = ['JSTokenType']
 
 # Enum value allowlist
-_ALLOW_ABBREVIATION_ENUM_VALUES = ['AM', 'CF', 'COOP', 'GPU', 'LTR', 'PM', 'RTL', 'URL', 'XHR']
+_ALLOW_ABBREVIATION_ENUM_VALUES = ['AM', 'CF', 'COOP', 'GPU', 'JSON', 'LTR', 'PM', 'RTL', 'URL', 'XHR']
 
 
 def check_enum_members(clean_lines, line_number, enum_state, error):
@@ -3785,6 +3800,35 @@ def check_arguments_for_wk_api_available(clean_lines, line_number, error):
         return
 
 
+def check_objc_annotation_macros(filename, clean_lines, line_number, error):
+    """Looks for Objective-C annotation macros which have a preferred spelling:
+    1. The WK_ prefixed macros in WKFoundation.h, which should be spelled using their NS_ equivalents.
+    2. NS_ASSUME_NONNULL_BEGIN / NS_ASSUME_NONNULL_END, which should be spelled using NS_HEADER_AUDIT_BEGIN / NS_HEADER_AUDIT_END.
+
+    Args:
+      filename: The name of the current file.
+      clean_lines: A CleansedLines instance containing the file.
+      line_number: The number of the line to check.
+      error: The function to call with any errors found.
+    """
+
+    # WKFoundation.h is where these macros are defined in terms of their preferred spellings.
+    if _RE_PATTERN_WK_FOUNDATION_HEADER.match(filename):
+        return
+
+    line = clean_lines.elided[line_number]  # Get rid of comments and strings.
+
+    for macro in _WK_MACROS_WITH_NS_EQUIVALENTS:
+        # Word boundaries keep WK_SWIFT_ASYNC from matching WK_SWIFT_ASYNC_NAME.
+        if search(r'\b%s\b' % macro, line):
+            error(line_number, 'build/wk_macros', 5, "Use '%s' instead of '%s'." % ('NS' + macro[len('WK'):], macro))
+
+    for macro in ('NS_ASSUME_NONNULL_BEGIN', 'NS_ASSUME_NONNULL_END'):
+        if search(r'\b%s\b' % macro, line):
+            replacement = 'NS_HEADER_AUDIT_%s' % macro.rsplit('_', 1)[-1]
+            error(line_number, 'build/header_audit', 5, "Use '%s(nullability, sendability)' instead of '%s'." % (replacement, macro))
+
+
 def check_objc_protocol(clean_lines, line_number, file_extension, error):
     """Looks for spaces between type names and protocol names.
 
@@ -4211,6 +4255,11 @@ def check_include_line(filename, file_extension, clean_lines, line_number, inclu
               'Replace WTF::BlockPtr with WTF::Function. '
               'WTF::BlockPtr is not safe to use until JavaScriptCore builds with ARC enabled.')
 
+    if include == 'objc/objc-runtime.h':
+        error(line_number, 'build/objc_runtime_header', 5,
+              'Do not include <objc/objc-runtime.h>; it is not available in all SDKs.  '
+              'Include <objc/message.h> and/or <objc/runtime.h> instead.')
+
     # Look for any of the stream classes that are part of standard C++.
     if match(r'(f|ind|io|i|o|parse|pf|stdio|str|)?stream$', include):
         error(line_number, 'readability/streams', 3,
@@ -4452,6 +4501,18 @@ def check_language(filename, clean_lines, line_number, file_extension, include_s
     if search(r'\bdispatch_set_target_queue\b', line):
         error(line_number, 'runtime/dispatch_set_target_queue', 5,
               'Never use dispatch_set_target_queue.  Use dispatch_queue_create_with_target instead.')
+
+    matched = search(r'\bDISPATCH_QUEUE_(SERIAL|CONCURRENT)\b', line)
+    if matched:
+        error(line_number, 'runtime/dispatch_queue_autorelease_pool', 5,
+              'Use %sQueueWithAutoreleasePoolAttrSingleton() instead of %s so that each work item runs with its '
+              'own autorelease pool.' % (matched.group(1).lower(), matched.group(0)))
+
+    matched = search(r'\bDISPATCH_QUEUE_(SERIAL|CONCURRENT)_WITH_AUTORELEASE_POOL\b', line)
+    if matched:
+        error(line_number, 'runtime/dispatch_queue_autorelease_pool', 5,
+              'Use %sQueueWithAutoreleasePoolAttrSingleton() instead of %s so that static analysis knows the '
+              'attribute does not need to be retained.' % (matched.group(1).lower(), matched.group(0)))
 
     matched = search(r'\b(RetainPtr<.*)', line)
     if matched:
@@ -5162,6 +5223,7 @@ def process_line(filename, file_extension,
     check_posix_threading(clean_lines, line, error)
     check_invalid_increment(clean_lines, line, error)
     check_os_version_checks(filename, clean_lines, line, error)
+    check_objc_annotation_macros(filename, clean_lines, line, error)
     check_callonmainthread(filename, clean_lines, line, file_state, error)
     check_ismainthread(filename, clean_lines, line, file_state, error)
     check_mainthreadneverdestroyed(filename, clean_lines, line, file_state, error)
@@ -5246,10 +5308,12 @@ class CppChecker(object):
         'build/forward_decl',
         'build/header_guard',
         'build/header_guard_missing',
+        'build/header_audit',
         'build/include',
         'build/include_order',
         'build/include_what_you_use',
         'build/namespaces',
+        'build/objc_runtime_header',
         'build/printf_format',
         'build/storage_class',
         'build/using_std',
@@ -5258,6 +5322,7 @@ class CppChecker(object):
         'build/cpp_comment',
         'build/webcore_export',
         'build/wk_api_available',
+        'build/wk_macros',
         'build/version_check',
         'build/self_include',
         'build-speed/inlines',
@@ -5292,6 +5357,7 @@ class CppChecker(object):
         'runtime/callonmainthread',
         'runtime/casting',
         'runtime/ctype_function',
+        'runtime/dispatch_queue_autorelease_pool',
         'runtime/dispatch_set_target_queue',
         'runtime/enum_bitfields',
         'runtime/explicit',

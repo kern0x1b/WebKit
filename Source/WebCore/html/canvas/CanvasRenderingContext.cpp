@@ -30,7 +30,7 @@
 
 #include "CachedImage.h"
 #include "CanvasPattern.h"
-#include "DestinationColorSpace.h"
+#include "ColorSpace.h"
 #include "GraphicsLayer.h"
 #include "GraphicsLayerContentsDisplayDelegate.h"
 #include "HTMLCanvasElement.h"
@@ -133,9 +133,9 @@ bool CanvasRenderingContext::isOpaque() const
     return pixelFormatIsOpaque(pixelFormat());
 }
 
-DestinationColorSpace CanvasRenderingContext::colorSpace() const
+ColorSpace CanvasRenderingContext::colorSpace() const
 {
-    return DestinationColorSpace::SRGB();
+    return ColorSpace::SRGB();
 }
 
 bool CanvasRenderingContext::willReadFrequently() const
@@ -245,9 +245,10 @@ void CanvasRenderingContext::updateMemoryCost(size_t newMemoryCost) const
         s_activeCanvasPixelMemory.fetch_sub(oldMemoryCost - newMemoryCost, std::memory_order_relaxed);
 #endif
     if (newMemoryCost) {
+    if (newMemoryCost > oldMemoryCost) {
         if (RefPtr scriptExecutionContext = protect(canvasBase())->scriptExecutionContext()) {
             JSC::JSLockHolder lock(scriptExecutionContext->vm());
-            scriptExecutionContext->vm().heap.reportExtraMemoryAllocated(static_cast<JSCell*>(nullptr), newMemoryCost);
+            scriptExecutionContext->vm().heap.reportExtraMemoryAllocated(static_cast<JSCell*>(nullptr), newMemoryCost - oldMemoryCost);
         }
     }
     if (oldMemoryCost != newMemoryCost)

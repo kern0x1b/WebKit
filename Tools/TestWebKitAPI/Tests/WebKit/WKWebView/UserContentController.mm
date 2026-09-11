@@ -47,6 +47,7 @@
 #import <WebKit/WKUserScriptPrivate.h>
 #import <WebKit/WKWebViewConfigurationPrivate.h>
 #import <WebKit/WKWebViewPrivate.h>
+#import <WebKit/WKWebsiteDataStorePrivate.h>
 #import <WebKit/WebKit.h>
 #import <WebKit/_WKContentWorldConfiguration.h>
 #import <WebKit/_WKFrameTreeNode.h>
@@ -1368,6 +1369,36 @@ TEST(WKUserContentController, BeforeFocusEvent)
     EXPECT_WK_STREQ([webView _test_waitForAlert], "focus-pass");
     [webView evaluateJavaScript:@"shadowRoot.querySelector('#text2').focus()" completionHandler:nil];
     EXPECT_WK_STREQ([webView _test_waitForAlert], "focus-pass");
+}
+
+TEST(WKUserContentController, AutofillScriptingMarksSiteAsIsolated)
+{
+    RetainPtr webView = adoptNS([TestWKWebView new]);
+    RetainPtr configuration = adoptNS([WKContentWorldConfiguration new]);
+    configuration.get().autofillScriptingEnabled = YES;
+    RetainPtr autofillWorld = [WKContentWorld worldWithConfiguration:configuration.get()];
+
+    NSURL *url = [NSURL URLWithString:@"https://example.com/"];
+    [webView synchronouslyLoadHTMLString:@"<input id='password' type='password'>" baseURL:url];
+
+    WKWebsiteDataStore *dataStore = [webView configuration].websiteDataStore;
+
+    // Loading the page has already marked the site with Signal::FirstPartyVisit, so check for the
+    // autofill signal rather than mere membership.
+    constexpr NSUInteger autofillSignal = 1 << 0; // IsolatedSiteStore::Signal::Autofill.
+    EXPECT_FALSE([[dataStore _isolatedSiteSignalsForTesting:url] unsignedIntegerValue] & autofillSignal);
+
+    __block bool doneEvaluatingScript = false;
+    [webView evaluateJavaScript:@"document.getElementById('password').value = 'famos'; document.getElementById('password').autofilled = true" inFrame:nil inContentWorld:autofillWorld.get() completionHandler:^(id, NSError *) {
+        doneEvaluatingScript = true;
+    }];
+    TestWebKitAPI::Util::run(&doneEvaluatingScript);
+
+    EXPECT_WK_STREQ("famos", [webView stringByEvaluatingJavaScript:@"document.getElementById('password').value"]);
+
+    EXPECT_TRUE(TestWebKitAPI::Util::waitFor(^{
+        return (bool)([[dataStore _isolatedSiteSignalsForTesting:url] unsignedIntegerValue] & autofillSignal);
+    }));
 }
 
 #endif // PLATFORM(MAC)

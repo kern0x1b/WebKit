@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015-2023 Apple Inc. All rights reserved.
+ * Copyright (C) 2015-2026 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,6 +27,8 @@
 
 #if ENABLE(WEBGL)
 
+#include "AlphaPremultiplication.h"
+#include "CanvasElementImage.h"
 #include "EventLoop.h"
 #include "GPUBasedCanvasRenderingContext.h"
 #include "GraphicsContextGL.h"
@@ -37,6 +39,7 @@
 #include "WebGLAny.h"
 #include "WebGLBuffer.h"
 #include "WebGLContextAttributes.h"
+#include "WebGLCopyElementImageConfig.h"
 #include "WebGLExtension.h"
 #include "WebGLExtensionAny.h"
 #include "WebGLFramebuffer.h"
@@ -99,6 +102,7 @@ class HTMLImageElement;
 class ImageData;
 class IntSize;
 class KHRParallelShaderCompile;
+class NativeImage;
 class NVShaderNoperspectiveInterpolation;
 class OESDrawBuffersIndexed;
 class OESElementIndexUint;
@@ -337,6 +341,8 @@ public:
     virtual void texSubImage2D(GCGLenum target, GCGLint level, GCGLint xoffset, GCGLint yoffset, GCGLsizei width, GCGLsizei height, GCGLenum format, GCGLenum type, RefPtr<ArrayBufferView>&&);
     virtual ExceptionOr<void> texSubImage2D(GCGLenum target, GCGLint level, GCGLint xoffset, GCGLint yoffset, GCGLenum format, GCGLenum type, std::optional<TexImageSource>&&);
 
+    virtual ExceptionOr<void> texElementImage2D(GCGLenum target, GCGLenum internalformat, std::optional<CanvasElementImageSource>, std::optional<WebGLCopyElementImageConfig>);
+
     template<typename TypedArray, typename DataType>
     class TypedList {
     public:
@@ -357,11 +363,11 @@ public:
             );
         }
 
-        GCGLsizei length() const
+        size_t length() const
         {
             return WTF::switchOn(m_variant,
-                [](const Ref<TypedArray>& typedArray) -> GCGLsizei { return typedArray->length(); },
-                [](const Vector<DataType>& vector) -> GCGLsizei { return vector.size(); }
+                [](const Ref<TypedArray>& typedArray) -> size_t { return typedArray->length(); },
+                [](const Vector<DataType>& vector) -> size_t { return vector.size(); }
             );
         }
 
@@ -440,6 +446,7 @@ public:
     void didUpdateCanvasSizeProperties(bool) override;
 
     RefPtr<ImageBuffer> surfaceBufferToImageBuffer(SurfaceBuffer) final;
+    RefPtr<NativeImage> surfaceBufferToNativeImage(SurfaceBuffer) final;
     bool isSurfaceBufferTransparentBlack(SurfaceBuffer) const final { return false; }
 
     RefPtr<ByteArrayPixelBuffer> drawingBufferToPixelBuffer();
@@ -460,7 +467,8 @@ public:
 
     // GraphicsContextGL::Client
     void forceContextLost() final;
-    void addDebugMessage(GCGLenum, GCGLenum, GCGLenum, const CString&) final;
+    void addDebugMessage(GCGLenum, GCGLenum, GCGLenum, const UTF8CString&) final;
+    void didChangeMemoryCost() final;
 
     void recycleContext();
 
@@ -556,7 +564,7 @@ protected:
         CallerTypeOther,
     };
 
-    void markContextChangedAndNotifyCanvasObserver(CallerType = CallerTypeDrawOrClear);
+    void willUpdateDrawingBufferContents(CallerType = CallerTypeDrawOrClear);
 
     void addActivityStateChangeObserverIfNecessary();
     void removeActivityStateChangeObserver();
@@ -586,10 +594,10 @@ protected:
     // Adds a compressed texture format.
     void addCompressedTextureFormat(GCGLenum);
 
-    RefPtr<Image> drawImageIntoBuffer(Image&, int width, int height, int deviceScaleFactor, ASCIILiteral functionName);
+    RefPtr<NativeImage> drawImageIntoBuffer(Image&, int width, int height, int deviceScaleFactor, ASCIILiteral functionName);
 
 #if ENABLE(VIDEO)
-    RefPtr<Image> videoFrameToImage(HTMLVideoElement&, ASCIILiteral functionName);
+    RefPtr<NativeImage> videoFrameToNativeImage(HTMLVideoElement&, ASCIILiteral functionName);
 #endif
 
     void loseExtensions(LostContextMode);
@@ -597,6 +605,7 @@ protected:
     virtual void uncacheDeletedBuffer(const AbstractLocker&, WebGLBuffer*);
     bool needsPreparationForDisplay() const final { return true; }
     void NODELETE updateActiveOrdinal();
+    void scheduleMemoryCostUpdate();
     void updateMemoryCost() const;
 
     struct ContextLostState {
@@ -669,10 +678,10 @@ protected:
         LRUImageBufferCache(int capacity);
         // Returns pointer to a cleared image buffer that is owned by the cache. The pointer is valid until next call.
         // Using fillOperator == CompositeOperator::Copy can be used to omit the clear of the buffer.
-        RefPtr<ImageBuffer> imageBuffer(const IntSize&, DestinationColorSpace, CompositeOperator fillOperator = CompositeOperator::SourceOver);
+        RefPtr<ImageBuffer> imageBuffer(const IntSize&, ColorSpace, CompositeOperator fillOperator = CompositeOperator::SourceOver);
     private:
         void bubbleToFront(size_t idx);
-        Vector<std::optional<std::pair<DestinationColorSpace, Ref<ImageBuffer>>>> m_buffers;
+        Vector<std::optional<std::pair<ColorSpace, Ref<ImageBuffer>>>> m_buffers;
     };
     LRUImageBufferCache m_generatedImageCache { 0 };
 
@@ -717,8 +726,22 @@ protected:
     int m_numGLErrorsToConsoleAllowed;
 
     bool m_compositingResultsNeedUpdating { false };
-    RefPtr<ImageBuffer> m_readDrawingBuffer;
-    RefPtr<ImageBuffer> m_readDisplayBuffer;
+    bool m_memoryCostUpdateScheduled { false };
+
+    // Temporary holder for both ImageBuffer and NativeImage requests.
+    // Once ImageBuffer requests have been removed, this will be reverted to RefPtr<NativeImage>.
+    struct ReadSurfaceBuffer {
+        RefPtr<NativeImage> image;
+        RefPtr<ImageBuffer> buffer;
+
+        bool isEmpty() const { return !image && !buffer; }
+        void clear();
+        size_t memoryCost() const;
+    };
+    ReadSurfaceBuffer& readSurfaceBuffer(SurfaceBuffer);
+
+    ReadSurfaceBuffer m_readDrawingBuffer;
+    ReadSurfaceBuffer m_readDisplayBuffer;
 
     // Enabled extension objects.
     // FIXME: Move some of these to WebGLRenderingContext, the ones not needed for WebGL2
@@ -858,8 +881,8 @@ protected:
     IntRect NODELETE getImageDataSize(ImageData*);
 
     ExceptionOr<void> texImageSourceHelper(TexImageFunctionID, GCGLenum target, GCGLint level, GCGLint internalformat, GCGLint border, GCGLenum format, GCGLenum type, GCGLint xoffset, GCGLint yoffset, GCGLint zoffset, const IntRect& sourceImageRect, GCGLsizei depth, GCGLint unpackImageHeight, TexImageSource&&);
-    void texImageArrayBufferViewHelper(TexImageFunctionID, GCGLenum target, GCGLint level, GCGLint internalformat, GCGLsizei width, GCGLsizei height, GCGLsizei depth, GCGLint border, GCGLenum format, GCGLenum type, GCGLint xoffset, GCGLint yoffset, GCGLint zoffset, RefPtr<ArrayBufferView>&& pixels, NullDisposition, GCGLuint srcOffset);
-    void texImageImpl(TexImageFunctionID, GCGLenum target, GCGLint level, GCGLenum internalformat, GCGLint xoffset, GCGLint yoffset, GCGLint zoffset, GCGLenum format, GCGLenum type, Image&, GraphicsContextGL::DOMSource, bool flipY, bool premultiplyAlpha, bool ignoreNativeImageAlphaPremultiplication, const IntRect&, GCGLsizei depth, GCGLint unpackImageHeight);
+    void texImageArrayBufferViewHelper(TexImageFunctionID, GCGLenum target, GCGLint level, GCGLint internalformat, GCGLsizei width, GCGLsizei height, GCGLsizei depth, GCGLint border, GCGLenum format, GCGLenum type, GCGLint xoffset, GCGLint yoffset, GCGLint zoffset, RefPtr<ArrayBufferView>&& pixels, NullDisposition, uint64_t srcOffset);
+    void texImageImpl(TexImageFunctionID, GCGLenum target, GCGLint level, GCGLenum internalformat, GCGLint xoffset, GCGLint yoffset, GCGLint zoffset, GCGLenum format, GCGLenum type, NativeImage&, AlphaPremultiplication sourceAlphaPremultiplication, bool flipY, bool premultiplyAlpha, const IntRect&, GCGLsizei depth, GCGLint unpackImageHeight);
     void texImage2DBase(GCGLenum target, GCGLint level, GCGLenum internalFormat, GCGLsizei width, GCGLsizei height, GCGLint border, GCGLenum format, GCGLenum type, std::span<const uint8_t> pixels);
     void texSubImage2DBase(GCGLenum target, GCGLint level, GCGLint xoffset, GCGLint yoffset, GCGLsizei width, GCGLsizei height, GCGLenum internalFormat, GCGLenum format, GCGLenum type, std::span<const uint8_t> pixels);
     static ASCIILiteral texImageFunctionName(TexImageFunctionID);
@@ -940,7 +963,7 @@ protected:
         GCGLenum format, GCGLenum type,
         ArrayBufferView* pixels,
         NullDisposition,
-        GCGLuint srcOffset);
+        uint64_t srcOffset);
 
     // Helper function to validate a given texture format is settable as in
     // you can supply data to texImage2D, or call texImage2D, copyTexImage2D and
@@ -972,12 +995,12 @@ protected:
     // Helper function to validate input parameters for uniform functions.
     bool validateUniformLocation(ASCIILiteral functionName, const WebGLUniformLocation*);
     template<typename T, typename TypedListType>
-    std::optional<std::span<const T>> validateUniformParameters(ASCIILiteral functionName, const WebGLUniformLocation* location, const TypedList<TypedListType, T>& values, GCGLsizei requiredMinSize, GCGLuint srcOffset = 0, GCGLuint srcLength = 0)
+    std::optional<std::span<const T>> validateUniformParameters(ASCIILiteral functionName, const WebGLUniformLocation* location, const TypedList<TypedListType, T>& values, GCGLsizei requiredMinSize, uint64_t srcOffset = 0, GCGLuint srcLength = 0)
     {
         return validateUniformMatrixParameters(functionName, location, false, values, requiredMinSize, srcOffset, srcLength);
     }
     template<typename T, typename TypedListType>
-    std::optional<std::span<const T>> validateUniformMatrixParameters(ASCIILiteral functionName, const WebGLUniformLocation*, GCGLboolean transpose, const TypedList<TypedListType, T>&, GCGLsizei requiredMinSize, GCGLuint srcOffset = 0, GCGLuint srcLength = 0);
+    std::optional<std::span<const T>> validateUniformMatrixParameters(ASCIILiteral functionName, const WebGLUniformLocation*, GCGLboolean transpose, const TypedList<TypedListType, T>&, GCGLsizei requiredMinSize, uint64_t srcOffset = 0, GCGLuint srcLength = 0);
 
     // Helper function to validate parameters for bufferData.
     // Return the current bound buffer to target, or 0 if parameters are invalid.

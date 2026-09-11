@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <html>
 <head>
-<script src="../../resources/js-test-pre.js"></script>
+<script src="../../resources/js-test.js"></script>
 </head>
 <body>
 <script>
-description("A worker serializing FontFace descriptors must not race the main thread on the process-global CSS serialization memoization map (CSSPrimitiveValue). Under ASan/TSan, the unfixed code reports a heap-use-after-free or double-free in HashTable::rehash; this test should run clean.");
+description("A worker serializing FontFace descriptors must not race the main thread on the process-global CSS serialization memoization map (CSSPrimitiveValue).");
 
 jsTestIsAsync = true;
 
@@ -74,6 +74,5 @@ while (performance.now() < deadline) {
         element.style.getPropertyValue("height");            // shared static-pool object
 }
 </script>
-<script src="../../resources/js-test-post.js"></script>
 </body>
 </html>

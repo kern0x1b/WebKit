@@ -631,6 +631,22 @@ void HTMLImageElement::removingSteps(RemovalType removalType, ContainerNode& old
     FormAssociatedElement::elementRemovedFromAncestor(*this, removalType);
 }
 
+void HTMLImageElement::movingSteps(IsSubtreeRoot isSubtreeRoot, ContainerNode& oldParent)
+{
+    HTMLElement::movingSteps(isSubtreeRoot, oldParent);
+
+    if (isSubtreeRoot == IsSubtreeRoot::No)
+        return;
+
+    if (RefPtr parentPicture = dynamicDowncast<HTMLPictureElement>(parentElement())) {
+        setPictureElement(parentPicture.get());
+        selectImageSource(RelevantMutation::Yes);
+    } else if (RefPtr oldParentPicture = dynamicDowncast<HTMLPictureElement>(oldParent)) {
+        setPictureElement(nullptr);
+        selectImageSource(RelevantMutation::Yes);
+    }
+}
+
 HTMLPictureElement* HTMLImageElement::pictureElement() const
 {
     return m_pictureElement.get();
@@ -661,7 +677,7 @@ unsigned HTMLImageElement::width()
     if (!box)
         return 0;
     LayoutRect contentRect = box->contentBoxRect();
-    return Style::adjustLayoutUnitForAbsoluteZoom(contentRect.width(), *box).round();
+    return Style::unapplyingZoom<LayoutUnit>(contentRect.width(), *box).round();
 }
 
 unsigned HTMLImageElement::height()
@@ -684,7 +700,7 @@ unsigned HTMLImageElement::height()
     if (!box)
         return 0;
     LayoutRect contentRect = box->contentBoxRect();
-    return Style::adjustLayoutUnitForAbsoluteZoom(contentRect.height(), *box).round();
+    return Style::unapplyingZoom<LayoutUnit>(contentRect.height(), *box).round();
 }
 
 unsigned HTMLImageElement::naturalWidth() const

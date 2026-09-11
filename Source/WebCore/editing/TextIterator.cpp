@@ -1119,7 +1119,7 @@ static bool shouldEmitExtraNewlineForNode(Node& node, bool emitsNewlinesPerInner
         return false;
 
     auto bottomMargin = renderBox->collapsedMarginAfter();
-    auto fontSize = renderBox->style().fontDescription().computedSize();
+    auto fontSize = renderBox->style().fontDescription().usedSize();
     return bottomMargin * 2 >= fontSize;
 }
 
@@ -1430,6 +1430,12 @@ void TextIterator::emitText(Text& textNode, RenderText& renderer, int textStartO
 
     m_lastTextNodeEndedWithCollapsedSpace = false;
     m_hasEmitted = true;
+}
+
+TextIteratorPosition TextIterator::position() const
+{
+    ASSERT(!atEnd());
+    return { *m_positionNode, m_positionOffsetBaseNode, static_cast<unsigned>(m_positionStartOffset), static_cast<unsigned>(m_positionEndOffset) };
 }
 
 SimpleRange TextIterator::range() const

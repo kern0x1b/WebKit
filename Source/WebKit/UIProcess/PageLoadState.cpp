@@ -112,6 +112,7 @@ void PageLoadState::commitChanges()
     bool estimatedProgressChanged = estimatedProgress(m_committedState) != estimatedProgress(m_uncommittedState);
     bool networkRequestsInProgressChanged = m_committedState.networkRequestsInProgress != m_uncommittedState.networkRequestsInProgress;
     bool certificateInfoChanged = m_committedState.certificateInfo != m_uncommittedState.certificateInfo;
+    bool qualifiedServerTrustChanged = m_committedState.qualifiedServerTrust != m_uncommittedState.qualifiedServerTrust;
 
     if (canGoBackChanged)
         callObserverCallback(&Observer::willChangeCanGoBack);
@@ -135,12 +136,16 @@ void PageLoadState::commitChanges()
         callObserverCallback(&Observer::willChangeNetworkRequestsInProgress);
     if (certificateInfoChanged)
         callObserverCallback(&Observer::willChangeCertificateInfo);
+    if (qualifiedServerTrustChanged)
+        callObserverCallback(&Observer::willChangeQualifiedServerTrust);
 
     m_committedState = m_uncommittedState;
 
     protect(page())->isLoadingChanged();
 
     // The "did" ordering is the reverse of the "will". This is a requirement of Cocoa Key-Value Observing.
+    if (qualifiedServerTrustChanged)
+        callObserverCallback(&Observer::didChangeQualifiedServerTrust);
     if (certificateInfoChanged)
         callObserverCallback(&Observer::didChangeCertificateInfo);
     if (networkRequestsInProgressChanged)
@@ -328,6 +333,7 @@ void PageLoadState::didCommitLoad(const Transaction::Token& token, const WebCore
     m_uncommittedState.titleFromBrowsingWarning = { };
     m_uncommittedState.proxyName = proxyName;
     m_uncommittedState.source = source;
+    m_uncommittedState.qualifiedServerTrust = { };
 }
 
 void PageLoadState::didFinishLoad(const Transaction::Token& token)
@@ -477,14 +483,29 @@ void PageLoadState::callObserverCallback(void (Observer::*callback)())
 {
     Ref protectedPage { m_webPageProxy.get() };
 
-    for (auto& observer : copyToVector(m_observers)) {
+    for (auto& weakObserver : copyToVector(m_observers)) {
         // This appears potentially inefficient on the surface (searching in a Vector)
         // but in practice - using only API - there will only ever be (1) observer.
+        RefPtr observer = weakObserver;
         if (!observer || !m_observers.contains(*observer))
             continue;
 
         ((*observer).*callback)();
     }
+}
+
+void PageLoadState::receivedQualifiedServerTrust(const Transaction::Token& token, WebCore::CertificateInfo&& serverTrust, WebCore::CertificateInfo&& qualifiedServerTrust)
+{
+    ASSERT_UNUSED(token, &token.m_pageLoadState == this);
+
+#if PLATFORM(COCOA)
+    // QualifiedServerTrustFetch and IPC can take enough time that the page has navigated away.
+    // Make sure we are still exposing the server trust for which the qualifiedServerTrust is valid.
+    if (!WebCore::certificatesMatch(serverTrust.trust(), this->certificateInfo().trust()))
+        return;
+#endif
+
+    m_uncommittedState.qualifiedServerTrust = WTF::move(qualifiedServerTrust);
 }
 
 } // namespace WebKit

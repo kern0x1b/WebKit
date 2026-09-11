@@ -34,6 +34,7 @@
 #import "WebPushDaemonConstants.h"
 #import <WebCore/SecurityOriginData.h>
 #import <mach/mach_init.h>
+#import <mach/mach_port.h>
 #import <mach/task.h>
 #import <pal/spi/cocoa/ServersSPI.h>
 #import <wtf/BlockPtr.h>
@@ -54,11 +55,13 @@ Ref<Connection> Connection::create(PreferTestService preferTestService, String b
 
 static mach_port_t maybeConnectToService(const char* serviceName)
 {
-    mach_port_t bsPort;
-    task_get_special_port(mach_task_self(), TASK_BOOTSTRAP_PORT, &bsPort);
+    mach_port_t bsPort = MACH_PORT_NULL;
+    if (task_get_special_port(mach_task_self(), TASK_BOOTSTRAP_PORT, &bsPort) != KERN_SUCCESS)
+        return MACH_PORT_NULL;
 
     mach_port_t servicePort;
     kern_return_t err = bootstrap_look_up(bsPort, serviceName, &servicePort);
+    mach_port_deallocate(mach_task_self(), bsPort);
 
     if (err == KERN_SUCCESS)
         return servicePort;
@@ -78,8 +81,7 @@ Connection::Connection(PreferTestService preferTestService, String bundleIdentif
 
 void Connection::connectToService(WaitForServiceToExist waitForServiceToExist)
 {
-    // FIXME: This is a false positive. <rdar://164843889>
-    SUPPRESS_RETAINPTR_CTOR_ADOPT m_connection = adoptOSObject(xpc_connection_create_mach_service(m_serviceName, mainDispatchQueueSingleton(), 0));
+    m_connection = adoptOSObject(xpc_connection_create_mach_service(m_serviceName, mainDispatchQueueSingleton(), 0));
 
     xpc_connection_set_event_handler(m_connection.get(), [](xpc_object_t event) {
         if (event == XPC_ERROR_CONNECTION_INVALID || event == XPC_ERROR_CONNECTION_INTERRUPTED) {
@@ -99,6 +101,7 @@ void Connection::connectToService(WaitForServiceToExist waitForServiceToExist)
             usleep(1000);
             result = maybeConnectToService(m_serviceName);
         }
+        mach_port_deallocate(mach_task_self(), result);
     }
 
     SAFE_PRINTF("Connecting to service '%s'\n", m_serviceName);
@@ -153,8 +156,7 @@ void Connection::sendAuditToken()
 static OSObjectPtr<xpc_object_t> messageDictionaryFromEncoder(UniqueRef<IPC::Encoder>&& encoder)
 {
     auto xpcData = WebKit::encoderToXPCData(WTF::move(encoder));
-    // FIXME: This is a false positive. <rdar://164843889>
-    SUPPRESS_RETAINPTR_CTOR_ADOPT auto dictionary = adoptOSObject(xpc_dictionary_create(nullptr, nullptr, 0));
+    OSObjectPtr dictionary = adoptOSObject(xpc_dictionary_create(nullptr, nullptr, 0));
     xpc_dictionary_set_uint64(dictionary.get(), WebKit::WebPushD::protocolVersionKey, WebKit::WebPushD::protocolVersionValue);
     xpc_dictionary_set_value(dictionary.get(), WebKit::WebPushD::protocolEncodedMessageKey, xpcData.get());
 

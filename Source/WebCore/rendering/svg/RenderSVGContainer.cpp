@@ -157,10 +157,12 @@ void RenderSVGContainer::paint(PaintInfo& paintInfo, const LayoutPoint& paintOff
         return;
     }
 
-    auto visualOverflowRect = visualOverflowRectEquivalent();
-    visualOverflowRect.moveBy(adjustedPaintOffset);
-    if (!visualOverflowRect.intersects(paintInfo.rect))
-        return;
+    if (auto cachedVisualOverflowRect = cachedVisualOverflowRectIfAvailable()) {
+        auto visualOverflowRect = *cachedVisualOverflowRect;
+        visualOverflowRect.moveBy(adjustedPaintOffset);
+        if (!visualOverflowRect.intersects(paintInfo.rect))
+            return;
+    }
 
     if (paintInfo.phase == PaintPhase::Outline || paintInfo.phase == PaintPhase::SelfOutline) {
         // Children's outlines are painted per-child during the Foreground phase, so later
@@ -179,8 +181,10 @@ void RenderSVGContainer::paint(PaintInfo& paintInfo, const LayoutPoint& paintOff
     GraphicsContextStateSaver stateSaver(childPaintInfo.context());
 
     // For layer-backed containers, clipping is handled by RenderLayer::calculateClipRects().
-    if (isRenderSVGViewportContainer() && SVGRenderSupport::isOverflowHidden(*this))
-        childPaintInfo.context().clip(FloatRect(overflowClipRect(adjustedPaintOffset)));
+    if (isRenderSVGViewportContainer() && SVGRenderSupport::isOverflowHidden(*this)) {
+        if (auto clipRect = overflowClipRectForPainting(adjustedPaintOffset); !clipRect.isInfinite())
+            childPaintInfo.context().clip(FloatRect(clipRect));
+    }
 
     childPaintInfo.updateSubtreePaintRootForChildren(this);
     for (CheckedRef child : childrenOfType<RenderElement>(*this)) {
@@ -189,7 +193,7 @@ void RenderSVGContainer::paint(PaintInfo& paintInfo, const LayoutPoint& paintOff
 
         child->paint(childPaintInfo, adjustedPaintOffset);
 
-        if (paintInfo.phase == PaintPhase::Foreground) {
+        if (paintInfo.phase == PaintPhase::Foreground && child->hasOutline()) {
             // Paint each child's outline immediately so later DOM siblings paint on top of it.
             PaintInfo outlinePaintInfo(childPaintInfo);
             outlinePaintInfo.phase = PaintPhase::Outline;

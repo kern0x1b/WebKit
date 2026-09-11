@@ -117,7 +117,7 @@
 #include "RenderLineBreak.h"
 #include "RenderListBox.h"
 #include "RenderListItem.h"
-#include "RenderListMarker.h"
+#include "RenderListOutsideMarker.h"
 #include "RenderMathMLBlock.h"
 #include "RenderObjectInlines.h"
 #include "RenderSVGInlineText.h"
@@ -325,7 +325,7 @@ AccessibilityObject* AccessibilityRenderObject::parentObject() const
 #endif // !USE(ATSPI)
 
     // Expose markers that are not direct children of a list item too.
-    if (m_renderer->isRenderListMarker()) {
+    if (m_renderer->isRenderListOutsideMarker()) {
         for (CheckedRef listItemAncestor : ancestorsOfType<RenderListItem>(*m_renderer)) {
             RefPtr parent = dynamicDowncast<AccessibilityRenderObject>(axObjectCache()->getOrCreate(listItemAncestor));
             if (parent && parent->markerRenderer() == m_renderer)
@@ -432,9 +432,21 @@ String AccessibilityRenderObject::textUnderElement(TextUnderElementMode mode) co
     if (CheckedPtr fileUpload = dynamicDowncast<RenderFileUploadControl>(*m_renderer))
         return fileUpload->buttonValue();
 
-    if (mode.includeListMarkers == IncludeListMarkerText::Yes) {
-        if (auto* listMarker = dynamicDowncast<RenderListMarker>(*m_renderer))
-            return listMarker->textWithSuffix();
+    if (CheckedPtr markerInlineBox = m_renderer->parent(); is<RenderText>(*m_renderer) && markerInlineBox && markerInlineBox->style().isListMarkerStyle()) {
+        if (mode.includeListMarkers == IncludeListMarkerText::Yes)
+            return downcast<RenderText>(*m_renderer).text();
+        return { };
+    }
+
+    if (auto* listMarker = dynamicDowncast<RenderListOutsideMarker>(*m_renderer)) {
+        // A `content` marker has no text of its own; the child walk below reads the renderers holding it.
+        if (!listMarker->hasContentProperty()) {
+            if (mode.includeListMarkers == IncludeListMarkerText::Yes) {
+                CheckedPtr listItem = listMarker->listItem();
+                return listItem ? listItem->markerText() : String();
+            }
+            return { };
+        }
     }
 
     // Reflect when a content author has explicitly marked a line break.
@@ -581,11 +593,14 @@ String AccessibilityRenderObject::stringValue() const
         return textUnderElement();
 #endif
 
-    if (CheckedPtr renderListMarker = dynamicDowncast<RenderListMarker>(m_renderer.get())) {
+    if (CheckedPtr renderListMarker = dynamicDowncast<RenderListOutsideMarker>(m_renderer.get())) {
+        CheckedPtr listItem = renderListMarker->listItem();
+        if (!listItem)
+            return { };
 #if USE(ATSPI)
-        return renderListMarker->textWithSuffix();
+        return listItem->markerText();
 #else
-        return renderListMarker->textWithoutSuffix();
+        return listItem->markerText(ListMarkerIncludeSuffix::No);
 #endif
     }
 
@@ -668,7 +683,7 @@ LayoutRect AccessibilityRenderObject::boundingBoxRect() const
                         if (axID == objectID())
                             break;
                         if (RefPtr object = cache->objectForID(axID)) {
-                            if (CheckedPtr renderListMarker = dynamicDowncast<RenderListMarker>(object->renderer())) {
+                            if (CheckedPtr renderListMarker = dynamicDowncast<RenderListOutsideMarker>(object->renderer())) {
                                 if (!object->isAXHidden())
                                     renderListMarker->absoluteFocusRingQuads(quads);
                             }
@@ -786,8 +801,8 @@ Path AccessibilityRenderObject::elementPath() const
         if (!rectsSpanMultipleLines(rects, style->writingMode().isHorizontal()))
             return { };
 
-        auto outlineOffset = Style::evaluate<float>(style->usedOutlineOffset(), style->usedZoomForLength());
         float deviceScaleFactor = protect(renderText->document())->deviceScaleFactor();
+        auto outlineOffset = Style::evaluate<float>(style->usedOutlineOffset(), style->usedZoomForLength(), deviceScaleFactor);
         Vector<FloatRect> pixelSnappedRects;
         for (auto rect : rects) {
             rect.inflate(outlineOffset);
@@ -1323,7 +1338,7 @@ bool AccessibilityRenderObject::computeIsIgnored() const
         // Otherwise fall through; use presence of help text, title, or description to decide.
     }
 
-    if (m_renderer->isRenderListMarker()) {
+    if (m_renderer->isRenderListOutsideMarker()) {
         RefPtr parent = parentObjectUnignored();
         return parent && !parent->isListItem();
     }
@@ -1496,6 +1511,15 @@ static bool shouldExcludeTextRunsForPseudoElement(std::optional<PseudoElementTyp
     return true;
 }
 
+static bool isPlaceholderText(const RenderText& renderText)
+{
+    RefPtr parentElement = renderText.textNode() ? renderText.textNode()->parentElement() : nullptr;
+    if (!parentElement)
+        return false;
+    RefPtr textControl = dynamicDowncast<HTMLTextFormControlElement>(parentElement->shadowHost());
+    return textControl && textControl->placeholderElement() == parentElement;
+}
+
 AXTextRuns AccessibilityRenderObject::textRuns()
 {
     constexpr std::array<uint16_t, 2> lengthOneDomOffsets = { 0, 1 };
@@ -1551,8 +1575,19 @@ AXTextRuns AccessibilityRenderObject::textRuns()
     if (!renderText)
         return { };
 
+    if (isPlaceholderText(*renderText))
+        return { };
+
     if (CheckedPtr parent = renderText->parent()) {
         if (shouldExcludeTextRunsForPseudoElement(parent->style().pseudoElementType()))
+            return { };
+    }
+
+    for (CheckedPtr ancestor = renderText->parent(); ancestor && !ancestor->element(); ancestor = ancestor->parent()) {
+        // A marker that needs renderers for its content (a synthesized glyph, bidi text, or a `content`
+        // value) puts them in an anonymous inline-block inside the RenderListOutsideMarker, and that anonymous
+        // style carries no pseudo type for the ::marker case above to catch. We do so here instead.
+        if (ancestor->isRenderListOutsideMarker())
             return { };
     }
 
@@ -1573,6 +1608,22 @@ AXTextRuns AccessibilityRenderObject::textRuns()
     float lineHeight = 0.0;
 
     bool isHorizontal = fontOrientation() == FontOrientation::Horizontal;
+
+    bool didComputeBoundsOffsets = false;
+    float containingBlockOffset = 0;
+    LayoutUnit elementRectOffset;
+    auto computeBoundsOffsetsIfNeeded = [&] {
+        if (didComputeBoundsOffsets)
+            return;
+        didComputeBoundsOffsets = true;
+
+        if (CheckedPtr containingBlock = renderText->containingBlock())
+            containingBlockOffset = isHorizontal ? containingBlock->absoluteBoundingBoxRect().x() : containingBlock->absoluteBoundingBoxRect().y();
+
+        LayoutRect rect = elementRect();
+        elementRectOffset = isHorizontal ? rect.x() : rect.y();
+    };
+
     // Appends text to the current lineString, collapsing whitespace as necessary (similar to how TextIterator::handleTextRun() does).
     auto appendToLineString = [&] (const InlineIterator::TextBoxIterator& textBox) {
         auto text = textBox->originalText();
@@ -1602,11 +1653,8 @@ AXTextRuns AccessibilityRenderObject::textRuns()
         // non-zero value indicates it was already set by an earlier text box.
         if (!didComputeDistanceFromBounds) {
             didComputeDistanceFromBounds = true;
-            float containingBlockOffset = 0;
-            if (CheckedPtr containingBlock = renderText->containingBlock())
-                containingBlockOffset = isHorizontal ? containingBlock->absoluteBoundingBoxRect().x() : containingBlock->absoluteBoundingBoxRect().y();
-
-            distanceFromBoundsInDirection = isHorizontal ? textRun.xPos() + lineBox->contentLogicalLeft() + containingBlockOffset - elementRect().x() : -textRun.xPos() + containingBlockOffset - elementRect().y();
+            computeBoundsOffsetsIfNeeded();
+            distanceFromBoundsInDirection = isHorizontal ? textRun.xPos() + lineBox->contentLogicalLeft() + containingBlockOffset - elementRectOffset : -textRun.xPos() + containingBlockOffset - elementRectOffset;
         }
 
         // Populate GlyphBuffer with all of the glyphs for the text runs, enabling us to measure character widths.
@@ -1728,16 +1776,11 @@ AXTextRuns AccessibilityRenderObject::textRuns()
     return { renderText->containingBlock(), WTF::move(runs), fullString.toString().isolatedCopy(), containsOnlyASCII };
 }
 
-AXTextRunLineID AccessibilityRenderObject::listMarkerLineID() const
-{
-    AX_ASSERT(role() == AccessibilityRole::ListMarker);
-    return { renderer() ? renderer()->containingBlock() : nullptr, 0 };
-}
-
 String AccessibilityRenderObject::listMarkerText() const
 {
-    CheckedPtr marker = dynamicDowncast<RenderListMarker>(renderer());
-    return marker ? marker->textWithSuffix() : String();
+    CheckedPtr marker = dynamicDowncast<RenderListOutsideMarker>(renderer());
+    CheckedPtr listItem = marker ? marker->listItem() : nullptr;
+    return listItem ? listItem->markerText() : String();
 }
 #endif // ENABLE(ACCESSIBILITY_ISOLATED_TREE)
 
@@ -1874,8 +1917,11 @@ bool AccessibilityRenderObject::press()
     if (RefPtr selectElement = dynamicDowncast<HTMLSelectElement>(element()); selectElement && selectElement->usesBaseAppearancePicker()) {
         // Base-appearance selects need explicit picker toggling since they no longer use
         // AccessibilityMenuList which had its own press() override.
-        if (selectElement->isDisabledFormControl())
+        if (selectElement->isDisabledFormControl()) {
+            if (CheckedPtr cache = axObjectCache())
+                cache->postNotification(selectElement.get(), AXNotification::PressDidFail);
             return false;
+        }
         if (selectElement->popupIsVisible())
             selectElement->hidePickerPopoverElement();
         else
@@ -2049,13 +2095,8 @@ void AccessibilityRenderObject::setSelectedVisiblePositionRange(const VisiblePos
     // else branch below would fail because contains<ComposedTree> returns
     // false for cross-document positions, clamping the selection to the web
     // area start.
-    RefPtr<HTMLTextFormControlElement> textControl;
-    if (isNativeTextControl()) {
-        // isNativeTextControl returns true only for HTMLTextAreaElement or HTMLInputElement,
-        // both of which derive from HTMLTextFormControlElement.
-        ASSERT(is<HTMLTextFormControlElement>(node()));
-        textControl = downcast<HTMLTextFormControlElement>(node());
-    } else
+    RefPtr textControl = nativeTextControl();
+    if (!textControl)
         textControl = enclosingTextFormControl(range.start.deepEquivalent());
 
     if (textControl) {
@@ -2192,8 +2233,16 @@ CharacterRange AccessibilityRenderObject::doAXRangeForLine(unsigned lineNumber) 
     if (isHardLineBreak(lineEnd))
         ++lineEndIndex;
 
-    if (lineStartIndex < 0 || lineEndIndex < 0 || lineEndIndex <= lineStartIndex)
+    if (lineStartIndex < 0 || lineEndIndex < 0 || lineEndIndex <= lineStartIndex) {
+        // A text control whose value ends in a line break has an empty final line at the document
+        // end, rendered by a placeholder <br>. Report it as an empty range there so it reads as an
+        // empty line, matching the isolated-tree path (AXTextMarker::characterRangeForLine).
+        auto value = text();
+        bool endsWithLineBreak = value.length() && value[value.length() - 1] == '\n';
+        if (lineStartIndex >= 0 && lineStartIndex == lineEndIndex && static_cast<unsigned>(lineStartIndex) == value.length() && endsWithLineBreak)
+            return { static_cast<unsigned>(lineStartIndex), 0 };
         return { };
+    }
 
     return { static_cast<unsigned>(lineStartIndex), static_cast<unsigned>(lineEndIndex - lineStartIndex) };
 }
@@ -2466,7 +2515,7 @@ AccessibilityRole AccessibilityRenderObject::determineAccessibilityRole()
             return AccessibilityRole::ListItem;
     }
 
-    if (m_renderer->isRenderListMarker())
+    if (m_renderer->isRenderListOutsideMarker())
         return AccessibilityRole::ListMarker;
     if (m_renderer->isBR())
         return AccessibilityRole::LineBreak;
@@ -2962,7 +3011,7 @@ void AccessibilityRenderObject::addChildren()
     auto addChildIfNeeded = [this](AccessibilityObject& object) {
 #if USE(ATSPI)
         // FIXME: Consider removing this ATSPI-only branch with https://bugs.webkit.org/show_bug.cgi?id=282117.
-        if (object.renderer() && object.renderer()->isRenderListMarker())
+        if (object.renderer() && object.renderer()->isRenderListOutsideMarker())
             return;
 #endif
         addChild(object);

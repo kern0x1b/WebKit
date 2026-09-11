@@ -84,7 +84,7 @@ public:
     void unregisterWithDocument(Document&);
 
     void clientWillBeginAutoplaying() final;
-    void clientWillBeginPlayback(CompletionHandler<void(bool)>&&) final;
+    Ref<GenericPromise> clientWillBeginPlayback() final;
     bool clientWillPausePlayback() final;
     void clientCharacteristicsChanged(bool) final;
 
@@ -92,10 +92,14 @@ public:
     void isVisibleInViewportChanged();
     void inActiveDocumentChanged();
 
-    Expected<void, MediaPlaybackDenialExplanation> playbackStateChangePermitted(MediaPlaybackState) const;
+    std::expected<void, MediaPlaybackDenialExplanation> playbackStateChangePermitted(MediaPlaybackState) const;
+    // playbackStateChangePermitted() only denies an audible element, so play() is permitted while
+    // the resource is believed to be silent (no audio track discovered yet, muted, or volume zero)
+    // and denied once it becomes audible.
+    bool playbackPermitted() const final { return playbackStateChangePermitted(MediaPlaybackState::Playing).has_value(); }
     bool autoplayPermitted() const;
     bool dataLoadingPermitted() const;
-    MediaPlayer::BufferingPolicy preferredBufferingPolicy() const;
+    WEBCORE_EXPORT MediaPlayer::BufferingPolicy preferredBufferingPolicy() const;
     bool fullscreenPermitted() const;
     bool pageAllowsDataLoading() const;
     bool pageAllowsPlaybackAfterResuming() const;
@@ -162,6 +166,8 @@ public:
     WEBCORE_EXPORT void removeBehaviorRestriction(BehaviorRestrictions);
     bool hasBehaviorRestriction(BehaviorRestrictions restriction) const { return restriction & m_restrictions; }
 
+    void mediaUsageManagerSessionWillBeSuspended();
+
     inline HTMLMediaElement* element() const; // Defined in HTMLMediaElement.h.
 
     bool wantsToObserveViewportVisibilityForMediaControls() const;
@@ -169,9 +175,10 @@ public:
 
     bool canShowControlsManager(PlaybackControlsPurpose) const;
     bool isLargeEnoughForMainContent(MediaSessionMainContentPurpose) const;
+    bool isLargeEnoughForMainContent() const final { return isLargeEnoughForMainContent(MediaSessionMainContentPurpose::MediaControls); }
     bool isLongEnoughForMainContent() const final;
     bool isMainContentForPurposesOfAutoplayEvents() const;
-    Markable<MonotonicTime> NODELETE mostRecentUserInteractionTime() const;
+    Markable<MonotonicTime> NODELETE mostRecentUserInteractionTime() const final;
 
     bool NODELETE allowsPlaybackControlsForAutoplayingAudio() const;
 

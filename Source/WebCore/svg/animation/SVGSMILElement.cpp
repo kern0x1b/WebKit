@@ -910,8 +910,7 @@ void SVGSMILElement::resolveFirstInterval()
     resolveInterval(true, begin, end);
     ASSERT(!begin.isIndefinite());
 
-    // Compare raw SMILTime values to avoids treating open-ended intervals as "new" on every call.
-    if (!begin.isUnresolved() && (begin.value() != m_intervalBegin.value() || end.value() != m_intervalEnd.value())) {
+    if (!begin.isUnresolved() && (begin != m_intervalBegin || end != m_intervalEnd)) {
         m_intervalBegin = begin;
         m_intervalEnd = end;
         notifyDependentsIntervalChanged();
@@ -1264,10 +1263,8 @@ bool SVGSMILElement::progress(SMILTime elapsed, SVGSMILElement& firstAnimation, 
             smilEventSender().dispatchEventSoon(*this, eventNames().endEventEvent);
 
         // Coalesce the skipped repeat iterations into a single event instead of one per interval.
-        if (repeat > 1 || (repeat && m_activeState == Inactive)) {
-            m_pendingRepeatIterations.append(repeat);
+        if (repeat > 1 || (repeat && m_activeState == Inactive))
             smilEventSender().dispatchEventSoon(*this, eventNames().repeatEventEvent);
-        }
     }
 
     m_nextProgressTime = calculateNextProgressTime(elapsed);

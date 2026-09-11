@@ -70,6 +70,7 @@ private:
     void setDrawsContent(bool) override;
     void setMasksToBounds(bool) override;
     void setPreserves3D(bool) override;
+    void setBackgroundColor(const Color&) override;
     void setBackfaceVisibility(bool) override;
     void setOpacity(float) override;
     void setBlendMode(BlendMode) override;
@@ -80,9 +81,12 @@ private:
     void setContentsTileSize(const FloatSize&) override;
     void setContentsTilePhase(const FloatSize&) override;
     void setContentsClippingRect(const FloatRoundedRect&) override;
+    void setContentsClipShapePath(const Path&) override;
     void setContentsNeedsDisplay() override;
     void setContentsNeedsDisplayInRect(const FloatRect&) override;
-    void setContentsToPlatformLayer(PlatformLayer*, ContentsLayerPurpose) override;
+#if ENABLE(VIDEO) && USE(GSTREAMER)
+    void setContentsToMediaPlayer(MediaPlayer*, ContentsLayerPurpose) override;
+#endif
     void setContentsDisplayDelegate(RefPtr<GraphicsLayerContentsDisplayDelegate>&&, ContentsLayerPurpose) override;
     RefPtr<GraphicsLayerAsyncContentsDisplayDelegate> createAsyncContentsDisplayDelegate(GraphicsLayerAsyncContentsDisplayDelegate*) override;
     void setContentsToImage(Image*) override;
@@ -113,6 +117,7 @@ private:
     void setReplicatedByLayer(RefPtr<GraphicsLayer>&&) override;
     bool setBackdropFilters(const FilterOperations&) override;
     void setBackdropFiltersRect(const FloatRoundedRect&) override;
+    void setBackdropFiltersShapePath(const Path&) override;
     void setIsBackdropRoot(bool) override;
 
     bool addAnimation(const GraphicsLayerKeyframeValueList&, const GraphicsLayerAnimation*, const String&, double) override;
@@ -140,6 +145,8 @@ private:
         Backdrop,
         BackdropRect,
         BackdropRoot,
+        BackdropShapePath,
+        BackgroundColor,
         BackfaceVisibility,
         BlendMode,
         Children,
@@ -147,6 +154,7 @@ private:
         ContentsBuffer,
         ContentsBufferNeedsDisplay,
         ContentsClippingRect,
+        ContentsClipShapePath,
         ContentsColor,
         ContentsImage,
         ContentsOpaque,

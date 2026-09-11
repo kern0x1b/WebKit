@@ -32,13 +32,12 @@
 #import "WebViewInternal.h"
 #import <JavaScriptCore/InitializeThreading.h>
 #import <WebCore/CookieJar.h>
+#import <WebCore/CookieStorageSession.h>
 #import <WebCore/CredentialStorage.h>
 #import <WebCore/CrossOriginPreflightResultCache.h>
 #import <WebCore/Document.h>
 #import <WebCore/MemoryCache.h>
 #import <WebCore/NativeImage.h>
-#import <WebCore/NetworkStorageSession.h>
-#import <WebCore/StorageSessionProvider.h>
 #import <WebCore/WebCoreJITOperations.h>
 #import <WebCore/WebCoreMainThread.h>
 #import <wtf/MainThread.h>
@@ -51,13 +50,6 @@
 #import <WebCore/LocalFrame.h>
 #import <WebCore/WebCoreThreadRun.h>
 #endif
-
-class DefaultStorageSessionProvider : public WebCore::StorageSessionProvider {
-    WebCore::NetworkStorageSession* storageSession() const final
-    {
-        return &NetworkStorageSessionMap::defaultStorageSession();
-    }
-};
 
 @implementation WebCache
 
@@ -169,12 +161,7 @@ class DefaultStorageSessionProvider : public WebCore::StorageSessionProvider {
     if (!nativeImage)
         return nullptr;
 
-    // Handed back alive. nativeImage is a local reference and the image can be
-    // released the moment it goes out of scope, so returning the raw pointer
-    // hands the caller something that may already be gone. Autoreleased matches
-    // what the name promises - no "create" or "copy" in it - so the caller does
-    // not own it and it survives the turn of the run loop.
-    return (CGImageRef)CFAutorelease(CGImageRetain(nativeImage->platformImage().get()));
+    return nativeImage->platformImage().unsafeGet();
 }
 
 #endif // PLATFORM(IOS_FAMILY)

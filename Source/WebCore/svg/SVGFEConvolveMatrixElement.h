@@ -30,7 +30,6 @@ namespace WebCore {
 template<>
 struct SVGPropertyTraits<EdgeModeType> {
     static unsigned highestEnumValue() { return static_cast<unsigned>(EdgeModeType::None); }
-    static EdgeModeType initialValue() { return EdgeModeType::None; }
 
     static String toString(EdgeModeType type)
     {
@@ -103,7 +102,6 @@ private:
 
     static constexpr int initialOrderValue = 3;
     static constexpr float initialDivisorValue = 1;
-    static constexpr float initialKernelUnitLengthValue = 0;
 
     void attributeChanged(const QualifiedName&, const AtomString& oldValue, const AtomString& newValue, AttributeModificationReason) override;
     void svgAttributeChanged(const QualifiedName&) override;

@@ -11,6 +11,7 @@
 accessibility/mac/attributed-string/attributed-string-for-range-with-options.html [ Pass ]
 accessibility/mac/attributed-string/attributed-string-for-range.html [ Pass ]
 accessibility/mac/attributed-string/attributed-string-text-styling.html [ Pass ]
+accessibility/isolated-tree/mac/attributed-string/attributed-string-text-styling.html [ Pass ]
 accessibility/mac/dynamic-style.html [ Pass ]
 
 # rdar://154889639 (REGRESSION(Liquid Glass): [ OS 26 ] fast/forms/datalist/datalist-fallback-content.html is a constant ImageOnlyFailure)
@@ -45,6 +46,11 @@ accessibility/mac/intersection-with-selection-range.html [ Skip ]
 
 # webkit.org/b/319008 WebTransport-over-HTTP/3 needs Network.framework QUIC SPI only present on Tahoe; skip the suite on Sequoia.
 imported/w3c/web-platform-tests/webtransport [ Skip ]
+imported/w3c/web-platform-tests/content-security-policy/connect-src/connect-src-webtransport-blocked.sub.https.html [ Skip ]
+
+# The IPC payload hardcodes the HAVE(WK_SECURE_CODING_SECTRUST) shape of WebKit::CoreIPCSecTrust,
+# which is only serialized that way on macOS 26 and later. Sequoia sends a bare std::span instead.
+ipc/cocoa/sectrust-null-data-crash.html [ Skip ]
 
 
 

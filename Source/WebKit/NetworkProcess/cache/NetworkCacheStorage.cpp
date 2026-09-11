@@ -45,6 +45,7 @@
 #include <wtf/text/CString.h>
 #include <wtf/text/MakeString.h>
 #include <wtf/text/StringToIntegerConversion.h>
+#include <wtf/text/TextStream.h>
 
 namespace WebKit {
 namespace NetworkCache {
@@ -108,12 +109,12 @@ private:
 
 WTF_MAKE_TZONE_ALLOCATED_IMPL(Storage::ReadOperation);
 
-bool Storage::isHigherPriority(const std::unique_ptr<ReadOperation>& a, const std::unique_ptr<ReadOperation>& b)
+bool Storage::ReadOperationIsLowerPriority::operator()(const std::unique_ptr<ReadOperation>& a, const std::unique_ptr<ReadOperation>& b) const
 {
     if (a->priority() == b->priority())
-        return a->identifier() < b->identifier();
+        return a->identifier() > b->identifier();
 
-    return a->priority() > b->priority();
+    return a->priority() < b->priority();
 }
 
 void Storage::ReadOperation::updateForStart(size_t readOperationDispatchCount)
@@ -363,27 +364,33 @@ RefPtr<Storage> Storage::open(const String& baseCachePath, Mode mode, size_t cap
 }
 
 using RecordFileTraverseFunction = Function<void (const String& fileName, const String& hashString, const String& type, bool isBlob, const String& recordDirectoryPath)>;
+
+static void traversePartitionFiles(const String& partitionPath, const String& expectedType, NOESCAPE const RecordFileTraverseFunction& function)
+{
+    traverseDirectory(partitionPath, [&](const String& actualType, DirectoryEntryType entryType) {
+        if (entryType != DirectoryEntryType::Directory)
+            return;
+        if (!expectedType.isEmpty() && expectedType != actualType)
+            return;
+        String recordDirectoryPath = FileSystem::pathByAppendingComponent(partitionPath, actualType);
+        traverseDirectory(recordDirectoryPath, [&function, &recordDirectoryPath, &actualType](const String& fileName, DirectoryEntryType entryType) {
+            if (entryType != DirectoryEntryType::File || fileName.length() < Key::hashStringLength())
+                return;
+
+            String hashString = fileName.left(Key::hashStringLength());
+            auto isBlob = fileName.length() > Key::hashStringLength() && fileName.endsWith(blobSuffix);
+            function(fileName, hashString, actualType, isBlob, recordDirectoryPath);
+        });
+    });
+}
+
 static void traverseRecordsFiles(const String& recordsPath, const String& expectedType, NOESCAPE const RecordFileTraverseFunction& function)
 {
     traverseDirectory(recordsPath, [&](const String& partitionName, DirectoryEntryType entryType) {
         if (entryType != DirectoryEntryType::Directory)
             return;
         String partitionPath = FileSystem::pathByAppendingComponent(recordsPath, partitionName);
-        traverseDirectory(partitionPath, [&](const String& actualType, DirectoryEntryType entryType) {
-            if (entryType != DirectoryEntryType::Directory)
-                return;
-            if (!expectedType.isEmpty() && expectedType != actualType)
-                return;
-            String recordDirectoryPath = FileSystem::pathByAppendingComponent(partitionPath, actualType);
-            traverseDirectory(recordDirectoryPath, [&function, &recordDirectoryPath, &actualType](const String& fileName, DirectoryEntryType entryType) {
-                if (entryType != DirectoryEntryType::File || fileName.length() < Key::hashStringLength())
-                    return;
-
-                String hashString = fileName.left(Key::hashStringLength());
-                auto isBlob = fileName.length() > Key::hashStringLength() && fileName.endsWith(blobSuffix);
-                function(fileName, hashString, actualType, isBlob, recordDirectoryPath);
-            });
-        });
+        traversePartitionFiles(partitionPath, expectedType, function);
     });
 }
 
@@ -1046,7 +1053,7 @@ void Storage::dispatchWriteOperation(std::unique_ptr<WriteOperation> writeOperat
         auto recordSize = recordData.size();
 
         if (!FileSystem::overwriteEntireFile(recordPath, recordData.span()))
-            RELEASE_LOG_ERROR(NetworkCacheStorage, "Failed to write %zu bytes of network cache record data to %" PUBLIC_LOG_STRING, recordSize, recordPath.utf8().data());
+            RELEASE_LOG_ERROR(NetworkCacheStorage, "Failed to write %zu bytes of network cache record data to %" PUBLIC_LOG_STRING, recordSize, recordPath.utf8().legacyCStringPointer());
 
         RunLoop::mainSingleton().dispatch([this, protectedThis = Ref { *this }, identifier, recordSize]() mutable {
             m_approximateRecordsSize += recordSize;
@@ -1131,14 +1138,14 @@ void Storage::store(const Record& record, MappedBodyHandler&& mappedBodyHandler,
     m_writeOperationDispatchTimer.startOneShot(m_initialWriteDelay);
 }
 
-void Storage::traverseWithinRootPath(const String& rootPath, const String& type, OptionSet<TraverseFlag> flags, TraverseHandler&& traverseHandler)
+void Storage::traverseInternal(const String& partitionName, const String& type, OptionSet<TraverseFlag> flags, TraverseHandler&& traverseHandler)
 {
     ASSERT(RunLoop::isMain());
     ASSERT(traverseHandler);
 
     auto traverseOperation = TraverseOperation::create(WTF::move(traverseHandler));
-    ioQueue().dispatch([this, protectedThis = Ref { *this }, traverseOperation = WTF::move(traverseOperation), flags, rootPath = crossThreadCopy(rootPath), type = crossThreadCopy(type)]() mutable {
-        traverseRecordsFiles(rootPath, type, [this, protectedThis, expectedType = type, flags, traverseOperation](const String& fileName, const String& hashString, const String& type, bool isBlob, const String& recordDirectoryPath) {
+    ioQueue().dispatch([this, protectedThis = Ref { *this }, traverseOperation = WTF::move(traverseOperation), flags, partitionName = crossThreadCopy(partitionName), type = crossThreadCopy(type)]() mutable {
+        RecordFileTraverseFunction traverseFunction = [this, protectedThis, expectedType = type, flags, traverseOperation](const String& fileName, const String& hashString, const String& type, bool isBlob, const String& recordDirectoryPath) {
             ASSERT(type == expectedType || expectedType.isEmpty());
             if (isBlob)
                 return;
@@ -1190,7 +1197,12 @@ void Storage::traverseWithinRootPath(const String& rootPath, const String& type,
                 }
                 traverseOperation->decrementActivityCount();
             });
-        });
+        };
+        if (!partitionName.isEmpty()) {
+            String partitionPath = FileSystem::pathByAppendingComponent(recordsPathIsolatedCopy(), partitionName);
+            traversePartitionFiles(partitionPath, type, traverseFunction);
+        } else
+            traverseRecordsFiles(recordsPathIsolatedCopy(), type, traverseFunction);
 
         if (flags & TraverseFlag::LastAccessedRecordPerPartition) {
             for (auto& [directoryPath, entry] : traverseOperation->ensurePartitionMap()) {
@@ -1219,14 +1231,14 @@ void Storage::traverseWithinRootPath(const String& rootPath, const String& type,
 
 void Storage::traverse(const String& type, OptionSet<TraverseFlag> flags, TraverseHandler&& traverseHandler)
 {
-    traverseWithinRootPath(recordsPathIsolatedCopy(), type, flags, WTF::move(traverseHandler));
+    String anyPartition;
+    traverseInternal(anyPartition, type, flags, WTF::move(traverseHandler));
 }
 
 void Storage::traverse(const String& type, const String& partition, OptionSet<TraverseFlag> flags, TraverseHandler&& traverseHandler)
 {
     auto partitionHashAsString = Key::partitionToPartitionHashAsString(partition, salt());
-    auto rootPath = FileSystem::pathByAppendingComponent(recordsPathIsolatedCopy(), partitionHashAsString);
-    traverseWithinRootPath(rootPath, type, flags, WTF::move(traverseHandler));
+    traverseInternal(partitionHashAsString, type, flags, WTF::move(traverseHandler));
 }
 
 void Storage::setCapacity(size_t capacity)
@@ -1382,7 +1394,7 @@ void Storage::deleteOldVersions()
             if (!directoryVersion || *directoryVersion >= version)
                 return;
             auto oldVersionPath = FileSystem::pathByAppendingComponent(cachePath, subdirName);
-            LOG(NetworkCacheStorage, "(NetworkProcess) deleting old cache version, path %s", oldVersionPath.utf8().data());
+            LOG_WITH_STREAM(NetworkCacheStorage, stream << "(NetworkProcess) deleting old cache version, path "_s << oldVersionPath);
             FileSystem::deleteNonEmptyDirectory(oldVersionPath);
         });
     });

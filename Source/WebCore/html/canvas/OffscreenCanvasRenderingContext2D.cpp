@@ -115,8 +115,8 @@ void OffscreenCanvasRenderingContext2D::setFont(const String& newFont)
     // relative to the default font.
     FontCascadeDescription fontDescription;
     fontDescription.setOneFamily(DefaultFontFamily);
-    fontDescription.setSpecifiedSize(DefaultFontSize);
     fontDescription.setComputedSize(DefaultFontSize);
+    fontDescription.setUsedSize(DefaultFontSize);
 
     if (auto fontCascade = Style::resolveForUnresolvedFont(*unresolvedFont, WTF::move(fontDescription), context)) {
         ASSERT(context->cssFontSelector());
@@ -145,6 +145,7 @@ RefPtr<ImageBuffer> OffscreenCanvasRenderingContext2D::transferToImageBuffer()
     if (result)
         result->flushDrawingContext();
 #endif
+    willUpdateEntireContents();
     clearCanvas();
     return result;
 }

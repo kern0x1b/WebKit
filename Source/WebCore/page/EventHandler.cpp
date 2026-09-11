@@ -158,6 +158,7 @@
 #include <wtf/SetForScope.h>
 #include <wtf/StdLibExtras.h>
 #include <wtf/TZoneMallocInlines.h>
+#include <wtf/text/TextStream.h>
 
 #if ENABLE(IOS_TOUCH_EVENTS)
 #include "PlatformTouchEventIOS.h"
@@ -749,8 +750,11 @@ bool EventHandler::handleMousePressEventDoubleClick(const MouseEventWithHitTestR
 #if ENABLE(DRAG_SUPPORT)
         m_dragStartSelection = getWeakSimpleRangeFromSelection(m_frame->selection().selection());
 #endif
-    } else if (mouseDownMayStartSelect())
+    } else if (mouseDownMayStartSelect() && event.event().inputSource() != MouseEventInputSource::Automation) {
+        // If the event is an Automation event, avoid interfering with the platform text interaction,
+        // which handles selection itself.
         selectClosestWordFromHitTestResult(event.hitTestResult(), shouldAppendTrailingWhitespace(event, protect(m_frame)));
+    }
 
     return true;
 }
@@ -1982,7 +1986,7 @@ std::optional<RemoteUserInputEventData> EventHandler::userInputEventDataForRemot
 
     return RemoteUserInputEventData {
         remoteFrame->frameID(),
-        remoteFrameView->rootViewToContents(frameView->contentsToRootView(pointInFrame))
+        remoteFrameView->convertFromRootView(frameView->contentsToRootView(pointInFrame))
     };
 }
 
@@ -2098,8 +2102,21 @@ HandleUserInputEventResult EventHandler::handleMousePressEvent(const PlatformMou
 
     if (!passedToScrollbar) {
         auto subframe = subframeForHitTestResult(mouseEvent);
-        if (auto remoteMouseEventData = userInputEventDataForRemoteFrame(dynamicDowncast<RemoteFrame>(subframe).get(), mouseEvent.hitTestResult().doublePointInInnerNodeFrame()))
-            return *remoteMouseEventData;
+        if (RefPtr remoteSubframe = dynamicDowncast<RemoteFrame>(subframe)) {
+            if (auto remoteMouseEventData = userInputEventDataForRemoteFrame(remoteSubframe, mouseEvent.hitTestResult().doublePointInInnerNodeFrame())) {
+                // Start capturing future events for this frame, mirroring the LocalFrame case below.
+                // Without this, a drag that leaves the remote subframe's on-screen bounds gets
+                // re-hit-tested into whatever's underneath instead of continuing to be delivered to
+                // the process that owns it.
+                if (m_mousePressed) {
+                    m_capturingMouseEventsElement = remoteSubframe->ownerElement();
+                    m_eventHandlerWillResetCapturingMouseEventsElement = true;
+                    if (!m_capturingMouseEventsElement)
+                        m_isCapturingRootElementForMouseEvents = true;
+                }
+                return *remoteMouseEventData;
+            }
+        }
 
         if (RefPtr localSubframe = dynamicDowncast<LocalFrame>(subframe)) {
             auto result = passMousePressEventToSubframe(mouseEvent, *localSubframe);
@@ -3597,7 +3614,8 @@ HandleUserInputEventResult EventHandler::handleWheelEventInternal(const Platform
     auto allowsScrollingState = SetForScope(m_currentWheelEventAllowsScrolling, processingSteps.contains(WheelEventProcessingSteps::SynchronousScrolling));
     
     setFrameWasScrolledByUser();
-    setLastKnownMousePosition(event.position(), event.globalPosition(), LastKnownMousePositionSource::Wheel);
+    if (event.inputSource() == MouseEventInputSource::UserDriven)
+        setLastKnownMousePosition(event.position(), event.globalPosition(), LastKnownMousePositionSource::Wheel);
 
     if (m_frame->isMainFrame()) {
         RefPtr page = m_frame->page();
@@ -4202,8 +4220,11 @@ bool EventHandler::keyEvent(const PlatformKeyboardEvent& keyEvent)
             if (page)
                 page->setUserDidInteractWithPage(savedUserDidInteractWithPage);
             document->updateLastHandledUserGestureTimestamp(savedLastHandledUserGestureTimestamp);
-        } else
+        } else {
             ResourceLoadObserver::singleton().logUserInteractionWithReducedTimeResolution(*document);
+            if (page)
+                page->didObserveFirstPartyUserGesture();
+        }
     }
 
     return wasHandled;
@@ -4222,7 +4243,7 @@ bool EventHandler::internalKeyEvent(const PlatformKeyboardEvent& initialKeyEvent
     Ref frame = m_frame.get();
     RefPtr protectedView { frame->view() };
 
-    LOG(Editing, "EventHandler %p keyEvent (text %s keyIdentifier %s)", this, initialKeyEvent.text().utf8().data(), initialKeyEvent.keyIdentifier().utf8().data());
+    LOG_WITH_STREAM(Editing, stream << "EventHandler "_s << this << " keyEvent (text "_s << initialKeyEvent.text() << " keyIdentifier "_s << initialKeyEvent.keyIdentifier() << ")"_s);
 
 #if ENABLE(POINTER_LOCK)
     if (initialKeyEvent.type() == PlatformEvent::Type::KeyDown && initialKeyEvent.windowsVirtualKeyCode() == VK_ESCAPE && frame->page()->pointerLockController().element()) {
@@ -4941,7 +4962,7 @@ bool EventHandler::mouseMovementExceedsThreshold(const FloatPoint& viewportLocat
 
 bool EventHandler::handleTextInputEvent(const String& text, Event* underlyingEvent, TextEventInputType inputType)
 {
-    LOG(Editing, "EventHandler %p handleTextInputEvent (text %s)", this, text.utf8().data());
+    LOG_WITH_STREAM(Editing, stream << "EventHandler "_s << this << " handleTextInputEvent (text "_s << text << ")"_s);
 
     // Platforms should differentiate real commands like selectAll from text input in disguise (like insertNewline),
     // and avoid dispatching text input events from keydown default handlers.
@@ -5475,6 +5496,7 @@ static FILE* touchLatencyLog()
 #endif
 
 Expected<bool, RemoteFrameGeometryTransformer> EventHandler::handleTouchEvent(const PlatformTouchEvent& event)
+std::expected<bool, RemoteFrameGeometryTransformer> EventHandler::handleTouchEvent(const PlatformTouchEvent& event)
 {
     Ref frame = m_frame.get();
 #if defined(WEBKIT_IOS6)

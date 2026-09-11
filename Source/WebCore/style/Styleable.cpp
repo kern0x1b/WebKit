@@ -44,7 +44,7 @@
 #include "RenderElement.h"
 #include "RenderElementInlines.h"
 #include "RenderListItem.h"
-#include "RenderListMarker.h"
+#include "RenderListOutsideMarker.h"
 #include "RenderView.h"
 #include "StyleAnimations.h"
 #include "StyleableInlines.h"
@@ -889,9 +889,9 @@ void Styleable::updateCSSScrollTimelines(const Style::ComputedStyle* currentStyl
             [](CSS::Keyword::None) {
                 // Nothing to register.
             },
-            [&](const Style::CustomIdent& identifier) {
-                styleOriginatedTimelinesController->registerNamedScrollTimeline(identifier.value, *this, scrollTimeline.axis());
-                registeredScrollTimelineNames.add(identifier.value);
+            [&](const Style::ScopedName& scopedName) {
+                styleOriginatedTimelinesController->registerNamedScrollTimeline(scopedName, *this, scrollTimeline.axis());
+                registeredScrollTimelineNames.add(scopedName.name);
             }
         );
     }
@@ -904,9 +904,9 @@ void Styleable::updateCSSScrollTimelines(const Style::ComputedStyle* currentStyl
             [](CSS::Keyword::None) {
                 // Nothing to unregister.
             },
-            [&](const Style::CustomIdent& identifier) {
-                if (!registeredScrollTimelineNames.contains(identifier.value))
-                    styleOriginatedTimelinesController->unregisterNamedTimeline(identifier.value, *this);
+            [&](const Style::ScopedName& scopedName) {
+                if (!registeredScrollTimelineNames.contains(scopedName.name))
+                    styleOriginatedTimelinesController->unregisterNamedTimeline(scopedName.name, *this);
             }
         );
     }
@@ -926,9 +926,9 @@ void Styleable::updateCSSViewTimelines(const Style::ComputedStyle* currentStyle,
             [](CSS::Keyword::None) {
                 // Nothing to register.
             },
-            [&](const Style::CustomIdent& identifier) {
-                styleOriginatedTimelinesController->registerNamedViewTimeline(identifier.value, *this, viewTimeline.axis(), viewTimeline.inset());
-                registeredViewTimelineNames.add(identifier.value);
+            [&](const Style::ScopedName& scopedName) {
+                styleOriginatedTimelinesController->registerNamedViewTimeline(scopedName, *this, viewTimeline.axis(), viewTimeline.inset(), afterChangeStyle.usedZoomForLength());
+                registeredViewTimelineNames.add(scopedName.name);
             }
         );
     }
@@ -941,9 +941,9 @@ void Styleable::updateCSSViewTimelines(const Style::ComputedStyle* currentStyle,
             [](CSS::Keyword::None) {
                 // Nothing to unregister.
             },
-            [&](const Style::CustomIdent& identifier) {
-                if (!registeredViewTimelineNames.contains(identifier.value))
-                    styleOriginatedTimelinesController->unregisterNamedTimeline(identifier.value, *this);
+            [&](const Style::ScopedName& scopedName) {
+                if (!registeredViewTimelineNames.contains(scopedName.name))
+                    styleOriginatedTimelinesController->unregisterNamedTimeline(scopedName.name, *this);
             }
         );
     }

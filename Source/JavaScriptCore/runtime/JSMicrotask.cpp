@@ -234,11 +234,11 @@ static void promiseResolveThenableJobFastSlow(JSGlobalObject* globalObject, JSPr
     if (!scope.clearExceptionExceptTermination()) [[unlikely]]
         return;
 
-    MarkedArgumentBuffer arguments;
-    arguments.append(error);
-    ASSERT(!arguments.hasOverflowed());
+    auto arguments = WTF::toArray<EncodedJSValue>({
+        JSValue::encode(error),
+    });
     auto callData = JSC::getCallDataInline(reject);
-    call(globalObject, reject, callData, jsUndefined(), arguments);
+    call(globalObject, reject, callData, jsUndefined(), ArgList { arguments.data(), arguments.size() });
     EXCEPTION_ASSERT(scope.exception() || true);
 }
 
@@ -262,11 +262,11 @@ static void promiseResolveThenableJobWithInternalMicrotaskFastSlow(JSGlobalObjec
     if (!scope.clearExceptionExceptTermination()) [[unlikely]]
         return;
 
-    MarkedArgumentBuffer arguments;
-    arguments.append(error);
-    ASSERT(!arguments.hasOverflowed());
+    auto arguments = WTF::toArray<EncodedJSValue>({
+        JSValue::encode(error),
+    });
     auto callData = JSC::getCallDataInline(reject);
-    call(globalObject, reject, callData, jsUndefined(), arguments);
+    call(globalObject, reject, callData, jsUndefined(), ArgList { arguments.data(), arguments.size() });
     EXCEPTION_ASSERT(scope.exception() || true);
 }
 
@@ -285,10 +285,10 @@ static void promiseResolveThenableJob(JSGlobalObject* globalObject, JSValue prom
     if (!scope.clearExceptionExceptTermination()) [[unlikely]]
         return;
 
-    MarkedArgumentBuffer arguments;
-    arguments.append(error);
-    ASSERT(!arguments.hasOverflowed());
-    call(globalObject, reject, jsUndefined(), arguments, "|reject| is not a function"_s);
+    auto arguments = WTF::toArray<EncodedJSValue>({
+        JSValue::encode(error),
+    });
+    call(globalObject, reject, jsUndefined(), ArgList { arguments.data(), arguments.size() }, "|reject| is not a function"_s);
     EXCEPTION_ASSERT(scope.exception() || true);
 }
 
@@ -661,9 +661,16 @@ void asyncGeneratorResume(JSGlobalObject* globalObject, JSAsyncGenerator* genera
     asyncGeneratorUnwrapYieldResumption(globalObject, generator, generator->resumeValue(), generator->resumeMode(), microtaskCallCache);
 }
 
-void enqueueAsyncGeneratorDriver(JSGlobalObject* globalObject, JSAsyncGenerator* iterator, JSObject* driver, MicrotaskCallCache* microtaskCallCache)
+static JSValue resumeValueOrUndefined(JSValue resumeValue)
+{
+    return resumeValue.isEmpty() ? jsUndefined() : resumeValue;
+}
+
+void enqueueAsyncGeneratorDriver(JSGlobalObject* globalObject, JSAsyncGenerator* iterator, JSObject* driver, JSValue resumeValue, MicrotaskCallCache* microtaskCallCache)
 {
     VM& vm = globalObject->vm();
+
+    resumeValue = resumeValueOrUndefined(resumeValue);
 
     // Mirror AsyncGeneratorEnqueue's completed-state fast path: settle { undefined, true } without enqueuing.
     int32_t state = iterator->state();
@@ -672,7 +679,7 @@ void enqueueAsyncGeneratorDriver(JSGlobalObject* globalObject, JSAsyncGenerator*
         return;
     }
 
-    iterator->enqueue(vm, jsUndefined(), static_cast<int32_t>(JSGenerator::ResumeMode::NormalMode), driver);
+    iterator->enqueue(vm, resumeValue, static_cast<int32_t>(JSGenerator::ResumeMode::NormalMode), driver);
 
     // https://tc39.es/ecma262/#sec-asyncgeneratorenqueue step 6: a non-busy generator resumes immediately.
     if (state == static_cast<int32_t>(JSAsyncGenerator::AsyncGeneratorState::Init) || JSAsyncGenerator::isSuspendedYieldState(state))
@@ -681,21 +688,21 @@ void enqueueAsyncGeneratorDriver(JSGlobalObject* globalObject, JSAsyncGenerator*
 
 // If the Promise species is tampered after the fused open, fall back to the real next() so the consumer's Await
 // still performs the observable PromiseResolve (Promise.prototype.constructor lookup) the fused driver would skip.
-JSValue asyncIteratorNextWithDriver(JSGlobalObject* globalObject, JSObject* iterator, JSObject* driver, MicrotaskCallCache* microtaskCallCache)
+JSValue asyncIteratorNextWithDriver(JSGlobalObject* globalObject, JSObject* iterator, JSObject* driver, JSValue resumeValue, MicrotaskCallCache* microtaskCallCache)
 {
     VM& vm = globalObject->vm();
     auto* generator = dynamicDowncast<JSAsyncGenerator>(iterator);
 
     if (globalObject->promiseSpeciesWatchpointSet().state() != IsWatched) [[unlikely]] {
         if (generator)
-            return asyncGeneratorNext(globalObject, generator, jsUndefined(), microtaskCallCache);
-        return asyncFromSyncIteratorNext(globalObject, uncheckedDowncast<JSAsyncFromSyncIterator>(iterator), JSValue());
+            return asyncGeneratorNext(globalObject, generator, resumeValueOrUndefined(resumeValue), microtaskCallCache);
+        return asyncFromSyncIteratorNext(globalObject, uncheckedDowncast<JSAsyncFromSyncIterator>(iterator), resumeValue);
     }
 
     if (generator)
-        enqueueAsyncGeneratorDriver(globalObject, generator, driver, microtaskCallCache);
+        enqueueAsyncGeneratorDriver(globalObject, generator, driver, resumeValue, microtaskCallCache);
     else
-        driveAsyncFromSyncIteratorWithDriver(globalObject, uncheckedDowncast<JSAsyncFromSyncIterator>(iterator), driver);
+        driveAsyncFromSyncIteratorWithDriver(globalObject, uncheckedDowncast<JSAsyncFromSyncIterator>(iterator), driver, resumeValue);
     return vm.fastAsyncGeneratorSentinel();
 }
 
@@ -1177,24 +1184,25 @@ static void moduleLoadTopSettled(JSGlobalObject* globalObject, VM& vm, ThrowScop
         // onFetchRejected logic
         const Identifier& specifier = context->moduleRequest().m_specifier;
         auto type = context->moduleRequest().type();
-        ModuleRegistryEntry* entry = globalObject->moduleLoader()->ensureRegistered(globalObject, specifier, type);
-        if (scope.exception()) {
-            intermediatePromise->rejectWithCaughtException(vm, scope);
-            return;
-        }
         JSValue errorValue = arguments[1];
         if (auto* error = dynamicDowncast<ErrorInstance>(errorValue)) {
             auto failure = JSModuleLoader::getErrorInfo(globalObject, error);
-            if (failure.isEvaluationError(specifier, type))
+            // https://html.spec.whatwg.org/multipage/webappapis.html#fetch-a-single-module-script step 13.1
+            // Don't register the module unless it's an evaluation error.
+            if (failure.isEvaluationError(specifier, type)) {
+                ModuleRegistryEntry* entry = globalObject->moduleLoader()->ensureRegistered(globalObject, specifier, type);
+                if (scope.exception()) {
+                    intermediatePromise->rejectWithCaughtException(vm, scope);
+                    return;
+                }
                 entry->setEvaluationError(globalObject, error);
-            else
-                entry->setFetchError(globalObject, error);
+            }
         }
         intermediatePromise->reject(vm, errorValue);
     }
 }
 
-static void moduleLoadTopRejected(JSGlobalObject* globalObject, VM& vm, ThrowScope& scope, std::span<const JSValue, maxMicrotaskArguments> arguments, uint8_t payload)
+static void moduleLoadTopRejected(JSGlobalObject* globalObject, VM& vm, std::span<const JSValue, maxMicrotaskArguments> arguments, uint8_t payload)
 {
     // loadModule first overload: onLoadRejected
     // arguments[0] = pre-created resultPromise
@@ -1208,26 +1216,11 @@ static void moduleLoadTopRejected(JSGlobalObject* globalObject, VM& vm, ThrowSco
     else {
         const Identifier& specifier = context->moduleRequest().m_specifier;
         auto type = context->moduleRequest().type();
-        ModuleRegistryEntry* entry = globalObject->moduleLoader()->ensureRegistered(globalObject, specifier, type);
-        if (scope.exception()) {
-            resultPromise->rejectWithCaughtException(vm, scope);
-            return;
-        }
-        if (JSValue fetchErrorValue = entry->fetchError()) {
-            if (ErrorInstance* fetchError = dynamicDowncast<ErrorInstance>(fetchErrorValue)) {
-                ErrorInstance* fetchErrorCopy = JSModuleLoader::maybeDuplicateFetchError(globalObject, fetchError);
-                if (scope.exception()) {
-                    resultPromise->rejectWithCaughtException(vm, scope);
-                    return;
-                }
-                resultPromise->reject(vm, fetchErrorCopy);
-            } else
-                resultPromise->reject(vm, fetchErrorValue);
-            return;
-        }
-        JSValue error = arguments[1];
-        entry->setEvaluationError(globalObject, error);
-        resultPromise->reject(vm, error);
+        // https://html.spec.whatwg.org/multipage/webappapis.html#fetch-a-single-module-script step 13.1
+        // Only set an error if the entry already exists.
+        if (ModuleRegistryEntry* entry = globalObject->moduleLoader()->getRegisteredMayBeNull(specifier, type))
+            entry->setEvaluationError(globalObject, arguments[1]);
+        resultPromise->reject(vm, arguments[1]);
     }
 }
 
@@ -1366,7 +1359,7 @@ static void moduleLoadReturnRecord(JSGlobalObject*, VM& vm, ThrowScope& scope, s
         resultPromise->reject(vm, arguments[1]);
 }
 
-static void moduleLoadStoreError(JSGlobalObject* globalObject, ThrowScope& scope, std::span<const JSValue, maxMicrotaskArguments> arguments, uint8_t payload)
+static void moduleLoadStoreError(JSGlobalObject* globalObject, std::span<const JSValue, maxMicrotaskArguments> arguments, uint8_t payload)
 {
     // loadModule second overload: fire-and-forget error categorization
     // arguments[0] = unused
@@ -1378,8 +1371,11 @@ static void moduleLoadStoreError(JSGlobalObject* globalObject, ThrowScope& scope
         JSValue errorValue = arguments[1];
         const Identifier& specifier = context->moduleRequest().m_specifier;
         auto type = context->moduleRequest().type();
-        ModuleRegistryEntry* entry = globalObject->moduleLoader()->ensureRegistered(globalObject, specifier, type);
-        RETURN_IF_EXCEPTION(scope, void());
+        // https://html.spec.whatwg.org/multipage/webappapis.html#fetch-a-single-module-script step 13.1
+        // Only set an error if the entry already exists.
+        ModuleRegistryEntry* entry = globalObject->moduleLoader()->getRegisteredMayBeNull(specifier, type);
+        if (!entry)
+            return;
         if (auto* error = dynamicDowncast<ErrorInstance>(errorValue)) {
             auto failure = JSModuleLoader::getErrorInfo(globalObject, error);
             if (failure.isEvaluationError(specifier, type))
@@ -1586,22 +1582,22 @@ static void promiseResolveWithoutHandlerJobSlow(JSGlobalObject* globalObject, VM
         JSValue reject = capability.get(globalObject, vm.propertyNames->reject);
         RETURN_IF_EXCEPTION(scope, void());
 
-        MarkedArgumentBuffer arguments;
-        arguments.append(resolution);
-        ASSERT(!arguments.hasOverflowed());
+        auto arguments = WTF::toArray<EncodedJSValue>({
+            JSValue::encode(resolution),
+        });
         scope.release();
-        call(globalObject, reject, jsUndefined(), arguments, "reject is not a function"_s);
+        call(globalObject, reject, jsUndefined(), ArgList { arguments.data(), arguments.size() }, "reject is not a function"_s);
         return;
     }
 
     JSValue resolve = capability.get(globalObject, vm.propertyNames->resolve);
     RETURN_IF_EXCEPTION(scope, void());
 
-    MarkedArgumentBuffer arguments;
-    arguments.append(resolution);
-    ASSERT(!arguments.hasOverflowed());
+    auto arguments = WTF::toArray<EncodedJSValue>({
+        JSValue::encode(resolution),
+    });
     scope.release();
-    call(globalObject, resolve, jsUndefined(), arguments, "resolve is not a function"_s);
+    call(globalObject, resolve, jsUndefined(), ArgList { arguments.data(), arguments.size() }, "resolve is not a function"_s);
 }
 
 static void promiseResolveWithoutHandlerJob(JSGlobalObject* globalObject, VM& vm, JSValue promiseOrCapability, JSValue resolution, JSPromise::Status status)
@@ -1872,11 +1868,11 @@ void runInternalMicrotask(JSGlobalObject* globalObject, VM& vm, InternalMicrotas
             JSValue reject = promiseOrCapability.get(globalObject, vm.propertyNames->reject);
             RETURN_IF_EXCEPTION(scope, void());
 
-            MarkedArgumentBuffer arguments;
-            arguments.append(error);
-            ASSERT(!arguments.hasOverflowed());
+            auto arguments = WTF::toArray<EncodedJSValue>({
+                JSValue::encode(error),
+            });
             scope.release();
-            call(globalObject, reject, jsUndefined(), arguments, "reject is not a function"_s);
+            call(globalObject, reject, jsUndefined(), ArgList { arguments.data(), arguments.size() }, "reject is not a function"_s);
             return;
         }
 
@@ -1886,11 +1882,11 @@ void runInternalMicrotask(JSGlobalObject* globalObject, VM& vm, InternalMicrotas
         JSValue resolve = promiseOrCapability.get(globalObject, vm.propertyNames->resolve);
         RETURN_IF_EXCEPTION(scope, void());
 
-        MarkedArgumentBuffer arguments;
-        arguments.append(result);
-        ASSERT(!arguments.hasOverflowed());
+        auto arguments = WTF::toArray<EncodedJSValue>({
+            JSValue::encode(result),
+        });
         scope.release();
-        call(globalObject, resolve, jsUndefined(), arguments, "resolve is not a function"_s);
+        call(globalObject, resolve, jsUndefined(), ArgList { arguments.data(), arguments.size() }, "resolve is not a function"_s);
         return;
     }
 
@@ -2010,7 +2006,7 @@ void runInternalMicrotask(JSGlobalObject* globalObject, VM& vm, InternalMicrotas
     }
 
     case InternalMicrotask::ModuleLoadTopRejected: {
-        moduleLoadTopRejected(globalObject, vm, scope, arguments, payload);
+        moduleLoadTopRejected(globalObject, vm, arguments, payload);
         return;
     }
 
@@ -2055,7 +2051,7 @@ void runInternalMicrotask(JSGlobalObject* globalObject, VM& vm, InternalMicrotas
     }
 
     case InternalMicrotask::ModuleLoadStoreError: {
-        moduleLoadStoreError(globalObject, scope, arguments, payload);
+        moduleLoadStoreError(globalObject, arguments, payload);
         return;
     }
 

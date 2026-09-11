@@ -22,15 +22,19 @@
 
 #if ENABLE(MODEL_PROCESS)
 
-headers: "ModelProcessCreationParameters.h" "AuxiliaryProcessCreationParameters.h" <wtf/ProcessID.h>
+headers: "ModelProcessCreationParameters.h" "AuxiliaryProcessCreationParameters.h" "SecurityFlags.h" <wtf/ProcessID.h>
 
 [RValue] struct WebKit::ModelProcessCreationParameters {
     WebKit::AuxiliaryProcessCreationParameters auxiliaryProcessParameters;
+    WebKit::SecurityFlags securityFlags;
     ProcessID parentPID;
     String applicationVisibleName;
     bool restrictiveRenderingMode;
     std::optional<int> debugEntityMemoryLimit;
     std::optional<int> debugImmersiveEntityMemoryLimit;
+#if ENABLE(LOGD_BLOCKING_IN_WEBCONTENT)
+    bool isDebugLoggingEnabled;
+#endif
 };
 
 #endif

@@ -25,12 +25,15 @@
 
 import Foundation
 
+@available(anyAppleOSAndDownlevels 26.0, *)
+@_spi_available(watchOSAndOpenSourceTBA, *)
+@_spi_available(tvOSAndOpenSourceTBA, *)
 extension WebPage {
     /// A configuration type that specifies the preferences and behaviors of a webpage.
     @MainActor
     @available(anyAppleOSAndDownlevels 26.0, *)
-    @available(watchOS, unavailable)
-    @available(tvOS, unavailable)
+    @_spi_available(watchOSAndOpenSourceTBA, *)
+    @_spi_available(tvOSAndOpenSourceTBA, *)
     public struct Configuration {
         /// Creates a new configuration value.
         public init() {
@@ -100,7 +103,7 @@ extension WebPage {
 
         private var backingAllowsImmersiveEnvironments = false
 
-        /// Indicates whether website immersive environments are allowed.
+        /// A Boolean value that indicates whether website immersive environments are allowed.
         ///
         /// Set this property to `true` to enable support for website immersive environments.
         /// If `false`, requests to present immersive environments are ignored.
@@ -135,7 +138,7 @@ extension WebPage {
             set { backingShowsSystemScreenTimeBlockingView = newValue }
         }
 
-        #if os(iOS)
+        #if WTF_PLATFORM_IOS_FAMILY
         /// The types of data detectors to apply to the webpage's content.
         ///
         /// Data detectors add interactivity to web content by creating links for specially formatted text.
@@ -157,18 +160,42 @@ extension WebPage {
         public var mediaPlaybackBehavior: MediaPlaybackBehavior = .automatic
         #endif
 
-        #if os(macOS)
+        #if WTF_PLATFORM_MAC
         /// The directionality of user interface elements.
         ///
         /// The default value of this property is `.content`.
         public var userInterfaceDirectionPolicy: WKUserInterfaceDirectionPolicy = .content
         #endif
 
+        private var backingAttachmentElementEnabled = false
+
+        /// Determines if the non-standard `<attachment>` element may be used in web content.
+        @_spi(Experimental)
+        @available(watchOS, unavailable)
+        @available(tvOS, unavailable)
+        public var attachmentElementEnabled: Bool {
+            get { backingAttachmentElementEnabled }
+            set { backingAttachmentElementEnabled = newValue }
+        }
+
+        private var backingImageControlsEnabled = false
+
+        /// Indicates if the service controls UI appears in web content over images.
+        @_spi(Experimental)
+        @available(iOS, unavailable)
+        @available(visionOS, unavailable)
+        @available(watchOS, unavailable)
+        @available(tvOS, unavailable)
+        public var imageControlsEnabled: Bool {
+            get { backingImageControlsEnabled }
+            set { backingImageControlsEnabled = newValue }
+        }
+
         /// The process pool to use for the page, used for testing.
         @_spi(Testing)
         public var processPool: WKProcessPool? = nil
 
-        #if os(macOS)
+        #if WTF_PLATFORM_MAC
         /// If `false`, the editor state is always forced to update.
         @_spi(Testing)
         public var requiresUserActionForEditingControlsManager: Bool = false
@@ -177,14 +204,21 @@ extension WebPage {
         /// Indicates whether the page is controlled by automation, used for testing.
         @_spi(Testing)
         public var isControlledByAutomation: Bool = false
+
+        /// Indicates whether background text extraction is enabled, used for testing.
+        @_spi(Testing)
+        public var backgroundTextExtractionEnabled: Bool = false
     }
 }
 
+@available(anyAppleOSAndDownlevels 26.0, *)
+@_spi_available(watchOSAndOpenSourceTBA, *)
+@_spi_available(tvOSAndOpenSourceTBA, *)
 extension WebPage {
     /// A type that describes the authorization permissions policy for the device's sensors a web resource may access.
     @available(anyAppleOSAndDownlevels 26.0, *)
-    @available(watchOS, unavailable)
-    @available(tvOS, unavailable)
+    @_spi_available(watchOSAndOpenSourceTBA, *)
+    @_spi_available(tvOSAndOpenSourceTBA, *)
     public struct DeviceSensorAuthorization {
         /// The kind of sensor permission a web resource may request to access.
         public enum Permission: Hashable, Sendable {
@@ -212,11 +246,14 @@ extension WebPage {
     }
 }
 
+@available(anyAppleOSAndDownlevels 26.0, *)
+@_spi_available(watchOSAndOpenSourceTBA, *)
+@_spi_available(tvOSAndOpenSourceTBA, *)
 extension WebPage.Configuration {
     /// The behavior used when playing HTML video within a page.
     @available(anyAppleOSAndDownlevels 26.0, *)
-    @available(watchOS, unavailable)
-    @available(tvOS, unavailable)
+    @_spi_available(watchOSAndOpenSourceTBA, *)
+    @_spi_available(tvOSAndOpenSourceTBA, *)
     @available(macOS, unavailable)
     public enum MediaPlaybackBehavior: Sendable {
         /// Use the default system value, which is `alwaysFullscreen` for iPhone and `allowsInlinePlayback` for iPad.

@@ -47,6 +47,7 @@
 #include <algorithm>
 #include <wtf/Borrow.h>
 #include <wtf/CallbackAggregator.h>
+#include <wtf/HexNumber.h>
 #include <wtf/ProcessID.h>
 #include <wtf/TZoneMallocInlines.h>
 #include <wtf/URL.h>
@@ -342,7 +343,7 @@ void BidiScriptAgent::callFunction(const String& functionDeclaration, bool await
         // https://bugs.webkit.org/show_bug.cgi?id=288058
         if (!stringResult) {
             if (stringResult.error().startsWith("JavaScriptError"_s)) {
-                String errorMessage = stringResult.error().right("JavaScriptError;"_s.length());
+                String errorMessage = stringResult.error().substring("JavaScriptError;"_s.length());
                 // Construct error object structure for RemoteValue.value per BiDi spec.
                 auto errorObject = JSON::Object::create();
                 errorObject->setString("message"_s, errorMessage);

@@ -52,6 +52,7 @@
 #include <wtf/Locker.h>
 #include <wtf/TZoneMallocInlines.h>
 #include <wtf/text/MakeString.h>
+#include <wtf/text/TextStream.h>
 
 namespace WebCore {
 using namespace JSC;
@@ -457,7 +458,7 @@ ExceptionOr<Ref<IDBRequest>> IDBObjectStore::clear()
 
 ExceptionOr<Ref<IDBIndex>> IDBObjectStore::createIndex(const String& name, IDBKeyPath&& keyPath, const IndexParameters& parameters)
 {
-    LOG(IndexedDB, "IDBObjectStore::createIndex %s (keyPath: %s, unique: %i, multiEntry: %i)", name.utf8().data(), loggingString(keyPath).utf8().data(), parameters.unique, parameters.multiEntry);
+    LOG_WITH_STREAM(IndexedDB, stream << "IDBObjectStore::createIndex "_s << name << " (keyPath: "_s << loggingString(keyPath) << ", unique: "_s << parameters.unique << ", multiEntry: "_s << parameters.multiEntry << ")"_s);
     Ref transaction = m_transaction.get();
     ASSERT(canCurrentThreadAccessThreadLocalData(transaction->database().originThread()));
 
@@ -531,7 +532,7 @@ ExceptionOr<Ref<IDBIndex>> IDBObjectStore::index(const String& indexName)
 
 ExceptionOr<void> IDBObjectStore::deleteIndex(const String& name)
 {
-    LOG(IndexedDB, "IDBObjectStore::deleteIndex %s", name.utf8().data());
+    LOG_WITH_STREAM(IndexedDB, stream << "IDBObjectStore::deleteIndex "_s << name);
     Ref transaction = m_transaction.get();
     ASSERT(canCurrentThreadAccessThreadLocalData(transaction->database().originThread()));
 
@@ -701,21 +702,18 @@ void IDBObjectStore::rollbackForVersionChangeAbort()
 
     Locker locker { m_referencedIndexLock };
 
-    Vector<IDBIndexIdentifier> identifiersToRemove;
     Vector<std::unique_ptr<IDBIndex>> indexesToDelete;
-    for (auto& iterator : m_deletedIndexes) {
-        if (m_info.hasIndex(iterator.key)) {
-            auto name = iterator.value->info().name();
-            auto result = m_referencedIndexes.add(name, nullptr);
-            if (!result.isNewEntry)
-                indexesToDelete.append(std::exchange(result.iterator->value, nullptr));
-            result.iterator->value = std::exchange(iterator.value, nullptr);
-            identifiersToRemove.append(iterator.key);
-        }
-    }
-
-    for (auto identifier : identifiersToRemove)
-        m_deletedIndexes.remove(identifier);
+    m_deletedIndexes.removeIf([&](auto& iterator) {
+        assertIsHeld(m_referencedIndexLock);
+        if (!m_info.hasIndex(iterator.key))
+            return false;
+        auto name = iterator.value->info().name();
+        auto result = m_referencedIndexes.add(name, nullptr);
+        if (!result.isNewEntry)
+            indexesToDelete.append(std::exchange(result.iterator->value, nullptr));
+        result.iterator->value = std::exchange(iterator.value, nullptr);
+        return true;
+    });
 
     for (auto& index : m_referencedIndexes.values())
         index->rollbackInfoForVersionChangeAbort();

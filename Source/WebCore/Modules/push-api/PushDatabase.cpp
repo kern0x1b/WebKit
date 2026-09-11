@@ -33,7 +33,6 @@
 #include "SecurityOrigin.h"
 #include <iterator>
 #include <wtf/CrossThreadCopier.h>
-#include <wtf/Expected.h>
 #include <wtf/FileSystem.h>
 #include <wtf/RunLoop.h>
 #include <wtf/Scope.h>
@@ -190,12 +189,12 @@ PushTopics PushTopics::isolatedCopy() &&
 
 enum class ShouldDeleteAndRetry : bool { No, Yes };
 
-static Expected<UniqueRef<SQLiteDatabase>, ShouldDeleteAndRetry> openAndMigrateDatabaseImpl(const String& path)
+static std::expected<UniqueRef<SQLiteDatabase>, ShouldDeleteAndRetry> openAndMigrateDatabaseImpl(const String& path)
 {
     ASSERT(!RunLoop::isMain());
 
     if (path != ":memory:"_s && !FileSystem::fileExists(path) && !FileSystem::makeAllDirectories(FileSystem::parentPath(path))) {
-        RELEASE_LOG_ERROR(Push, "Couldn't create PushDatabase parent directories for path %s", path.utf8().data());
+        RELEASE_LOG_ERROR(Push, "Couldn't create PushDatabase parent directories for path %s", path.utf8().legacyCStringPointer());
         return makeUnexpected(ShouldDeleteAndRetry::No);
     }
 
@@ -203,7 +202,7 @@ static Expected<UniqueRef<SQLiteDatabase>, ShouldDeleteAndRetry> openAndMigrateD
     db->disableThreadingChecks();
 
     if (!db->open(path)) {
-        RELEASE_LOG_ERROR(Push, "Couldn't open PushDatabase at path %s", path.utf8().data());
+        RELEASE_LOG_ERROR(Push, "Couldn't open PushDatabase at path %s", path.utf8().legacyCStringPointer());
         return makeUnexpected(ShouldDeleteAndRetry::Yes);
     }
 
@@ -211,14 +210,14 @@ static Expected<UniqueRef<SQLiteDatabase>, ShouldDeleteAndRetry> openAndMigrateD
     {
         auto sql = db->prepareStatement("PRAGMA user_version"_s);
         if (!sql || sql->step() != SQLITE_ROW) {
-            RELEASE_LOG_ERROR(Push, "Couldn't get PushDatabase version at path %s", path.utf8().data());
+            RELEASE_LOG_ERROR(Push, "Couldn't get PushDatabase version at path %s", path.utf8().legacyCStringPointer());
             return makeUnexpected(ShouldDeleteAndRetry::Yes);
         }
         version = sql->columnInt(0);
     }
 
     if (version < 0 || version > currentPushDatabaseVersion) {
-        RELEASE_LOG_ERROR(Push, "Found unexpected PushDatabase version: %d (expected: %d) at path: %s", version, currentPushDatabaseVersion, path.utf8().data());
+        RELEASE_LOG_ERROR(Push, "Found unexpected PushDatabase version: %d (expected: %d) at path: %s", version, currentPushDatabaseVersion, path.utf8().legacyCStringPointer());
         return makeUnexpected(ShouldDeleteAndRetry::Yes);
     }
 
@@ -231,14 +230,14 @@ static Expected<UniqueRef<SQLiteDatabase>, ShouldDeleteAndRetry> openAndMigrateD
         for (auto i = version; i < currentPushDatabaseVersion; i++) {
             for (auto statement : pushDatabaseSchemaStatements[i]) {
                 if (!db->executeCommand(statement)) {
-                    RELEASE_LOG_ERROR(Push, "Error executing PushDatabase DDL statement %s at path %s: %d", statement.characters(), path.utf8().data(), db->lastError());
+                    RELEASE_LOG_ERROR(Push, "Error executing PushDatabase DDL statement %s at path %s: %d", statement.characters(), path.utf8().legacyCStringPointer(), db->lastError());
                     return makeUnexpected(ShouldDeleteAndRetry::Yes);
                 }
             }
         }
 
         if (!db->executeCommandSlow(makeString("PRAGMA user_version = "_s, currentPushDatabaseVersion)))
-            RELEASE_LOG_ERROR(Push, "Error setting user version for PushDatabase at path %s: %d", path.utf8().data(), db->lastError());
+            RELEASE_LOG_ERROR(Push, "Error setting user version for PushDatabase at path %s: %d", path.utf8().legacyCStringPointer(), db->lastError());
 
         transaction.commit();
     }
@@ -253,11 +252,11 @@ static std::unique_ptr<SQLiteDatabase> openAndMigrateDatabase(const String& path
     auto result = openAndMigrateDatabaseImpl(path);
     if (!result && result.error() == ShouldDeleteAndRetry::Yes) {
         if (path == SQLiteDatabase::inMemoryPath() || !SQLiteFileSystem::deleteDatabaseFile(path)) {
-            RELEASE_LOG_ERROR(Push, "Failed to delete PushDatabase at path %s; bailing on recreating from scratch", path.utf8().data());
+            RELEASE_LOG_ERROR(Push, "Failed to delete PushDatabase at path %s; bailing on recreating from scratch", path.utf8().legacyCStringPointer());
             return nullptr;
         }
 
-        RELEASE_LOG_ERROR(Push, "Deleted PushDatabase at path %s and recreating from scratch", path.utf8().data());
+        RELEASE_LOG_ERROR(Push, "Deleted PushDatabase at path %s and recreating from scratch", path.utf8().legacyCStringPointer());
         result = openAndMigrateDatabaseImpl(path);
     }
 
@@ -336,7 +335,7 @@ SQLiteStatementAutoResetScope PushDatabase::cachedStatementOnQueue(ASCIILiteral 
     auto statementRef = makeUniqueRefFromNonNullUniquePtr(WTF::move(statement));
     CheckedPtr statementPtr = statementRef.ptr();
     m_statements.add(query, WTF::move(statementRef));
-    return SQLiteStatementAutoResetScope(statementPtr);
+    return SQLiteStatementAutoResetScope(WTF::move(statementPtr));
 }
 
 template<typename... Args>

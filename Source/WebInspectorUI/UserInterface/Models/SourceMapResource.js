@@ -157,7 +157,15 @@ WI.SourceMapResource = class SourceMapResource extends WI.Resource
             });
         }
 
-        if (!this._target.hasCommand("Network.loadResource"))
+        // Under Site Isolation, ProxyingNetworkAgent implements Network.loadResource on the backend
+        // (web-page) target, fanning the load out to the frame's owning process. Route there when
+        // Network is enabled on the backend target; otherwise this resource's target handles it.
+        // Mirrors Resource.requestContentFromBackend.
+        let target = this._target;
+        if (WI.networkManager.networkEnabledOnBackendTarget && WI.backendTarget && WI.backendTarget !== target && WI.backendTarget.hasCommand("Network.loadResource"))
+            target = WI.backendTarget;
+
+        if (!target.hasCommand("Network.loadResource"))
             return sourceMapResourceLoadError.call(this);
 
         var frameIdentifier = null;
@@ -167,7 +175,7 @@ WI.SourceMapResource = class SourceMapResource extends WI.Resource
         if (!frameIdentifier)
             frameIdentifier = WI.networkManager.mainFrame ? WI.networkManager.mainFrame.id : "";
 
-        return this._target.NetworkAgent.loadResource(frameIdentifier, this.url).then(sourceMapResourceLoaded.bind(this)).catch(sourceMapResourceLoadError.bind(this));
+        return target.NetworkAgent.loadResource(frameIdentifier, this.url).then(sourceMapResourceLoaded.bind(this)).catch(sourceMapResourceLoadError.bind(this));
     }
 
     createSourceCodeLocation(lineNumber, columnNumber)
@@ -184,7 +192,7 @@ WI.SourceMapResource = class SourceMapResource extends WI.Resource
         }
 
         // Create the SourceCodeLocation and since we already know the the mapped location set it directly.
-        let location = originalSourceCode.createSourceCodeLocation(generatedLine, generatedColumn);
+        let location = originalSourceCode.createSourceMapSourceCodeLocation(generatedLine, generatedColumn);
         location._setMappedLocation(this, lineNumber, columnNumber);
         return location;
     }

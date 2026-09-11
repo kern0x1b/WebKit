@@ -775,6 +775,14 @@ void WebInspectorUIProxy::timelineRecordingChanged(bool active)
     m_isProfilingPage = active;
 }
 
+void WebInspectorUIProxy::showPaintRectsChanged(bool show)
+{
+    // The main-frame process already drew its own paint rects; hand the toggle to the inspector
+    // controller so its ProxyingPageAgent fans it out to the cross-origin subframe processes.
+    if (RefPtr inspectedPage = m_inspectedPage.get())
+        inspectedPage->inspectorController().setShowPaintRects(show);
+}
+
 void WebInspectorUIProxy::setDeveloperPreferenceOverride(WebCore::InspectorBackendClient::DeveloperPreference developerPreference, std::optional<bool> overrideValue)
 {
     switch (developerPreference) {
@@ -806,10 +814,10 @@ void WebInspectorUIProxy::setDeveloperPreferenceOverride(WebCore::InspectorBacke
 
 #if ENABLE(INSPECTOR_NETWORK_THROTTLING)
 
-void WebInspectorUIProxy::setEmulatedConditions(std::optional<int64_t>&& bytesPerSecondLimit)
+void WebInspectorUIProxy::setEmulatedConditions(std::optional<uint64_t> bandwidthBytesPerSecond, Seconds latency)
 {
-    if (auto inspectedPage = this->inspectedPage())
-        inspectedPage->websiteDataStore().setEmulatedConditions(WTF::move(bytesPerSecondLimit));
+    if (RefPtr inspectedPage = m_inspectedPage.get())
+        protect(inspectedPage->websiteDataStore())->setEmulatedConditions(bandwidthBytesPerSecond, latency);
 }
 
 #endif // ENABLE(INSPECTOR_NETWORK_THROTTLING)

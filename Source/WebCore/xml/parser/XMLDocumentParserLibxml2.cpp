@@ -80,6 +80,7 @@
 #include <wtf/MallocSpan.h>
 #include <wtf/StdLibExtras.h>
 #include <wtf/TZoneMallocInlines.h>
+#include <wtf/text/AtomString.h>
 #include <wtf/text/MakeString.h>
 #include <wtf/unicode/CharacterNames.h>
 #include <wtf/unicode/UTF8Conversion.h>
@@ -700,7 +701,7 @@ XMLDocumentParser::~XMLDocumentParser()
     m_scriptWaitingForStylesheets = nullptr;
 }
 
-void XMLDocumentParser::doWrite(const String& parseString)
+void XMLDocumentParser::doWrite(String&& parseString)
 {
     ASSERT(!isDetached());
     if (!m_context)
@@ -709,8 +710,13 @@ void XMLDocumentParser::doWrite(const String& parseString)
     // Protect the libxml context from deletion during a callback
     RefPtr<XMLParserContext> context = m_context;
 
+    // Lone surrogates are not valid XML characters, so libxml2 would reject the
+    // whole document. Replace them with U+FFFD to do a best-effort parse instead
+    // (matching Firefox and Blink). See https://crbug.com/40814739.
+    String sanitizedString = replaceUnpairedSurrogatesWithReplacementCharacter(WTF::move(parseString));
+
     // libXML throws an error if you try to switch the encoding for an empty string.
-    if (parseString.length()) {
+    if (sanitizedString.length()) {
         // JavaScript may cause the parser to detach during xmlParseChunk
         // keep this alive until this function is done.
         Ref<XMLDocumentParser> protectedThis(*this);
@@ -719,7 +725,7 @@ void XMLDocumentParser::doWrite(const String& parseString)
 
         // FIXME: Can we parse 8-bit strings directly as Latin-1 instead of upconverting to UTF-16?
         switchToUTF16(context->context());
-        xmlParseChunk(context->context(), reinterpret_cast<const char*>(StringView(parseString).upconvertedCharacters().get()), sizeof(char16_t) * parseString.length(), 0);
+        xmlParseChunk(context->context(), reinterpret_cast<const char*>(StringView(sanitizedString).upconvertedCharacters().get()), sizeof(char16_t) * sanitizedString.length(), 0);
 
         // JavaScript (which may be run under the xmlParseChunk callstack) may
         // cause the parser to be stopped or detached.
@@ -977,6 +983,14 @@ void XMLDocumentParser::endElementNs()
     }
 
     if (!element || m_isInFrameView == IsInFrameView::No) {
+        // We never prepare scripts in this case (e.g. when parsing a fragment or a document without
+        // a frame view, like a DOMParser document). Mark them as already started so that they stay
+        // inert when cloned or adopted into a document that does execute scripts, matching what
+        // HTMLConstructionSite does for the HTML fragment parser.
+        if (element && !parserContentPolicy().contains(ParserContentPolicy::DoNotMarkAlreadyStarted)) {
+            if (auto* scriptElement = dynamicDowncastScriptElement(*element))
+                scriptElement->markAlreadyStarted();
+        }
         popCurrentNode();
         return;
     }
@@ -1593,7 +1607,7 @@ xmlDocPtr xmlDocPtrForString(CachedResourceLoader& cachedResourceLoader, const S
         return nullptr;
 
     XMLDocumentParserScope scope(&cachedResourceLoader, errorFunc);
-    return xmlReadMemory(characters.data(), static_cast<int>(sizeInBytes), url.latin1().data(), encoding, XSLT_PARSE_OPTIONS);
+    return xmlReadMemory(characters.data(), static_cast<int>(sizeInBytes), url.utf8().legacyCStringPointer(), encoding, XSLT_PARSE_OPTIONS);
 }
 #endif
 
@@ -1655,7 +1669,7 @@ bool XMLDocumentParser::appendFragmentSource(const String& chunk)
     ASSERT(!m_context);
     ASSERT(m_parsingFragment);
 
-    CString chunkAsUTF8 = chunk.utf8();
+    auto chunkAsUTF8 = chunk.utf8();
     
     // libxml2 takes an int for a length, and therefore can't handle XML chunks larger than 2 GiB.
     if (chunkAsUTF8.length() > INT_MAX)

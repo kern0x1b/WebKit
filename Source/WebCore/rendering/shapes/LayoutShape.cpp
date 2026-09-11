@@ -178,7 +178,7 @@ Ref<const LayoutShape> LayoutShape::createRasterShape(Image* image, float thresh
     auto snappedLogicalMarginRect = snappedIntRect(logicalMarginRect);
     auto intervals = makeUnique<RasterShapeIntervals>(snappedLogicalMarginRect.height(), -snappedLogicalMarginRect.y());
     // FIXME (149420): This buffer should not be unconditionally unaccelerated.
-    auto imageBuffer = ImageBuffer::create(snappedPhysicalImageSize, RenderingMode::Unaccelerated, RenderingPurpose::Unspecified, 1, DestinationColorSpace::SRGB(), PixelFormat::BGRA8);
+    auto imageBuffer = ImageBuffer::create(snappedPhysicalImageSize, RenderingMode::Unaccelerated, RenderingPurpose::Unspecified, 1, ColorSpace::SRGB(), PixelFormat::BGRA8);
 
     auto createShape = [&]() {
         auto rasterShape = adoptRef(*new RasterLayoutShape(WTF::move(intervals), snappedLogicalMarginRect.size()));
@@ -194,7 +194,7 @@ Ref<const LayoutShape> LayoutShape::createRasterShape(Image* image, float thresh
     if (image)
         graphicsContext.drawImage(*image, IntRect({ }, snappedPhysicalImageSize));
 
-    PixelBufferFormat format { AlphaPremultiplication::Unpremultiplied, PixelFormat::RGBA8, DestinationColorSpace::SRGB() };
+    PixelBufferFormat format { AlphaPremultiplication::Unpremultiplied, PixelFormat::RGBA8, ColorSpace::SRGB() };
     auto pixelBuffer = imageBuffer->getPixelBuffer(format, { { }, snappedPhysicalImageSize });
 
     // We could get to a value where PixelBuffer could be nullptr because snappedPhysicalImageSize
@@ -235,12 +235,11 @@ Ref<const LayoutShape> LayoutShape::createRasterShape(Image* image, float thresh
     return createShape();
 }
 
-Ref<const LayoutShape> LayoutShape::createBoxShape(const LayoutRoundedRect& roundedRect, WritingMode writingMode, float logicalMargin)
+Ref<const LayoutShape> LayoutShape::createBoxShape(const LayoutRoundedRect& roundedRect, Vector<FloatPoint>&& contour, WritingMode writingMode, float logicalMargin)
 {
     ASSERT(roundedRect.rect().width() >= 0 && roundedRect.rect().height() >= 0);
 
-    FloatRoundedRect bounds { roundedRect };
-    auto shape = adoptRef(*new BoxLayoutShape(bounds));
+    Ref shape = adoptRef(*new BoxLayoutShape(FloatRoundedRect { roundedRect }, WTF::move(contour)));
     shape->m_writingMode = writingMode;
     shape->m_margin = logicalMargin;
 

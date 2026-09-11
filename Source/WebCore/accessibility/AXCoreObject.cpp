@@ -241,7 +241,12 @@ bool AXCoreObject::isButton() const
 
 bool AXCoreObject::isTextControl() const
 {
-    switch (role()) {
+    return isTextControl(role());
+}
+
+bool AXCoreObject::isTextControl(AccessibilityRole role)
+{
+    switch (role) {
     case AccessibilityRole::ComboBox:
     case AccessibilityRole::SearchField:
     case AccessibilityRole::TextArea:
@@ -317,7 +322,7 @@ AXCoreObject::AccessibilityChildrenVector AXCoreObject::unignoredChildren(bool u
     // NOTE: The per-object properties read below (role, IsExposableTable, IsIgnored) participate
     // in AXIsolatedTree's cache invalidation for stitchedUnignoredChildren. If a new property
     // becomes a dependency of this walk, update the trigger list in
-    // AXIsolatedTree::applyPendingChangesFromSnapshot.
+    // AXIsolatedTree::applyCommittedChanges.
 
     if (onlyAddsUnignoredChildren())
         return children(updateChildrenIfNeeded);
@@ -407,6 +412,19 @@ AXCoreObject::AccessibilityChildrenVector AXCoreObject::stitchedUnignoredChildre
 size_t AXCoreObject::stitchedUnignoredChildrenCount()
 {
     return stitchedUnignoredChildren().size();
+}
+
+RefPtr<AXCoreObject> AXCoreObject::stitchRepresentativeOrSelf()
+{
+    std::optional<AXID> representativeID = stitchedIntoID();
+    if (!representativeID || *representativeID == objectID())
+        return this;
+    // The AXTextMarker is not a text position here (offset 0 is unused); it is the idiomatic way to
+    // resolve an { treeID, AXID } pair to its object on whichever tree we are on, dispatching to the
+    // isolated tree off the main thread or the main-thread cache on it.
+    if (RefPtr representative = AXTextMarker { treeID(), *representativeID, 0 }.object())
+        return representative;
+    return this;
 }
 
 AXCoreObject::AccessibilityChildrenVector AXCoreObject::crossFrameUnignoredChildrenInRange(size_t start, size_t maxCount)
@@ -839,25 +857,6 @@ RefPtr<AXCoreObject> AXCoreObject::previousSiblingIncludingIgnored(bool updateCh
         return nullptr;
 
     return siblings[indexOfThis - 1].copyRef();
-}
-
-AXCoreObject* AXCoreObject::nextUnignoredSibling(bool updateChildrenIfNeeded, AXCoreObject* unignoredParent) const
-{
-    // In some contexts, we may have already computed the `unignoredParent`, which is what this parameter is.
-    // Ensure this is actually our parent.
-    AX_ASSERT(unignoredParent == parentObjectUnignored());
-
-    RefPtr parent = unignoredParent ? unignoredParent : parentObjectUnignored();
-    if (!parent)
-        return nullptr;
-    const auto& siblings = parent->unignoredChildren(updateChildrenIfNeeded);
-    size_t indexOfThis = siblings.findIf([this] (const Ref<AXCoreObject>& object) {
-        return object.ptr() == this;
-    });
-    if (indexOfThis == notFound)
-        return nullptr;
-
-    return indexOfThis + 1 < siblings.size() ? siblings[indexOfThis + 1].unsafePtr() : nullptr;
 }
 
 AXCoreObject* AXCoreObject::nextSiblingIncludingIgnoredOrParent() const
@@ -1477,17 +1476,6 @@ bool AXCoreObject::isTableCellInSameRowGroup(AXCoreObject& otherTableCell)
 {
     auto ancestorID = rowGroupAncestorID();
     return ancestorID && *ancestorID == otherTableCell.rowGroupAncestorID();
-}
-
-bool AXCoreObject::isTableCellInSameColGroup(AXCoreObject* tableCell)
-{
-    if (!tableCell)
-        return false;
-
-    auto columnRange = columnIndexRange();
-    auto otherColumnRange = tableCell->columnIndexRange();
-
-    return columnRange.first <= otherColumnRange.first + otherColumnRange.second;
 }
 
 bool AXCoreObject::isReplacedElement() const

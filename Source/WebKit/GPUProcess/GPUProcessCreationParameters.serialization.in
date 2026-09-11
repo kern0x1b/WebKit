@@ -24,6 +24,7 @@
 
 [RValue, DebugDecodingFailure] struct WebKit::GPUProcessCreationParameters {
     WebKit::AuxiliaryProcessCreationParameters auxiliaryProcessParameters;
+    WebKit::SecurityFlags securityFlags;
 
 #if ENABLE(MEDIA_STREAM)
     bool useMockCaptureDevices;
@@ -52,6 +53,11 @@
 #endif
 
     Vector<String> overrideLanguages;
+
+#if ENABLE(VIDEO) || ENABLE(WEB_AUDIO)
+    std::optional<WebCore::QualifiedMediaSessionIdentifier> nowPlayingFallbackSession;
+#endif
+
 #if PLATFORM(COCOA)
     bool enableMetalDebugDeviceForTesting;
     bool enableMetalShaderValidationForTesting;

@@ -32,6 +32,7 @@
 #include "DisplayListRecorderImpl.h"
 #include "FloatConversion.h"
 #include "FloatRect.h"
+#include "FrameProcessIndicators.h"
 #include "GraphicsLayerAnimation.h"
 #include "GraphicsLayerAnimationValue.h"
 #include "GraphicsLayerAsyncContentsDisplayDelegateCocoa.h"
@@ -481,6 +482,8 @@ GraphicsLayerCA::~GraphicsLayerCA()
 
     if (m_backdropClippingLayer)
         protect(m_backdropClippingLayer)->setOwner(nullptr);
+
+    m_frameProcessIndicators = nullptr;
 
     removeCloneLayers();
 
@@ -1074,6 +1077,34 @@ void GraphicsLayerCA::setContentsClippingRect(const FloatRoundedRect& rect)
     noteLayerPropertyChanged(ContentsRectsChanged);
 }
 
+static bool shapePathsAreEqual(const Path& a, const Path& b)
+{
+    if (a.isEmpty() || b.isEmpty())
+        return a.isEmpty() && b.isEmpty();
+
+    auto* aSegments = a.segmentsIfExists();
+    auto* bSegments = b.segmentsIfExists();
+    return aSegments && bSegments && *aSegments == *bSegments;
+}
+
+void GraphicsLayerCA::setContentsClipShapePath(const Path& path)
+{
+    if (shapePathsAreEqual(contentsClipShapePath(), path))
+        return;
+
+    GraphicsLayer::setContentsClipShapePath(path);
+    noteLayerPropertyChanged(ContentsRectsChanged);
+}
+
+void GraphicsLayerCA::setBackdropFiltersShapePath(const Path& path)
+{
+    if (shapePathsAreEqual(backdropFiltersShapePath(), path))
+        return;
+
+    GraphicsLayer::setBackdropFiltersShapePath(path);
+    noteLayerPropertyChanged(BackdropFiltersRectChanged);
+}
+
 void GraphicsLayerCA::setContentsRectClipsDescendants(bool contentsRectClipsDescendants)
 {
     if (contentsRectClipsDescendants == m_contentsRectClipsDescendants)
@@ -1094,7 +1125,9 @@ void GraphicsLayerCA::setVideoGravity(MediaPlayerVideoGravity gravity)
 
 void GraphicsLayerCA::setShapeLayerPath(const Path& path)
 {
-    // FIXME: need to check for path equality. No bool Path::operator==(const Path&)!.
+    if (!path.isEmpty() && shapeLayerPath().definitelyEqual(path))
+        return;
+
     GraphicsLayer::setShapeLayerPath(path);
     noteLayerPropertyChanged(ShapeChanged);
 }
@@ -1412,7 +1445,11 @@ std::optional<PlatformLayerIdentifier> GraphicsLayerCA::contentsLayerIDForModel(
 
 void GraphicsLayerCA::setContentsToPlatformLayer(PlatformLayer* platformLayer, ContentsLayerPurpose purpose)
 {
-    if (m_contentsLayer && platformLayer == protect(m_contentsLayer)->platformLayer())
+    // When platformLayer is non-null, skip if the same layer is already set.
+    // When platformLayer is null, always proceed: a PlatformCALayerRemote also
+    // returns null from platformLayer(), so the naive check would incorrectly
+    // treat a clear request as a no-op, leaving the hardware video sublayer alive.
+    if (platformLayer && m_contentsLayer && platformLayer == protect(m_contentsLayer)->platformLayer())
         return;
 
     // FIXME: The passed in layer might be a raw layer or an externally created
@@ -1463,7 +1500,7 @@ void GraphicsLayerCA::setContentsToModelContext(Ref<ModelContext> modelContext, 
 }
 #endif
 
-#if ENABLE(MODEL_ELEMENT_IMMERSIVE)
+#if ENABLE(MODEL_ELEMENT_IMMERSIVE) || ENABLE(SPATIAL_PORTAL)
 void GraphicsLayerCA::removeModelContents()
 {
     if (!m_contentsLayer)
@@ -2063,7 +2100,7 @@ void GraphicsLayerCA::recursiveCommitChanges(CommitState& commitState, const Tra
         TraceScope tracingScope(DisplayListRecordStart, DisplayListRecordEnd);
         m_displayList = nullptr;
         FloatRect initialClip(boundsOrigin(), size());
-        DisplayList::RecorderImpl context(GraphicsContextState(), initialClip, AffineTransform());
+        DisplayList::RecorderImpl context(initialClip);
         paintGraphicsLayerContents(context, FloatRect(FloatPoint(), size()));
         m_displayList = context.takeDisplayList();
     }
@@ -2459,9 +2496,9 @@ void GraphicsLayerCA::updateSublayerList(bool maxLayerDepthReached)
 #ifdef VISIBLE_TILE_WASH
         if (m_visibleTileWashLayer)
             list.append(m_visibleTileWashLayer);
-#else
-        UNUSED_PARAM(list);
 #endif
+        if (m_frameProcessIndicators)
+            m_frameProcessIndicators->appendLayers(list);
     };
 
     auto buildChildLayerList = [&](PlatformCALayerList& list) {
@@ -2551,6 +2588,9 @@ void GraphicsLayerCA::updateGeometry(float pageScaleFactor, const FloatPoint& po
     FloatRect adjustedBounds = FloatRect(FloatPoint(m_boundsOrigin - pixelAlignmentOffset), m_size);
     layer->setBounds(adjustedBounds);
     layer->setAnchorPoint(scaledAnchorPoint);
+
+    if (m_frameProcessIndicators)
+        m_frameProcessIndicators->updateGeometry(adjustedBounds);
 
     if (m_layerClones) {
         for (auto& clone : m_layerClones->primaryLayerClones) {
@@ -2783,7 +2823,7 @@ void GraphicsLayerCA::updateBackdropFiltersRect()
 
     auto backdropRectRelativeToBackdropLayer = m_backdropFiltersRect;
     backdropRectRelativeToBackdropLayer.setLocation({ });
-    updateClippingStrategy(*backdropLayer, m_backdropClippingLayer, backdropRectRelativeToBackdropLayer);
+    updateClippingStrategy(*backdropLayer, m_backdropClippingLayer, backdropRectRelativeToBackdropLayer, m_backdropFiltersShapePath);
 
     if (m_layerClones) {
         for (auto& clone : m_layerClones->backdropLayerClones) {
@@ -2795,7 +2835,7 @@ void GraphicsLayerCA::updateBackdropFiltersRect()
             RefPtr<PlatformCALayer> backdropClippingLayerClone = m_layerClones->backdropClippingLayerClones.get(cloneID);
 
             bool hadBackdropClippingLayer = backdropClippingLayerClone;
-            updateClippingStrategy(backdropCloneLayer, backdropClippingLayerClone, backdropRectRelativeToBackdropLayer);
+            updateClippingStrategy(backdropCloneLayer, backdropClippingLayerClone, backdropRectRelativeToBackdropLayer, m_backdropFiltersShapePath);
 
             if (!backdropClippingLayerClone)
                 m_layerClones->backdropClippingLayerClones.remove(cloneID);
@@ -3099,18 +3139,29 @@ static Color cloneLayerDebugBorderColor(bool showingBorders)
     return showingBorders ? SRGBA<uint8_t> { 255, 122, 251 } : Color { };
 }
 
+void GraphicsLayerCA::updateFrameProcessIndicators()
+{
+    if (isShowingFrameProcessBorders() && !m_frameProcessIndicators)
+        m_frameProcessIndicators = makeUnique<FrameProcessIndicators>(*this);
+    else if (!isShowingFrameProcessBorders() && m_frameProcessIndicators)
+        m_frameProcessIndicators = nullptr;
+    noteSublayersChanged(DontScheduleFlush);
+}
+
 void GraphicsLayerCA::updateDebugIndicators()
 {
+    updateFrameProcessIndicators();
+
     Color borderColor;
     float width = 0;
 
-    bool showDebugBorders = isShowingDebugBorder() || isShowingFrameProcessBorders();
+    bool showDebugBorders = isShowingDebugBorder();
     if (showDebugBorders)
         getDebugBorderInfo(borderColor, width);
 
-    // Paint repaint counter.
     RefPtr layer = m_layer;
-    layer->setNeedsDisplay();
+    if (isShowingRepaintCounter())
+        layer->setNeedsDisplay();
 
     setLayerDebugBorder(*layer, borderColor, width);
     if (RefPtr contentsLayer = m_contentsLayer)
@@ -3225,17 +3276,19 @@ void GraphicsLayerCA::updateContentsColorLayer()
 
 // The clipping strategy depends on whether the rounded rect has equal corner radii.
 // roundedRect is in the coordinate space of clippingLayer.
-void GraphicsLayerCA::updateClippingStrategy(PlatformCALayer& clippingLayer, RefPtr<PlatformCALayer>& shapeMaskLayer, const FloatRoundedRect& roundedRect)
+void GraphicsLayerCA::updateClippingStrategy(PlatformCALayer& clippingLayer, RefPtr<PlatformCALayer>& shapeMaskLayer, const FloatRoundedRect& roundedRect, const Path& shapePath)
 {
+    bool hasShapePath = !shapePath.isEmpty();
+
 #if HAVE(CORE_ANIMATION_SEPARATED_LAYERS)
-    if (m_isSeparated && roundedRect.radii().hasEvenCorners() && clippingLayer.bounds() == roundedRect.rect()) {
+    if (!hasShapePath && m_isSeparated && roundedRect.radii().hasEvenCorners() && clippingLayer.bounds() == roundedRect.rect()) {
         m_layer->setCornerRadius(roundedRect.radii().topLeft().width());
         return;
     }
     m_layer->setCornerRadius(0);
 #endif
 
-    if (roundedRect.radii().isUniformCornerRadius() && clippingLayer.bounds() == roundedRect.rect()) {
+    if (!hasShapePath && roundedRect.radii().isUniformCornerRadius() && clippingLayer.bounds() == roundedRect.rect()) {
         clippingLayer.setMaskLayer(nullptr);
         if (shapeMaskLayer) {
             shapeMaskLayer->setOwner(nullptr);
@@ -3261,9 +3314,15 @@ void GraphicsLayerCA::updateClippingStrategy(PlatformCALayer& clippingLayer, Ref
     auto shapeBounds = FloatRect { { }, roundedRect.rect().size() };
     shapeMaskLayer->setBounds(shapeBounds);
     
-    auto localRoundedRect = roundedRect;
-    localRoundedRect.setLocation({ });
-    shapeMaskLayer->setShapeRoundedRect(localRoundedRect);
+    if (hasShapePath) {
+        auto localPath = shapePath;
+        localPath.translate(-toFloatSize(rectLocation));
+        shapeMaskLayer->setShapePath(localPath);
+    } else {
+        auto localRoundedRect = roundedRect;
+        localRoundedRect.setLocation({ });
+        shapeMaskLayer->setShapeRoundedRect(localRoundedRect);
+    }
 
     clippingLayer.setCornerRadius(0);
     RefPtr maskLayer = shapeMaskLayer;
@@ -3278,7 +3337,8 @@ void GraphicsLayerCA::updateContentsRects()
     auto contentBounds = FloatRect { { }, m_contentsRect.size() };
     
     bool gainedOrLostClippingLayer = false;
-    if (m_contentsClippingRect.hasNonZeroRadii() || !m_contentsClippingRect.rect().contains(m_contentsRect)) {
+    if (m_contentsClippingRect.hasNonZeroRadii() || !contentsClipShapePath().isEmpty()
+        || !m_contentsClippingRect.rect().contains(m_contentsRect)) {
         if (!m_contentsClippingLayer) {
             Ref contentsClippingLayer = createPlatformCALayer(PlatformCALayer::LayerType::LayerTypeLayer, this);
             m_contentsClippingLayer = contentsClippingLayer.copyRef();
@@ -3295,7 +3355,7 @@ void GraphicsLayerCA::updateContentsRects()
         contentsClippingLayer->setPosition(m_contentsClippingRect.rect().location());
         contentsClippingLayer->setBounds(m_contentsClippingRect.rect());
         
-        updateClippingStrategy(contentsClippingLayer, m_contentsShapeMaskLayer, m_contentsClippingRect);
+        updateClippingStrategy(contentsClippingLayer, m_contentsShapeMaskLayer, m_contentsClippingRect, contentsClipShapePath());
 
         if (RefPtr contentsLayer = m_contentsLayer; contentsLayer && gainedOrLostClippingLayer) {
             contentsLayer->removeFromSuperlayer();
@@ -3338,7 +3398,7 @@ void GraphicsLayerCA::updateContentsRects()
             RefPtr<PlatformCALayer> shapeMaskLayerClone = m_layerClones->contentsShapeMaskLayerClones.get(cloneID);
 
             bool hadShapeMask = shapeMaskLayerClone;
-            updateClippingStrategy(Ref { clone.value }, shapeMaskLayerClone, m_contentsClippingRect);
+            updateClippingStrategy(Ref { clone.value }, shapeMaskLayerClone, m_contentsClippingRect, contentsClipShapePath());
 
             if (!shapeMaskLayerClone)
                 m_layerClones->contentsShapeMaskLayerClones.remove(cloneID);
@@ -4430,6 +4490,9 @@ void GraphicsLayerCA::updateContentsScale(float pageScaleFactor)
     if (auto customScale = client().customContentsScale(*this))
         contentsScale = *customScale;
 
+    if (m_frameProcessIndicators)
+        m_frameProcessIndicators->updateContentsScale(contentsScale);
+
     RefPtr layer = m_layer;
     if (contentsScale == layer->contentsScale())
         return;
@@ -4468,15 +4531,19 @@ void GraphicsLayerCA::setShowRepaintCounter(bool showCounter)
         return;
 
     GraphicsLayer::setShowRepaintCounter(showCounter);
+
+    if (RefPtr layer = m_layer)
+        layer->setNeedsDisplay();
+
     noteLayerPropertyChanged(DebugIndicatorsChanged);
 }
 
-void GraphicsLayerCA::setShowFrameProcessBorders(bool showBorders)
+void GraphicsLayerCA::setShowFrameProcessBorders(bool showBorders, unsigned frameDepth)
 {
-    if (showBorders == m_showFrameProcessBorders)
+    if (showBorders == m_showFrameProcessBorders && frameDepth == m_frameProcessIndicatorDepth)
         return;
 
-    GraphicsLayer::setShowFrameProcessBorders(showBorders);
+    GraphicsLayer::setShowFrameProcessBorders(showBorders, frameDepth);
     noteLayerPropertyChanged(DebugIndicatorsChanged);
 }
 

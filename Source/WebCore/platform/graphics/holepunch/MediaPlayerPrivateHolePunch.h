@@ -22,7 +22,7 @@
 
 #if USE(EXTERNAL_HOLEPUNCH)
 
-#include "DestinationColorSpace.h"
+#include "ColorSpace.h"
 #include "MediaPlayerPrivate.h"
 #include "PlatformLayer.h"
 #include <wtf/RefCounted.h>
@@ -64,7 +64,9 @@ public:
     void pause() final { };
 
 #if USE(COORDINATED_GRAPHICS)
-    PlatformLayer* NODELETE platformLayer() const final;
+    PlatformLayer* NODELETE platformLayer() const final { return nullptr; }
+    void setPlatformLayerBufferProxy(Ref<CoordinatedPlatformLayerBufferProxy>&&) final;
+    RefPtr<CoordinatedPlatformLayerBufferProxy> platformLayerBufferProxy() const final;
 #endif
 
     FloatSize naturalSize() const final;
@@ -89,7 +91,7 @@ public:
 
     void paint(GraphicsContext&, const FloatRect&) final { };
 
-    DestinationColorSpace colorSpace() final { return DestinationColorSpace::SRGB(); }
+    ColorSpace colorSpace() final { return ColorSpace::SRGB(); }
 
     bool supportsAcceleratedRendering() const final { return true; }
 

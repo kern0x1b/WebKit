@@ -35,8 +35,8 @@
 #include "NowPlayingInfo.h"
 #include "PlatformMediaSessionManager.h"
 #include <wtf/MediaTime.h>
+#include <wtf/RunLoop.h>
 #include <wtf/RuntimeApplicationChecks.h>
-#include <wtf/SetForScope.h>
 #include <wtf/TZoneMallocInlines.h>
 #include <wtf/text/MakeString.h>
 
@@ -218,7 +218,9 @@ void PlatformMediaSession::beginInterruption(InterruptionType type)
     }
     m_interruptionStack.append({ type, false });
 
-    m_stateToRestore = state();
+    // A playback admission may still be in flight. If so the session is not in State::Playing yet even
+    // though play is intended, and we should restore State::Playing when the interruption ends.
+    m_stateToRestore = m_preparingToPlay ? State::Playing : state();
     m_notifyingClient = true;
     setState(State::Interrupted);
     protect(client())->suspendPlayback();
@@ -238,9 +240,12 @@ void PlatformMediaSession::endInterruption(OptionSet<EndInterruptionFlags> flags
     if (activeInterruptionCount() || interruption.ignored)
         return;
 
-    ALWAYS_LOG(LOGIDENTIFIER, "restoring state ", m_stateToRestore);
+    // An admission in flight means play is intended, whatever this session was doing when the
+    // interruption began. Same rule as beginInterruption(), which cannot apply it for an admission
+    // that only started once the session was already interrupted.
+    State stateToRestore = m_preparingToPlay ? State::Playing : m_stateToRestore;
+    ALWAYS_LOG(LOGIDENTIFIER, "restoring state ", stateToRestore);
 
-    State stateToRestore = m_stateToRestore;
     m_stateToRestore = State::Idle;
     setState(stateToRestore);
 
@@ -266,41 +271,64 @@ void PlatformMediaSession::clientWillBeginAutoplaying()
     setState(State::Autoplaying);
 }
 
-void PlatformMediaSession::clientWillBeginPlayback(CompletionHandler<void(bool)>&& completionHandler)
+Ref<GenericPromise> PlatformMediaSession::clientWillBeginPlayback()
 {
-    if (m_notifyingClient) {
-        completionHandler(true);
-        return;
-    }
+    if (m_notifyingClient)
+        return GenericPromise::createAndResolve();
 
     ALWAYS_LOG(LOGIDENTIFIER, "state = ", m_state);
 
-    SetForScope preparingToPlay(m_preparingToPlay, true);
+    // If we're already in Playing state, a prior admission already succeeded.
+    // Skip re-running sessionWillBeginPlayback (which would re-do setCurrentSession
+    // and ConcurrentCheck at completion time, potentially reordering session state
+    // when async admissions interleave with the redundant clientWillBeginPlayback
+    // call from updatePlayState).
+    if (state() == State::Playing)
+        return GenericPromise::createAndResolve();
 
     RefPtr manager = sessionManager();
-    if (!manager) {
-        completionHandler(false);
-        return;
-    }
+    if (!manager)
+        return GenericPromise::createAndReject();
 
-    manager->sessionWillBeginPlayback(*this, [weakThis = WeakPtr { *this }, completionHandler = WTF::move(completionHandler)](bool canBegin) mutable {
+    // m_preparingToPlay tracks "play is still intended". It is cleared by
+    // processClientWillPausePlayback if pause() is called while admission is
+    // in flight, and by commitPlaybackAdmission() once the manager's admission
+    // settles successfully.
+    m_preparingToPlay = true;
+
+    return manager->sessionWillBeginPlayback(*this)->whenSettled(RunLoop::mainSingleton(), [weakThis = WeakPtr { *this }](auto&& result) {
         RefPtr protectedThis = weakThis.get();
-        if (!protectedThis) {
-            completionHandler(false);
-            return;
-        }
+        if (!protectedThis)
+            return GenericPromise::createAndReject();
 
-        if (!canBegin) {
+        if (!result) {
+            protectedThis->m_preparingToPlay = false;
             if (protectedThis->state() == State::Interrupted)
                 protectedThis->m_stateToRestore = State::Playing;
-            completionHandler(false);
-            return;
+            return GenericPromise::createAndReject();
         }
 
-        protectedThis->m_stateToRestore = State::Playing;
-        protectedThis->setState(State::Playing);
-        completionHandler(true);
+        return GenericPromise::createAndResolve();
     });
+}
+
+bool PlatformMediaSession::commitPlaybackAdmission(State stateAtStart)
+{
+    m_preparingToPlay = false;
+
+    // If state transitioned to Paused while admission was in flight (and it wasn't Paused
+    // at admission start), don't override the user's (or ended-path's) Paused state by
+    // setting state to Playing. The trade-off is that for a genuine play()/pause() user
+    // race, the play promise still resolves rather than rejecting with AbortError (spec
+    // deviation) — clientWillBeginPlayback()'s continuation resolves regardless of this
+    // result. What this return value controls is only whether the caller may enforce
+    // exclusivity on this session's behalf: a session that stayed paused never claimed it.
+    if (state() == State::Paused && stateAtStart != State::Paused)
+        return false;
+
+    m_stateToRestore = State::Playing;
+    setState(State::Playing);
+    return true;
 }
 
 bool PlatformMediaSession::processClientWillPausePlayback(DelayCallingUpdateNowPlaying shouldDelayCallingUpdateNowPlaying)
@@ -315,6 +343,10 @@ bool PlatformMediaSession::processClientWillPausePlayback(DelayCallingUpdateNowP
         return false;
     }
 
+    // Clear m_preparingToPlay: if play()'s admission IPC is in flight, this
+    // tells the admission callback that the user has paused and the play
+    // should not override the pause state.
+    m_preparingToPlay = false;
     setState(State::Paused);
     if (RefPtr manager = sessionManager())
         manager->sessionWillEndPlayback(*this, shouldDelayCallingUpdateNowPlaying);
@@ -388,8 +420,21 @@ void PlatformMediaSession::canProduceAudioChanged()
     if (m_state == State::Playing && canProduceAudio())
         setHasPlayedAudiblySinceLastInterruption(true);
 
-    if (RefPtr manager = sessionManager())
+    if (RefPtr manager = sessionManager()) {
         manager->sessionCanProduceAudioChanged();
+        // The session's mediaType may have transitioned (typically Video → VideoAudio
+        // once the player finishes probing audio tracks). If the new mediaType has
+        // ConcurrentPlaybackNotPermitted, claim exclusivity now — at admission time
+        // the restriction set was looked up against the old mediaType, so the check
+        // never ran for this session.
+        if (m_state == State::Playing)
+            manager->enforceConcurrentPlaybackRestriction(*this);
+    }
+}
+
+bool PlatformMediaSession::preparingToPlay() const
+{
+    return m_preparingToPlay;
 }
 
 void PlatformMediaSession::clientCharacteristicsChanged(bool positionChanged)

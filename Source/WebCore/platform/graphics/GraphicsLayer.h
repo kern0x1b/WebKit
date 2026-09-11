@@ -79,6 +79,7 @@ class GraphicsLayerKeyframeValueList;
 class HTMLVideoElement;
 class Image;
 class ImageBuffer;
+class MediaPlayer;
 class Model;
 class Settings;
 class TiledBacking;
@@ -315,6 +316,9 @@ public:
     virtual void setBackdropFiltersRect(const FloatRoundedRect& backdropFiltersRect) { m_backdropFiltersRect = backdropFiltersRect; }
     const FloatRoundedRect& backdropFiltersRect() const LIFETIME_BOUND { return m_backdropFiltersRect; }
 
+    Path backdropFiltersShapePath() const { return m_backdropFiltersShapePath; }
+    virtual void setBackdropFiltersShapePath(const Path& path) { m_backdropFiltersShapePath = path; }
+
     BlendMode blendMode() const { return m_blendMode; }
     virtual void setBlendMode(BlendMode blendMode) { m_blendMode = blendMode; }
 
@@ -344,6 +348,9 @@ public:
     // Set a rounded rect that will be used to clip the layer contents.
     FloatRoundedRect contentsClippingRect() const { return m_contentsClippingRect; }
     virtual void setContentsClippingRect(const FloatRoundedRect& roundedRect) { m_contentsClippingRect = roundedRect; }
+
+    const Path& contentsClipShapePath() const { return m_contentsClipShapePath; }
+    virtual void setContentsClipShapePath(const Path& path) { m_contentsClipShapePath = path; }
     
     // If true, contentsClippingRect is used to clip child GraphicsLayers.
     bool contentsRectClipsDescendants() const { return m_contentsRectClipsDescendants; }
@@ -400,10 +407,13 @@ public:
 #if ENABLE(MODEL_CONTEXT)
     virtual void setContentsToModelContext(Ref<ModelContext>, ContentsLayerPurpose) { }
 #endif
-#if ENABLE(MODEL_ELEMENT_IMMERSIVE)
+#if ENABLE(MODEL_ELEMENT_IMMERSIVE) || ENABLE(SPATIAL_PORTAL)
     virtual void removeModelContents() { }
 #endif
     virtual void setContentsToVideoElement(HTMLVideoElement&, ContentsLayerPurpose) { }
+#if ENABLE(VIDEO)
+    WEBCORE_EXPORT virtual void setContentsToMediaPlayer(MediaPlayer*, ContentsLayerPurpose);
+#endif
     virtual void setContentsDisplayDelegate(RefPtr<GraphicsLayerContentsDisplayDelegate>&&, ContentsLayerPurpose);
     WEBCORE_EXPORT virtual RefPtr<GraphicsLayerAsyncContentsDisplayDelegate> createAsyncContentsDisplayDelegate(GraphicsLayerAsyncContentsDisplayDelegate* existing);
 #if ENABLE(MODEL_ELEMENT)
@@ -436,8 +446,9 @@ public:
     virtual void setShowRepaintCounter(bool show) { m_showRepaintCounter = show; }
     bool isShowingRepaintCounter() const { return m_showRepaintCounter; }
 
-    virtual void setShowFrameProcessBorders(bool show) { m_showFrameProcessBorders = show; }
+    virtual void setShowFrameProcessBorders(bool show, unsigned frameDepth = 0) { m_showFrameProcessBorders = show; m_frameProcessIndicatorDepth = frameDepth; }
     bool isShowingFrameProcessBorders() const { return m_showFrameProcessBorders; }
+    unsigned frameProcessIndicatorDepth() const { return m_frameProcessIndicatorDepth; }
 
     // FIXME: this is really a paint count.
     int repaintCount() const { return m_repaintCount; }
@@ -672,7 +683,7 @@ protected:
 #endif
 
     int m_repaintCount { 0 };
-
+    unsigned m_frameProcessIndicatorDepth { 0 };
     Vector<Ref<GraphicsLayer>> m_children;
     WeakPtr<GraphicsLayer> m_parent;
 
@@ -685,11 +696,13 @@ protected:
 
     FloatRect m_contentsRect;
     FloatRoundedRect m_contentsClippingRect;
+    Path m_contentsClipShapePath;
     FloatSize m_contentsTilePhase;
     FloatSize m_contentsTileSize;
     ScalingFilter m_contentsMinificationFilter = ScalingFilter::Linear;
     ScalingFilter m_contentsMagnificationFilter = ScalingFilter::Linear;
     FloatRoundedRect m_backdropFiltersRect;
+    Path m_backdropFiltersShapePath;
     std::optional<FloatRect> m_animationExtent;
 
     EventRegion m_eventRegion;

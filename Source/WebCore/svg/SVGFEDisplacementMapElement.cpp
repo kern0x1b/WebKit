@@ -25,6 +25,7 @@
 #include "NodeName.h"
 #include "SVGFilterRenderer.h"
 #include "SVGNames.h"
+#include "SVGParserUtilities.h"
 #include "SVGPropertyOwnerRegistry.h"
 #include <wtf/TZoneMallocInlines.h>
 
@@ -56,18 +57,12 @@ Ref<SVGFEDisplacementMapElement> SVGFEDisplacementMapElement::create(const Quali
 void SVGFEDisplacementMapElement::attributeChanged(const QualifiedName& name, const AtomString& oldValue, const AtomString& newValue, AttributeModificationReason attributeModificationReason)
 {
     switch (name.nodeName()) {
-    case AttributeNames::xChannelSelectorAttr: {
-        auto propertyValue = SVGPropertyTraits<ChannelSelectorType>::fromString(*this, newValue);
-        if (std::to_underlying(propertyValue))
-            Ref { m_xChannelSelector }->setBaseValInternal<ChannelSelectorType>(propertyValue);
+    case AttributeNames::xChannelSelectorAttr:
+        protect(m_xChannelSelector)->parseBaseVal<ChannelSelectorType>(*this, newValue);
         break;
-    }
-    case AttributeNames::yChannelSelectorAttr: {
-        auto propertyValue = SVGPropertyTraits<ChannelSelectorType>::fromString(*this, newValue);
-        if (std::to_underlying(propertyValue))
-            Ref { m_yChannelSelector }->setBaseValInternal<ChannelSelectorType>(propertyValue);
+    case AttributeNames::yChannelSelectorAttr:
+        protect(m_yChannelSelector)->parseBaseVal<ChannelSelectorType>(*this, newValue);
         break;
-    }
     case AttributeNames::inAttr:
         Ref { m_in1 }->setBaseValInternal(newValue);
         break;
@@ -75,7 +70,7 @@ void SVGFEDisplacementMapElement::attributeChanged(const QualifiedName& name, co
         Ref { m_in2 }->setBaseValInternal(newValue);
         break;
     case AttributeNames::scaleAttr:
-        m_scale->setBaseValInternal(newValue.toFloat());
+        m_scale->setBaseValInternal(parseNumber(newValue));
         break;
     default:
         break;

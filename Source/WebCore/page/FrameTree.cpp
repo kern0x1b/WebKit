@@ -49,8 +49,11 @@ FrameTree::FrameTree(Frame& thisFrame, Frame* parentFrame)
 
 FrameTree::~FrameTree()
 {
-    for (RefPtr child = firstChild(); child; child = child->tree().nextSibling())
+    for (RefPtr child = firstChild(); child; child = child->tree().nextSibling()) {
+        child->tree().detachFromParent();
         child->disconnectView();
+    }
+    ASSERT(!m_remoteFrameDescendantCount);
 }
 
 void FrameTree::setSpecifiedName(const AtomString& specifiedName)
@@ -68,6 +71,45 @@ Frame* FrameTree::parent() const
     return m_parent.get();
 }
 
+unsigned FrameTree::remoteFrameCountIncludingSelf() const
+{
+    return m_remoteFrameDescendantCount + (is<RemoteFrame>(m_thisFrame.get()) ? 1 : 0);
+}
+
+void FrameTree::adjustRemoteFrameDescendantCountForSelfAndAncestors(int delta)
+{
+    if (!delta)
+        return;
+
+    for (RefPtr frame = m_thisFrame.ptr(); frame; frame = frame->tree().parent()) {
+        auto& count = frame->tree().m_remoteFrameDescendantCount;
+        count += delta;
+    }
+}
+
+#if ASSERT_ENABLED
+unsigned FrameTree::remoteFrameDescendantCountSlow() const
+{
+    unsigned count = 0;
+    for (RefPtr child = firstChild(); child; child = child->tree().nextSibling()) {
+        // There may a window between when a child tree clears its parent (detachFromParent) and
+        // when the parent removes the child (removeChild). Ignore these partially-detached nodes.
+        if (child->tree().parent() != m_thisFrame.ptr())
+            continue;
+        count += (is<RemoteFrame>(*child) ? 1 : 0) + child->tree().remoteFrameDescendantCountSlow();
+    }
+    return count;
+}
+#endif
+
+void FrameTree::detachFromParent()
+{
+    RefPtr parent = m_parent.get();
+    m_parent = nullptr;
+    if (parent)
+        parent->tree().adjustRemoteFrameDescendantCountForSelfAndAncestors(-remoteFrameCountIncludingSelf());
+}
+
 void FrameTree::appendChild(Frame& child)
 {
     ASSERT(child.page() == m_thisFrame->page());
@@ -83,11 +125,20 @@ void FrameTree::appendChild(Frame& child)
 
     m_scopedChildCount = invalidCount;
 
+    adjustRemoteFrameDescendantCountForSelfAndAncestors(child.tree().remoteFrameCountIncludingSelf());
+
     ASSERT(!m_lastChild->tree().m_nextSibling);
+    ASSERT(m_remoteFrameDescendantCount == remoteFrameDescendantCountSlow());
 }
 
 void FrameTree::removeChild(Frame& child)
 {
+    // We may have already called detachFromParent() on the child, which would cleared the parent
+    // on the child and already adjusted the descendant count.
+    ASSERT(!child.tree().parent() || child.tree().parent() == m_thisFrame.ptr());
+    if (child.tree().parent())
+        adjustRemoteFrameDescendantCountForSelfAndAncestors(-child.tree().remoteFrameCountIncludingSelf());
+
     WeakPtr<Frame>& newLocationForPrevious = m_lastChild == &child ? m_lastChild : child.tree().m_nextSibling->tree().m_previousSibling;
     RefPtr<Frame>& newLocationForNext = m_firstChild == &child ? m_firstChild : child.tree().m_previousSibling->tree().m_nextSibling;
 
@@ -96,6 +147,8 @@ void FrameTree::removeChild(Frame& child)
     newLocationForNext = WTF::move(child.tree().m_nextSibling);
 
     m_scopedChildCount = invalidCount;
+
+    ASSERT(m_remoteFrameDescendantCount == remoteFrameDescendantCountSlow());
 }
 
 void FrameTree::replaceChild(Frame& oldChild, Frame& newChild)
@@ -109,6 +162,7 @@ void FrameTree::replaceChild(Frame& oldChild, Frame& newChild)
     ASSERT(!newTree.firstChild());
     ASSERT(!newTree.lastChild());
     ASSERT(newTree.m_scopedChildCount == invalidCount);
+    ASSERT(!newTree.m_remoteFrameDescendantCount);
     ASSERT(newTree.m_thisFrame.ptr() == &newChild);
     ASSERT(is<LocalFrame>(oldChild) != is<LocalFrame>(newChild));
 
@@ -135,6 +189,9 @@ void FrameTree::replaceChild(Frame& oldChild, Frame& newChild)
         oldNextSibling->tree().m_previousSibling = &newChild;
     if (oldPreviousSibling)
         oldPreviousSibling->tree().m_nextSibling = &newChild;
+
+    adjustRemoteFrameDescendantCountForSelfAndAncestors(newTree.remoteFrameCountIncludingSelf());
+    ASSERT(m_remoteFrameDescendantCount == remoteFrameDescendantCountSlow());
 }
 
 static bool NODELETE inScope(Frame& frame, TreeScope& scope)
@@ -361,6 +418,29 @@ bool NODELETE FrameTree::isDescendantOf(const Frame* ancestor) const
     return false;
 }
 
+bool FrameTree::containsRemoteFrame() const
+{
+    return !!remoteFrameCountIncludingSelf();
+}
+
+bool FrameTree::containsLocalFrame() const
+{
+    for (RefPtr frame = m_thisFrame.ptr(); frame; frame = frame->tree().traverseNext(m_thisFrame.ptr())) {
+        if (is<LocalFrame>(*frame))
+            return true;
+    }
+    return false;
+}
+
+bool FrameTree::hasRemoteFrameAncestor() const
+{
+    for (RefPtr ancestor = parent(); ancestor; ancestor = ancestor->tree().parent()) {
+        if (is<RemoteFrame>(*ancestor))
+            return true;
+    }
+    return false;
+}
+
 Frame* FrameTree::traverseNext(const Frame* stayWithin) const
 {
     auto* child = firstChild();
@@ -569,15 +649,6 @@ unsigned FrameTree::depth() const
     for (auto* parent = m_thisFrame.ptr(); parent; parent = parent->tree().parent())
         depth++;
     return depth;
-}
-
-bool FrameTree::hasRemoteFrameDescendant() const
-{
-    for (RefPtr frame = firstChild(); frame; frame = frame->tree().traverseNext(m_thisFrame.ptr())) {
-        if (is<RemoteFrame>(*frame))
-            return true;
-    }
-    return false;
 }
 
 AtomString FrameTree::uniqueName() const

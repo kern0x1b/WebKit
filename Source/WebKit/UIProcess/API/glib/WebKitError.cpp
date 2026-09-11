@@ -35,7 +35,7 @@ using namespace WebCore;
  */
 GQuark webkit_network_error_quark()
 {
-    return g_quark_from_string(API::Error::webKitNetworkErrorDomain().utf8().data());
+    return g_quark_from_string(API::Error::webKitNetworkErrorDomain().utf8().legacyCStringPointer());
 }
 
 /**
@@ -47,7 +47,7 @@ GQuark webkit_network_error_quark()
  */
 GQuark webkit_policy_error_quark()
 {
-    return g_quark_from_string(API::Error::webKitPolicyErrorDomain().utf8().data());
+    return g_quark_from_string(API::Error::webKitPolicyErrorDomain().utf8().legacyCStringPointer());
 }
 
 /**
@@ -59,7 +59,7 @@ GQuark webkit_policy_error_quark()
  */
 GQuark webkit_plugin_error_quark()
 {
-    return g_quark_from_string(API::Error::webKitPluginErrorDomain().utf8().data());
+    return g_quark_from_string(API::Error::webKitPluginErrorDomain().utf8().legacyCStringPointer());
 }
 
 /**
@@ -71,7 +71,7 @@ GQuark webkit_plugin_error_quark()
  */
 GQuark webkit_download_error_quark()
 {
-    return g_quark_from_string(API::Error::webKitDownloadErrorDomain().utf8().data());
+    return g_quark_from_string(API::Error::webKitDownloadErrorDomain().utf8().legacyCStringPointer());
 }
 
 #if PLATFORM(GTK)
@@ -84,7 +84,7 @@ GQuark webkit_download_error_quark()
  */
 GQuark webkit_print_error_quark()
 {
-    return g_quark_from_string(API::Error::webKitPrintErrorDomain().utf8().data());
+    return g_quark_from_string(API::Error::webKitPrintErrorDomain().utf8().legacyCStringPointer());
 }
 #endif
 
@@ -125,6 +125,20 @@ GQuark webkit_snapshot_error_quark()
 GQuark webkit_web_extension_error_quark()
 {
     return g_quark_from_static_string("WebKitWebExtensionError");
+}
+
+/**
+ * webkit_web_extension_context_error_quark:
+ *
+ * Gets the quark for the domain of Web Extension Context errors.
+ *
+ * Returns: web extension context error domain.
+ *
+ * Since: 2.56
+ */
+GQuark webkit_web_extension_context_error_quark()
+{
+    return g_quark_from_static_string("WebKitWebExtensionContextError");
 }
 #endif
 

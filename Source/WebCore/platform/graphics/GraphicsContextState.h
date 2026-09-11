@@ -61,13 +61,6 @@ public:
     };
     using ChangeFlags = OptionSet<Change>;
 
-    struct ChangeIndex {
-        Change toChange() { return static_cast<Change>(1 << value); }
-
-        uint32_t value;
-    };
-    static constexpr ChangeIndex toIndex(GraphicsContextState::Change change) { return { WTF::ctz(std::to_underlying(change)) }; }
-
     static constexpr ChangeFlags basicChangeFlags { Change::StrokeThickness, Change::StrokeBrush, Change::FillBrush };
     static constexpr ChangeFlags strokeChangeFlags { Change::StrokeThickness, Change::StrokeBrush };
 
@@ -79,11 +72,25 @@ public:
 
     WEBCORE_EXPORT GraphicsContextState(const ChangeFlags& = { }, InterpolationQuality = InterpolationQuality::Default);
 
+    // The initial state for a context that knows nothing about the state of the context its output
+    // will be applied to. Every property is indeterminate, so every setter is observed.
+    static GraphicsContextState initialIndeterminate()
+    {
+        GraphicsContextState state;
+        state.m_indeterminateProperties = ChangeFlags::all();
+        return state;
+    }
+
     void repurpose(Purpose);
     GraphicsContextState clone(Purpose) const;
 
     ChangeFlags changes() const { return m_changeFlags; }
     void didApplyChanges() { m_changeFlags = { }; }
+
+    // The mask travels with save() and restore(), matching what the other context does to its own
+    // state: a property established inside a save block is unknown again after the restore.
+    ChangeFlags indeterminateProperties() const { return m_indeterminateProperties; }
+    void markDeterminate(ChangeFlags properties) { m_indeterminateProperties.remove(properties); }
 
     SourceBrush& fillBrush() LIFETIME_BOUND { return m_fillBrush; }
     const SourceBrush& fillBrush() const LIFETIME_BOUND { return m_fillBrush; }
@@ -141,9 +148,18 @@ public:
     bool drawLuminanceMask() const { return m_drawLuminanceMask; }
     void setDrawLuminanceMask(bool drawLuminanceMask) { setProperty(Change::DrawLuminanceMask, &GraphicsContextState::m_drawLuminanceMask, drawLuminanceMask); }
 
-    void mergeLastChanges(const GraphicsContextState&, const std::optional<GraphicsContextState>& lastDrawingState = std::nullopt);
-    void mergeSingleChange(const GraphicsContextState&, ChangeIndex, const std::optional<GraphicsContextState>& lastDrawingState = std::nullopt);
+    void mergeLastChanges(const GraphicsContextState&);
     void mergeAllChanges(const GraphicsContextState&);
+
+    // Removes change bit for each property that matches another state property.
+    WEBCORE_EXPORT void filterLastChangesForMatching(const GraphicsContextState&);
+
+    // Copies the given properties from another state, without marking them changed here. Used to
+    // track what the underlying context has been given.
+    WEBCORE_EXPORT void copyPropertiesFrom(const GraphicsContextState&, ChangeFlags);
+
+    // Whether every property holds the same value, ignoring changes() and purpose(). For assertions.
+    WEBCORE_EXPORT bool propertiesEqualIgnoring(const GraphicsContextState&, ChangeFlags ignoredProperties) const;
 
     Purpose purpose() const { return m_purpose; }
 
@@ -152,11 +168,13 @@ public:
 private:
     friend struct IPC::ArgumentCoder<GraphicsContextState>;
 
+    template<typename Functor> static constexpr void forEachProperty(NOESCAPE const Functor&);
+
     template<typename T>
     void setProperty(Change change, T GraphicsContextState::*property, const T& value)
     {
 #if !USE(CAIRO)
-        if (this->*property == value)
+        if (this->*property == value && !m_indeterminateProperties.contains(change))
             return;
 #endif
         this->*property = value;
@@ -167,7 +185,7 @@ private:
     void setProperty(Change change, T GraphicsContextState::*property, T&& value)
     {
 #if !USE(CAIRO)
-        if (this->*property == value)
+        if (this->*property == value && !m_indeterminateProperties.contains(change))
             return;
 #endif
         this->*property = std::forward<T>(value);
@@ -176,7 +194,11 @@ private:
 
     SourceBrush m_fillBrush { Color::black };
     SourceBrush m_strokeBrush { Color::black };
+    // Changes not appiled to the underlying platform context.
     ChangeFlags m_changeFlags;
+    // Properties whose value in the context this state is being applied to is unknown. A setter for
+    // such a property is never elided. Used for display list recording.
+    ChangeFlags m_indeterminateProperties;
     float m_strokeThickness { 0 };
     WindRule m_fillRule { WindRule::NonZero };
     StrokeStyle m_strokeStyle { StrokeStyle::SolidStroke };

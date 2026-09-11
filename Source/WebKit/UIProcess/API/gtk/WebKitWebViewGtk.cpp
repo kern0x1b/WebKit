@@ -66,7 +66,7 @@ gboolean webkitWebViewAuthenticate(WebKitWebView* webView, WebKitAuthenticationR
 
 gboolean webkitWebViewScriptDialog(WebKitWebView* webView, WebKitScriptDialog* scriptDialog)
 {
-    GUniquePtr<char> title(g_strdup_printf("JavaScript - %s", webkitWebViewGetPage(webView).pageLoadState().url().string().utf8().data()));
+    GUniquePtr<char> title(g_strdup_printf("JavaScript - %s", webkitWebViewGetPage(webView).pageLoadState().url().string().utf8().legacyCStringPointer()));
     // Limit script dialog size to 80% of the web view size.
     GtkRequisition maxSize = { static_cast<int>(gtk_widget_get_allocated_width(GTK_WIDGET(webView)) * 0.80), static_cast<int>(gtk_widget_get_allocated_height(GTK_WIDGET(webView)) * 0.80) };
     webkitWebViewBaseAddDialog(WEBKIT_WEB_VIEW_BASE(webView), webkitScriptDialogImplNew(scriptDialog, title.get(), &maxSize));
@@ -499,4 +499,41 @@ gboolean webkit_web_view_get_theme_color(WebKitWebView* webView, GdkRGBA* rgba)
 
     *rgba = WebKit::colorToGdkRGBA(page.themeColor());
     return TRUE;
+}
+
+guint createRunColorChooserSignal(WebKitWebViewClass* webViewClass)
+{
+    /**
+     * WebKitWebView::run-color-chooser:
+     * @web_view: the [class@WebView] on which the signal is emitted
+     * @request: a [class@ColorChooserRequest]
+     *
+     * This signal is emitted when the user interacts with a <input
+     * type='color' /> HTML element, requesting from WebKit to show
+     * a dialog to select a color. To let the application know the details of
+     * the color chooser, as well as to allow the client application to either
+     * cancel the request or perform an actual color selection, the signal will
+     * pass an instance of the [class@ColorChooserRequest] in the @request
+     * argument.
+     *
+     * It is possible to handle this request asynchronously by increasing the
+     * reference count of the request.
+     *
+     * The default signal handler will asynchronously run a regular
+     * [class@Gtk.ColorChooserDialog] for the user to interact with.
+     *
+     * Returns: %TRUE to stop other handlers from being invoked for the event.
+     *   %FALSE to propagate the event further.
+     *
+     * Since: 2.8
+     */
+    return g_signal_new(
+        "run-color-chooser",
+        G_TYPE_FROM_CLASS(webViewClass),
+        G_SIGNAL_RUN_LAST,
+        G_STRUCT_OFFSET(WebKitWebViewClass, run_color_chooser),
+        g_signal_accumulator_true_handled, nullptr,
+        g_cclosure_marshal_generic,
+        G_TYPE_BOOLEAN, 1,
+        WEBKIT_TYPE_COLOR_CHOOSER_REQUEST);
 }

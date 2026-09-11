@@ -191,7 +191,7 @@ void Image::fillWithSolidColor(GraphicsContext& ctxt, const FloatRect& dstRect, 
     ctxt.setCompositeOperation(previousOperator);
 }
 
-RefPtr<NativeImage> Image::nativeImage(const DestinationColorSpace&)
+RefPtr<NativeImage> Image::nativeImage(const ColorSpace&)
 {
     return nullptr;
 }
@@ -424,9 +424,9 @@ void Image::startAnimationAsynchronously()
     m_animationStartTimer->startOneShot(0_s);
 }
 
-DestinationColorSpace Image::colorSpace()
+ColorSpace Image::colorSpace()
 {
-    return DestinationColorSpace::SRGB();
+    return ColorSpace::SRGB();
 }
 
 RefPtr<ShareableBitmap> Image::toShareableBitmap() const
@@ -493,6 +493,21 @@ void Image::setSystemAllowsAnimationControls(bool allowsControls)
 std::optional<Color> Image::singlePixelSolidColor() const
 {
     return std::nullopt;
+}
+
+ImageObserverDisableScope::ImageObserverDisableScope(Image& image, bool disable)
+    : m_image(image)
+    , m_observer(disable ? image.imageObserver() : nullptr)
+    , m_disable(disable)
+{
+    if (m_disable)
+        m_image->setImageObserver(nullptr);
+}
+
+ImageObserverDisableScope::~ImageObserverDisableScope()
+{
+    if (m_disable)
+        m_image->setImageObserver(WTF::move(m_observer));
 }
 
 } // namespace WebCore

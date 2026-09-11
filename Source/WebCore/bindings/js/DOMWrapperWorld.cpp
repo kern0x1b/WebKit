@@ -31,17 +31,6 @@
 #include <JavaScriptCore/WeakInlines.h>
 #include <wtf/MainThread.h>
 
-#if PLATFORM(COCOA)
-#include <mutex>
-#include <sys/mman.h>
-#include <wtf/FastMalloc.h>
-#include <wtf/HashMap.h>
-#include <wtf/Lock.h>
-#include <wtf/NeverDestroyed.h>
-#include <wtf/PageBlock.h>
-#include <wtf/WeakRandomNumber.h>
-#endif
-
 namespace WebCore {
 using namespace JSC;
 
@@ -149,9 +138,6 @@ DOMWrapperWorld::DOMWrapperWorld(JSC::VM& vm, Type type, const String& name)
     , m_name(name)
     , m_type(type)
 {
-#if PLATFORM(COCOA)
-    initializeWrapperMapGuardingOnce();
-#endif
     VM::ClientData* clientData = m_vm.clientData;
     ASSERT(clientData);
     downcast<JSVMClientData>(clientData)->rememberWorld(*this);
@@ -162,15 +148,6 @@ DOMWrapperWorld::~DOMWrapperWorld()
     VM::ClientData* clientData = m_vm.clientData;
     ASSERT(clientData);
     downcast<JSVMClientData>(clientData)->forgetWorld(*this);
-
-    // The m_wrappers member destructor (runs after this body) destroys buckets and frees the
-    // table, which writes to it; make the read-only backing writable so those writes don't fault.
-#if PLATFORM(COCOA)
-    if (m_wrappersTableBase) {
-        mprotect(m_wrappersTableBase, m_wrappersTableSize, PROT_READ | PROT_WRITE);
-        m_wrappersTableWritableDepth = 0;
-    }
-#endif
 
     // These items are created lazily.
     while (!m_jsWindowProxies.isEmpty())
@@ -186,10 +163,7 @@ void DOMWrapperWorld::clearWrappers()
             eventListener->invalidate();
     }
 
-    {
-        WrapperMutationScope scope { *this };
-        m_wrappers.clear();
-    }
+    m_wrappers.clear();
 
     // These items are created lazily.
     while (!m_jsWindowProxies.isEmpty())

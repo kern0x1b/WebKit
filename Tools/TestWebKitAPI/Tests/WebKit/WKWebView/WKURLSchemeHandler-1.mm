@@ -1867,6 +1867,44 @@ TEST(URLSchemeHandler, Redirect302FromHTTPToHandledScheme)
     runRedirectToHandledSchemeTest(302);
 }
 
+TEST(URLSchemeHandler, ModuleDescendantFetchDoesNotSendReferrer)
+{
+    __block RetainPtr<NSString> dependencyReferrer;
+    __block bool fetchedDependency = false;
+    RetainPtr handler = adoptNS([TestURLSchemeHandler new]);
+    [handler setStartURLSchemeTaskHandler:^(WKWebView *, id<WKURLSchemeTask> task) {
+        NSString *path = task.request.URL.path;
+        NSString *mimeType = @"text/javascript";
+        NSString *body = @"";
+        if ([path isEqualToString:@"/index.html"]) {
+            mimeType = @"text/html";
+            body = @"<meta name='referrer' content='no-referrer'><script type='module' src='/importer.js'></script>";
+        } else if ([path isEqualToString:@"/importer.js"])
+            body = @"import '/dependency.js';";
+        else {
+            EXPECT_WK_STREQ("/dependency.js", path);
+            dependencyReferrer = [task.request valueForHTTPHeaderField:@"Referer"];
+            fetchedDependency = true;
+        }
+
+        NSData *data = [body dataUsingEncoding:NSUTF8StringEncoding];
+        RetainPtr response = adoptNS([[NSURLResponse alloc] initWithURL:task.request.URL MIMEType:mimeType expectedContentLength:data.length textEncodingName:nil]);
+        [task didReceiveResponse:response.get()];
+        [task didReceiveData:data];
+        [task didFinish];
+    }];
+
+    RetainPtr configuration = adoptNS([WKWebViewConfiguration new]);
+    [configuration setURLSchemeHandler:handler.get() forURLScheme:@"module-referrer"];
+    RetainPtr webView = adoptNS([[WKWebView alloc] initWithFrame:CGRectMake(0, 0, 800, 600) configuration:configuration.get()]);
+    [webView loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:@"module-referrer://webkit.org/index.html"]]];
+    TestWebKitAPI::Util::run(&fetchedDependency);
+
+    // The descendant fetch of a module script sends the importing script's URL as its referrer, but only
+    // an HTTP(S) fetch gets a Referer header, and only those have the referrer policy applied to them.
+    EXPECT_NULL(dependencyReferrer.get());
+}
+
 static void respondForCrossOriginTest(id<WKURLSchemeTask> task)
 {
     NSURL *url = task.request.URL;
@@ -2019,55 +2057,6 @@ TEST(URLSchemeHandler, LoadFileURLNoCorsSubresourceAllowed)
     EXPECT_TRUE([receivedPaths containsObject:@"/data"]);
 
     [[NSFileManager defaultManager] removeItemAtPath:tempDir error:nil];
-}
-
-TEST(URLSchemeHandler, LoadCustomSchemeNoCorsCrossSchemeSubresourceAllowed)
-{
-    RetainPtr receivedPaths = adoptNS([[NSMutableArray alloc] init]);
-    RetainPtr documentSchemeHandler = adoptNS([TestURLSchemeHandler new]);
-    [documentSchemeHandler setStartURLSchemeTaskHandler:^(WKWebView *, id<WKURLSchemeTask> task) {
-        [receivedPaths addObject:task.request.URL.path];
-        NSURL *url = task.request.URL;
-        // Reference the other app scheme (bookimg://) absolutely so the subresource loads are cross-scheme.
-        NSString *html = @"<!doctype html><html><head><script>"
-            "let results = {};"
-            "function report() {"
-            "if ('script' in results && 'fetch' in results)"
-            "alert('script=' + results.script + '|fetch=' + results.fetch);"
-            "}"
-            "window.addEventListener('load', () => {"
-            "const s = document.createElement('script');"
-            "s.src = 'bookimg://host.test/config';"
-            "s.onload = () => { results.script = 'executed:' + (window.LEAKED_CONFIG || 'unset'); report(); };"
-            "s.onerror = () => { results.script = 'blocked'; report(); };"
-            "document.head.appendChild(s);"
-            "fetch('bookimg://host.test/data', { mode: 'no-cors' })"
-            ".then(() => { results.fetch = 'ok'; report(); })"
-            ".catch(() => { results.fetch = 'blocked'; report(); });"
-            "});"
-            "</script></head><body>page</body></html>";
-        NSData *data = [html dataUsingEncoding:NSUTF8StringEncoding];
-        RetainPtr response = adoptNS([[NSHTTPURLResponse alloc] initWithURL:url statusCode:200 HTTPVersion:@"HTTP/1.1" headerFields:@{ @"Content-Type": @"text/html" }]);
-        [task didReceiveResponse:response.get()];
-        [task didReceiveData:data];
-        [task didFinish];
-    }];
-    RetainPtr subresourceSchemeHandler = adoptNS([TestURLSchemeHandler new]);
-    [subresourceSchemeHandler setStartURLSchemeTaskHandler:^(WKWebView *, id<WKURLSchemeTask> task) {
-        [receivedPaths addObject:task.request.URL.path];
-        respondForCrossOriginTest(task);
-    }];
-
-    RetainPtr configuration = adoptNS([[WKWebViewConfiguration alloc] init]);
-    [configuration setURLSchemeHandler:documentSchemeHandler.get() forURLScheme:@"bookapp"];
-    [configuration setURLSchemeHandler:subresourceSchemeHandler.get() forURLScheme:@"bookimg"];
-
-    RetainPtr webView = adoptNS([[TestWKWebView alloc] initWithFrame:NSMakeRect(0, 0, 800, 600) configuration:configuration.get()]);
-    [webView loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:@"bookapp://host.test/page.html"]]];
-
-    EXPECT_WK_STREQ([webView _test_waitForAlert], "script=executed:secret-value|fetch=ok");
-    EXPECT_TRUE([receivedPaths containsObject:@"/config"]);
-    EXPECT_TRUE([receivedPaths containsObject:@"/data"]);
 }
 
 // Verifies that cross origin requests to a custom scheme handler work as expected,

@@ -39,6 +39,7 @@
 namespace WebCore {
 struct FetchOptions;
 struct MessageWithMessagePorts;
+class PendingStreamState;
 class ResourceRequest;
 class Site;
 }
@@ -77,7 +78,6 @@ public:
     void didReceiveMessage(IPC::Connection&, IPC::Decoder&) final;
 
     void startFetch(ServiceWorkerFetchTask&);
-    void cancelFetch(WebCore::SWServerConnectionIdentifier, WebCore::FetchIdentifier, WebCore::ServiceWorkerIdentifier);
 
     void didReceiveFetchTaskMessage(IPC::Connection&, IPC::Decoder&);
 
@@ -131,12 +131,16 @@ private:
     void fireBackgroundFetchEvent(WebCore::ServiceWorkerIdentifier, const WebCore::BackgroundFetchInformation&, CompletionHandler<void(bool)>&&) final;
     void fireBackgroundFetchClickEvent(WebCore::ServiceWorkerIdentifier, const WebCore::BackgroundFetchInformation&, CompletionHandler<void(bool)>&&) final;
     void focus(WebCore::ScriptExecutionContextIdentifier, CompletionHandler<void(std::optional<WebCore::ServiceWorkerClientData>&&)>&&);
-    void navigate(WebCore::ScriptExecutionContextIdentifier, WebCore::ServiceWorkerIdentifier, const URL&, CompletionHandler<void(Expected<std::optional<WebCore::ServiceWorkerClientData>, WebCore::ExceptionData>&&)>&&);
+    void navigate(WebCore::ScriptExecutionContextIdentifier, WebCore::ServiceWorkerIdentifier, const URL&, CompletionHandler<void(std::expected<std::optional<WebCore::ServiceWorkerClientData>, WebCore::ExceptionData>&&)>&&);
 
     void connectionIsNoLongerNeeded() final;
     void terminateDueToUnresponsiveness() final;
     void openWindow(WebCore::ServiceWorkerIdentifier, const URL&, OpenWindowCallback&&) final;
     void reportConsoleMessage(WebCore::ServiceWorkerIdentifier, MessageSource, MessageLevel, const String& message, uint64_t requestIdentifier);
+    void startPendingStreamUploadForwarding(WebCore::FetchIdentifier);
+    void pendingStreamDataAvailable(WebCore::FetchIdentifier);
+    void cancelPendingStreamUploadForwarding(WebCore::FetchIdentifier);
+    void pendingStreamUploadNeedData(WebCore::FetchIdentifier);
 
     void connectionClosed();
 
@@ -148,6 +152,7 @@ private:
     WeakPtr<NetworkConnectionToWebProcess> m_connection;
     HashMap<WebCore::FetchIdentifier, WeakPtr<ServiceWorkerFetchTask>> m_ongoingFetches;
     HashMap<WebCore::FetchIdentifier, ThreadSafeWeakPtr<ServiceWorkerDownloadTask>> m_ongoingDownloads;
+    HashMap<WebCore::FetchIdentifier, Ref<WebCore::PendingStreamState>> m_requestPendingStreamStates;
     bool m_isThrottleable { true };
     WebPageProxyIdentifier m_webPageProxyID;
     size_t m_processingFunctionalEventCount { 0 };

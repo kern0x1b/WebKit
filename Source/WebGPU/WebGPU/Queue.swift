@@ -23,8 +23,9 @@
 
 import Metal
 import WebGPU_Internal.Queue
+import WebGPU_Private.WebGPUExt
 
-private let largeBufferSize = 32 * 1024 * 1024
+private let largeBufferSize = Int(WGPU_LARGE_BUFFER_SIZE)
 
 @_expose(Cxx)
 func queueWriteBuffer(_ queue: WebGPU.Queue, buffer: any MTLBuffer, bufferOffset: UInt64, data: WebGPU.SpanUInt8) {
@@ -35,10 +36,6 @@ func queueWriteBuffer(_ queue: WebGPU.Queue, buffer: any MTLBuffer, bufferOffset
 extension WebGPU.Queue {
     func writeBuffer(buffer: any MTLBuffer, bufferOffset: UInt64, data: consuming MutableSpan<UInt8>) {
         guard self.metalDevice() != nil else {
-            return
-        }
-
-        guard let blitCommandEncoder = ensureBlitCommandEncoder() else {
             return
         }
 
@@ -54,16 +51,11 @@ extension WebGPU.Queue {
             return
         }
 
-        blitCommandEncoder.copy(
-            from: temporaryBuffer,
-            sourceOffset: Int(temporaryBufferOffset),
-            to: buffer,
-            destinationOffset: Int(bufferOffset),
-            size: count
-        )
-
-        if noCopy {
-            finalizeBlitCommandEncoder()
-        }
+        // Shared channel decision with the C++ backend (Queue::encodeStagedCopy): the staged copy
+        // is encoded on the compute channel when possible, because standalone blit-only staging
+        // command buffers interleaved with user compute submissions intermittently deadlock the
+        // AGX blit/DMA channel. See Queue.mm for the full rationale. Passing the staging buffer
+        // and byte offsets keeps this call free of span interop, so it needs no 'unsafe'.
+        encodeStagedCopy(temporaryBuffer, temporaryBufferOffset, buffer, bufferOffset, UInt64(count), noCopy)
     }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015-2023 Apple Inc. All rights reserved.
+ * Copyright (C) 2015-2026 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -69,6 +69,7 @@
 #include "ImageBitmap.h"
 #include "ImageBuffer.h"
 #include "ImageData.h"
+#include "ImageObserver.h"
 #include "InspectorInstrumentation.h"
 #include "IntSize.h"
 #include "JSDOMPromiseDeferred.h"
@@ -80,6 +81,7 @@
 #include "LocalFrameView.h"
 #include "Logging.h"
 #include "NVShaderNoperspectiveInterpolation.h"
+#include "NativeImage.h"
 #include "NavigatorWebXR.h"
 #include "NotImplemented.h"
 #include "OESDrawBuffersIndexed.h"
@@ -193,6 +195,11 @@ static constexpr size_t maxActiveWorkerContexts = 4;
 template <typename T> static IntRect texImageSourceSize(T& source)
 {
     return { 0, 0, static_cast<int>(source.width()), static_cast<int>(source.height()) };
+}
+
+static IntRect texImageSourceSize(NativeImage& source)
+{
+    return { { }, source.size() };
 }
 
 // Return true if a character belongs to the ASCII subset as defined in
@@ -406,13 +413,13 @@ static constexpr GCGLErrorCode NODELETE glEnumToErrorCode(GCGLenum error)
 }
 
 // Conversion function converting GraphicsContextGL member function results that are directly
-// CStrings. The returned values might be null on implementation error or context loss during
+// UTF8CStrings. The returned values might be null on implementation error or context loss during
 // that function.
-static String ensureNotNull(const CString& text)
+static String toNonNullString(const UTF8CString& text)
 {
     if (text.isNull())
         return emptyString();
-    return String::fromUTF8(text.span());
+    return text;
 }
 
 static GraphicsContextGL::SurfaceBuffer NODELETE toGCGLSurfaceBuffer(CanvasRenderingContext::SurfaceBuffer buffer)
@@ -536,8 +543,8 @@ void WebGLRenderingContextBase::initializeNewContext(Ref<GraphicsContextGL> cont
 void WebGLRenderingContextBase::initializeContextState()
 {
     m_errors = { };
-    m_readDisplayBuffer = nullptr;
-    m_readDrawingBuffer = nullptr;
+    m_readDisplayBuffer.clear();
+    m_readDrawingBuffer.clear();
     m_compositingResultsNeedUpdating = false;
     m_activeTextureUnit = 0;
     m_packParameters = { };
@@ -599,7 +606,7 @@ void WebGLRenderingContextBase::initializeContextState()
     m_drawBuffersWebGLRequirementsChecked = false;
     m_drawBuffersSupported = false;
 
-    context->setDrawingBufferColorSpace(toDestinationColorSpace(m_drawingBufferColorSpace));
+    context->setDrawingBufferColorSpace(toColorSpace(m_drawingBufferColorSpace));
 
     IntSize canvasSize = clampedCanvasSize();
     context->viewport(0, 0, canvasSize.width(), canvasSize.height());
@@ -678,7 +685,7 @@ void WebGLRenderingContextBase::destroyGraphicsContextGL()
     }
 }
 
-void WebGLRenderingContextBase::markContextChangedAndNotifyCanvasObserver(WebGLRenderingContextBase::CallerType caller)
+void WebGLRenderingContextBase::willUpdateDrawingBufferContents(WebGLRenderingContextBase::CallerType caller)
 {
     // Draw and clear ops with rasterizer discard enabled do not change the canvas.
     if (caller == CallerTypeDrawOrClear && m_rasterizerDiscardEnabled)
@@ -689,11 +696,11 @@ void WebGLRenderingContextBase::markContextChangedAndNotifyCanvasObserver(WebGLR
         return;
 
     m_compositingResultsNeedUpdating = true;
-    if (m_readDrawingBuffer) {
-        m_readDrawingBuffer = nullptr;
+    if (!m_readDrawingBuffer.isEmpty()) {
+        m_readDrawingBuffer.clear();
         updateMemoryCost();
     }
-    markCanvasChanged();
+    willUpdateCanvasContents();
 }
 
 bool WebGLRenderingContextBase::clearIfComposited(WebGLRenderingContextBase::CallerType caller, GCGLbitfield mask)
@@ -773,7 +780,49 @@ bool WebGLRenderingContextBase::clearIfComposited(WebGLRenderingContextBase::Cal
 // Temporary function to create image buffer for backing store reads until NativeImages are used.
 static RefPtr<ImageBuffer> createImageBufferForWebGLContextReads(IntSize size, ScriptExecutionContext& scriptExecutionContext)
 {
-    return ImageBuffer::create(size, RenderingMode::Accelerated, RenderingPurpose::Canvas, 1, DestinationColorSpace::SRGB(), PixelFormat::BGRA8, scriptExecutionContext.graphicsClient());
+    return ImageBuffer::create(size, RenderingMode::Accelerated, RenderingPurpose::Canvas, 1, ColorSpace::SRGB(), PixelFormat::BGRA8, scriptExecutionContext.graphicsClient());
+}
+
+void WebGLRenderingContextBase::ReadSurfaceBuffer::clear()
+{
+    image = nullptr;
+    buffer = nullptr;
+}
+
+size_t WebGLRenderingContextBase::ReadSurfaceBuffer::memoryCost() const
+{
+    size_t cost = 0;
+    if (RefPtr image = this->image)
+        cost += image->sizeInBytes();
+    if (RefPtr buffer = this->buffer)
+        cost += buffer->memoryCost();
+    return cost;
+}
+
+auto WebGLRenderingContextBase::readSurfaceBuffer(SurfaceBuffer sourceBuffer) -> ReadSurfaceBuffer&
+{
+    return sourceBuffer == SurfaceBuffer::DrawingBuffer ? m_readDrawingBuffer : m_readDisplayBuffer;
+}
+
+RefPtr<NativeImage> WebGLRenderingContextBase::surfaceBufferToNativeImage(SurfaceBuffer sourceBuffer)
+{
+    auto size = clampedCanvasSize();
+    if (size.isEmpty())
+        return nullptr;
+    auto& readBuffer = readSurfaceBuffer(sourceBuffer);
+    if (readBuffer.image)
+        return readBuffer.image;
+    if (!isContextLost()) {
+        if (sourceBuffer == SurfaceBuffer::DrawingBuffer)
+            clearIfComposited(CallerTypeOther);
+        readBuffer.image = protect(graphicsContextGL())->copyNativeImage(toGCGLSurfaceBuffer(sourceBuffer));
+    }
+    // A lost context or a failed read is transparent black.
+    if (!readBuffer.image)
+        readBuffer.image = ImageBuffer::sinkIntoNativeImage(ImageBuffer::create(size, RenderingMode::Unaccelerated, RenderingPurpose::Unspecified, 1, ColorSpace::SRGB(), PixelFormat::BGRA8));
+    if (readBuffer.image)
+        updateMemoryCost();
+    return readBuffer.image;
 }
 
 RefPtr<ImageBuffer> WebGLRenderingContextBase::surfaceBufferToImageBuffer(SurfaceBuffer sourceBuffer)
@@ -784,33 +833,23 @@ RefPtr<ImageBuffer> WebGLRenderingContextBase::surfaceBufferToImageBuffer(Surfac
     auto size = clampedCanvasSize();
     if (size.isEmpty())
         return nullptr;
-    RefPtr<ImageBuffer> buffer;
-    if (sourceBuffer == SurfaceBuffer::DrawingBuffer) {
-        if (m_readDrawingBuffer)
-            return m_readDrawingBuffer;
-        m_readDrawingBuffer = createImageBufferForWebGLContextReads(size, *scriptExecutionContext);
-        updateMemoryCost();
-        buffer = m_readDrawingBuffer;
-    } else {
-        if (m_readDisplayBuffer)
-            return m_readDisplayBuffer;
-        m_readDisplayBuffer = createImageBufferForWebGLContextReads(size, *scriptExecutionContext);
-        updateMemoryCost();
-        buffer = m_readDisplayBuffer;
-    }
-    if (isContextLost())
-        return buffer;
+    auto& readBuffer = readSurfaceBuffer(sourceBuffer);
+    if (readBuffer.buffer)
+        return readBuffer.buffer;
+    // Obtain the image before creating the buffer, as obtaining it might invalidate the cache.
+    RefPtr image = surfaceBufferToNativeImage(sourceBuffer);
+    readBuffer.buffer = createImageBufferForWebGLContextReads(size, *scriptExecutionContext);
+    updateMemoryCost();
+    RefPtr buffer = readBuffer.buffer;
     if (!buffer)
+        return nullptr;
+    // A lost context or a failed read is a transparent black buffer.
+    if (!image)
         return buffer;
-    if (sourceBuffer == SurfaceBuffer::DrawingBuffer)
-        clearIfComposited(CallerTypeOther);
     // FIXME: Remote ImageBuffers do not flush the buffers that are drawn to a buffer.
     // Avoid leaking the WebGL content in the cases where a WebGL canvas element is drawn to a Context2D
     // canvas element repeatedly.
     buffer->flushDrawingContext();
-    RefPtr image = protect(graphicsContextGL())->copyNativeImageYFlipped(toGCGLSurfaceBuffer(sourceBuffer));
-    if (!image)
-        return buffer;
     GraphicsContextGL::paintToCanvas(*image, buffer->backendSize(), buffer->context());
     return buffer;
 }
@@ -825,7 +864,7 @@ RefPtr<ByteArrayPixelBuffer> WebGLRenderingContextBase::drawingBufferToPixelBuff
     auto size = clampedCanvasSize();
     if (size.isEmpty())
         return nullptr;
-    PixelBufferFormat format { AlphaPremultiplication::Unpremultiplied, PixelFormat::RGBA8, DestinationColorSpace::SRGB() };
+    PixelBufferFormat format { AlphaPremultiplication::Unpremultiplied, PixelFormat::RGBA8, ColorSpace::SRGB() };
     auto pixelBuffer = ByteArrayPixelBuffer::tryCreate(format, size);
     if (!pixelBuffer)
         return nullptr;
@@ -880,7 +919,7 @@ RefPtr<ImageBuffer> WebGLRenderingContextBase::transferToImageBuffer()
         return nullptr;
     if (compositingResultsNeedUpdating())
         prepareForDisplay();
-    RefPtr image = protect(graphicsContextGL())->copyNativeImageYFlipped(GraphicsContextGL::SurfaceBuffer::DisplayBuffer);
+    RefPtr image = protect(graphicsContextGL())->copyNativeImage(GraphicsContextGL::SurfaceBuffer::DisplayBuffer);
     if (image)
         GraphicsContextGL::paintToCanvas(*image, buffer->backendSize(), buffer->context());
     // Any draw or read sees cleared drawing buffer.
@@ -893,8 +932,8 @@ RefPtr<ImageBuffer> WebGLRenderingContextBase::transferToImageBuffer()
 void WebGLRenderingContextBase::didUpdateCanvasSizeProperties(bool)
 {
     if (isContextLost()) {
-        m_readDrawingBuffer = nullptr;
-        m_readDisplayBuffer = nullptr;
+        m_readDrawingBuffer.clear();
+        m_readDisplayBuffer.clear();
         updateMemoryCost();
         return;
     }
@@ -903,8 +942,8 @@ void WebGLRenderingContextBase::didUpdateCanvasSizeProperties(bool)
     if (newSize == m_defaultFramebuffer->size())
         return;
 
-    m_readDrawingBuffer = nullptr;
-    m_readDisplayBuffer = nullptr;
+    m_readDrawingBuffer.clear();
+    m_readDisplayBuffer.clear();
 
     m_defaultFramebuffer->reshape(newSize);
     updateMemoryCost();
@@ -943,7 +982,7 @@ void WebGLRenderingContextBase::setDrawingBufferColorSpace(PredefinedColorSpace 
     if (isContextLost())
         return;
 
-    protect(graphicsContextGL())->setDrawingBufferColorSpace(toDestinationColorSpace(colorSpace));
+    protect(graphicsContextGL())->setDrawingBufferColorSpace(toColorSpace(colorSpace));
 }
 
 unsigned WebGLRenderingContextBase::sizeInBytes(GCGLenum type)
@@ -1269,9 +1308,10 @@ void WebGLRenderingContextBase::clear(GCGLbitfield mask)
 {
     if (isContextLost())
         return;
-    if (!clearIfComposited(CallerTypeDrawOrClear, mask))
+    willUpdateDrawingBufferContents();
+    bool cleared = clearIfComposited(CallerTypeDrawOrClear, mask);
+    if (!cleared)
         protect(graphicsContextGL())->clear(mask);
-    markContextChangedAndNotifyCanvasObserver();
 }
 
 void WebGLRenderingContextBase::clearColor(GCGLfloat r, GCGLfloat g, GCGLfloat b, GCGLfloat a)
@@ -1642,14 +1682,13 @@ void WebGLRenderingContextBase::drawArrays(GCGLenum mode, GCGLint first, GCGLsiz
     if (RefPtr currentProgram = m_currentProgram; currentProgram && InspectorInstrumentation::isWebGLProgramDisabled(*this, *currentProgram))
         return;
 
+    willUpdateDrawingBufferContents();
     clearIfComposited(CallerTypeDrawOrClear);
 
     {
         ScopedInspectorShaderProgramHighlight scopedHighlight { *this };
         protect(graphicsContextGL())->drawArrays(mode, first, count);
     }
-
-    markContextChangedAndNotifyCanvasObserver();
 }
 
 void WebGLRenderingContextBase::drawElements(GCGLenum mode, GCGLsizei count, GCGLenum type, long long offset)
@@ -1662,13 +1701,13 @@ void WebGLRenderingContextBase::drawElements(GCGLenum mode, GCGLsizei count, GCG
     if (RefPtr currentProgram = m_currentProgram; currentProgram && InspectorInstrumentation::isWebGLProgramDisabled(*this, *currentProgram))
         return;
 
+    willUpdateDrawingBufferContents();
     clearIfComposited(CallerTypeDrawOrClear);
 
     {
         ScopedInspectorShaderProgramHighlight scopedHighlight { *this };
         protect(graphicsContextGL())->drawElements(mode, count, type, static_cast<GCGLintptr>(offset));
     }
-    markContextChangedAndNotifyCanvasObserver();
 }
 
 void WebGLRenderingContextBase::enable(GCGLenum cap)
@@ -1841,12 +1880,12 @@ GCGLint WebGLRenderingContextBase::getAttribLocation(WebGLProgram& program, cons
         return -1;
     if (!validateString("getAttribLocation"_s, name))
         return -1;
-    if (isPrefixReserved(name))
-        return -1;
     if (!program.linkStatus()) {
         synthesizeGLError(GraphicsContextGL::INVALID_OPERATION, "getAttribLocation"_s, "program not linked"_s);
         return -1;
     }
+    if (isPrefixReserved(name))
+        return -1;
     return program.attribLocations().getOptional(name).value_or(-1);
 }
 
@@ -2264,7 +2303,7 @@ String WebGLRenderingContextBase::getProgramInfoLog(WebGLProgram& program)
         return { };
     if (!validateWebGLObject("getProgramInfoLog"_s, program))
         return { };
-    return ensureNotNull(protect(graphicsContextGL())->getProgramInfoLog(program.object()));
+    return toNonNullString(protect(graphicsContextGL())->getProgramInfoLog(program.object()));
 }
 
 WebGLAny WebGLRenderingContextBase::getRenderbufferParameter(GCGLenum target, GCGLenum pname)
@@ -2372,7 +2411,7 @@ String WebGLRenderingContextBase::getShaderInfoLog(WebGLShader& shader)
         return { };
     if (!validateWebGLObject("getShaderInfoLog"_s, shader))
         return { };
-    return ensureNotNull(protect(graphicsContextGL())->getShaderInfoLog(shader.object()));
+    return toNonNullString(protect(graphicsContextGL())->getShaderInfoLog(shader.object()));
 }
 
 RefPtr<WebGLShaderPrecisionFormat> WebGLRenderingContextBase::getShaderPrecisionFormat(GCGLenum shaderType, GCGLenum precisionType)
@@ -2656,12 +2695,12 @@ RefPtr<WebGLUniformLocation> WebGLRenderingContextBase::getUniformLocation(WebGL
         return nullptr;
     if (!validateString("getUniformLocation"_s, name))
         return nullptr;
-    if (isPrefixReserved(name))
-        return nullptr;
     if (!program.linkStatus()) {
         synthesizeGLError(GraphicsContextGL::INVALID_OPERATION, "getUniformLocation"_s, "program not linked"_s);
         return nullptr;
     }
+    if (isPrefixReserved(name))
+        return nullptr;
     if (auto location = program.uniformLocations().getOptional(name))
         return WebGLUniformLocation::create(program, location.value());
     return nullptr;
@@ -3206,6 +3245,32 @@ static bool NODELETE isVideoFrameFormatEligibleToCopy(WebCodecsVideoFrame& frame
 }
 #endif // ENABLE(WEB_CODECS)
 
+namespace {
+// The image contents to upload, together with the premultiplication of the contents.
+struct TexImageSourceImage {
+    RefPtr<NativeImage> image;
+    AlphaPremultiplication alphaPremultiplication { AlphaPremultiplication::Premultiplied };
+};
+}
+
+// Obtains the image contents to upload. The decoded frame of an image may hold different values than
+// the ones the upload needs, e.g. the alpha may be premultiplied or the color profile may be applied.
+// In such cases decode the encoded data again with the properties the upload needs.
+static TexImageSourceImage nativeImageForTexImageSource(Image& image, bool premultiplyAlpha, bool ignoreGammaAndColorProfile)
+{
+    bool hasAlpha = !image.currentFrameKnownToBeOpaque();
+    if ((ignoreGammaAndColorProfile || (hasAlpha && !premultiplyAlpha)) && image.data()) {
+        auto decodedImage = BitmapImage::create(nullptr, premultiplyAlpha ? AlphaOption::Premultiplied : AlphaOption::NotPremultiplied, ignoreGammaAndColorProfile ? GammaAndColorProfileOption::Ignored : GammaAndColorProfileOption::Applied);
+        decodedImage->setData(image.data(), true);
+        if (!decodedImage->frameCount())
+            return { };
+        // The decode above produced the premultiplication the upload asked for.
+        return { decodedImage->currentNativeImage(), premultiplyAlpha ? AlphaPremultiplication::Premultiplied : AlphaPremultiplication::Unpremultiplied };
+    }
+    // Decoded frames hold premultiplied alpha.
+    return { image.currentNativeImage(), AlphaPremultiplication::Premultiplied };
+}
+
 ExceptionOr<void> WebGLRenderingContextBase::texImageSourceHelper(TexImageFunctionID functionID, GCGLenum target, GCGLint level, GCGLint internalformat, GCGLint border, GCGLenum format, GCGLenum type, GCGLint xoffset, GCGLint yoffset, GCGLint zoffset, const IntRect& inputSourceImageRect, GCGLsizei depth, GCGLint unpackImageHeight, TexImageSource&& source)
 {
     if (isContextLost())
@@ -3243,11 +3308,14 @@ ExceptionOr<void> WebGLRenderingContextBase::texImageSource(TexImageFunctionID f
         return { };
 
     // Fallback pure SW path.
-    RefPtr image = BitmapImage::create(buffer->createNativeImageReference());
+    RefPtr image = buffer->createNativeImageReference();
     if (!image)
         return { };
+    // Image buffers hold premultiplied alpha, except when the ImageBitmap was constructed such that
+    // the buffer contents are not premultiplied even though the buffer claims they are.
+    auto sourceAlphaPremultiplication = source.forciblyPremultiplyAlpha() ? AlphaPremultiplication::Unpremultiplied : AlphaPremultiplication::Premultiplied;
     // The premultiplyAlpha and flipY pixel unpack parameters are ignored for ImageBitmaps.
-    texImageImpl(functionID, target, level, internalformat, xoffset, yoffset, zoffset, format, type, *image, GraphicsContextGL::DOMSource::Image, false, source.premultiplyAlpha(), source.forciblyPremultiplyAlpha(), sourceImageRect, depth, unpackImageHeight);
+    texImageImpl(functionID, target, level, internalformat, xoffset, yoffset, zoffset, format, type, *image, sourceAlphaPremultiplication, false, source.premultiplyAlpha(), sourceImageRect, depth, unpackImageHeight);
     return { };
 }
 
@@ -3333,16 +3401,25 @@ ExceptionOr<void> WebGLRenderingContextBase::texImageSource(TexImageFunctionID f
     if (!imageForRender)
         return { };
 
-    if (imageForRender->drawsSVGImage() || imageForRender->orientation() != ImageOrientation::Orientation::None || imageForRender->hasDensityCorrectedSize())
-        imageForRender = drawImageIntoBuffer(*imageForRender, source.width(), source.height(), 1, functionName);
+    TexImageSourceImage sourceImage;
+    if (imageForRender->drawsSVGImage() || imageForRender->orientation() != ImageOrientation::Orientation::None || imageForRender->hasDensityCorrectedSize()) {
+        // Drawing to an image buffer produces premultiplied alpha.
+        sourceImage = { drawImageIntoBuffer(*imageForRender, source.width(), source.height(), 1, functionName), AlphaPremultiplication::Premultiplied };
+    } else
+        sourceImage = nativeImageForTexImageSource(*imageForRender, m_unpackPremultiplyAlpha, m_unpackColorspaceConversion == GraphicsContextGL::NONE);
 
-    if (!imageForRender || !validateTexFunc(functionID, SourceHTMLImageElement, target, level, internalformat, imageForRender->width(), imageForRender->height(), depth, border, format, type, xoffset, yoffset, zoffset))
+    RefPtr image = sourceImage.image;
+    if (!image) {
+        synthesizeGLError(GraphicsContextGL::INVALID_VALUE, functionName, "bad image data"_s);
+        return { };
+    }
+    if (!validateTexFunc(functionID, SourceHTMLImageElement, target, level, internalformat, image->size().width(), image->size().height(), depth, border, format, type, xoffset, yoffset, zoffset))
         return { };
 
     // Pass along inputSourceImageRect unchanged. HTMLImageElements are unique in that their
-    // size may differ from that of the Image obtained from them (because of devicePixelRatio),
+    // size may differ from that of the image obtained from them (because of devicePixelRatio),
     // so for WebGL 1.0 uploads, defer measuring their rectangle as long as possible.
-    texImageImpl(functionID, target, level, internalformat, xoffset, yoffset, zoffset, format, type, *imageForRender, GraphicsContextGL::DOMSource::Image, m_unpackFlipY, m_unpackPremultiplyAlpha, false, inputSourceImageRect, depth, unpackImageHeight);
+    texImageImpl(functionID, target, level, internalformat, xoffset, yoffset, zoffset, format, type, *image, sourceImage.alphaPremultiplication, m_unpackFlipY, m_unpackPremultiplyAlpha, inputSourceImageRect, depth, unpackImageHeight);
     return { };
 }
 
@@ -3366,8 +3443,8 @@ ExceptionOr<void> WebGLRenderingContextBase::texImageSource(TexImageFunctionID f
 
     if (RefPtr imageData = source.getImageData()) {
         texImageSourceHelper(functionID, target, level, internalformat, border, format, type, xoffset, yoffset, zoffset, sourceImageRect, depth, unpackImageHeight, TexImageSource(imageData.releaseNonNull()));
-    } else if (RefPtr image = source.copiedImage()) {
-        texImageImpl(functionID, target, level, internalformat, xoffset, yoffset, zoffset, format, type, *image, GraphicsContextGL::DOMSource::Canvas, m_unpackFlipY, m_unpackPremultiplyAlpha, false, sourceImageRect, depth, unpackImageHeight);
+    } else if (RefPtr image = source.copyNativeImage()) {
+        texImageImpl(functionID, target, level, internalformat, xoffset, yoffset, zoffset, format, type, *image, AlphaPremultiplication::Premultiplied, m_unpackFlipY, m_unpackPremultiplyAlpha, sourceImageRect, depth, unpackImageHeight);
     }
     return { };
 }
@@ -3412,10 +3489,10 @@ ExceptionOr<void> WebGLRenderingContextBase::texImageSource(TexImageFunctionID f
     }
 
     // Fallback pure SW path.
-    RefPtr<Image> image = videoFrameToImage(source, functionName);
+    RefPtr image = videoFrameToNativeImage(source, functionName);
     if (!image)
         return { };
-    texImageImpl(functionID, target, level, internalformat, xoffset, yoffset, zoffset, format, type, *image, GraphicsContextGL::DOMSource::Video, m_unpackFlipY, m_unpackPremultiplyAlpha, false, inputSourceImageRect, depth, unpackImageHeight);
+    texImageImpl(functionID, target, level, internalformat, xoffset, yoffset, zoffset, format, type, *image, AlphaPremultiplication::Premultiplied, m_unpackFlipY, m_unpackPremultiplyAlpha, inputSourceImageRect, depth, unpackImageHeight);
     return { };
 }
 #endif
@@ -3439,10 +3516,10 @@ ExceptionOr<void> WebGLRenderingContextBase::texImageSource(TexImageFunctionID f
     if (!validateTexFunc(functionID, SourceOffscreenCanvas, target, level, internalformat, sourceImageRect.width(), sourceImageRect.height(), depth, border, format, type, xoffset, yoffset, zoffset))
         return { };
 
-    RefPtr image = source.copiedImage();
+    RefPtr image = source.copyNativeImage();
     if (!image)
         return { };
-    texImageImpl(functionID, target, level, internalformat, xoffset, yoffset, zoffset, format, type, *image, GraphicsContextGL::DOMSource::Canvas, m_unpackFlipY, m_unpackPremultiplyAlpha, false, sourceImageRect, depth, unpackImageHeight);
+    texImageImpl(functionID, target, level, internalformat, xoffset, yoffset, zoffset, format, type, *image, AlphaPremultiplication::Premultiplied, m_unpackFlipY, m_unpackPremultiplyAlpha, sourceImageRect, depth, unpackImageHeight);
     return { };
 }
 #endif
@@ -3476,16 +3553,16 @@ ExceptionOr<void> WebGLRenderingContextBase::texImageSource(TexImageFunctionID f
     }
 
     // Fallback pure SW path.
-    auto image = context->videoFrameToImage(*internalFrame);
+    auto image = context->videoFrameToNativeImage(*internalFrame);
     if (!image)
         return { };
 
-    texImageImpl(functionID, target, level, internalformat, xoffset, yoffset, zoffset, format, type, *image, GraphicsContextGL::DOMSource::Video, m_unpackFlipY, m_unpackPremultiplyAlpha, false, inputSourceImageRect, depth, unpackImageHeight);
+    texImageImpl(functionID, target, level, internalformat, xoffset, yoffset, zoffset, format, type, *image, AlphaPremultiplication::Premultiplied, m_unpackFlipY, m_unpackPremultiplyAlpha, inputSourceImageRect, depth, unpackImageHeight);
     return { };
 }
 #endif
 
-void WebGLRenderingContextBase::texImageArrayBufferViewHelper(TexImageFunctionID functionID, GCGLenum target, GCGLint level, GCGLint internalformat, GCGLsizei width, GCGLsizei height, GCGLsizei depth, GCGLint border, GCGLenum format, GCGLenum type, GCGLint xoffset, GCGLint yoffset, GCGLint zoffset, RefPtr<ArrayBufferView>&& pixels, NullDisposition nullDisposition, GCGLuint srcOffset)
+void WebGLRenderingContextBase::texImageArrayBufferViewHelper(TexImageFunctionID functionID, GCGLenum target, GCGLint level, GCGLint internalformat, GCGLsizei width, GCGLsizei height, GCGLsizei depth, GCGLint border, GCGLenum format, GCGLenum type, GCGLint xoffset, GCGLint yoffset, GCGLint zoffset, RefPtr<ArrayBufferView>&& pixels, NullDisposition nullDisposition, uint64_t srcOffset)
 {
     if (isContextLost())
         return;
@@ -3541,7 +3618,7 @@ void WebGLRenderingContextBase::texImageArrayBufferViewHelper(TexImageFunctionID
     }
 }
 
-void WebGLRenderingContextBase::texImageImpl(TexImageFunctionID functionID, GCGLenum target, GCGLint level, GCGLenum internalformat, GCGLint xoffset, GCGLint yoffset, GCGLint zoffset, GCGLenum format, GCGLenum type, Image& image, GraphicsContextGL::DOMSource domSource, bool flipY, bool premultiplyAlpha, bool ignoreNativeImageAlphaPremultiplication, const IntRect& sourceImageRect, GCGLsizei depth, GCGLint unpackImageHeight)
+void WebGLRenderingContextBase::texImageImpl(TexImageFunctionID functionID, GCGLenum target, GCGLint level, GCGLenum internalformat, GCGLint xoffset, GCGLint yoffset, GCGLint zoffset, GCGLenum format, GCGLenum type, NativeImage& image, AlphaPremultiplication sourceAlphaPremultiplication, bool flipY, bool premultiplyAlpha, const IntRect& sourceImageRect, GCGLsizei depth, GCGLint unpackImageHeight)
 {
     auto functionName = texImageFunctionName(functionID);
     // All calling functions check isContextLost, so a duplicate check is not
@@ -3554,7 +3631,7 @@ void WebGLRenderingContextBase::texImageImpl(TexImageFunctionID functionID, GCGL
 
     IntRect subRect = sourceImageRect;
     if (subRect.isValid() && subRect == sentinelEmptyRect()) {
-        // Recalculate based on the size of the Image.
+        // Recalculate based on the size of the image.
         subRect = texImageSourceSize(image);
     }
 
@@ -3565,9 +3642,9 @@ void WebGLRenderingContextBase::texImageImpl(TexImageFunctionID functionID, GCGL
     // Adjust the source image rectangle if doing a y-flip.
     IntRect adjustedSourceImageRect = subRect;
     if (m_unpackFlipY)
-        adjustedSourceImageRect.setY(image.height() - adjustedSourceImageRect.maxY());
+        adjustedSourceImageRect.setY(image.size().height() - adjustedSourceImageRect.maxY());
 
-    GraphicsContextGLImageExtractor imageExtractor(image, domSource, premultiplyAlpha, m_unpackColorspaceConversion == GraphicsContextGL::NONE, ignoreNativeImageAlphaPremultiplication);
+    GraphicsContextGLImageExtractor imageExtractor(image, sourceAlphaPremultiplication, premultiplyAlpha);
     if (!imageExtractor.extractSucceeded()) {
         synthesizeGLError(GraphicsContextGL::INVALID_VALUE, functionName, "bad image data"_s);
         return;
@@ -3584,7 +3661,7 @@ void WebGLRenderingContextBase::texImageImpl(TexImageFunctionID functionID, GCGL
     auto pixels = imagePixelData;
     RefPtr context = m_context;
     if (type != GraphicsContextGL::UNSIGNED_BYTE || sourceDataFormat != GraphicsContextGL::DataFormat::RGBA8 || format != GraphicsContextGL::RGBA || alphaOp != GraphicsContextGL::AlphaOp::DoNothing || flipY || selectingSubRectangle || depth != 1) {
-        if (!context->packImageData(&image, pixels, format, type, flipY, alphaOp, sourceDataFormat, imageExtractor.imageWidth(), imageExtractor.imageHeight(), adjustedSourceImageRect, depth, imageExtractor.imageSourceUnpackAlignment(), unpackImageHeight, data)) {
+        if (!context->packImageData(pixels, format, type, flipY, alphaOp, sourceDataFormat, imageExtractor.imageWidth(), imageExtractor.imageHeight(), adjustedSourceImageRect, depth, imageExtractor.imageSourceUnpackAlignment(), unpackImageHeight, data)) {
             synthesizeGLError(GraphicsContextGL::INVALID_VALUE, functionName, "packImage error"_s);
             return;
         }
@@ -3789,6 +3866,11 @@ ExceptionOr<void> WebGLRenderingContextBase::texSubImage2D(GCGLenum target, GCGL
     return texImageSourceHelper(TexImageFunctionID::TexSubImage2D, target, level, 0, 0, format, type, xoffset, yoffset, 0, sentinelEmptyRect(), 1, 0, WTF::move(*source));
 }
 
+ExceptionOr<void> WebGLRenderingContextBase::texElementImage2D(GCGLenum, GCGLenum, std::optional<CanvasElementImageSource>, std::optional<WebGLCopyElementImageConfig>)
+{
+    return Exception { ExceptionCode::InvalidStateError };
+}
+
 bool WebGLRenderingContextBase::validateTypeAndArrayBufferType(ASCIILiteral functionName, ArrayBufferViewFunctionType functionType, GCGLenum type, ArrayBufferView* pixels)
 {
     JSC::TypedArrayType expectedArrayType = JSC::NotTypedArray;
@@ -3874,7 +3956,7 @@ bool WebGLRenderingContextBase::validateImageFormatAndType(ASCIILiteral function
     return true;
 }
 
-std::optional<std::span<const uint8_t>> WebGLRenderingContextBase::validateTexFuncData(ASCIILiteral functionName, TexImageDimension texDimension, GCGLsizei width, GCGLsizei height, GCGLsizei depth, GCGLenum format, GCGLenum type, ArrayBufferView* pixels, NullDisposition disposition, GCGLuint srcOffset)
+std::optional<std::span<const uint8_t>> WebGLRenderingContextBase::validateTexFuncData(ASCIILiteral functionName, TexImageDimension texDimension, GCGLsizei width, GCGLsizei height, GCGLsizei depth, GCGLenum format, GCGLenum type, ArrayBufferView* pixels, NullDisposition disposition, uint64_t srcOffset)
 {
     // All calling functions check isContextLost, so a duplicate check is not
     // needed here.
@@ -3902,8 +3984,16 @@ std::optional<std::span<const uint8_t>> WebGLRenderingContextBase::validateTexFu
         return std::nullopt;
     }
 
+    // An offset a size_t cannot hold is past the end of any view. Narrowing it here also keeps the
+    // arithmetic below in one width: Checked's result type for mixed widths differs between platforms.
+    if (!isInBounds<size_t>(srcOffset)) {
+        synthesizeGLError(GraphicsContextGL::INVALID_OPERATION, functionName, "ArrayBufferView not big enough for request"_s);
+        return std::nullopt;
+    }
+    size_t offsetInElements = srcOffset;
+
     auto dataLength = CheckedSize { packSizes->imageBytes } + packSizes->initialSkipBytes;
-    auto offset = CheckedSize { pixels ? JSC::elementSize(pixels->getType()) : 0 } * srcOffset;
+    auto offset = CheckedSize { pixels ? JSC::elementSize(pixels->getType()) : 0 } * offsetInElements;
     auto total = offset + dataLength;
     if (total.hasOverflowed() || !isInBounds<GCGLsizei>(dataLength)) {
         synthesizeGLError(GraphicsContextGL::INVALID_OPERATION, functionName, "image too large"_s);
@@ -4169,11 +4259,11 @@ ExceptionOr<void> WebGLRenderingContextBase::texImage2D(GCGLenum target, GCGLint
     return texImageSourceHelper(TexImageFunctionID::TexImage2D, target, level, internalformat, 0, format, type, 0, 0, 0, sentinelEmptyRect(), 1, 0, WTF::move(*source));
 }
 
-RefPtr<Image> WebGLRenderingContextBase::drawImageIntoBuffer(Image& image, int width, int height, int deviceScaleFactor, ASCIILiteral functionName)
+RefPtr<NativeImage> WebGLRenderingContextBase::drawImageIntoBuffer(Image& image, int width, int height, int deviceScaleFactor, ASCIILiteral functionName)
 {
     IntSize size(width, height);
     size.scale(deviceScaleFactor);
-    RefPtr buf = m_generatedImageCache.imageBuffer(size, DestinationColorSpace::SRGB());
+    RefPtr buf = m_generatedImageCache.imageBuffer(size, ColorSpace::SRGB());
     if (!buf) {
         synthesizeGLError(GraphicsContextGL::OUT_OF_MEMORY, functionName, "out of memory"_s);
         return nullptr;
@@ -4184,12 +4274,12 @@ RefPtr<Image> WebGLRenderingContextBase::drawImageIntoBuffer(Image& image, int w
     buf->context().drawImage(image, destRect, srcRect);
     // FIXME: createNativeImageReference() does not make sense for GPUP.
     // Instead, should fix by GPUP side upload.
-    return BitmapImage::create(buf->createNativeImageReference());
+    return buf->createNativeImageReference();
 }
 
 #if ENABLE(VIDEO)
 
-RefPtr<Image> WebGLRenderingContextBase::videoFrameToImage(HTMLVideoElement& video, ASCIILiteral functionName)
+RefPtr<NativeImage> WebGLRenderingContextBase::videoFrameToNativeImage(HTMLVideoElement& video, ASCIILiteral functionName)
 {
     RefPtr<ImageBuffer> imageBuffer;
     // FIXME: When texImage2D is passed an HTMLVideoElement, implementations
@@ -4228,7 +4318,7 @@ RefPtr<Image> WebGLRenderingContextBase::videoFrameToImage(HTMLVideoElement& vid
         IntSize videoSize { static_cast<int>(video.videoWidth()), static_cast<int>(video.videoHeight()) };
         auto colorSpace = video.colorSpace();
         if (!colorSpace)
-            colorSpace = DestinationColorSpace::SRGB();
+            colorSpace = ColorSpace::SRGB();
         imageBuffer = m_generatedImageCache.imageBuffer(videoSize, *colorSpace);
         if (!imageBuffer) {
             synthesizeGLError(GraphicsContextGL::OUT_OF_MEMORY, functionName, "out of memory"_s);
@@ -4236,7 +4326,7 @@ RefPtr<Image> WebGLRenderingContextBase::videoFrameToImage(HTMLVideoElement& vid
         }
         video.paintCurrentFrameInContext(imageBuffer->context(), { { }, videoSize });
     }
-    RefPtr<Image> image = BitmapImage::create(imageBuffer->createNativeImageReference());
+    RefPtr image = imageBuffer->createNativeImageReference();
     if (!image) {
         synthesizeGLError(GraphicsContextGL::OUT_OF_MEMORY, functionName, "out of memory"_s);
         return nullptr;
@@ -4689,6 +4779,7 @@ void WebGLRenderingContextBase::forceLostContext(WebGLRenderingContextBase::Lost
         Locker locker { objectGraphLock() };
         detachAndRemoveAllObjects();
     }
+    updateMemoryCost();
     loseExtensions(mode);
 
     protect(graphicsContextGL())->getErrors();
@@ -5050,11 +5141,12 @@ bool WebGLRenderingContextBase::validateCapability(ASCIILiteral functionName, GC
 }
 
 template<typename T, typename TypedListType>
-std::optional<std::span<const T>> WebGLRenderingContextBase::validateUniformMatrixParameters(ASCIILiteral functionName, const WebGLUniformLocation* location, GCGLboolean transpose, const TypedList<TypedListType, T>& values, GCGLsizei requiredMinSize, GCGLuint srcOffset, GCGLuint srcLength)
+std::optional<std::span<const T>> WebGLRenderingContextBase::validateUniformMatrixParameters(ASCIILiteral functionName, const WebGLUniformLocation* location, GCGLboolean transpose, const TypedList<TypedListType, T>& values, GCGLsizei requiredMinSize, uint64_t srcOffset, GCGLuint srcLength)
 {
     if (!validateUniformLocation(functionName, location))
         return { };
-    if (!values.data()) {
+    auto span = values.span();
+    if (!span.data()) {
         synthesizeGLError(GraphicsContextGL::INVALID_VALUE, functionName, "no array"_s);
         return { };
     }
@@ -5062,33 +5154,35 @@ std::optional<std::span<const T>> WebGLRenderingContextBase::validateUniformMatr
         synthesizeGLError(GraphicsContextGL::INVALID_VALUE, functionName, "transpose not FALSE"_s);
         return { };
     }
-    if (srcOffset >= static_cast<GCGLuint>(values.length())) {
+    if (srcOffset >= span.size()) {
         synthesizeGLError(GraphicsContextGL::INVALID_VALUE, functionName, "invalid srcOffset"_s);
         return { };
     }
-    GCGLsizei actualSize = values.length() - srcOffset;
+    size_t offset = srcOffset;
+    size_t actualSize = span.size() - offset;
     if (srcLength > 0) {
-        if (srcLength > static_cast<GCGLuint>(actualSize)) {
+        if (srcLength > actualSize) {
             synthesizeGLError(GraphicsContextGL::INVALID_VALUE, functionName, "invalid srcOffset + srcLength"_s);
             return { };
         }
         actualSize = srcLength;
     }
-    if (actualSize < requiredMinSize || (actualSize % requiredMinSize)) {
+    // The element count reaches GL as a GCGLsizei, so a longer run cannot be expressed.
+    if (actualSize < static_cast<size_t>(requiredMinSize) || (actualSize % requiredMinSize) || !isInBounds<GCGLsizei>(actualSize)) {
         synthesizeGLError(GraphicsContextGL::INVALID_VALUE, functionName, "invalid size"_s);
         return { };
     }
-    return values.span().subspan(srcOffset, actualSize);
+    return span.subspan(offset, actualSize);
 }
 
 template
-std::optional<std::span<const GCGLuint>> WebGLRenderingContextBase::validateUniformMatrixParameters<GCGLuint, Uint32Array>(ASCIILiteral functionName, const WebGLUniformLocation*, GCGLboolean transpose, const TypedList<Uint32Array, uint32_t>& values, GCGLsizei requiredMinSize, GCGLuint srcOffset, GCGLuint srcLength);
+std::optional<std::span<const GCGLuint>> WebGLRenderingContextBase::validateUniformMatrixParameters<GCGLuint, Uint32Array>(ASCIILiteral functionName, const WebGLUniformLocation*, GCGLboolean transpose, const TypedList<Uint32Array, uint32_t>& values, GCGLsizei requiredMinSize, uint64_t srcOffset, GCGLuint srcLength);
 
 template
-std::optional<std::span<const GCGLint>> WebGLRenderingContextBase::validateUniformMatrixParameters<GCGLint, Int32Array>(ASCIILiteral functionName, const WebGLUniformLocation*, GCGLboolean transpose, const TypedList<Int32Array, int32_t>& values, GCGLsizei requiredMinSize, GCGLuint srcOffset, GCGLuint srcLength);
+std::optional<std::span<const GCGLint>> WebGLRenderingContextBase::validateUniformMatrixParameters<GCGLint, Int32Array>(ASCIILiteral functionName, const WebGLUniformLocation*, GCGLboolean transpose, const TypedList<Int32Array, int32_t>& values, GCGLsizei requiredMinSize, uint64_t srcOffset, GCGLuint srcLength);
 
 template
-std::optional<std::span<const GCGLfloat>> WebGLRenderingContextBase::validateUniformMatrixParameters<GCGLfloat, Float32Array>(ASCIILiteral functionName, const WebGLUniformLocation*, GCGLboolean transpose, const TypedList<Float32Array, float>& values, GCGLsizei requiredMinSize, GCGLuint srcOffset, GCGLuint srcLength);
+std::optional<std::span<const GCGLfloat>> WebGLRenderingContextBase::validateUniformMatrixParameters<GCGLfloat, Float32Array>(ASCIILiteral functionName, const WebGLUniformLocation*, GCGLboolean transpose, const TypedList<Float32Array, float>& values, GCGLsizei requiredMinSize, uint64_t srcOffset, GCGLuint srcLength);
 
 RefPtr<WebGLBuffer> WebGLRenderingContextBase::validateBufferDataParameters(ASCIILiteral functionName, GCGLenum target, GCGLenum usage)
 {
@@ -5210,8 +5304,7 @@ void WebGLRenderingContextBase::vertexAttribfvImpl(ASCIILiteral functionName, GC
         return;
     }
 
-    int size = list.length();
-    if (size < expectedSize) {
+    if (data.size() < static_cast<size_t>(expectedSize)) {
         synthesizeGLError(GraphicsContextGL::INVALID_VALUE, functionName, "invalid size"_s);
         return;
     }
@@ -5331,7 +5424,7 @@ WebGLRenderingContextBase::LRUImageBufferCache::LRUImageBufferCache(int capacity
 {
 }
 
-RefPtr<ImageBuffer> WebGLRenderingContextBase::LRUImageBufferCache::imageBuffer(const IntSize& size, DestinationColorSpace colorSpace, CompositeOperator fillOperator)
+RefPtr<ImageBuffer> WebGLRenderingContextBase::LRUImageBufferCache::imageBuffer(const IntSize& size, ColorSpace colorSpace, CompositeOperator fillOperator)
 {
     size_t i;
     for (i = 0; i < m_buffers.size(); ++i) {
@@ -5445,14 +5538,13 @@ void WebGLRenderingContextBase::drawArraysInstanced(GCGLenum mode, GCGLint first
     if (currentProgram && InspectorInstrumentation::isWebGLProgramDisabled(*this, *currentProgram))
         return;
 
+    willUpdateDrawingBufferContents();
     clearIfComposited(CallerTypeDrawOrClear);
 
     {
         ScopedInspectorShaderProgramHighlight scopedHighlight { *this };
         protect(graphicsContextGL())->drawArraysInstanced(mode, first, count, primcount);
     }
-
-    markContextChangedAndNotifyCanvasObserver();
 }
 
 void WebGLRenderingContextBase::drawElementsInstanced(GCGLenum mode, GCGLsizei count, GCGLenum type, long long offset, GCGLsizei primcount)
@@ -5466,14 +5558,13 @@ void WebGLRenderingContextBase::drawElementsInstanced(GCGLenum mode, GCGLsizei c
     if (currentProgram && InspectorInstrumentation::isWebGLProgramDisabled(*this, *currentProgram))
         return;
 
+    willUpdateDrawingBufferContents();
     clearIfComposited(CallerTypeDrawOrClear);
 
     {
         ScopedInspectorShaderProgramHighlight scopedHighlight { *this };
         protect(graphicsContextGL())->drawElementsInstanced(mode, count, type, static_cast<GCGLintptr>(offset), primcount);
     }
-
-    markContextChangedAndNotifyCanvasObserver();
 }
 
 void WebGLRenderingContextBase::vertexAttribDivisor(GCGLuint index, GCGLuint divisor)
@@ -5602,7 +5693,7 @@ static ASCIILiteral debugMessageSeverityToString(GCGLenum severity)
     }
 }
 
-void WebGLRenderingContextBase::addDebugMessage(GCGLenum type, GCGLenum id, GCGLenum severity, const CString& message)
+void WebGLRenderingContextBase::addDebugMessage(GCGLenum type, GCGLenum id, GCGLenum severity, const UTF8CString& message)
 {
     if (!shouldPrintToConsole())
         return;
@@ -5616,9 +5707,9 @@ void WebGLRenderingContextBase::addDebugMessage(GCGLenum type, GCGLenum id, GCGL
 
     if (type == GraphicsContextGL::DEBUG_TYPE_ERROR) {
         level = MessageLevel::Error;
-        formattedMessage = makeString("WebGL: "_s, errorCodeToString(glEnumToErrorCode(id)), ": "_s, String::fromUTF8(message.span()));
+        formattedMessage = makeString("WebGL: "_s, errorCodeToString(glEnumToErrorCode(id)), ": "_s, message);
     } else
-        formattedMessage = makeString("WebGL debug message: type:"_s, debugMessageTypeToString(type), ", id:"_s, id, " severity: "_s, debugMessageSeverityToString(severity), ": "_s, String::fromUTF8(message.span()));
+        formattedMessage = makeString("WebGL debug message: type:"_s, debugMessageTypeToString(type), ", id:"_s, id, " severity: "_s, debugMessageSeverityToString(severity), ": "_s, message);
 
     auto consoleMessage = makeUnique<Inspector::ConsoleMessage>(MessageSource::Rendering, MessageType::Log, level, WTF::move(formattedMessage));
     scriptExecutionContext->addConsoleMessage(WTF::move(consoleMessage));
@@ -5626,6 +5717,11 @@ void WebGLRenderingContextBase::addDebugMessage(GCGLenum type, GCGLenum id, GCGL
     --m_numGLErrorsToConsoleAllowed;
     if (!m_numGLErrorsToConsoleAllowed)
         scriptExecutionContext->addConsoleMessage(makeUnique<Inspector::ConsoleMessage>(MessageSource::Rendering, MessageType::Log, MessageLevel::Warning, "WebGL: too many errors, no more errors will be reported to the console for this context."_s));
+}
+
+void WebGLRenderingContextBase::didChangeMemoryCost()
+{
+    scheduleMemoryCostUpdate();
 }
 
 void WebGLRenderingContextBase::recycleContext()
@@ -5688,8 +5784,8 @@ void WebGLRenderingContextBase::prepareForDisplay()
     m_defaultFramebuffer->markAllUnpreservedBuffersDirty();
 
     m_compositingResultsNeedUpdating = false;
-    m_readDisplayBuffer = nullptr;
-    m_readDrawingBuffer = nullptr;
+    m_readDisplayBuffer.clear();
+    m_readDrawingBuffer.clear();
     updateMemoryCost();
 
     if (hasActiveInspectorCanvasCallTracer()) [[unlikely]]
@@ -5706,14 +5802,29 @@ bool WebGLRenderingContextBase::isOpaque() const
     return !m_attributes.alpha;
 }
 
+void WebGLRenderingContextBase::scheduleMemoryCostUpdate()
+{
+    if (m_memoryCostUpdateScheduled || !m_context || isContextStopped() || isContextLost())
+        return;
+
+    m_memoryCostUpdateScheduled = true;
+    protect(canvasBase())->queueTaskKeepingObjectAlive(TaskSource::WebGL, [weakThis = WeakPtr { *this }](auto&) {
+        RefPtr protectedThis = weakThis.get();
+        if (!protectedThis)
+            return;
+
+        protectedThis->m_memoryCostUpdateScheduled = false;
+        if (!protectedThis->isContextStopped())
+            protectedThis->updateMemoryCost();
+    });
+}
+
 void WebGLRenderingContextBase::updateMemoryCost() const
 {
-    // Computes only a rough ballpark figure to drive garbage collection.
+    // Computes only a rough ballpark figure to drive garbage collection and Web Inspector.
     size_t newMemoryCost = 0;
-    if (m_readDisplayBuffer)
-        newMemoryCost += m_readDisplayBuffer->memoryCost();
-    if (m_readDrawingBuffer)
-        newMemoryCost += m_readDrawingBuffer->memoryCost();
+    newMemoryCost += m_readDisplayBuffer.memoryCost();
+    newMemoryCost += m_readDrawingBuffer.memoryCost();
     if (!isContextLost()) {
         size_t area = m_defaultFramebuffer->size().unclampedArea();
         size_t bytesPerSample = 4;
@@ -5723,6 +5834,11 @@ void WebGLRenderingContextBase::updateMemoryCost() const
             bytesPerSample += 1;
         size_t samplesPerPixel = m_attributes.antialias ? 4 : 1;
         newMemoryCost += area * samplesPerPixel * bytesPerSample;
+
+        if (RefPtr context = graphicsContextGL()) {
+            if (auto backendMemoryCost = context->estimatedMemoryCost())
+                newMemoryCost += *backendMemoryCost;
+        }
     }
     CanvasRenderingContext::updateMemoryCost(newMemoryCost);
 }

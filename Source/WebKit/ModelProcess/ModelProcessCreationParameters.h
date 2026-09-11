@@ -28,17 +28,22 @@
 #if ENABLE(MODEL_PROCESS)
 
 #include "AuxiliaryProcessCreationParameters.h"
+#include "SecurityFlags.h"
 #include <wtf/ProcessID.h>
 
 namespace WebKit {
 
 struct ModelProcessCreationParameters {
     AuxiliaryProcessCreationParameters auxiliaryProcessParameters;
+    SecurityFlags securityFlags;
     ProcessID parentPID;
     String applicationVisibleName;
     bool restrictiveRenderingMode { false };
     std::optional<int> debugEntityMemoryLimit;
     std::optional<int> debugImmersiveEntityMemoryLimit;
+#if ENABLE(LOGD_BLOCKING_IN_WEBCONTENT)
+    bool isDebugLoggingEnabled { false };
+#endif
 };
 
 } // namespace WebKit

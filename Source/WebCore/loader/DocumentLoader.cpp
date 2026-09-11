@@ -86,7 +86,6 @@
 #include "NavigationRequester.h"
 #include "NavigationScheduler.h"
 #include "NetworkLoadMetrics.h"
-#include "NetworkStorageSession.h"
 #include "OriginAccessPatterns.h"
 #include "Page.h"
 #include "Performance.h"
@@ -103,6 +102,7 @@
 #include "ServiceWorkerClientData.h"
 #include "ServiceWorkerProvider.h"
 #include "Settings.h"
+#include "StorageAccessQuirks.h"
 #include "SubresourceLoader.h"
 #include "TextResourceDecoder.h"
 #include "UserContentProvider.h"
@@ -193,7 +193,7 @@ DocumentLoader::DocumentLoader(ResourceRequest&& request, SubstituteData&& subst
     , m_originalRequestCopy(originalRequest.isNull() ? request : WTF::move(originalRequest))
     , m_request(WTF::move(request))
     , m_substituteResourceDeliveryTimer(*this, &DocumentLoader::substituteResourceDeliveryTimerFired)
-    , m_originalSubstituteDataWasValid(substituteData.isValid())
+    , m_originalSubstituteDataWasValid(m_substituteData.isValid())
 {
 }
 
@@ -614,7 +614,8 @@ bool DocumentLoader::setControllingServiceWorkerRegistration(ServiceWorkerRegist
 
 void DocumentLoader::matchRegistration(const URL& url, SWClientConnection::RegistrationCallback&& callback)
 {
-    bool shouldTryLoadingThroughServiceWorker = m_canUseServiceWorkers && !frameLoader()->isReloadingFromOrigin() && m_frame->page() && url.protocolIsInHTTPFamily();
+    bool shouldTryLoadingThroughServiceWorker = m_canUseServiceWorkers && !frameLoader()->isReloadingFromOrigin() && m_frame->page()
+        && (url.protocolIsInHTTPFamily() || LegacySchemeRegistry::shouldTreatURLSchemeAsAllowingServiceWorkerClients(url.protocol()));
     if (!shouldTryLoadingThroughServiceWorker) {
         callback(std::nullopt);
         return;
@@ -762,7 +763,7 @@ void DocumentLoader::willSendRequest(ResourceRequest&& newRequest, const Resourc
         if (!parentFrame)
             return completionHandler(WTF::move(newRequest));
 
-        if (MixedContentChecker::shouldBlockRequest(*parentFrame, newRequest.url())) {
+        if (MixedContentChecker::shouldBlockRequest(*parentFrame, newRequest.url(), MixedContentChecker::IsUpgradable::No, newRequest.targetAddressSpace())) {
             cancelMainResourceLoad(protect(frameLoader())->cancelledError(newRequest));
             return completionHandler(WTF::move(newRequest));
         }
@@ -949,7 +950,7 @@ void DocumentLoader::responseReceived(const CachedResource& resource, const Reso
         Ref document = *frame->document();
         if (Quirks::isMicrosoftTeamsRedirectURL(response.url())) {
             auto firstPartyDomain = RegistrableDomain(response.url());
-            if (auto loginDomains = NetworkStorageSession::subResourceDomainsInNeedOfStorageAccessForFirstParty(firstPartyDomain)) {
+            if (auto loginDomains = subResourceDomainsInNeedOfStorageAccessForFirstParty(firstPartyDomain)) {
                 if (!Quirks::hasStorageAccessForAllLoginDomains(*loginDomains, firstPartyDomain)) {
                     protect(frame->navigationScheduler())->scheduleRedirect(document, 0, microsoftTeamsRedirectURL(), IsMetaRefresh::No);
                     completionHandler();
@@ -1359,7 +1360,7 @@ void DocumentLoader::commitData(const SharedBuffer& data)
                     document->createNewIdentifier();
             }
 
-            if (m_frame->document()->activeServiceWorker() || document->url().protocolIsInHTTPFamily() || (document->page() && document->page()->isServiceWorkerPage()) || (document->parentDocument() && shouldUseActiveServiceWorkerFromParent(document, *protect(document->parentDocument()))))
+            if (m_frame->document()->activeServiceWorker() || document->url().protocolIsInHTTPFamily() || LegacySchemeRegistry::shouldTreatURLSchemeAsAllowingServiceWorkerClients(document->url().protocol()) || (document->page() && document->page()->isServiceWorkerPage()) || (document->parentDocument() && shouldUseActiveServiceWorkerFromParent(document, *protect(document->parentDocument()))))
                 document->setServiceWorkerConnection(&ServiceWorkerProvider::singleton().serviceWorkerConnection());
 
             if (m_resultingClientId) {
@@ -1506,33 +1507,14 @@ void DocumentLoader::applyPoliciesToSettings()
     if (!m_frame->isMainFrame())
         return;
 
-#if ENABLE(MEDIA_SOURCE)
-    m_frame->settings().setMediaSourceEnabled(m_mediaSourcePolicy == MediaSourcePolicy::Default ? Settings::platformDefaultMediaSourceEnabled() : m_mediaSourcePolicy == MediaSourcePolicy::Enable);
-#endif
-#if ENABLE(WEBKIT_OVERFLOW_SCROLLING_CSS_PROPERTY)
-    if (m_legacyOverflowScrollingTouchPolicy == LegacyOverflowScrollingTouchPolicy::Disable)
-        m_frame->settings().setLegacyOverflowScrollingTouchEnabled(false);
-#endif
-#if ENABLE(TEXT_AUTOSIZING)
-    m_frame->settings().setIdempotentModeAutosizingOnlyHonorsPercentages(m_idempotentModeAutosizingOnlyHonorsPercentages);
-#endif
-
-    if (m_pushAndNotificationsEnabledPolicy != PushAndNotificationsEnabledPolicy::UseGlobalPolicy) {
-        bool enabled = m_pushAndNotificationsEnabledPolicy == PushAndNotificationsEnabledPolicy::Yes;
-        m_frame->settings().setPushAPIEnabled(enabled);
-#if ENABLE(NOTIFICATIONS)
-        m_frame->settings().setNotificationsEnabled(enabled);
-#endif
-#if ENABLE(NOTIFICATION_EVENT)
-        m_frame->settings().setNotificationEventEnabled(enabled);
-#endif
-#if PLATFORM(IOS)
-        m_frame->settings().setAppBadgeEnabled(enabled);
-#endif
-    }
-
-    if (m_inlineMediaPlaybackPolicy != InlineMediaPlaybackPolicy::Default)
-        m_frame->settings().setInlineMediaPlaybackRequiresPlaysInlineAttribute(m_inlineMediaPlaybackPolicy == InlineMediaPlaybackPolicy::RequiresPlaysInlineAttribute);
+    m_frame->settings().applyMainFrameWebsitePolicies({
+        m_mediaSourcePolicy,
+        m_legacyOverflowScrollingTouchPolicy,
+        m_pushAndNotificationsEnabledPolicy,
+        m_inlineMediaPlaybackPolicy,
+        m_globalPrivacyControlEnabled,
+        m_idempotentModeAutosizingOnlyHonorsPercentages
+    });
 }
 
 ColorSchemePreference NODELETE DocumentLoader::colorSchemePreference() const
@@ -1819,10 +1801,12 @@ RefPtr<ArchiveResource> DocumentLoader::subresource(const URL& url) const
 {
     if (!isCommitted())
         return nullptr;
-    
-    RefPtr resource = m_cachedResourceLoader->cachedResource(url);
+
+    auto resourceURL = MemoryCache::removeFragmentIdentifierIfNeeded(url);
+
+    RefPtr resource = m_cachedResourceLoader->cachedResource(resourceURL);
     if (!resource || !resource->isLoaded())
-        return archiveResourceForURL(url);
+        return archiveResourceForURL(resourceURL);
 
     if (resource->type() == CachedResource::Type::MainResource)
         return nullptr;
@@ -1831,7 +1815,7 @@ RefPtr<ArchiveResource> DocumentLoader::subresource(const URL& url) const
     if (!data)
         return nullptr;
 
-    return ArchiveResource::create(data.get(), url, resource->response());
+    return ArchiveResource::create(data.get(), resourceURL, resource->response());
 }
 
 Vector<Ref<ArchiveResource>> DocumentLoader::subresources() const
@@ -2186,7 +2170,10 @@ void DocumentLoader::startLoadingMainResource()
     RefPtr frame = m_frame.get();
     m_canUseServiceWorkers = canUseServiceWorkers(frame.get());
     m_mainDocumentError = ResourceError();
-    timing().markStartTime();
+    if (m_originalNavigationStartTime)
+        timing().setStartTime(m_originalNavigationStartTime);
+    else
+        timing().markStartTime();
     ASSERT(!m_mainResource);
     ASSERT(!m_loadingMainResource);
     m_loadingMainResource = true;
@@ -2244,7 +2231,7 @@ void DocumentLoader::startLoadingMainResource()
 
         DOCUMENTLOADER_RELEASE_LOG_FORWARDABLE(DocumentLoaderStartLoadingMainResourceStartingLoad);
 
-        if (m_substituteData.isValid()) {
+        if (m_substituteData.isValid() || LegacySchemeRegistry::shouldTreatURLSchemeAsAllowingServiceWorkerClients(request.url().protocol())) {
             auto url = request.url();
             matchRegistration(url, [request = WTF::move(request), protectedThis = Ref { *this }, this] (auto&& registrationData) mutable {
                 if (!m_mainDocumentError.isNull()) {
@@ -2340,7 +2327,10 @@ void DocumentLoader::loadMainResource(ResourceRequest&& request)
             return;
         }
 
-        if (advancedPrivacyProtections().contains(AdvancedPrivacyProtections::HTTPSOnly)) {
+        bool isHTTPSOnlyActive = advancedPrivacyProtections().contains(AdvancedPrivacyProtections::HTTPSOnly)
+            || m_httpsByDefaultMode == HTTPSByDefaultMode::UpgradeWithUserMediatedFallback
+            || m_httpsByDefaultMode == HTTPSByDefaultMode::UpgradeAndNoFallback;
+        if (isHTTPSOnlyActive) {
             if (platformStrategies()->loaderStrategy()->isHttpNavigationWithHTTPSOnlyError(mainResourceOrError.error())) {
                 DOCUMENTLOADER_RELEASE_LOG("loadMainResource: Unable to load main resource, URL has HTTP scheme with HTTPSOnly enabled");
                 cancelMainResourceLoad(mainResourceOrError.error());

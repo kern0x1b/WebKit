@@ -1127,7 +1127,7 @@ void PDFDiscretePresentationController::buildRows()
         rowSelectionLayer->setAnchorPoint({ });
         rowSelectionLayer->setDrawsContent(true);
         rowSelectionLayer->setAcceleratesDrawing(true);
-        rowSelectionLayer->setBlendMode(BlendMode::Multiply);
+        rowSelectionLayer->setBlendMode(pdfSelectionBlendMode(accessibilityDisplayMode()));
         m_layerToRowIndexMap.set(WTF::move(rowSelectionLayer), rowIndex);
 
         parentRowLayers(row);
@@ -1194,13 +1194,13 @@ void PDFDiscretePresentationController::updateLayersOnLayoutChange(FloatSize doc
 
     auto updateRowPageContainerLayers = [&](const RowData& row, const FloatRect& rowBounds) {
         auto leftPageIndex = row.pages.pages[0];
-        updatePageContainerLayerBounds(row.leftPageContainerLayer.get(), leftPageIndex, rowBounds);
+        updatePageContainerLayerBounds(protect(row.leftPageContainerLayer), leftPageIndex, rowBounds);
 
         if (row.pages.numPages() == 1)
             return;
 
         auto rightPageIndex = row.pages.pages[1];
-        updatePageContainerLayerBounds(row.rightPageContainerLayer.get(), rightPageIndex, rowBounds);
+        updatePageContainerLayerBounds(protect(row.rightPageContainerLayer), rightPageIndex, rowBounds);
     };
 
     TransformationMatrix transform;
@@ -1320,6 +1320,32 @@ void PDFDiscretePresentationController::updateDebugBorders(bool showDebugBorders
 
     if (RefPtr asyncRenderer = asyncRendererIfExists())
         asyncRenderer->setShowDebugBorders(showDebugBorders);
+}
+
+void PDFDiscretePresentationController::updateLayersForAccessibilityDisplayModeChange()
+{
+    auto displayMode = accessibilityDisplayMode();
+
+    auto applyToBackgroundLayer = [backgroundColor = pdfPageBackgroundColor(displayMode)](GraphicsLayer& layer) {
+        layer.setBackgroundColor(backgroundColor);
+        layer.setNeedsDisplay();
+    };
+
+    for (auto& row : m_rows) {
+        if (row.leftPageContainerLayer)
+            applyToBackgroundLayer(row.leftPageBackgroundLayer());
+
+        if (RefPtr rightPageBackgroundLayer = row.rightPageBackgroundLayer())
+            applyToBackgroundLayer(*rightPageBackgroundLayer);
+
+        if (RefPtr contentsLayer = row.contentsLayer)
+            contentsLayer->setNeedsDisplay();
+
+        if (RefPtr selectionLayer = row.selectionLayer) {
+            selectionLayer->setBlendMode(pdfSelectionBlendMode(displayMode));
+            selectionLayer->setNeedsDisplay();
+        }
+    }
 }
 
 void PDFDiscretePresentationController::updateForCurrentScrollability(OptionSet<TiledBackingScrollability> scrollability)

@@ -38,6 +38,7 @@
 #include "CSSTokenizer.h"
 #include "CommonAtomStrings.h"
 #include "Document.h"
+#include "HTMLNames.h"
 #include "MutableCSSSelector.h"
 #include "PseudoElementIdentifier.h"
 #include "SelectorPseudoTypeMap.h"
@@ -780,6 +781,34 @@ std::unique_ptr<MutableCSSSelector> CSSSelectorParser::consumeNesting(CSSParserT
     return selector;
 }
 
+// [class~="foo"] selects the same elements as .foo: both compare the whitespace-separated
+// tokens of the class attribute case-sensitively. Marking it lets matching use the tokenized
+// ElementData::classNames() instead of searching the raw attribute value.
+static bool isEquivalentToClassSelector(const CSSSelector& selector, CSSParserMode mode)
+{
+    // Only HTMLStandardMode. Quirks mode ASCII-lowercases the class list while [class~=] stays
+    // case-sensitive, and UA sheets are parsed once and shared with quirks mode documents.
+    if (mode != HTMLStandardMode)
+        return false;
+
+    if (selector.match() != CSSSelector::Match::List)
+        return false;
+
+    // A prefixed or uppercase attribute name is a different attribute, except for HTML elements
+    // where the name is matched ASCII-case-insensitively. Requiring an exact match keeps
+    // [CLASS~=foo] and [html|class~=foo] on the general attribute path.
+    if (selector.attribute() != HTMLNames::classAttr)
+        return false;
+
+    if (selector.attributeMatchType() == CSSSelector::AttributeMatchType::CaseInsensitive)
+        return false;
+
+    // Neither [class~=""] nor a value with whitespace can match anything, which is not what a
+    // class selector would do.
+    auto& value = selector.value();
+    return !value.isEmpty() && value.find(isASCIIWhitespace<char16_t>) == notFound;
+}
+
 std::unique_ptr<MutableCSSSelector> CSSSelectorParser::consumeAttribute(CSSParserTokenRange& range)
 {
     ASSERT(range.peek().type() == LeftBracketToken);
@@ -818,6 +847,10 @@ std::unique_ptr<MutableCSSSelector> CSSSelectorParser::consumeAttribute(CSSParse
 
     if (!block.atEnd())
         return nullptr;
+
+    if (isEquivalentToClassSelector(selector->selector(), m_context.mode))
+        selector->setIsEquivalentToClassSelector();
+
     return selector;
 }
 
@@ -1489,7 +1522,7 @@ static std::optional<Style::PseudoElementIdentifier> NODELETE pseudoElementIdent
 
 // FIXME: It's probably worth investigating if more logic can be shared with
 // CSSSelectorParser::consumePseudo(), though note that the requirements are subtly different.
-std::optional<Style::PseudoElementIdentifier> CSSSelectorParser::parsePseudoElement(const String& input, const CSSSelectorParserContext& context)
+std::optional<Style::PseudoElementIdentifier> CSSSelectorParser::parsePseudoElement(StringView input, const CSSSelectorParserContext& context)
 {
     auto tokenizer = CSSTokenizer { input };
     auto range = tokenizer.tokenRange();

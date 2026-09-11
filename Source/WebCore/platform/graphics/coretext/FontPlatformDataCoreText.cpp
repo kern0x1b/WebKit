@@ -69,8 +69,8 @@ FontPlatformDataAttributes::FontPlatformDataAttributes(const FontMetadata& metad
     , m_psName(psName)
     { }
 
-FontPlatformData::FontPlatformData(RetainPtr<CTFontRef>&& font, float size, bool syntheticBold, bool syntheticOblique, FontOrientation orientation, FontWidthVariant widthVariant, TextRenderingMode textRenderingMode, const FontCustomPlatformData* customPlatformData)
-    : FontPlatformData(WTF::move(font), FontMetadata { size, orientation, widthVariant, textRenderingMode, syntheticBold, syntheticOblique }, customPlatformData)
+FontPlatformData::FontPlatformData(RetainPtr<CTFontRef>&& font, float size, bool syntheticBold, bool syntheticOblique, FontOrientation orientation, FontWidthVariant widthVariant, TextRenderingMode textRenderingMode, const FontMetricsOverrides& metricsOverrides, const FontCustomPlatformData* customPlatformData)
+    : FontPlatformData(WTF::move(font), FontMetadata { size, orientation, widthVariant, textRenderingMode, syntheticBold, syntheticOblique, metricsOverrides }, customPlatformData)
 {
 }
 
@@ -519,7 +519,7 @@ RetainPtr<CTFontRef> InstalledFont::PostScriptFont::toCTFont(float pointSize) co
     auto fontName = String(adoptCF(CTFontCopyPostScriptName(font.get())).get());
     if (fontName != postScriptName) {
         RELEASE_LOG_ERROR(Fonts, "Serialized font %{public}s reconstructed to %{public}s. Subbing system-ui; may result in garbled text.",
-            postScriptName.utf8().data(), fontName.utf8().data());
+            postScriptName.utf8().legacyCStringPointer(), fontName.utf8().legacyCStringPointer());
         font = adoptCF(CTFontCreateUIFontForLanguage(kCTFontUIFontSystem, pointSize, nullptr));
     }
 

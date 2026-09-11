@@ -36,6 +36,7 @@
 #include <sqlite3.h>
 #include <wtf/TZoneMallocInlines.h>
 #include <wtf/text/MakeString.h>
+#include <wtf/text/TextStream.h>
 
 namespace WebCore {
 namespace IDBServer {
@@ -191,7 +192,7 @@ bool SQLiteIDBCursor::establishStatement()
 
 bool SQLiteIDBCursor::createSQLiteStatement(StringView sql)
 {
-    LOG(IndexedDB, "Creating cursor with SQL query: \"%s\"", sql.utf8().data());
+    LOG_WITH_STREAM(IndexedDB, stream << "Creating cursor with SQL query: \""_s << sql << "\""_s);
 
     ASSERT(!m_currentLowerKey.isNull());
     ASSERT(!m_currentUpperKey.isNull());
@@ -270,7 +271,7 @@ void SQLiteIDBCursor::resetAndRebindStatement()
 
 bool SQLiteIDBCursor::bindArguments()
 {
-    LOG(IndexedDB, "Cursor is binding lower key '%s' and upper key '%s'", m_currentLowerKey.loggingString().utf8().data(), m_currentUpperKey.loggingString().utf8().data());
+    LOG_WITH_STREAM(IndexedDB, stream << "Cursor is binding lower key '"_s << m_currentLowerKey.loggingString() << "' and upper key '"_s << m_currentUpperKey.loggingString() << "'"_s);
 
     int currentBindArgument = 1;
 
@@ -563,7 +564,7 @@ SQLiteIDBCursor::FetchResult SQLiteIDBCursor::internalFetchNextRecord(SQLiteCurs
         CheckedPtr cachedObjectStoreStatement = m_cachedObjectStoreStatement.get();
         if (!cachedObjectStoreStatement
             || cachedObjectStoreStatement->bindBlob(1, keyData) != SQLITE_OK
-            || cachedObjectStoreStatement->bindInt64(2, m_objectStoreID.toRawValue()) != SQLITE_OK) {
+            || cachedObjectStoreStatement->bindInt64(2, m_objectStoreID.toUInt64()) != SQLITE_OK) {
             LOG_ERROR("Could not create index cursor statement into object store records (%i) '%s'", database->lastError(), database->lastErrorMsg());
             markAsErrored(record);
             return FetchResult::Failure;
@@ -685,7 +686,7 @@ int64_t SQLiteIDBCursor::currentRecordRowID() const
 
 uint64_t SQLiteIDBCursor::boundIDValue() const
 {
-    return std::holds_alternative<IDBObjectStoreIdentifier>(m_boundID) ? std::get<IDBObjectStoreIdentifier>(m_boundID).toRawValue() : std::get<IDBIndexIdentifier>(m_boundID).toRawValue();
+    return std::holds_alternative<IDBObjectStoreIdentifier>(m_boundID) ? std::get<IDBObjectStoreIdentifier>(m_boundID).toUInt64() : std::get<IDBIndexIdentifier>(m_boundID).toUInt64();
 }
 
 } // namespace IDBServer

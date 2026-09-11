@@ -30,6 +30,7 @@
 #include "WebPageProxyIdentifier.h"
 #include <WebCore/ProcessQualified.h>
 #include <WebCore/WebTransportOptions.h>
+#include <wtf/CompletionHandler.h>
 #include <wtf/Identified.h>
 #include <wtf/RefCounted.h>
 #include <wtf/TZoneMalloc.h>
@@ -68,7 +69,7 @@ using WebTransportSessionIdentifier = AtomicObjectIdentifier<WebTransportSession
 class NetworkTransportSession : public RefCounted<NetworkTransportSession>, public IPC::MessageReceiver, public IPC::MessageSender {
     WTF_MAKE_TZONE_ALLOCATED(NetworkTransportSession);
 public:
-    static RefPtr<NetworkTransportSession> create(NetworkConnectionToWebProcess&, WebTransportSessionIdentifier, URL&&, WebCore::WebTransportOptions&&, WebKit::WebPageProxyIdentifier&&, WebCore::ClientOrigin&&);
+    static RefPtr<NetworkTransportSession> create(NetworkConnectionToWebProcess&, WebTransportSessionIdentifier, URL&&, WebCore::WebTransportOptions&&, Vector<KeyValuePair<String, String>>&&, WebKit::WebPageProxyIdentifier&&, WebCore::ClientOrigin&&);
 
     ~NetworkTransportSession();
 
@@ -84,6 +85,7 @@ public:
     void getSendStreamStats(WebCore::WebTransportStreamIdentifier, CompletionHandler<void(std::optional<WebCore::WebTransportSendStreamStats>&&)>&&);
     void getReceiveStreamStats(WebCore::WebTransportStreamIdentifier, CompletionHandler<void(std::optional<WebCore::WebTransportReceiveStreamStats>&&)>&&);
     void getSendGroupStats(WebCore::WebTransportSendGroupIdentifier, CompletionHandler<void(std::optional<WebCore::WebTransportSendStreamStats>&&)>&&);
+    void exportKeyingMaterial(std::span<const uint8_t> label, std::span<const uint8_t> context, uint32_t outputLength, CompletionHandler<void(std::optional<Vector<uint8_t>>)>&&);
     void destroyOutgoingUnidirectionalStream(WebCore::WebTransportStreamIdentifier);
     void destroyBidirectionalStream(WebCore::WebTransportStreamIdentifier);
     void streamSendBytes(WebCore::WebTransportStreamIdentifier, std::span<const uint8_t>, bool withFin, CompletionHandler<void(std::optional<WebCore::Exception>&&)>&&);
@@ -108,9 +110,10 @@ public:
     std::optional<SharedPreferencesForWebProcess> NODELETE sharedPreferencesForWebProcess() const;
     bool isSessionClosed() const;
 private:
-#if PLATFORM(COCOA)
+#if PLATFORM(COCOA) && HAVE(WEBTRANSPORT)
     static Ref<NetworkTransportSession> create(NetworkConnectionToWebProcess&, WebTransportSessionIdentifier, WebCore::WebTransportOptions&&, nw_connection_group_t, nw_endpoint_t);
     NetworkTransportSession(NetworkConnectionToWebProcess&, WebTransportSessionIdentifier, WebCore::WebTransportOptions&&, nw_connection_group_t, nw_endpoint_t);
+    RetainPtr<sec_protocol_metadata_t> securityMetadata() const;
 #else
     NetworkTransportSession();
 #endif
@@ -121,7 +124,7 @@ private:
     void setupDatagramConnection(CompletionHandler<void(std::optional<WebCore::WebTransportConnectionInfo>&&)>&&);
     void receiveDatagramLoop();
     void createStream(NetworkTransportStreamType, CompletionHandler<void(std::optional<WebCore::WebTransportStreamIdentifier>)>&&);
-    void completeStatsRequestsAfterInitialization(std::optional<Seconds>);
+    void completeRequestsAfterInitialization(std::optional<Seconds>);
 
     HashMap<WebCore::WebTransportStreamIdentifier, Ref<NetworkTransportStream>> m_streams;
     WeakPtr<NetworkConnectionToWebProcess> m_connectionToWebProcess;
@@ -130,15 +133,20 @@ private:
     HashMap<WebCore::WebTransportSendGroupIdentifier, uint64_t> m_datagramBytesSent;
     uint64_t m_datagramBytesReceived { 0 };
 
+    struct StreamRequestBeforeInitialization {
+        NetworkTransportStreamType streamType;
+        CompletionHandler<void(std::optional<WebCore::WebTransportStreamIdentifier>)> completionHandler;
+    };
+    Vector<StreamRequestBeforeInitialization> m_streamRequestsBeforeInitialization;
+    Vector<CompletionHandler<void(std::optional<WebCore::WebTransportConnectionStats>&&)>> m_statsRequestsBeforeInitialization;
+
     uint64_t m_bytesSentOnClosedStreams { 0 };
     uint64_t m_bytesReceivedOnClosedStreams { 0 };
-    Seconds m_initializationTime;
     enum class InitializationState : uint8_t {
         Waiting,
         Succeeded,
         Failed
     } m_initializationState { InitializationState::Waiting };
-    Vector<CompletionHandler<void(std::optional<WebCore::WebTransportConnectionStats>&&)>> m_statsRequestsBeforeInitialization;
 
 #if PLATFORM(COCOA)
     const RetainPtr<nw_connection_group_t> m_connectionGroup;

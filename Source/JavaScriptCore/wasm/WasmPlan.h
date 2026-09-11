@@ -32,6 +32,7 @@
 #include "WasmJS.h"
 #include "WasmModuleInformation.h"
 #include "WasmOMGIRGenerator.h"
+#include <optional>
 #include <wtf/Bag.h>
 #include <wtf/CrossThreadCopier.h>
 #include <wtf/SharedTask.h>
@@ -81,6 +82,7 @@ public:
 protected:
     void runCompletionTasks() WTF_REQUIRES_LOCK(m_lock);
     void fail(String&& errorMessage, CompilationError = CompilationError::Default) WTF_REQUIRES_LOCK(m_lock);
+    void failAtFunction(FunctionCodeIndex, String&& errorMessage, CompilationError = CompilationError::Default) WTF_REQUIRES_LOCK(m_lock);
 
     virtual bool isComplete() const = 0;
     virtual void complete() WTF_REQUIRES_LOCK(m_lock) = 0;
@@ -97,9 +99,10 @@ protected:
 
     Ref<ModuleInformation> m_moduleInformation; // noconst
 
-    Vector<std::pair<VM*, CompletionTask>, 1> m_completionTasks;
+    Vector<std::pair<VM*, CompletionTask>, 1> m_completionTasks WTF_GUARDED_BY_LOCK(m_lock);
 
     String m_errorMessage;
+    std::optional<FunctionCodeIndex> m_errorFunctionIndex;
     CompilationError m_error { CompilationError::Default };
 };
 

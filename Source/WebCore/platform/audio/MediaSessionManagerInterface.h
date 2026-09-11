@@ -34,6 +34,7 @@
 #include <wtf/AggregateLogger.h>
 #include <wtf/CancellableTask.h>
 #include <wtf/LoggerHelper.h>
+#include <wtf/NativePromise.h>
 #include <wtf/ProcessID.h>
 #include <wtf/TZoneMalloc.h>
 #include <wtf/ThreadSafeWeakPtr.h>
@@ -43,6 +44,7 @@
 
 namespace WebCore {
 
+class MediaSessionManagerClient;
 class Page;
 class PlatformMediaSessionInterface;
 struct NowPlayingMetadata;
@@ -70,7 +72,8 @@ public:
     virtual bool hasNoSession() const;
 
     virtual bool activeAudioSessionRequired() const;
-    virtual bool hasActiveAudioSession() const;
+    bool audioSessionActivationRequired() const;
+    virtual bool hasActiveAudioSession(PlatformMediaSessionInterface&) const;
     virtual bool canProduceAudio() const;
 
     virtual void setShouldDeactivateAudioSession(bool should) { m_shouldDeactivateAudioSession = should; };
@@ -94,6 +97,7 @@ public:
     virtual bool registeredAsNowPlayingApplication() const { return false; }
     virtual bool haveEverRegisteredAsNowPlayingApplication() const { return false; }
     virtual void resetHaveEverRegisteredAsNowPlayingApplicationForTesting() { };
+    virtual void resetToConsistentStateForTesting();
 
     virtual bool willIgnoreSystemInterruptions() const { return m_willIgnoreSystemInterruptions; }
     virtual void setWillIgnoreSystemInterruptions(bool ignore) { m_willIgnoreSystemInterruptions = ignore; }
@@ -121,14 +125,28 @@ public:
     virtual MediaSessionRestrictions restrictions(PlatformMediaSessionMediaType);
     virtual void resetRestrictions();
 
-    virtual void sessionWillBeginPlayback(PlatformMediaSessionInterface&, CompletionHandler<void(bool)>&&);
+    Ref<GenericPromise> sessionWillBeginPlayback(PlatformMediaSessionInterface&);
+    // Called after a session's admission commits to Playing, still inside the serialized admission region.
+    // Override for work that depends on that outcome (Now Playing/audio-session updates, wireless playback
+    // target assignment, cross-process notification) instead of overriding sessionWillBeginPlayback() itself.
+    virtual void sessionDidCompleteAdmission(PlatformMediaSessionInterface&);
     virtual void sessionWillEndPlayback(PlatformMediaSessionInterface&, DelayCallingUpdateNowPlaying);
     virtual void sessionStateChanged(PlatformMediaSessionInterface&);
     virtual void sessionDidEndRemoteScrubbing(PlatformMediaSessionInterface&) { }
     virtual void sessionCanProduceAudioChanged();
     virtual void clientCharacteristicsChanged(PlatformMediaSessionInterface&, bool) { }
 
+    // Re-evaluates ConcurrentPlaybackNotPermitted for `newSession`: if its
+    // current mediaType has that restriction, pauses other Playing sessions
+    // that report `canPlayConcurrently=false`. Called from sessionWillBeginPlayback
+    // and again when a session transitions from a non-restricted to a
+    // restricted mediaType (e.g., Video → VideoAudio after audio metadata loads).
+    void enforceConcurrentPlaybackRestriction(PlatformMediaSessionInterface& newSession);
+
     virtual void configureWirelessTargetMonitoring() { }
+#if ENABLE(WIRELESS_PLAYBACK_MEDIA_PLAYER)
+    virtual void ensureMediaDeviceRouteControllerMonitoring() { }
+#endif
     virtual bool hasWirelessTargetsAvailable() { return false; }
     virtual bool isMonitoringWirelessTargets() const { return false; }
     virtual void sessionIsPlayingToWirelessPlaybackTargetChanged(PlatformMediaSessionInterface&);
@@ -139,10 +157,15 @@ public:
     virtual void addAudioCaptureSource(AudioCaptureSource&);
     virtual void removeAudioCaptureSource(AudioCaptureSource&);
     enum class IsCaptureStarting : bool { No, Yes };
-    virtual void audioCaptureSourceStateChanged(IsCaptureStarting);
+    // The returned promise settles once the audio session category resulting from this state change has
+    // been applied to AudioSession::singleton() in this process. Ordering-sensitive callers (e.g.
+    // getUserMedia resolution) await it so they observe the up-to-date category; other callers may
+    // ignore the result. The base implementation applies the category synchronously and returns an
+    // already-resolved promise; RemoteMediaSessionManager settles it from its async IPC reply.
+    virtual Ref<GenericPromise> audioCaptureSourceStateChanged(IsCaptureStarting);
     virtual size_t audioCaptureSourceCount() const { return m_audioCaptureSources.computeSize(); }
 
-    virtual void processDidReceiveRemoteControlCommand(PlatformMediaSessionRemoteControlCommandType, const PlatformMediaSessionRemoteCommandArgument&);
+    bool processDidReceiveRemoteControlCommand(PlatformMediaSessionRemoteControlCommandType, const PlatformMediaSessionRemoteCommandArgument&, std::optional<MediaSessionIdentifier> targetSession = std::nullopt);
     virtual bool processIsSuspended() const { return m_processIsSuspended; };
     virtual void processSystemWillSleep();
     virtual void processSystemDidWake();
@@ -166,6 +189,9 @@ public:
 protected:
     explicit MediaSessionManagerInterface(std::optional<PageIdentifier>);
 
+    MediaSessionManagerClient& client() const;
+    void setClient(std::unique_ptr<MediaSessionManagerClient>&&);
+
     virtual WeakListHashSet<PlatformMediaSessionInterface>& sessions() const = 0;
     virtual Vector<WeakPtr<PlatformMediaSessionInterface>> copySessionsToVector() const = 0;
 
@@ -175,13 +201,14 @@ protected:
     Vector<WeakPtr<PlatformMediaSessionInterface>> sessionsMatching(NOESCAPE const Function<bool(const PlatformMediaSessionInterface&)>&) const;
     WeakPtr<PlatformMediaSessionInterface> firstSessionMatching(NOESCAPE const Function<bool(const PlatformMediaSessionInterface&)>&) const;
 
-    void maybeDeactivateAudioSession();
-    bool maybeActivateAudioSession();
+    enum class ShouldCheckRequiredSession : bool { No, Yes };
+    void maybeDeactivateAudioSession(ShouldCheckRequiredSession = ShouldCheckRequiredSession::Yes);
+    Ref<GenericPromise> maybeActivateAudioSession();
 
     void nowPlayingMetadataChanged(const NowPlayingMetadata&);
     void enqueueTaskOnMainThread(Function<void()>&&);
 
-    int countActiveAudioCaptureSources();
+    virtual int countActiveAudioCaptureSources();
 
     bool computeSupportsSeeking() const;
 
@@ -203,10 +230,17 @@ protected:
 
 private:
     bool has(PlatformMediaSessionMediaType) const;
+    Ref<GenericPromise> startSessionAdmission(PlatformMediaSessionInterface&, PlatformMediaSessionState stateAtStart);
 
     std::array<MediaSessionRestrictions, static_cast<unsigned>(PlatformMediaSessionMediaType::DOMMediaSession) + 1> m_restrictions;
 
     std::optional<PlatformMediaSessionInterruptionType> m_currentInterruption;
+
+    // Used to serialize admissions; gets resolved when the current round completes. An admission whose
+    // AudioSession activation never replies stalls every later admission for this manager instance —
+    // page-wide, across every WebContent process, on the UI-process aggregator — and keeps this manager
+    // alive (each in-flight round holds a Ref to it). There is no watchdog for this today.
+    Ref<GenericPromise> m_currentPlaybackAdmission { GenericPromise::createAndResolve() };
 
     WeakHashSet<AudioCaptureSource> m_audioCaptureSources;
 
@@ -214,6 +248,7 @@ private:
     TaskCancellationGroup m_taskGroup;
 
     Markable<PageIdentifier> m_pageIdentifier;
+    std::unique_ptr<MediaSessionManagerClient> m_client;
 #if !RELEASE_LOG_DISABLED
     UniqueRef<Timer> m_stateLogTimer;
     const Ref<AggregateLogger> m_logger;

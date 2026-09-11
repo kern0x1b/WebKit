@@ -696,7 +696,7 @@ CompletionHandlerCallingScope HTMLSelectElement::optionToSelectFromChildChangeSc
     };
 
     RefPtr<HTMLOptionElement> optionToSelect;
-    if (change.type == ChildChange::Type::ElementInserted || change.type == ChildChange::Type::ElementAndTextInserted) {
+    if (change.type == ChildChange::Type::ElementInserted || change.type == ChildChange::Type::ElementAndTextInserted || change.type == ChildChange::Type::ElementMovedInto) {
         auto handleInsertedElement = [&](Element& insertedElement) {
             if (auto* option = dynamicDowncast<HTMLOptionElement>(insertedElement)) {
                 if (option->selectedWithoutUpdate())
@@ -1143,6 +1143,7 @@ void HTMLSelectElement::updateListBoxSelection(bool deselectOtherOptions)
     }
 
     invalidateSelectedItems();
+    invalidateButtonText();
     scrollToSelection();
     updateValidity();
 }

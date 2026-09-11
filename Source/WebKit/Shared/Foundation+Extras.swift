@@ -21,10 +21,18 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
 // THE POSSIBILITY OF SUCH DAMAGE.
 
+#if os(Windows)
+// FIXME: (rdar://185504483) conflict with Windows Swift Foundation's ICU
+import FoundationEssentials
+
+typealias URL = FoundationEssentials.URL
+#else
 import Foundation
 
-typealias String = Swift.String
 typealias URL = Foundation.URL
+#endif
+
+typealias String = Swift.String
 
 struct UncheckedSendableKeyPathBox<Root, Value>: @unchecked Sendable {
     let keyPath: KeyPath<Root, Value>
@@ -37,5 +45,25 @@ extension Comparable {
     /// - Returns: A value guaranteed to be in the range `[limits.lowerBound, limits.upperBound]`
     func clamped(to limits: ClosedRange<Self>) -> Self {
         min(max(self, limits.lowerBound), limits.upperBound)
+    }
+}
+
+/// A type that can be used to uniquely own an instance of `Value` while being copyable.
+final class CopyableBox<Value: ~Copyable> {
+    /// The value contained in this copyable box.
+    var value: Value?
+
+    /// Initializes a value of this copyable box with the given value.
+    ///
+    /// - Parameter value: The value to initialize the copyable box with.
+    init(value: consuming Value) {
+        self.value = consume value
+    }
+
+    /// Consumes the box's value and returns the instance of Value that was within the box.
+    ///
+    /// - Returns: The value in this box.
+    func take() -> Value? {
+        value.take()
     }
 }

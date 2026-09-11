@@ -31,7 +31,9 @@
 #import "Logging.h"
 #import "MediaPlaybackTargetCocoa.h"
 #import "MediaPlayer.h"
+#import "MediaStrategy.h"
 #import "PlatformMediaSession.h"
+#import "PlatformStrategies.h"
 #import "SystemMemory.h"
 #import "WebCoreThreadRun.h"
 #import <wtf/MainThread.h>
@@ -121,34 +123,38 @@ void MediaSessionManageriOS::configureWirelessTargetMonitoring()
 #endif
 }
 
-void MediaSessionManageriOS::sessionWillBeginPlayback(PlatformMediaSessionInterface& session, CompletionHandler<void(bool)>&& completionHandler)
+#if ENABLE(WIRELESS_PLAYBACK_MEDIA_PLAYER)
+void MediaSessionManageriOS::ensureMediaDeviceRouteControllerMonitoring()
 {
-    auto logSiteIdentifier = LOGIDENTIFIER;
-    MediaSessionManagerCocoa::sessionWillBeginPlayback(session, [weakThis = ThreadSafeWeakPtr { *this }, completionHandler = WTF::move(completionHandler), strongSession = RefPtr { &session }, logSiteIdentifier = WTF::move(logSiteIdentifier)](bool canBegin) mutable {
+    if (!hasPlatformStrategies() || !platformStrategies()->mediaStrategy()->wirelessPlaybackMediaPlayerEnabled())
+        return;
 
-        UNUSED_PARAM(logSiteIdentifier);
-
-        RefPtr protectedThis = weakThis.get();
-        if (!protectedThis) {
-            completionHandler(false);
-            return;
-        }
-
-        if (!canBegin) {
-            completionHandler(false);
-            return;
-        }
-
-#if PLATFORM(IOS_FAMILY)
-        auto playbackTargetSupportsAirPlayVideo = MediaSessionHelper::sharedHelper().activeVideoRouteSupportsAirPlayVideo();
-        ALWAYS_LOG_WITH_THIS(protectedThis, logSiteIdentifier, "Playback Target Supports AirPlay Video = ", playbackTargetSupportsAirPlayVideo);
-        if (RefPtr target = MediaSessionHelper::sharedHelper().playbackTarget(); target && playbackTargetSupportsAirPlayVideo)
-            strongSession->setPlaybackTarget(*target);
-        strongSession->setShouldPlayToPlaybackTarget(playbackTargetSupportsAirPlayVideo);
+    protect(MediaSessionHelper::sharedHelper())->ensureMediaDeviceRouteControllerMonitoring();
+}
 #endif
 
-        completionHandler(true);
-    });
+void MediaSessionManageriOS::applyActiveVideoRouteToSession(PlatformMediaSessionInterface& session)
+{
+    auto playbackTargetSupportsAirPlayVideo = MediaSessionHelper::sharedHelper().activeVideoRouteSupportsAirPlayVideo();
+    ALWAYS_LOG(LOGIDENTIFIER, "Playback Target Supports AirPlay Video = ", playbackTargetSupportsAirPlayVideo);
+    if (RefPtr target = MediaSessionHelper::sharedHelper().playbackTarget(); target && playbackTargetSupportsAirPlayVideo)
+        session.setPlaybackTarget(*target);
+    session.setShouldPlayToPlaybackTarget(playbackTargetSupportsAirPlayVideo);
+}
+
+void MediaSessionManageriOS::sessionDidCompleteAdmission(PlatformMediaSessionInterface& session)
+{
+    MediaSessionManagerCocoa::sessionDidCompleteAdmission(session);
+
+    applyActiveVideoRouteToSession(session);
+}
+
+void MediaSessionManageriOS::activeNowPlayingSessionChanged(PlatformMediaSessionInterface* session)
+{
+    MediaSessionManagerCocoa::activeNowPlayingSessionChanged(session);
+
+    if (session)
+        applyActiveVideoRouteToSession(*session);
 }
 
 void MediaSessionManageriOS::sessionWillEndPlayback(PlatformMediaSessionInterface& session, DelayCallingUpdateNowPlaying delayCallingUpdateNowPlaying)

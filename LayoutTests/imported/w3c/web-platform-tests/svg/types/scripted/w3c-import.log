@@ -10,8 +10,6 @@ Do NOT modify or remove this file.
 ------------------------------------------------------------------------
 Properties requiring vendor prefixes:
 None
-Property values requiring vendor prefixes:
-None
 ------------------------------------------------------------------------
 List of files:
 /LayoutTests/imported/w3c/web-platform-tests/svg/types/scripted/SVGAnimatedAngle-initial-values.html
@@ -33,6 +31,8 @@ List of files:
 /LayoutTests/imported/w3c/web-platform-tests/svg/types/scripted/SVGAnimatedEnumeration-SVGTextContentElement.html
 /LayoutTests/imported/w3c/web-platform-tests/svg/types/scripted/SVGAnimatedEnumeration-SVGTextPathElement.html
 /LayoutTests/imported/w3c/web-platform-tests/svg/types/scripted/SVGAnimatedEnumeration-initial-values.html
+/LayoutTests/imported/w3c/web-platform-tests/svg/types/scripted/SVGAnimatedEnumeration-invalid-values.html
+/LayoutTests/imported/w3c/web-platform-tests/svg/types/scripted/SVGAnimatedEnumeration-keywords.html
 /LayoutTests/imported/w3c/web-platform-tests/svg/types/scripted/SVGAnimatedEnumeration.html
 /LayoutTests/imported/w3c/web-platform-tests/svg/types/scripted/SVGAnimatedInteger-initial-values.html
 /LayoutTests/imported/w3c/web-platform-tests/svg/types/scripted/SVGAnimatedInteger.html
@@ -72,6 +72,11 @@ List of files:
 /LayoutTests/imported/w3c/web-platform-tests/svg/types/scripted/SVGGraphicsElement.svg
 /LayoutTests/imported/w3c/web-platform-tests/svg/types/scripted/SVGLength-cap.html
 /LayoutTests/imported/w3c/web-platform-tests/svg/types/scripted/SVGLength-ch.html
+/LayoutTests/imported/w3c/web-platform-tests/svg/types/scripted/SVGLength-convertToSpecifiedUnits-font-change.html
+/LayoutTests/imported/w3c/web-platform-tests/svg/types/scripted/SVGLength-convertToSpecifiedUnits-non-px-source.html
+/LayoutTests/imported/w3c/web-platform-tests/svg/types/scripted/SVGLength-convertToSpecifiedUnits-percentage-directionality.html
+/LayoutTests/imported/w3c/web-platform-tests/svg/types/scripted/SVGLength-convertToSpecifiedUnits-readonly.html
+/LayoutTests/imported/w3c/web-platform-tests/svg/types/scripted/SVGLength-convertToSpecifiedUnits-reserialization.html
 /LayoutTests/imported/w3c/web-platform-tests/svg/types/scripted/SVGLength-ic.html
 /LayoutTests/imported/w3c/web-platform-tests/svg/types/scripted/SVGLength-lh.html
 /LayoutTests/imported/w3c/web-platform-tests/svg/types/scripted/SVGLength-px-with-context.html
@@ -85,10 +90,13 @@ List of files:
 /LayoutTests/imported/w3c/web-platform-tests/svg/types/scripted/SVGLengthList-appendItemFromClearedList.html
 /LayoutTests/imported/w3c/web-platform-tests/svg/types/scripted/SVGLengthList-basics.html
 /LayoutTests/imported/w3c/web-platform-tests/svg/types/scripted/SVGLengthList-getItem.html
+/LayoutTests/imported/w3c/web-platform-tests/svg/types/scripted/SVGList-animVal-reflects-base-value.html
 /LayoutTests/imported/w3c/web-platform-tests/svg/types/scripted/SVGList-parse-invalid-clears-items.html
-/LayoutTests/imported/w3c/web-platform-tests/svg/types/scripted/SVGMatrix-tentative.html
+/LayoutTests/imported/w3c/web-platform-tests/svg/types/scripted/SVGList-reflected-attribute-synchronize.html
+/LayoutTests/imported/w3c/web-platform-tests/svg/types/scripted/SVGMatrix.html
 /LayoutTests/imported/w3c/web-platform-tests/svg/types/scripted/SVGPathElement.getTotalLength-01.html
 /LayoutTests/imported/w3c/web-platform-tests/svg/types/scripted/SVGPoint.html
+/LayoutTests/imported/w3c/web-platform-tests/svg/types/scripted/SVGPointList-error-handling.html
 /LayoutTests/imported/w3c/web-platform-tests/svg/types/scripted/SVGRect.html
 /LayoutTests/imported/w3c/web-platform-tests/svg/types/scripted/WEB_FEATURES.yml
 /LayoutTests/imported/w3c/web-platform-tests/svg/types/scripted/event-handler-all-document-element-events.svg

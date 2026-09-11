@@ -29,6 +29,7 @@
 #include "DisplayList.h"
 #include "DisplayListItems.h"
 #include "Filter.h"
+#include "Font.h"
 #include "GraphicsContext.h"
 #include "ImageBuffer.h"
 #include "Logging.h"
@@ -44,7 +45,7 @@ namespace DisplayList {
 
 WTF_MAKE_TZONE_ALLOCATED_IMPL(RecorderImpl);
 
-RecorderImpl::RecorderImpl(const GraphicsContextState& state, const FloatRect& initialClip, const AffineTransform& initialCTM, const DestinationColorSpace& colorSpace, DrawGlyphsMode drawGlyphsMode)
+RecorderImpl::RecorderImpl(const GraphicsContextState& state, const FloatRect& initialClip, const AffineTransform& initialCTM, const ColorSpace& colorSpace, DrawGlyphsMode drawGlyphsMode)
     : Recorder(state, initialClip, initialCTM, colorSpace, drawGlyphsMode)
 {
     LOG_WITH_STREAM(DisplayLists, stream << "\nRecording with clip " << initialClip);
@@ -66,6 +67,53 @@ Ref<const DisplayList> RecorderImpl::copyDisplayList()
 {
     appendStateChangeItemIfNecessary();
     return DisplayList::create(Vector(m_items));
+}
+
+static void replaceFontsWithRebuildDataInItems(std::span<Item>);
+static void rebuildFontsInItems(std::span<Item>);
+
+static Ref<const DisplayList> displayListWithFontsReplacedByRebuildData(const DisplayList& displayList)
+{
+    Vector<Item> items(displayList.items());
+    replaceFontsWithRebuildDataInItems(items.mutableSpan());
+    return DisplayList::create(WTF::move(items));
+}
+
+static Ref<const DisplayList> displayListWithFontsRebuilt(const DisplayList& displayList)
+{
+    Vector<Item> items(displayList.items());
+    rebuildFontsInItems(items.mutableSpan());
+    return DisplayList::create(WTF::move(items));
+}
+
+static void replaceFontsWithRebuildDataInItems(std::span<Item> items)
+{
+    for (auto& item : items) {
+        if (auto* drawGlyphs = std::get_if<DrawGlyphs>(&item))
+            drawGlyphs->replaceFontWithRebuildData();
+        else if (auto* drawDisplayList = std::get_if<DrawDisplayList>(&item))
+            drawDisplayList->setDisplayList(displayListWithFontsReplacedByRebuildData(drawDisplayList->displayList()));
+    }
+}
+
+static void rebuildFontsInItems(std::span<Item> items)
+{
+    for (auto& item : items) {
+        if (auto* drawGlyphs = std::get_if<DrawGlyphs>(&item))
+            drawGlyphs->rebuildFont();
+        else if (auto* drawDisplayList = std::get_if<DrawDisplayList>(&item))
+            drawDisplayList->setDisplayList(displayListWithFontsRebuilt(drawDisplayList->displayList()));
+    }
+}
+
+void RecorderImpl::replaceFontsWithRebuildData()
+{
+    replaceFontsWithRebuildDataInItems(m_items.mutableSpan());
+}
+
+void RecorderImpl::rebuildFonts()
+{
+    rebuildFontsInItems(m_items.mutableSpan());
 }
 
 void RecorderImpl::save(GraphicsContextState::Purpose purpose)
@@ -452,15 +500,14 @@ void RecorderImpl::setURLForRect(const URL& link, const FloatRect& destRect)
 
 void RecorderImpl::appendStateChangeItemIfNecessary()
 {
-    auto& state = currentState().state;
-    auto changes = state.changes();
+    auto& state = m_state;
+    auto changes = computeStateChanges();
     if (!changes)
         return;
 
     auto recordFullItem = [&] {
         m_items.append(SetState(state));
-        state.didApplyChanges();
-        currentState().lastDrawingState = state;
+        commitStateChanges(changes);
     };
 
     if (!changes.containsOnly({ GraphicsContextState::Change::FillBrush, GraphicsContextState::Change::StrokeBrush, GraphicsContextState::Change::StrokeThickness })) {
@@ -492,8 +539,7 @@ void RecorderImpl::appendStateChangeItemIfNecessary()
     if (strokeColor || strokeThickness)
         m_items.append(SetInlineStroke(strokeColor, strokeThickness));
 
-    state.didApplyChanges();
-    currentState().lastDrawingState = state;
+    commitStateChanges(changes);
 }
 
 void RecorderImpl::drawPlaceholder(Function<void(GraphicsContext&)>&& function)

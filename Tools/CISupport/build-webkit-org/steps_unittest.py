@@ -2024,7 +2024,8 @@ class TestRunWebDriverTests(BuildStepMixinAdditions, unittest.TestCase):
                 log_environ=True,
                 logfiles={'json': self.jsonFileName},
                 command=['/bin/bash', '--posix', '-o', 'pipefail', '-c', 'python3 Tools/Scripts/run-webdriver-tests --verbose --json-output=webdriver_tests.json --release 2>&1 | python3 Tools/Scripts/filter-test-logs webdriver'],
-                timeout=5400
+                timeout=5400,
+                max_time=10800
             )
             .log('stdio', stdout='All tests run as expected\n')
             .exit(0),
@@ -2042,7 +2043,8 @@ class TestRunWebDriverTests(BuildStepMixinAdditions, unittest.TestCase):
                 log_environ=True,
                 logfiles={'json': self.jsonFileName},
                 command=['/bin/bash', '--posix', '-o', 'pipefail', '-c', 'python3 Tools/Scripts/run-webdriver-tests --verbose --json-output=webdriver_tests.json --release 2>&1 | python3 Tools/Scripts/filter-test-logs webdriver'],
-                timeout=5400
+                timeout=5400,
+                max_time=10800
             )
             .log('stdio', stdout='Unexpected failures (554)\n')
             .exit(1),
@@ -2068,7 +2070,8 @@ class TestRunWebDriverTests(BuildStepMixinAdditions, unittest.TestCase):
                 log_environ=True,
                 logfiles={'json': self.jsonFileName},
                 command=['/bin/bash', '--posix', '-o', 'pipefail', '-c', 'python3 Tools/Scripts/run-webdriver-tests --verbose --json-output=webdriver_tests.json --release 2>&1 | python3 Tools/Scripts/filter-test-logs webdriver'],
-                timeout=5400
+                timeout=5400,
+                max_time=10800
             )
             .log('stdio', stdout='Expected to fail, but passed (1)\n')
             .exit(1),
@@ -2094,7 +2097,8 @@ class TestRunWebDriverTests(BuildStepMixinAdditions, unittest.TestCase):
                 log_environ=True,
                 logfiles={'json': self.jsonFileName},
                 command=['/bin/bash', '--posix', '-o', 'pipefail', '-c', 'python3 Tools/Scripts/run-webdriver-tests --verbose --json-output=webdriver_tests.json --release 2>&1 | python3 Tools/Scripts/filter-test-logs webdriver'],
-                timeout=5400
+                timeout=5400,
+                max_time=10800
             )
             .log('stdio', stdout='''filter-test-logs progress: 11300 lines processed
 filter-test-logs progress: 20000 lines processed
@@ -2643,7 +2647,7 @@ class TestRunTest262Tests(BuildStepMixinAdditions, unittest.TestCase):
             ExpectShell(workdir='wkdir',
                         timeout=3600,
                         log_environ=True,
-                        command=['/bin/bash', '--posix', '-o', 'pipefail', '-c', 'perl Tools/Scripts/test262-runner --verbose --release 2>&1 | python3 Tools/Scripts/filter-test-logs test262'],
+                        command=['/bin/bash', '--posix', '-o', 'pipefail', '-c', 'Tools/Scripts/test262-runner --verbose --release 2>&1 | python3 Tools/Scripts/filter-test-logs test262'],
                         )
             .exit(0),
         )
@@ -2658,7 +2662,7 @@ class TestRunTest262Tests(BuildStepMixinAdditions, unittest.TestCase):
             ExpectShell(workdir='wkdir',
                         timeout=3600,
                         log_environ=True,
-                        command=['/bin/bash', '--posix', '-o', 'pipefail', '-c', 'perl Tools/Scripts/test262-runner --verbose --debug 2>&1 | python3 Tools/Scripts/filter-test-logs test262'],
+                        command=['/bin/bash', '--posix', '-o', 'pipefail', '-c', 'Tools/Scripts/test262-runner --verbose --debug 2>&1 | python3 Tools/Scripts/filter-test-logs test262'],
                         )
             .log('stdio', stdout='''! NEW FAIL: test/built-ins/Array/prototype/at/index-non-numeric.js
 ! NEW FAIL: test/built-ins/Array/prototype/at/index-out-of-range.js
@@ -2678,7 +2682,7 @@ class TestRunTest262Tests(BuildStepMixinAdditions, unittest.TestCase):
             ExpectShell(workdir='wkdir',
                         timeout=3600,
                         log_environ=True,
-                        command=['/bin/bash', '--posix', '-o', 'pipefail', '-c', 'perl Tools/Scripts/test262-runner --verbose --release 2>&1 | python3 Tools/Scripts/filter-test-logs test262'],
+                        command=['/bin/bash', '--posix', '-o', 'pipefail', '-c', 'Tools/Scripts/test262-runner --verbose --release 2>&1 | python3 Tools/Scripts/filter-test-logs test262'],
                         )
             .exit(0),
         )
@@ -2694,7 +2698,7 @@ class TestRunTest262Tests(BuildStepMixinAdditions, unittest.TestCase):
             ExpectShell(workdir='wkdir',
                         timeout=3600,
                         log_environ=True,
-                        command=['/bin/bash', '--posix', '-o', 'pipefail', '-c', 'perl Tools/Scripts/test262-runner --verbose --release --gtk 2>&1 | python3 Tools/Scripts/filter-test-logs test262'],
+                        command=['/bin/bash', '--posix', '-o', 'pipefail', '-c', 'Tools/Scripts/test262-runner --verbose --release --gtk 2>&1 | python3 Tools/Scripts/filter-test-logs test262'],
                         )
             .exit(0),
         )
@@ -2710,7 +2714,7 @@ class TestRunTest262Tests(BuildStepMixinAdditions, unittest.TestCase):
             ExpectShell(workdir='wkdir',
                         timeout=3600,
                         log_environ=True,
-                        command=['/bin/bash', '--posix', '-o', 'pipefail', '-c', 'perl Tools/Scripts/test262-runner --verbose --debug --wpe 2>&1 | python3 Tools/Scripts/filter-test-logs test262'],
+                        command=['/bin/bash', '--posix', '-o', 'pipefail', '-c', 'Tools/Scripts/test262-runner --verbose --debug --wpe 2>&1 | python3 Tools/Scripts/filter-test-logs test262'],
                         )
             .exit(0),
         )

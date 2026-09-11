@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2012-2023 Apple Inc. All rights reserved.
+ * Copyright (C) 2012-2026 Apple Inc. All rights reserved.
  * Copyright (C) 2015 Google Inc. All rights reserved.
  * Copyright (C) 2026 Samuel Weinig <sam@webkit.org>
  *
@@ -433,7 +433,9 @@ LayoutUnit RenderMultiColumnSet::calculateMaxColumnHeight() const
     RenderBlockFlow* multicolBlock = multiColumnBlockFlow();
     const Style::ComputedStyle& multicolStyle = multicolBlock->style();
     LayoutUnit availableHeight = multiColumnFlow()->columnHeightAvailable();
-    LayoutUnit maxColumnHeight = availableHeight ? availableHeight : RenderFragmentedFlow::maxLogicalHeight();
+    if (availableHeight)
+        return heightAdjustedForSetOffset(availableHeight);
+    LayoutUnit maxColumnHeight = RenderFragmentedFlow::maxLogicalHeight();
     if (!multicolStyle.logicalMaxHeight().isNone())
         maxColumnHeight = std::min(maxColumnHeight, multicolBlock->computeContentLogicalHeight(multicolStyle.logicalMaxHeight(), std::nullopt).value_or(maxColumnHeight));
     return heightAdjustedForSetOffset(maxColumnHeight);
@@ -446,7 +448,7 @@ LayoutUnit RenderMultiColumnSet::columnGap() const
     auto& parentBlock = downcast<RenderBlockFlow>(*parent());
     auto& parentBlockGap = parentBlock.style().columnGap();
     if (parentBlockGap.isNormal())
-        return LayoutUnit(parentBlock.style().fontDescription().computedSize()); // "1em" is recommended as the normal gap setting. Matches <p> margins.
+        return LayoutUnit(parentBlock.style().fontDescription().usedSize()); // "1em" is recommended as the normal gap setting. Matches <p> margins.
     return Style::evaluate<LayoutUnit>(parentBlockGap, parentBlock.contentBoxLogicalWidth(), parentBlock.style().usedZoomForLength());
 }
 

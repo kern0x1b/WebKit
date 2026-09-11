@@ -36,6 +36,7 @@
 #include "IOSurface.h"
 #include "OffscreenCanvas.h"
 #include "PlatformCALayer.h"
+#include "WebGPUFramePacer.h"
 #include <wtf/MachSendRight.h>
 #include <wtf/Ref.h>
 #include <wtf/RefCounted.h>
@@ -51,7 +52,9 @@ class GPUCanvasContextCocoa final : public GPUCanvasContext {
 public:
     static std::unique_ptr<GPUCanvasContextCocoa> create(CanvasBase&, GPU&, Document*);
 
-    DestinationColorSpace colorSpace() const override;
+    ~GPUCanvasContextCocoa();
+
+    ColorSpace colorSpace() const override;
     bool compositingResultsNeedUpdating() const override { return m_compositingResultsNeedsUpdating; }
     RefPtr<GraphicsLayerContentsDisplayDelegate> layerContentsDisplayDelegate() override;
     bool needsPreparationForDisplay() const override { return true; }
@@ -59,8 +62,10 @@ public:
     PixelFormat pixelFormat() const override;
     bool isOpaque() const override;
     void didUpdateCanvasSizeProperties(bool) override;
+    std::optional<FramesPerSecond> preferredRenderingUpdateFramesPerSecond() const override;
 
     RefPtr<ImageBuffer> surfaceBufferToImageBuffer(SurfaceBuffer) override;
+    RefPtr<NativeImage> surfaceBufferToNativeImage(SurfaceBuffer) override;
     bool isSurfaceBufferTransparentBlack(SurfaceBuffer) const final { return false; }
 
     // GPUCanvasContext methods:
@@ -68,6 +73,7 @@ public:
     ExceptionOr<void> configure(GPUCanvasConfiguration&&) override;
     void unconfigure() override;
     std::optional<GPUCanvasConfiguration> getConfiguration() const override;
+    GPUDevice* device() const override { return m_configuration ? m_configuration->device.ptr() : nullptr; }
     ExceptionOr<Ref<GPUTexture>> getCurrentTexture() override;
     RefPtr<ImageBuffer> transferToImageBuffer() override;
 
@@ -79,7 +85,7 @@ public:
 private:
     explicit GPUCanvasContextCocoa(CanvasBase&, Ref<GPUCompositorIntegration>&&, Ref<GPUPresentationContext>&&, Document*);
 
-    void markContextChangedAndNotifyCanvasObservers();
+    void willUpdateDisplayBufferContents();
 
     bool isConfigured() const
     {
@@ -89,6 +95,8 @@ private:
     CanvasType htmlOrOffscreenCanvas() const;
     ExceptionOr<void> configure(GPUCanvasConfiguration&&, bool);
     void present(uint32_t frameIndex);
+    void updateFramePacing();
+    Page* page() const;
 #if HAVE(SUPPORT_HDR_DISPLAY)
     float computeContentsHeadroom();
     void updateContentsHeadroom();
@@ -108,6 +116,7 @@ private:
         GPUCanvasAlphaMode compositingAlphaMode { GPUCanvasAlphaMode::Opaque };
         Vector<MachSendRight> renderBuffers;
         unsigned frameCount { 0 };
+        std::optional<unsigned> lastPresentedFrameIndex;
     };
     std::optional<Configuration> m_configuration;
 
@@ -115,6 +124,9 @@ private:
     const Ref<GPUCompositorIntegration> m_compositorIntegration;
     const Ref<GPUPresentationContext> m_presentationContext;
     RefPtr<GPUTexture> m_currentTexture;
+    WebGPUFramePacer m_framePacer;
+    std::optional<FramesPerSecond> m_lastPreferredFrameRate;
+    bool m_isRegisteredForPacing { false };
 
     GPUIntegerCoordinate m_width { 0 };
     GPUIntegerCoordinate m_height { 0 };
@@ -128,7 +140,8 @@ private:
     bool m_suppressEDR { false };
 #endif // HAVE(SUPPORT_HDR_DISPLAY)
     bool m_compositingResultsNeedsUpdating { false };
-    RefPtr<ImageBuffer> m_readDisplayBuffer;
+    RefPtr<ImageBuffer> m_readDisplayBuffer; // Temporary until content is provided as NativeImage.
+    RefPtr<NativeImage> m_readDisplayBufferImage;
 };
 
 } // namespace WebCore

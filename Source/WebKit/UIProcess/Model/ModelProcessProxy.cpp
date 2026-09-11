@@ -36,6 +36,7 @@
 #include "ModelProcessProxyMessages.h"
 #include "ProcessTerminationReason.h"
 #include "ProvisionalPageProxy.h"
+#include "SecurityFlagsController.h"
 #include "WebPageGroup.h"
 #include "WebPageMessages.h"
 #include "WebPageProxy.h"
@@ -88,6 +89,7 @@ ModelProcessProxy::ModelProcessProxy()
 
     ModelProcessCreationParameters parameters;
     parameters.auxiliaryProcessParameters = auxiliaryProcessParameters();
+    parameters.securityFlags.replaceWith(SecurityFlagsController::singleton().securityFlags());
     parameters.parentPID = getCurrentProcessID();
 
 #if PLATFORM(COCOA)
@@ -102,12 +104,12 @@ ModelProcessProxy::ModelProcessProxy()
 
 ModelProcessProxy::~ModelProcessProxy() = default;
 
-void ModelProcessProxy::terminateWebProcess(WebCore::ProcessIdentifier webProcessIdentifier)
+void ModelProcessProxy::terminateWebProcess(WebCore::ProcessIdentifier webProcessIdentifier, IPC::MessageName invalidMessageName)
 {
     if (auto process = WebProcessProxy::processForIdentifier(webProcessIdentifier)) {
         MESSAGE_CHECK(process->sharedPreferencesForWebProcessValue().modelElementEnabled);
         MESSAGE_CHECK(process->sharedPreferencesForWebProcessValue().modelProcessEnabled);
-        process->requestTermination(ProcessTerminationReason::RequestedByModelProcess);
+        process->requestTermination(ProcessTerminationReason::RequestedByModelProcess, invalidMessageName);
     }
 }
 
@@ -172,9 +174,20 @@ void ModelProcessProxy::sharedPreferencesForWebProcessDidChange(WebProcessProxy&
     sendWithAsyncReply(Messages::ModelProcess::SharedPreferencesForWebProcessDidChange { webProcessProxy.coreProcessIdentifier(), WTF::move(sharedPreferencesForWebProcess) }, WTF::move(completionHandler));
 }
 
+void ModelProcessProxy::securityFlagsDidChange(const SecurityFlags& securityFlags)
+{
+    send(Messages::ModelProcess::SecurityFlagsDidChange { securityFlags }, 0);
+}
+
 void ModelProcessProxy::modelProcessExited(ProcessTerminationReason reason)
 {
     Ref protectedThis { *this };
+
+#if ENABLE(LOGD_BLOCKING_IN_WEBCONTENT)
+    // Tear down the log stream promptly on process exit rather than waiting for this proxy to be
+    // destroyed, mirroring WebProcessProxy::shutDown(). See rdar://182244946.
+    stopLogStream();
+#endif
 
     switch (reason) {
     case ProcessTerminationReason::ExceededMemoryLimit:
@@ -260,7 +273,7 @@ void ModelProcessProxy::didReceiveInvalidMessage(IPC::Connection& connection, IP
     WebProcessPool::didReceiveInvalidMessage(messageName);
 
     // Terminate the model process.
-    terminate();
+    terminate(messageName);
 
     // Since we've invalidated the connection we'll never get a IPC::Connection::Client::didClose
     // callback so we'll explicitly call it here instead.
@@ -279,7 +292,7 @@ void ModelProcessProxy::didFinishLaunching(ProcessLauncher* launcher, IPC::Conne
     }
 
 #if PLATFORM(COCOA)
-    if (auto networkProcess = NetworkProcessProxy::defaultNetworkProcess())
+    if (RefPtr networkProcess = NetworkProcessProxy::defaultNetworkProcess())
         networkProcess->sendXPCEndpointToProcess(*this);
 #endif
 

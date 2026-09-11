@@ -226,11 +226,6 @@ public:
             m_maxArgumentCountIncludingThisForVarargs = std::min<unsigned>(argumentCountIncludingThisForVarargs, maxProfiledArgumentCountIncludingThisForVarargs);
     }
 
-    static constexpr ptrdiff_t offsetOfSlowPathCount()
-    {
-        return OBJECT_OFFSETOF(CallLinkInfo, m_slowPathCount);
-    }
-
     static constexpr ptrdiff_t offsetOfCallee()
     {
         return OBJECT_OFFSETOF(CallLinkInfo, m_callee);
@@ -251,11 +246,6 @@ public:
         return OBJECT_OFFSETOF(CallLinkInfo, m_stub);
     }
 
-    uint32_t slowPathCount()
-    {
-        return m_slowPathCount;
-    }
-
     CodeOrigin codeOrigin() const { return m_codeOrigin; }
 
     template<typename Functor>
@@ -271,7 +261,7 @@ public:
             functor(lastSeenCallee());
     }
 
-    void visitWeak(VM&);
+    void reconcileWeakReferencesAtGCEnd(VM&);
 
     Type type() const { return static_cast<Type>(m_type); }
 
@@ -305,7 +295,6 @@ protected:
     unsigned m_type : 1; // Type
     unsigned m_mode : 3 { static_cast<unsigned>(Mode::Init) }; // Mode
     uint8_t m_maxArgumentCountIncludingThisForVarargs { 0 }; // For varargs: the profiled maximum number of arguments. For direct: the number of stack slots allocated for arguments.
-    uint32_t m_slowPathCount { 0 };
 
     CodeBlock* m_codeBlock { nullptr }; // This is weakly held. And cleared whenever m_monomorphicCallDestination is changed.
     CodePtr<JSEntryPtrTag> m_monomorphicCallDestination { nullptr };
@@ -394,7 +383,7 @@ public:
 
     void unlinkOrUpgradeImpl(VM&, CodeBlock* oldCodeBlock, CodeBlock* newCodeBlock);
 
-    void visitWeak(VM&);
+    void reconcileWeakReferencesAtGCEnd(VM&);
 
     CodeOrigin codeOrigin() const { return m_codeOrigin; }
     bool isDataIC() const { return m_useDataIC == UseDataIC::Yes; }

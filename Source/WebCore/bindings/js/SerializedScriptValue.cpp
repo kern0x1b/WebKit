@@ -136,6 +136,7 @@
 #include <wtf/DataLog.h>
 #include <wtf/MainThread.h>
 #include <wtf/RunLoop.h>
+#include <wtf/RuntimeApplicationChecks.h>
 #include <wtf/StackCheck.h>
 #include <wtf/StdLibExtras.h>
 #include <wtf/Vector.h>
@@ -311,18 +312,18 @@ enum class PredefinedColorSpaceTag : uint8_t {
 #endif
 };
 
-enum DestinationColorSpaceTag {
-    DestinationColorSpaceSRGBTag = 0,
-    DestinationColorSpaceLinearSRGBTag = 1,
+enum ColorSpaceTag {
+    ColorSpaceSRGBTag = 0,
+    ColorSpaceLinearSRGBTag = 1,
 #if ENABLE(DESTINATION_COLOR_SPACE_DISPLAY_P3)
-    DestinationColorSpaceDisplayP3Tag = 2,
+    ColorSpaceDisplayP3Tag = 2,
 #endif
 #if PLATFORM(COCOA)
-    DestinationColorSpaceCGColorSpaceNameTag = 3,
-    DestinationColorSpaceCGColorSpacePropertyListTag = 4,
+    ColorSpaceCGColorSpaceNameTag = 3,
+    ColorSpaceCGColorSpacePropertyListTag = 4,
 #endif
 #if ENABLE(DESTINATION_COLOR_SPACE_DISPLAY_P3)
-    DestinationColorSpaceLinearDisplayP3Tag = 5,
+    ColorSpaceLinearDisplayP3Tag = 5,
 #endif
 };
 
@@ -1170,14 +1171,28 @@ private:
 
     void dumpDOMException(JSObject* obj, SerializationReturnCode& code)
     {
-        if (RefPtr exception = JSDOMException::toWrapped(m_lexicalGlobalObject->vm(), obj)) {
-            write(DOMExceptionTag);
-            write(exception->message());
-            write(exception->name());
+        RefPtr exception = JSDOMException::toWrapped(m_lexicalGlobalObject->vm(), obj);
+        if (!exception) {
+            code = SerializationReturnCode::DataCloneError;
             return;
         }
 
-        code = SerializationReturnCode::DataCloneError;
+        // A DOMException's wrapper is a JSC::ErrorInstance, so it carries the same non-standard
+        // line/column/sourceURL/stack own properties a plain Error does. Serialize them too, so a
+        // clone reports the same stack as the original.
+        auto errorInformation = JSC::extractErrorInformationFromErrorInstance(m_lexicalGlobalObject, downcast<JSC::ErrorInstance>(*obj));
+        if (!errorInformation) {
+            code = SerializationReturnCode::DataCloneError;
+            return;
+        }
+
+        write(DOMExceptionTag);
+        write(exception->message());
+        write(exception->name());
+        write(errorInformation->line);
+        write(errorInformation->column);
+        writeNullableString(errorInformation->sourceURL);
+        writeNullableString(errorInformation->stack);
     }
 
 public:
@@ -1361,6 +1376,10 @@ public:
             write(WasmMemoryTag);
             write(agentClusterIDFromGlobalObject(*m_lexicalGlobalObject));
             write(index);
+            // The address type is not recoverable from the shared contents, and a memory declared with a
+            // maximum of zero has no contents at all. This record is never persisted (forStorage is
+            // rejected above), so it needs no version guard.
+            write(memory->memory().addressType().is64Bit());
             return true;
         }
 #endif
@@ -1478,7 +1497,7 @@ public:
             write(FileSystemHandleTag);
             write(std::to_underlying(handle.kind()));
             write(handle.name());
-            write(std::span<const uint8_t> { handle.globalIdentifier().toRawValue().span() });
+            write(std::span<const uint8_t> { handle.globalIdentifier().span() });
             ASSERT(!context->securityOrigin()->isOpaque());
             write(context->securityOrigin()->toString());
             if (RefPtr connection = fileSystemStorageConnectionForContext(*context)) {
@@ -1498,7 +1517,7 @@ public:
 private:
     using Base::write;
 
-    void write(DestinationColorSpaceTag tag)
+    void write(ColorSpaceTag tag)
     {
         JSC::StructuredCloneInternal::writeLittleEndian<uint8_t>(m_buffer, static_cast<uint8_t>(tag));
     }
@@ -1586,26 +1605,26 @@ private:
     }
 #endif
 
-    void write(DestinationColorSpace destinationColorSpace)
+    void write(ColorSpace destinationColorSpace)
     {
-        if (destinationColorSpace == DestinationColorSpace::SRGB()) {
-            write(DestinationColorSpaceSRGBTag);
+        if (destinationColorSpace == ColorSpace::SRGB()) {
+            write(ColorSpaceSRGBTag);
             return;
         }
 
-        if (destinationColorSpace == DestinationColorSpace::LinearSRGB()) {
-            write(DestinationColorSpaceLinearSRGBTag);
+        if (destinationColorSpace == ColorSpace::LinearSRGB()) {
+            write(ColorSpaceLinearSRGBTag);
             return;
         }
 
 #if ENABLE(DESTINATION_COLOR_SPACE_DISPLAY_P3)
-        if (destinationColorSpace == DestinationColorSpace::DisplayP3()) {
-            write(DestinationColorSpaceDisplayP3Tag);
+        if (destinationColorSpace == ColorSpace::DisplayP3()) {
+            write(ColorSpaceDisplayP3Tag);
             return;
         }
 
-        if (destinationColorSpace == DestinationColorSpace::LinearDisplayP3()) {
-            write(DestinationColorSpaceLinearDisplayP3Tag);
+        if (destinationColorSpace == ColorSpace::LinearDisplayP3()) {
+            write(ColorSpaceLinearDisplayP3Tag);
             return;
         }
 #endif
@@ -1616,11 +1635,11 @@ private:
         if (RetainPtr name = CGColorSpaceGetName(colorSpace.get())) {
             auto data = adoptCF(CFStringCreateExternalRepresentation(nullptr, name.get(), kCFStringEncodingUTF8, 0));
             if (!data) {
-                write(DestinationColorSpaceSRGBTag);
+                write(ColorSpaceSRGBTag);
                 return;
             }
 
-            write(DestinationColorSpaceCGColorSpaceNameTag);
+            write(ColorSpaceCGColorSpaceNameTag);
             write(data);
             return;
         }
@@ -1628,18 +1647,18 @@ private:
         if (auto propertyList = adoptCF(CGColorSpaceCopyPropertyList(colorSpace.get()))) {
             auto data = adoptCF(CFPropertyListCreateData(nullptr, propertyList.get(), kCFPropertyListBinaryFormat_v1_0, 0, nullptr));
             if (!data) {
-                write(DestinationColorSpaceSRGBTag);
+                write(ColorSpaceSRGBTag);
                 return;
             }
 
-            write(DestinationColorSpaceCGColorSpacePropertyListTag);
+            write(ColorSpaceCGColorSpacePropertyListTag);
             write(data);
             return;
         }
 #endif
 
         ASSERT_NOT_REACHED();
-        write(DestinationColorSpaceSRGBTag);
+        write(ColorSpaceSRGBTag);
     }
 
     void write(CryptoKeyOKP::NamedCurve curve)
@@ -1968,6 +1987,7 @@ public:
         , uint64_t exposedMessagePortCount
         )
     {
+        ASSERT_WITH_SECURITY_IMPLICATION(!isInAuxiliaryProcess() || isInWebProcess()); // NOLINT
         if (!buffer.size())
             return { jsNull(), SerializationReturnCode::UnspecifiedError };
         CloneDeserializer deserializer(lexicalGlobalObject, globalObject, messagePorts, arrayBufferContentsArray, buffer, blobURLs, blobFilePaths, sharedBuffers, WTF::move(detachedImageBitmaps)
@@ -2450,11 +2470,11 @@ private:
         }
     }
 
-    bool NODELETE read(DestinationColorSpaceTag& tag)
+    bool NODELETE read(ColorSpaceTag& tag)
     {
         if (m_data.empty())
             return false;
-        tag = static_cast<DestinationColorSpaceTag>(consume(m_data));
+        tag = static_cast<ColorSpaceTag>(consume(m_data));
         return true;
     }
 
@@ -2474,29 +2494,29 @@ private:
     }
 #endif
 
-    bool read(DestinationColorSpace& destinationColorSpace)
+    bool read(ColorSpace& destinationColorSpace)
     {
-        DestinationColorSpaceTag tag;
+        ColorSpaceTag tag;
         if (!read(tag))
             return false;
 
         switch (tag) {
-        case DestinationColorSpaceSRGBTag:
-            destinationColorSpace = DestinationColorSpace::SRGB();
+        case ColorSpaceSRGBTag:
+            destinationColorSpace = ColorSpace::SRGB();
             return true;
-        case DestinationColorSpaceLinearSRGBTag:
-            destinationColorSpace = DestinationColorSpace::LinearSRGB();
+        case ColorSpaceLinearSRGBTag:
+            destinationColorSpace = ColorSpace::LinearSRGB();
             return true;
 #if ENABLE(DESTINATION_COLOR_SPACE_DISPLAY_P3)
-        case DestinationColorSpaceDisplayP3Tag:
-            destinationColorSpace = DestinationColorSpace::DisplayP3();
+        case ColorSpaceDisplayP3Tag:
+            destinationColorSpace = ColorSpace::DisplayP3();
             return true;
-        case DestinationColorSpaceLinearDisplayP3Tag:
-            destinationColorSpace = DestinationColorSpace::LinearDisplayP3();
+        case ColorSpaceLinearDisplayP3Tag:
+            destinationColorSpace = ColorSpace::LinearDisplayP3();
             return true;
 #endif
 #if PLATFORM(COCOA)
-        case DestinationColorSpaceCGColorSpaceNameTag: {
+        case ColorSpaceCGColorSpaceNameTag: {
             RetainPtr<CFDataRef> data;
             if (!read(data))
                 return false;
@@ -2509,10 +2529,10 @@ private:
             if (!colorSpace)
                 return false;
 
-            destinationColorSpace = DestinationColorSpace(colorSpace.get());
+            destinationColorSpace = ColorSpace(colorSpace.get());
             return true;
         }
-        case DestinationColorSpaceCGColorSpacePropertyListTag: {
+        case ColorSpaceCGColorSpacePropertyListTag: {
             RetainPtr<CFDataRef> data;
             if (!read(data))
                 return false;
@@ -2525,7 +2545,7 @@ private:
             if (!colorSpace)
                 return false;
 
-            destinationColorSpace = DestinationColorSpace(colorSpace.get());
+            destinationColorSpace = ColorSpace(colorSpace.get());
             return true;
         }
 #endif
@@ -3425,7 +3445,7 @@ private:
         int32_t logicalWidth;
         int32_t logicalHeight;
         double resolutionScale;
-        auto colorSpace = DestinationColorSpace::SRGB();
+        auto colorSpace = ColorSpace::SRGB();
         RefPtr<ArrayBuffer> arrayBuffer;
 
         if (!read(rawFlags) || !read(logicalWidth) || !read(logicalHeight) || !read(resolutionScale) || (m_majorVersion > 8 && !read(colorSpace)) || !readArrayBufferImpl<uint32_t>(arrayBuffer)) {
@@ -3472,8 +3492,26 @@ private:
         CachedStringRef name;
         if (!readStringData(name))
             return JSValue();
+
+        uint32_t line = 0;
+        uint32_t column = 0;
+        String sourceURL;
+        String stack;
+        bool hasErrorInformation = m_majorVersion >= 16;
+        if (hasErrorInformation) {
+            if (!read(line) || !read(column) || !readNullableString(sourceURL) || !readNullableString(stack))
+                return JSValue();
+        }
+
         auto exception = DOMException::create(message->string(), name->string());
-        return getJSValue(exception);
+        JSValue result = getJSValue(exception);
+        // Creating the wrapper captured a stack trace of the frame doing the deserializing; replace
+        // it with the serialized one so the clone reports the same stack as the original did.
+        if (hasErrorInformation) {
+            if (auto* errorInstance = dynamicDowncast<JSC::ErrorInstance>(result.getObject()))
+                errorInstance->setErrorInfoForEmbedderError(JSC::LineColumn { line, column }, WTF::move(sourceURL), WTF::move(stack));
+        }
+        return result;
     }
 
     JSValue readFileSystemHandle()
@@ -3710,6 +3748,14 @@ public:
                 return JSValue();
             }
 
+            bool isMemory64;
+            if (!read(isMemory64)) {
+                SERIALIZE_TRACE("FAIL deserialize");
+                fail();
+                return JSValue();
+            }
+            JSC::Wasm::AddressType addressType { isMemory64 };
+
             auto& vm = m_lexicalGlobalObject->vm();
             JSWebAssemblyMemory* result = JSC::JSWebAssemblyMemory::create(vm, m_globalObject->webAssemblyMemoryStructure());
             RefPtr<Wasm::Memory> memory;
@@ -3720,10 +3766,10 @@ public:
                     fail();
                     return JSValue();
                 }
-                memory = Wasm::Memory::create(contents.releaseNonNull(), result->memory().addressType(), WTF::move(handler));
+                memory = Wasm::Memory::create(contents.releaseNonNull(), addressType, WTF::move(handler));
             } else {
                 // zero size & max-size.
-                memory = Wasm::Memory::createZeroSized(JSC::MemorySharingMode::Shared, result->memory().addressType(), WTF::move(handler));
+                memory = Wasm::Memory::createZeroSized(JSC::MemorySharingMode::Shared, addressType, WTF::move(handler));
             }
 
             result->adopt(memory.releaseNonNull());
@@ -4258,8 +4304,11 @@ size_t SerializedScriptValue::computeMemoryCost() const
 #if ENABLE(WEBASSEMBLY)
     // We are not supporting WebAssembly Module memory estimation yet.
     if (m_internals->wasmMemoryHandlesArray) {
-        for (auto& content : *m_internals->wasmMemoryHandlesArray)
-            cost += content->sizeInBytes(std::memory_order_relaxed);
+        // A shared memory declared with a maximum of zero has no contents at all.
+        for (auto& content : *m_internals->wasmMemoryHandlesArray) {
+            if (content)
+                cost += content->sizeInBytes(std::memory_order_relaxed);
+        }
     }
 #endif
 #if ENABLE(WEB_CODECS)

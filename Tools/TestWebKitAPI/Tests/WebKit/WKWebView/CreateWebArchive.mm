@@ -34,7 +34,6 @@
 #import "Helpers/cocoa/TestNavigationDelegate.h"
 #import "TestURLSchemeHandler.h"
 #import "Helpers/cocoa/TestWKWebView.h"
-#import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #import <WebKit/_WKArchiveConfiguration.h>
 #import <WebKit/_WKArchiveExclusionRule.h>
 

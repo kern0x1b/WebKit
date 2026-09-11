@@ -88,8 +88,10 @@ CaptureSourceOrError CoreAudioCaptureSource::create(const CaptureDevice& device,
     auto source = adoptRef(*new CoreAudioCaptureSource(device, coreAudioDevice->deviceID(), WTF::move(hashSalts), pageIdentifier));
 #elif PLATFORM(IOS_FAMILY)
     auto coreAudioDevice = AVAudioSessionCaptureDeviceManager::singleton().audioSessionDeviceWithUID(device.persistentId());
-    if (!coreAudioDevice)
+    if (!coreAudioDevice && !device.isDefault()) {
+        AVAudioSessionCaptureDeviceManager::singleton().scheduleUpdateCaptureDevices();
         return CaptureSourceOrError({ "No AVAudioSessionCaptureDevice device"_s, MediaAccessDenialReason::PermissionDenied });
+    }
 
     auto source = adoptRef(*new CoreAudioCaptureSource(device, 0, WTF::move(hashSalts), pageIdentifier));
 #endif
@@ -386,7 +388,7 @@ void CoreAudioCaptureSource::handleNewCurrentMicrophoneDevice(const CaptureDevic
     if (!isProducingData() || persistentID() == device.persistentId())
         return;
 
-    RELEASE_LOG_INFO(WebRTC, "CoreAudioCaptureSource switching from '%s' to '%s'", name().utf8().data(), device.label().utf8().data());
+    RELEASE_LOG_INFO(WebRTC, "CoreAudioCaptureSource switching from '%s' to '%s'", name().utf8().legacyCStringPointer(), device.label().utf8().legacyCStringPointer());
 
     setName(AtomString { device.label() });
     setPersistentId(device.persistentId());

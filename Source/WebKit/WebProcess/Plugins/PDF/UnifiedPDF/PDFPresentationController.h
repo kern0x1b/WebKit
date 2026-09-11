@@ -87,6 +87,10 @@ public:
     virtual void updateIsInWindow(bool isInWindow) = 0;
     virtual void updateDebugBorders(bool showDebugBorders, bool showRepaintCounters) = 0;
 
+    // Discards all rendered content so every tile is re-rendered for the plugin's current
+    // accessibility display mode, then updates the layer state that depends on it.
+    void updateForAccessibilityDisplayModeChange();
+
     virtual void updateForCurrentScrollability(OptionSet<WebCore::TiledBackingScrollability>) = 0;
 
     virtual void didGeneratePreviewForPage(PDFDocumentLayout::PageIndex) = 0;
@@ -115,8 +119,10 @@ public:
     virtual bool handleWheelEvent(const WebWheelEvent&) { return false; }
 
     void releaseMemory();
+
     RetainPtr<PDFDocument> pluginPDFDocument() const;
     bool pluginShouldCachePagePreviews() const;
+    PDFAccessibilityDisplayMode accessibilityDisplayMode() const;
 
     virtual std::optional<WebCore::PlatformLayerIdentifier> contentsLayerIdentifier() const { return std::nullopt; }
 
@@ -125,6 +131,8 @@ public:
     virtual void setSelectionLayerEnabled(bool) { }
 
 protected:
+    virtual void updateLayersForAccessibilityDisplayModeChange() = 0;
+
     Ref<WebCore::GraphicsLayer> createGraphicsLayer(const String&, WebCore::GraphicsLayerType);
     Ref<WebCore::GraphicsLayer> makePageContainerLayer(PDFDocumentLayout::PageIndex);
     struct LayerCoverage {

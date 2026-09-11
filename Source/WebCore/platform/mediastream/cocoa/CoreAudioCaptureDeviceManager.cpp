@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2023 Apple Inc. All rights reserved.
+ * Copyright (C) 2017-2026 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -161,7 +161,7 @@ static bool isValidMicrophoneDevice(const CoreAudioCaptureDevice& device, bool f
 
     // FIXME: We might want to use properties like whether a device can be selected as default once we move device enumeration to GPUProcess.
     if (isVirtualDeviceFromLabel(device.label())) {
-        RELEASE_LOG(WebRTC, "Ignoring virtual microphone device '%s'", device.label().utf8().data());
+        RELEASE_LOG(WebRTC, "Ignoring virtual microphone device '%s'", device.label().utf8().legacyCStringPointer());
         return false;
     }
 
@@ -335,7 +335,7 @@ void CoreAudioCaptureDeviceManager::refreshAudioCaptureDevices(NotifyIfDevicesHa
         for (size_t cptr = 0; cptr < audioDevices.size(); ++cptr) {
             auto& oldDevice = m_coreAudioCaptureDevices[cptr];
             auto& newDevice = audioDevices[cptr];
-            if (newDevice.type() != oldDevice.type() || newDevice.deviceID() != oldDevice.deviceID() || newDevice.isDefault() != oldDevice.isDefault() || newDevice.enabled() != oldDevice.enabled() || newDevice.isDefault() != oldDevice.isDefault())
+            if (newDevice.type() != oldDevice.type() || newDevice.deviceID() != oldDevice.deviceID() || newDevice.isDefault() != oldDevice.isDefault() || newDevice.enabled() != oldDevice.enabled() || newDevice.label() != oldDevice.label() || newDevice.groupId() != oldDevice.groupId())
                 haveDeviceChanges = true;
         }
     }

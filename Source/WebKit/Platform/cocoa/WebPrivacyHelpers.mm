@@ -33,14 +33,15 @@
 #import "WKContentRuleListStoreInternal.h"
 #import <WebCore/DNS.h>
 #import <WebCore/LinkDecorationFilteringData.h>
-#import <WebCore/NetworkStorageSession.h>
 #import <WebCore/OrganizationStorageAccessPromptQuirk.h>
 #import <WebCore/ResourceRequest.h>
+#import <WebCore/TrackingPreventionTypes.h>
 #import <numeric>
 #import <pal/spi/cf/CFNetworkSPI.h>
 #import <pal/spi/cocoa/NetworkSPI.h>
 #import <time.h>
 #import <wtf/BlockPtr.h>
+#import <wtf/MonotonicTime.h>
 #import <wtf/NeverDestroyed.h>
 #import <wtf/RobinHoodHashMap.h>
 #import <wtf/RunLoop.h>
@@ -418,6 +419,92 @@ RestrictedOpenerType RestrictedOpenerDomainsController::lookup(const WebCore::Re
     return it == m_restrictedOpenerTypes.end() ? RestrictedOpenerType::Unrestricted : it->value;
 }
 
+HighValueFraudTargetDomainsController& HighValueFraudTargetDomainsController::singleton()
+{
+    static MainRunLoopNeverDestroyed<HighValueFraudTargetDomainsController> sharedInstance;
+    return sharedInstance.get();
+}
+
+HighValueFraudTargetDomainsController::HighValueFraudTargetDomainsController()
+{
+    scheduleNextUpdate(ContinuousApproximateTime::now());
+    update();
+
+    m_notificationListener = adoptNS([[WKWebPrivacyNotificationListener alloc] initWithType:static_cast<WPResourceType>(WPResourceTypeHighValueFraudTargetDomains) callback:^{
+        update();
+    }]);
+}
+
+void HighValueFraudTargetDomainsController::scheduleNextUpdate(ContinuousApproximateTime now)
+{
+    // Allow the list to be re-requested from the server sometime between [24, 26) hours from now.
+    static WeakRandom random;
+    m_nextScheduledUpdateTime = now + 24_h + random.get() * 2_h;
+}
+
+void HighValueFraudTargetDomainsController::update()
+{
+    ASSERT(RunLoop::isMain());
+    if (m_hasInjectedDomainsForTesting)
+        return;
+
+    if (!PAL::isWebPrivacyFrameworkAvailable() || ![PAL::getWPResourcesClassSingleton() instancesRespondToSelector:@selector(requestHighValueFraudTargetDomains:completionHandler:)])
+        return;
+
+    RetainPtr options = adoptNS([PAL::allocWPResourceRequestOptionsInstance() init]);
+    [options setAfterUpdates:NO];
+
+    auto requestStartTime = MonotonicTime::now();
+    [[PAL::getWPResourcesClassSingleton() sharedInstance] requestHighValueFraudTargetDomains:options.get() completionHandler:^(NSArray<WPHighValueFraudTargetDomain *> *domains, NSError *error) {
+        if (m_hasInjectedDomainsForTesting)
+            return;
+
+        auto elapsed = MonotonicTime::now() - requestStartTime;
+        if (error) {
+            RELEASE_LOG_ERROR(ResourceLoadStatistics, "Failed to request high-value fraud target domains from WebPrivacy after %.1f ms: %@", elapsed.milliseconds(), error);
+            return;
+        }
+
+        HashSet<WebCore::RegistrableDomain> highValueDomains;
+        highValueDomains.reserveInitialCapacity(domains.count);
+
+        for (WPHighValueFraudTargetDomain *domainInfo in domains) {
+            auto registrableDomain = WebCore::RegistrableDomain::fromRawString(domainInfo.domain);
+            if (registrableDomain.isEmpty())
+                continue;
+            highValueDomains.add(WTF::move(registrableDomain));
+        }
+
+        m_domains = WTF::move(highValueDomains);
+
+        if (std::exchange(m_didReceiveInitialData, true))
+            RELEASE_LOG(ResourceLoadStatistics, "HighValueFraudTargetDomainsController::update: Reloaded %u high-value fraud target domain(s) from WebPrivacy in %.1f ms.", m_domains.size(), elapsed.milliseconds());
+        else
+            RELEASE_LOG(ResourceLoadStatistics, "HighValueFraudTargetDomainsController::update: Loaded initial %u high-value fraud target domain(s) from WebPrivacy in %.1f ms.", m_domains.size(), elapsed.milliseconds());
+    }];
+}
+
+bool HighValueFraudTargetDomainsController::contains(const WebCore::RegistrableDomain& domain) const
+{
+    auto now = ContinuousApproximateTime::now();
+    if (now > m_nextScheduledUpdateTime) {
+        auto mutableThis = const_cast<HighValueFraudTargetDomainsController*>(this);
+        mutableThis->scheduleNextUpdate(now);
+        mutableThis->update();
+    }
+
+    return m_domains.contains(domain);
+}
+
+void HighValueFraudTargetDomainsController::setDomainsForTesting(HashSet<WebCore::RegistrableDomain>&& domains)
+{
+    ASSERT(RunLoop::isMain());
+    m_domains = WTF::move(domains);
+    m_didReceiveInitialData = true;
+    // Keep update() from replacing the injected list with real data from WebPrivacy.
+    m_hasInjectedDomainsForTesting = true;
+}
+
 ResourceMonitorURLsController& ResourceMonitorURLsController::singleton()
 {
     static MainRunLoopNeverDestroyed<ResourceMonitorURLsController> sharedInstance;
@@ -683,6 +770,8 @@ public:
                     return;
                 }
 
+                Locker locker { domainListLock };
+
                 for (WPTrackingDomain *domain in domains)
                     list().set(String::fromLatin1([domain.host UTF8String]), TrackerDomainLookupInfo { domain });
             }];
@@ -691,13 +780,16 @@ public:
 
     static const TrackerDomainLookupInfo find(String host)
     {
+        Locker locker { domainListLock };
         if (!list().isValidKey(host))
             return { };
         return list().get(host);
     }
 
 private:
-    static MemoryCompactRobinHoodHashMap<String, TrackerDomainLookupInfo>& NODELETE list()
+    static Lock domainListLock;
+
+    static MemoryCompactRobinHoodHashMap<String, TrackerDomainLookupInfo>& NODELETE list() WTF_REQUIRES_LOCK(domainListLock)
     {
         static NeverDestroyed<MemoryCompactRobinHoodHashMap<String, TrackerDomainLookupInfo>> map;
         return map.get();
@@ -706,6 +798,8 @@ private:
     CString m_owner;
     CanBlock m_canBlock { CanBlock::No };
 };
+
+Lock TrackerDomainLookupInfo::domainListLock;
 
 void configureForAdvancedPrivacyProtections(NSURLSession *session)
 {

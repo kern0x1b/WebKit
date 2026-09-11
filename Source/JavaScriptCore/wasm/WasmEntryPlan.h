@@ -78,12 +78,6 @@ public:
         return WTF::move(m_wasmToWasmExitStubs);
     }
 
-    Vector<Vector<UnlinkedWasmToWasmCall>> takeWasmToWasmCallsites()
-    {
-        RELEASE_ASSERT(!failed() && !hasWork());
-        return WTF::move(m_unlinkedWasmToWasmCalls);
-    }
-
     Vector<MacroAssemblerCodeRef<WasmEntryPtrTag>> takeWasmToJSExitStubs()
     {
         RELEASE_ASSERT(!failed() && !hasWork());
@@ -124,6 +118,10 @@ protected:
     void complete() WTF_REQUIRES_LOCK(m_lock) override;
 
     bool failIfMixedExceptionHandlingProposals() WTF_REQUIRES_LOCK(m_lock);
+    // Records a function validation error (lowest index wins) and stops assigning more work.
+    // Completion is deferred to ThreadCountHolder / completeInStreaming so concurrent
+    // workers can still report a lower-index failure.
+    void failFunctionCompilation(FunctionCodeIndex, String&& errorMessage, CompilationError = CompilationError::Default) WTF_REQUIRES_LOCK(m_lock);
 
     virtual bool prepareImpl() = 0;
     virtual void compileFunction(FunctionCodeIndex functionIndex) = 0;
@@ -150,7 +148,6 @@ protected:
     Vector<MacroAssemblerCodeRef<WasmEntryPtrTag>> m_wasmToJSExitStubs;
     UncheckedKeyHashSet<uint32_t, DefaultHash<uint32_t>, WTF::UnsignedWithZeroKeyHashTraits<uint32_t>> m_exportedFunctionIndices;
 
-    Vector<Vector<UnlinkedWasmToWasmCall>> m_unlinkedWasmToWasmCalls;
     StreamingParser m_streamingParser;
     State m_state;
 

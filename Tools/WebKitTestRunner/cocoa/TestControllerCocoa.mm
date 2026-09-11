@@ -385,6 +385,13 @@ UniqueRef<PlatformWebView> TestController::platformCreateOtherPage(PlatformWebVi
 // Code that needs to run after TestController::m_mainWebView is initialized goes into this function.
 void TestController::finishCreatingPlatformWebView(PlatformWebView* view, const TestOptions& options)
 {
+    TestRunnerWKWebView *webView = view->platformView();
+    webView.announcementTranslationMode = [NSString stringWithUTF8String:options.announcementTranslationMode().c_str()];
+
+    auto displayedTranslationLocale = options.displayedTranslationLocale();
+    if (!displayedTranslationLocale.empty())
+        webView._displayedTranslationLocaleIdentifier = [NSString stringWithUTF8String:displayedTranslationLocale.c_str()];
+
 #if PLATFORM(MAC)
     if (options.shouldShowWindow())
         [view->platformWindow() orderFront:nil];
@@ -793,7 +800,7 @@ WKRetainPtr<WKStringRef> TestController::getBackgroundFetchIdentifier()
     }];
     platformRunUntil(isDone, noTimeout);
 
-    return adoptWK(WKStringCreateWithUTF8CString(result.utf8().data()));
+    return adoptWK(WKStringCreateWithUTF8CString(result.utf8().legacyCStringPointer()));
 }
 
 void TestController::abortBackgroundFetch(WKStringRef identifier)

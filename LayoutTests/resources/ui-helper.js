@@ -190,6 +190,13 @@ window.UIHelper = class UIHelper {
         await UIHelper.delayFor(0);
     }
 
+    static async renderingComplete()
+    {
+        // Wait for the platform layer tree to be updated
+        await UIHelper.animationFrame();
+        await UIHelper.animationFrame();
+    }
+
     static async waitForCondition(conditionFunc, maximumFrames = Infinity)
     {
         for (let frames = 0; !conditionFunc(); ++frames) {
@@ -527,6 +534,19 @@ window.UIHelper = class UIHelper {
         return new Promise(resolve => {
             testRunner.runUIScript(`
                 uiController.doAfterNextStablePresentationUpdate(function() {
+                    uiController.uiScriptComplete();
+                });`, resolve);
+        });
+    }
+
+    static ensureVisibleContentRectAndStablePresentationUpdate()
+    {
+        if (!this.isWebKit2() || !this.isIOSFamily())
+            return UIHelper.renderingUpdate();
+
+        return new Promise(resolve => {
+            testRunner.runUIScript(`
+                uiController.doAfterNextVisibleContentRectAndStablePresentationUpdate(function() {
                     uiController.uiScriptComplete();
                 });`, resolve);
         });
@@ -1595,6 +1615,20 @@ window.UIHelper = class UIHelper {
                 uiController.uiScriptComplete(JSON.stringify(uiController.inputViewBounds));
             })()`, jsonString => {
                 resolve(JSON.parse(jsonString));
+            });
+        });
+    }
+
+    static inputViewBoundsInWebView()
+    {
+        if (!this.isWebKit2() || !this.isIOSFamily())
+            return Promise.resolve();
+
+        return new Promise(resolve => {
+            testRunner.runUIScript(`(() => {
+                uiController.uiScriptComplete(JSON.stringify(uiController.inputViewBoundsInWebView));
+                })()`, jsonString => {
+                    resolve(JSON.parse(jsonString));
             });
         });
     }

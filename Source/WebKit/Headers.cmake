@@ -163,6 +163,7 @@ if (APPLE)
 list(APPEND WebKit_PUBLIC_FRAMEWORK_HEADERS
     Shared/API/Cocoa/WKDataDetectorTypes.h
     Shared/API/Cocoa/WKFoundation.h
+    Shared/API/Cocoa/WebKit.apinotes
     Shared/API/Cocoa/WebKit.h
 
     UIProcess/API/Cocoa/NSAttributedString.h
@@ -441,6 +442,7 @@ list(APPEND WebKit_PRIVATE_FRAMEWORK_HEADERS
     UIProcess/API/Cocoa/_WKTextRun.h
     UIProcess/API/Cocoa/_WKThumbnailView.h
     UIProcess/API/Cocoa/_WKTouchEventGenerator.h
+    UIProcess/API/Cocoa/_WKTranslationDelegate.h
     UIProcess/API/Cocoa/_WKUserContentExtensionStore.h
     UIProcess/API/Cocoa/_WKUserContentExtensionStorePrivate.h
     UIProcess/API/Cocoa/_WKUserContentFilter.h
@@ -549,6 +551,13 @@ set(WebKit_PROJECT_HEADERS
 
     UIProcess/DigitalCredentials/WKDigitalCredentialsPicker.h
 
+    WebKitSwift/CredentialUpdaterShim.h
+    WebKitSwift/WebKitSwift.h
+
+    WebKitSwift/AVKit/WKSExperienceController.h
+
+    WebKitSwift/GroupActivities/WKGroupSession.h
+
     WebKitSwift/IdentityDocumentServices/WKISO18013Request.h
     WebKitSwift/IdentityDocumentServices/WKIdentityDocumentPresentmentController.h
     WebKitSwift/IdentityDocumentServices/WKIdentityDocumentPresentmentDelegate.h
@@ -558,6 +567,24 @@ set(WebKit_PROJECT_HEADERS
     WebKitSwift/IdentityDocumentServices/WKIdentityDocumentPresentmentRequest.h
     WebKitSwift/IdentityDocumentServices/WKIdentityDocumentPresentmentResponse.h
     WebKitSwift/IdentityDocumentServices/WKIdentityDocumentRawRequestValidator.h
+
+    WebKitSwift/LinearMediaKit/WKSLinearMediaPlayer.h
+    WebKitSwift/LinearMediaKit/WKSLinearMediaTypes.h
+
+    WebKitSwift/MarketplaceKit/WKMarketplaceKit.h
+
+    WebKitSwift/Preview/WKPreviewWindowController.h
+
+    WebKitSwift/RealityKit/WKRKEntity.h
+
+    WebKitSwift/StageMode/WKStageMode.h
+
+    WebKitSwift/TextAnimation/WKSTextStyleSourceDelegate.h
+    WebKitSwift/TextAnimation/WKTextAnimationManagerIOS.h
+
+    WebKitSwift/WritingTools/WKIntelligenceReplacementTextEffectCoordinator.h
+    WebKitSwift/WritingTools/WKIntelligenceSmartReplyTextEffectCoordinator.h
+    WebKitSwift/WritingTools/WKIntelligenceTextEffectCoordinator.h
 
     WebProcess/cocoa/IdentityDocumentServices/DigitalCredentialsRequestValidatorBridge.h
 )

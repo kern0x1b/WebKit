@@ -37,6 +37,7 @@
 #import "PrintInfo.h"
 #import "RemoteLayerTreeDrawingAreaProxy.h"
 #import "RemoteScrollingCoordinatorProxy.h"
+#import "SuspendedPageProxy.h"
 #import "UserMediaProcessManager.h"
 #import "ViewGestureController.h"
 #import "ViewSnapshotStore.h"
@@ -53,6 +54,7 @@
 #import "WebsiteDataStore.h"
 #import "_WKFrameHandleInternal.h"
 #import "_WKInspectorInternal.h"
+#import <WebCore/AXObjectTypes.h>
 #import <WebCore/BoxSides.h>
 #import <WebCore/Color.h>
 #import <WebCore/NowPlayingInfo.h>
@@ -172,11 +174,11 @@
 static void dumpCALayer(TextStream& ts, CALayer *layer, bool traverse)
 {
     auto rectToString = [] (auto rect) {
-        return makeString("[x: "_s, rect.origin.x, " y: "_s, rect.origin.x, " width: "_s, rect.size.width, " height: "_s, rect.size.height, ']');
+        return makeString("[x: "_s, rect.origin.x, " y: "_s, rect.origin.y, " width: "_s, rect.size.width, " height: "_s, rect.size.height, ']');
     };
 
     auto pointToString = [] (auto point) {
-        return makeString("[x: "_s, point.x, " y: "_s, point.x, ']');
+        return makeString("[x: "_s, point.x, " y: "_s, point.y, ']');
     };
 
 #if ENABLE(INTERACTION_REGIONS_IN_EVENT_REGION)
@@ -260,6 +262,16 @@ static void dumpCALayer(TextStream& ts, CALayer *layer, bool traverse)
 - (CGFloat)_pageScale
 {
     return _page->pageScaleFactor();
+}
+
+- (CGFloat)_minMagnification
+{
+    return _page->minPageZoomFactor();
+}
+
+- (CGFloat)_maxMagnification
+{
+    return _page->maxPageZoomFactor();
 }
 
 - (void)_setContinuousSpellCheckingEnabledForTesting:(BOOL)enabled
@@ -357,6 +369,15 @@ static void dumpCALayer(TextStream& ts, CALayer *layer, bool traverse)
         return @"";
 
     return coordinator->scrollingTreeAsText().createNSString().autorelease();
+}
+
+- (NSString *)_scrollingTreeIncludingNodeIDsAsText
+{
+    CheckedPtr coordinator = _page->scrollingCoordinatorProxy();
+    if (!coordinator)
+        return @"";
+
+    return coordinator->scrollingTreeIncludingNodeIDsAsText().createNSString().autorelease();
 }
 
 - (double)_rubberbandHyperbolicCoefficientForTesting
@@ -473,6 +494,28 @@ static void dumpCALayer(TextStream& ts, CALayer *layer, bool traverse)
     protect(_page->legacyMainFrameProcess())->setThrottleStateForTesting(static_cast<WebKit::ProcessThrottleState>(value));
 }
 
+- (NSString *)_processAssertionTypeForTesting
+{
+    if (!_page)
+        return nil;
+
+    auto assertionType = protect(_page->legacyMainFrameProcess())->throttler().assertionTypeForTesting();
+    if (!assertionType)
+        return nil;
+
+    return WebKit::processAssertionTypeDescription(*assertionType).createNSString().autorelease();
+}
+
+- (void)_setJetsamBoostEnabledForTesting:(BOOL)enabled
+{
+#if PLATFORM(MAC) && USE(RUNNINGBOARD)
+    if (_page)
+        protect(_page->legacyMainFrameProcess())->setJetsamBoostEnabled(enabled);
+#else
+    UNUSED_PARAM(enabled);
+#endif
+}
+
 - (BOOL)_hasServiceWorkerBackgroundActivityForTesting
 {
     return _page && protect(_page->configuration().processPool())->hasServiceWorkerBackgroundActivityForTesting();
@@ -533,6 +576,18 @@ static void dumpCALayer(TextStream& ts, CALayer *layer, bool traverse)
         return playbackSessionManager->wirelessVideoPlaybackDisabled();
 #endif
     return false;
+}
+
+- (double)_maximumSeekableTime
+{
+#if ENABLE(VIDEO_PRESENTATION_MODE)
+    if (RefPtr playbackSessionManager = _page->playbackSessionManager()) {
+        auto ranges = playbackSessionManager->seekableRanges();
+        if (ranges.length())
+            return ranges.maximumBufferedTime().toDouble();
+    }
+#endif
+    return std::numeric_limits<double>::quiet_NaN();
 }
 
 - (void)_doAfterProcessingAllPendingMouseEvents:(dispatch_block_t)action
@@ -769,10 +824,41 @@ static void dumpCALayer(TextStream& ts, CALayer *layer, bool traverse)
     });
 }
 
+- (void)_setDisplayForTesting:(uint32_t)displayID nominalFramesPerSecond:(unsigned)nominalFramesPerSecond
+{
+    if (RefPtr pageForTesting = _page->pageForTesting())
+        pageForTesting->setDisplayForTesting(displayID, nominalFramesPerSecond);
+}
+
+- (void)_preferredRenderingUpdateIntervalsForTesting:(void (^)(NSArray<NSNumber *> *))completionHandler
+{
+    RefPtr pageForTesting = _page->pageForTesting();
+    if (!pageForTesting)
+        return completionHandler(@[ ]);
+
+    pageForTesting->preferredRenderingUpdateIntervalsInMilliseconds([completionHandler = makeBlockPtr(completionHandler)](Vector<double>&& intervals) {
+        completionHandler(createNSArray(intervals, [](double interval) {
+            return @(interval);
+        }).get());
+    });
+}
+
 - (void)_computePagesForPrinting:(_WKFrameHandle *)handle completionHandler:(void(^)(void))completionHandler
 {
+    // A default-constructed PrintInfo has a zero-sized page, which makes the printing layout
+    // divide by zero, so pretend we're printing to US Letter paper.
     WebKit::PrintInfo printInfo;
+    printInfo.pageSetupScaleFactor = 1;
+    printInfo.availablePaperWidth = 612;
+    printInfo.availablePaperHeight = 792;
     _page->computePagesForPrinting(*handle->_frameHandle->frameID(), printInfo, [completionHandler = makeBlockPtr(completionHandler)] (const Vector<WebCore::IntRect>&, double, const WebCore::FloatBoxExtent&) {
+        completionHandler();
+    });
+}
+
+- (void)_endPrintingForTesting:(void(^)(void))completionHandler
+{
+    _page->endPrinting([completionHandler = makeBlockPtr(completionHandler)] {
         completionHandler();
     });
 }
@@ -1035,6 +1121,11 @@ static void dumpCALayer(TextStream& ts, CALayer *layer, bool traverse)
 #endif
 }
 
++ (NSUInteger)_suspendedRemotePageNetworkActivityCountForTesting
+{
+    return WebKit::SuspendedPageProxy::remotePagesWithNetworkActivityCountForTesting();
+}
+
 - (BOOL)_hasAccessibilityActivityForTesting
 {
 #if ENABLE(WEB_PROCESS_SUSPENSION_DELAY)
@@ -1042,6 +1133,16 @@ static void dumpCALayer(TextStream& ts, CALayer *layer, bool traverse)
 #else
     return NO;
 #endif
+}
+
++ (BOOL)_isAccessibilityEnabledForTesting
+{
+    return !WebCore::isAccessibilityModeOff(WebKit::WebProcessProxy::accessibilityModeForWebContent());
+}
+
++ (void)_resetAccessibilityModeForTesting
+{
+    WebKit::WebProcessProxy::resetAccessibilityModeForTesting();
 }
 
 - (void)_setMediaVolumeForTesting:(float)mediaVolume
@@ -1060,7 +1161,7 @@ static void dumpCALayer(TextStream& ts, CALayer *layer, bool traverse)
     return @{
         @"bounds" : @{
             @"x" : @(layer.get().bounds.origin.x),
-            @"y" : @(layer.get().bounds.origin.x),
+            @"y" : @(layer.get().bounds.origin.y),
             @"width" : @(layer.get().bounds.size.width),
             @"height" : @(layer.get().bounds.size.height),
 
@@ -1167,6 +1268,9 @@ static void dumpCALayer(TextStream& ts, CALayer *layer, bool traverse)
 #if ENABLE(HORIZONTAL_BANNER_VIEW_OVERLAYS)
     [_systemBackgroundColorExtensionViews.left() cancelFadeAnimation];
     [_systemBackgroundColorExtensionViews.right() cancelFadeAnimation];
+#if PLATFORM(IOS_FAMILY)
+    [_systemBackgroundColorExtensionViews.top() cancelFadeAnimation];
+#endif
 #endif
 }
 

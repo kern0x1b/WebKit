@@ -35,7 +35,9 @@
 #include "InlineIteratorInlineBox.h"
 #include "InlineIteratorLineBox.h"
 #include "LayoutIntegrationLineLayout.h"
+#include "LegacyInlineFlowBox.h"
 #include "LegacyInlineTextBox.h"
+#include "LegacyRootInlineBox.h"
 #include "OutlinePainter.h"
 #include "RenderBlock.h"
 #include "RenderBoxInlines.h"
@@ -48,8 +50,9 @@
 #include "RenderLayer.h"
 #include "RenderLayoutState.h"
 #include "RenderLineBreak.h"
-#include "RenderListMarker.h"
+#include "RenderListOutsideMarker.h"
 #include "RenderObjectInlines.h"
+#include "RenderSVGInline.h"
 #include "RenderTable.h"
 #include "RenderTheme.h"
 #include "RenderTreeBuilder.h"
@@ -57,7 +60,6 @@
 #include "Settings.h"
 #include "TransformState.h"
 #include "VisiblePosition.h"
-#include <wtf/SetForScope.h>
 #include <wtf/TZoneMallocInlines.h>
 
 namespace WebCore {
@@ -80,31 +82,19 @@ RenderInline::RenderInline(Type type, Document& document, Style::ComputedStyle&&
 
 RenderInline::~RenderInline() = default;
 
-void RenderInline::willBeDestroyed()
+// Only SVG inlines have legacy line boxes, and they always do: SVG text is always laid out by
+// LegacyLineLayout (Settings::useIFCForSVGText, the in-progress migration off it, is never enabled).
+// Every legacy arm below is therefore reachable from RenderSVGInline only.
+static LegacyInlineFlowBox* firstLegacyInlineBoxFor(const RenderInline& renderer)
 {
-    if (!renderTreeBeingDestroyed()) {
-        if (auto* inlineBox = firstLegacyInlineBox()) {
-            // We can't wait for RenderBoxModelObject::destroy to clear the selection,
-            // because by then we will have nuked the line boxes.
-            if (isSelectionBorder())
-                frame().selection().setNeedsSelectionUpdate();
+    auto* svgInline = dynamicDowncast<RenderSVGInline>(renderer);
+    return svgInline ? svgInline->firstLegacyInlineBox() : nullptr;
+}
 
-            // If line boxes are contained inside a root, that means we're an inline.
-            // In that case, we need to remove all the line boxes so that the parent
-            // lines aren't pointing to deleted children. If the first line box does
-            // not have a parent that means they are either already disconnected or
-            // root lines that can just be destroyed without disconnecting.
-            if (inlineBox->parent()) {
-                for (auto* box = inlineBox; box; box = box->nextLineBox())
-                    box->removeFromParent();
-            }
-        } else if (auto* parent = this->parent(); parent && parent->isSVGRenderer())
-            parent->dirtyLineFromChangedChild();
-    }
-
-    m_legacyLineBoxes.deleteLineBoxes();
-
-    RenderBoxModelObject::willBeDestroyed();
+static LegacyInlineFlowBox* lastLegacyInlineBoxFor(const RenderInline& renderer)
+{
+    auto* svgInline = dynamicDowncast<RenderSVGInline>(renderer);
+    return svgInline ? svgInline->lastLegacyInlineBox() : nullptr;
 }
 
 void RenderInline::updateFromStyle()
@@ -149,7 +139,7 @@ bool RenderInline::mayAffectLayout() const
         || !WTF::holdsAlternative<CSS::Keyword::Baseline>(style().verticalAlign())
         || !style().textEmphasisStyle().isNone()
         || (checkFonts && (!parentStyle->fontCascade().metricsOfPrimaryFont().hasIdenticalAscentDescentAndLineGap(style().fontCascade().metricsOfPrimaryFont())
-        || parentStyle->lineHeight() != style().lineHeight()))
+        || parentStyle->textAutosizingAdjustedLineHeight() != style().textAutosizingAdjustedLineHeight()))
         || hasHardLineBreakChildOnly;
 
     if (!mayAffectLayout && checkFonts) {
@@ -158,7 +148,7 @@ bool RenderInline::mayAffectLayout() const
         auto& childStyle = firstLineStyle();
         mayAffectLayout = !parentStyle->fontCascade().metricsOfPrimaryFont().hasIdenticalAscentDescentAndLineGap(childStyle.fontCascade().metricsOfPrimaryFont())
             || !WTF::holdsAlternative<CSS::Keyword::Baseline>(childStyle.verticalAlign())
-            || parentStyle->lineHeight() != childStyle.lineHeight();
+            || parentStyle->textAutosizingAdjustedLineHeight() != childStyle.textAutosizingAdjustedLineHeight();
     }
     return mayAffectLayout;
 }
@@ -182,7 +172,7 @@ void RenderInline::generateLineBoxRects(GeneratorContext& context) const
             context.addRect(inlineRect);
         return;
     }
-    if (auto* curr = firstLegacyInlineBox()) {
+    if (auto* curr = firstLegacyInlineBoxFor(*this)) {
         for (; curr; curr = curr->nextLineBox())
             context.addRect(FloatRect(curr->topLeft(), curr->size()));
     } else
@@ -240,14 +230,6 @@ void RenderInline::absoluteQuads(Vector<FloatQuad>& quads, bool*) const
     generateLineBoxRects(context);
 }
 
-#if PLATFORM(IOS_FAMILY)
-void RenderInline::absoluteQuadsForSelection(Vector<FloatQuad>& quads) const
-{
-    AbsoluteQuadsGeneratorContext context(this, quads);
-    generateLineBoxRects(context);
-}
-#endif
-
 LayoutUnit RenderInline::offsetLeft() const
 {
     return adjustedPositionRelativeToOffsetParent(firstInlineBoxTopLeft()).x();
@@ -262,7 +244,7 @@ LayoutPoint RenderInline::firstInlineBoxTopLeft() const
 {
     if (auto* lineLayout = LayoutIntegration::LineLayout::containing(*this))
         return lineLayout->firstInlineBoxRect(*this).location();
-    if (auto* inlineBox = firstLegacyInlineBox())
+    if (auto* inlineBox = firstLegacyInlineBoxFor(*this))
         return flooredLayoutPoint(inlineBox->locationIncludingFlipping());
     return { };
 }
@@ -366,8 +348,8 @@ LayoutUnit RenderInline::innerPaddingBoxWidth() const
         return { };
     }
 
-    auto* firstInlineBox = firstLegacyInlineBox();
-    auto* lastInlineBox = lastLegacyInlineBox();
+    auto* firstInlineBox = firstLegacyInlineBoxFor(*this);
+    auto* lastInlineBox = lastLegacyInlineBoxFor(*this);
     if (!firstInlineBox || !lastInlineBox)
         return { };
 
@@ -410,28 +392,31 @@ IntRect RenderInline::linesBoundingBox() const
         return enclosingIntRect(layout->enclosingBorderBoxRectFor(*this));
     }
 
+    auto* firstInlineBox = firstLegacyInlineBoxFor(*this);
+    auto* lastInlineBox = lastLegacyInlineBoxFor(*this);
+
     // See <rdar://problem/5289721>, for an unknown reason the linked list here is sometimes inconsistent, first is non-zero and last is zero.  We have been
     // unable to reproduce this at all (and consequently unable to figure ot why this is happening).  The assert will hopefully catch the problem in debug
     // builds and help us someday figure out why.  We also put in a redundant check of lastLineBox() to avoid the crash for now.
-    ASSERT(!firstLegacyInlineBox() == !lastLegacyInlineBox());  // Either both are null or both exist.
+    ASSERT(!firstInlineBox == !lastInlineBox); // Either both are null or both exist.
     IntRect result;
-    if (firstLegacyInlineBox() && lastLegacyInlineBox()) {
+    if (firstInlineBox && lastInlineBox) {
         // Return the width of the minimal left side and the maximal right side.
         float logicalLeftSide = 0;
         float logicalRightSide = 0;
-        for (auto* curr = firstLegacyInlineBox(); curr; curr = curr->nextLineBox()) {
-            if (curr == firstLegacyInlineBox() || curr->logicalLeft() < logicalLeftSide)
+        for (auto* curr = firstInlineBox; curr; curr = curr->nextLineBox()) {
+            if (curr == firstInlineBox || curr->logicalLeft() < logicalLeftSide)
                 logicalLeftSide = curr->logicalLeft();
-            if (curr == firstLegacyInlineBox() || curr->logicalRight() > logicalRightSide)
+            if (curr == firstInlineBox || curr->logicalRight() > logicalRightSide)
                 logicalRightSide = curr->logicalRight();
         }
 
         bool isHorizontal = writingMode().isHorizontal();
 
-        float x = isHorizontal ? logicalLeftSide : firstLegacyInlineBox()->x();
-        float y = isHorizontal ? firstLegacyInlineBox()->y() : logicalLeftSide;
-        float width = isHorizontal ? logicalRightSide - logicalLeftSide : lastLegacyInlineBox()->logicalBottom() - x;
-        float height = isHorizontal ? lastLegacyInlineBox()->logicalBottom() - y : logicalRightSide - logicalLeftSide;
+        float x = isHorizontal ? logicalLeftSide : firstInlineBox->x();
+        float y = isHorizontal ? firstInlineBox->y() : logicalLeftSide;
+        float width = isHorizontal ? logicalRightSide - logicalLeftSide : lastInlineBox->logicalBottom() - x;
+        float height = isHorizontal ? lastInlineBox->logicalBottom() - y : logicalRightSide - logicalLeftSide;
         result = enclosingIntRect(FloatRect(x, y, width, height));
     }
 
@@ -449,23 +434,25 @@ LayoutRect RenderInline::linesVisualOverflowBoundingBox() const
         return layout->inkOverflowBoundingBoxRectFor(*this);
     }
 
-    if (!firstLegacyInlineBox() || !lastLegacyInlineBox())
+    auto* firstInlineBox = firstLegacyInlineBoxFor(*this);
+    auto* lastInlineBox = lastLegacyInlineBoxFor(*this);
+    if (!firstInlineBox || !lastInlineBox)
         return { };
 
     // Return the width of the minimal left side and the maximal right side.
     LayoutUnit logicalLeftSide = LayoutUnit::max();
     LayoutUnit logicalRightSide = LayoutUnit::min();
-    for (auto* curr = firstLegacyInlineBox(); curr; curr = curr->nextLineBox()) {
+    for (auto* curr = firstInlineBox; curr; curr = curr->nextLineBox()) {
         logicalLeftSide = std::min(logicalLeftSide, curr->logicalLeftVisualOverflow());
         logicalRightSide = std::max(logicalRightSide, curr->logicalRightVisualOverflow());
     }
 
-    const LegacyRootInlineBox& firstRootBox = firstLegacyInlineBox()->root();
-    const LegacyRootInlineBox& lastRootBox = lastLegacyInlineBox()->root();
+    const LegacyRootInlineBox& firstRootBox = firstInlineBox->root();
+    const LegacyRootInlineBox& lastRootBox = lastInlineBox->root();
 
-    LayoutUnit logicalTop = firstLegacyInlineBox()->logicalTopVisualOverflow(firstRootBox.lineTop());
+    LayoutUnit logicalTop = firstInlineBox->logicalTopVisualOverflow(firstRootBox.lineTop());
     LayoutUnit logicalWidth = logicalRightSide - logicalLeftSide;
-    LayoutUnit logicalHeight = lastLegacyInlineBox()->logicalBottomVisualOverflow(lastRootBox.lineBottom()) - logicalTop;
+    LayoutUnit logicalHeight = lastInlineBox->logicalBottomVisualOverflow(lastRootBox.lineBottom()) - logicalTop;
 
     LayoutRect rect(logicalLeftSide, logicalTop, logicalWidth, logicalHeight);
     if (!writingMode().isHorizontal())
@@ -473,7 +460,7 @@ LayoutRect RenderInline::linesVisualOverflowBoundingBox() const
     return rect;
 }
 
-LayoutRect RenderInline::clippedOverflowRect(const RenderLayerModelObject* repaintContainer, VisibleRectContext context) const
+LayoutRect RenderInline::clippedOverflowRect(const RenderLayerModelObject* repaintContainer, const VisibleRectContext& context) const
 {
     // Only first-letter renderers are allowed in here during layout. They mutate the tree triggering repaints.
 #ifndef NDEBUG
@@ -491,7 +478,7 @@ LayoutRect RenderInline::clippedOverflowRect(const RenderLayerModelObject* repai
 #endif
 
     auto knownEmpty = [&] {
-        if (firstLegacyInlineBox())
+        if (firstLegacyInlineBoxFor(*this))
             return false;
         if (LayoutIntegration::LineLayout::containing(*this))
             return false;
@@ -567,7 +554,7 @@ auto RenderInline::computeVisibleRectsUsingPaintOffset(const RepaintRects& rects
     return adjustedRects;
 }
 
-auto RenderInline::computeVisibleRectsInContainer(const RepaintRects& rects, const RenderLayerModelObject* container, VisibleRectContext context) const -> std::optional<RepaintRects>
+auto RenderInline::computeVisibleRectsInContainer(const RepaintRects& rects, const RenderLayerModelObject* container, const VisibleRectContext& context, VisibleRectState state) const -> std::optional<RepaintRects>
 {
     // Repaint offset cache is only valid for root-relative repainting
     if (view().frameView().layoutContext().isPaintOffsetCacheEnabled() && !container && !context.options.contains(VisibleRectContext::Option::UseEdgeInclusiveIntersection))
@@ -593,8 +580,9 @@ auto RenderInline::computeVisibleRectsInContainer(const RepaintRects& rects, con
 
     if (localContainer->hasNonVisibleOverflow()) {
         // FIXME: Respect the value of context.options.
-        SetForScope change(context.options, context.options | VisibleRectContext::Option::ApplyCompositedContainerScrolls);
-        bool isEmpty = !downcast<RenderLayerModelObject>(*localContainer).applyCachedClipAndScrollPosition(adjustedRects, container, context);
+        auto containerContext = context;
+        containerContext.options.add(VisibleRectContext::Option::ApplyCompositedContainerScrolls);
+        bool isEmpty = !downcast<RenderLayerModelObject>(*localContainer).applyCachedClipAndScrollPosition(adjustedRects, container, containerContext);
         if (isEmpty) {
             if (context.options.contains(VisibleRectContext::Option::UseEdgeInclusiveIntersection))
                 return std::nullopt;
@@ -609,7 +597,7 @@ auto RenderInline::computeVisibleRectsInContainer(const RepaintRects& rects, con
         return adjustedRects;
     }
 
-    return localContainer->computeVisibleRectsInContainer(adjustedRects, container, context);
+    return localContainer->computeVisibleRectsInContainer(adjustedRects, container, context, state);
 }
 
 LayoutSize RenderInline::offsetFromContainer(const RenderElement& container, const LayoutPoint&, bool* offsetDependsOnPoint) const
@@ -681,49 +669,19 @@ const RenderElement* RenderInline::pushMappingToContainer(const RenderLayerModel
     return ancestorSkipped ? ancestorToStopAt : container;
 }
 
-void RenderInline::updateHitTestResult(HitTestResult& result, const LayoutPoint& point) const
-{
-    if (result.innerNode())
-        return;
-
-    LayoutPoint localPoint(point);
-    if (RefPtr node = nodeForHitTest()) {
-        result.setInnerNode(node.get());
-        if (!result.innerNonSharedNode())
-            result.setInnerNonSharedNode(node.get());
-        result.setPseudoElementIdentifier(style().pseudoElementIdentifier());
-        result.setLocalPoint(localPoint);
-    }
-}
-
-void RenderInline::deleteLegacyLineBoxes()
-{
-    m_legacyLineBoxes.deleteLineBoxes();
-}
-
-std::unique_ptr<LegacyInlineFlowBox> RenderInline::createInlineFlowBox()
-{
-    return makeUnique<LegacyInlineFlowBox>(*this);
-}
-
-LegacyInlineFlowBox* RenderInline::createAndAppendInlineFlowBox()
-{
-    auto newFlowBox = createInlineFlowBox();
-    auto flowBox = newFlowBox.get();
-    m_legacyLineBoxes.appendLineBox(WTF::move(newFlowBox));
-    return flowBox;
-}
-
 LayoutSize RenderInline::offsetForInFlowPositionedInline(const RenderBox* child) const
 {
     // FIXME: This function isn't right with mixed writing modes.
-    if (!isInFlowPositioned()) {
+    // An inline box is the containing block for an out-of-flow child when it is in-flow positioned, and also when
+    // something else about it makes it one, e.g. a filter. Either way the child's static position is relative to the
+    // inline's own content, so it needs the offset of the line the inline starts on.
+    if (!canContainAbsolutelyPositionedObjects()) {
         ASSERT_NOT_REACHED();
         return { };
     }
 
     if (!hasLayer()) {
-        // It looks like we are inflow positioned but no layer created yet. It essentially means we don't have an position offset yet.
+        // It looks like we are a containing block but no layer created yet. It essentially means we don't have a position offset yet.
         return { };
     }
 
@@ -732,7 +690,7 @@ LayoutSize RenderInline::offsetForInFlowPositionedInline(const RenderBox* child)
     // relative to the inline itself.
     auto inlinePosition = layer()->staticInlinePosition();
     auto blockPosition = layer()->staticBlockPosition();
-    if (auto* inlineBox = firstLegacyInlineBox()) {
+    if (auto* inlineBox = firstLegacyInlineBoxFor(*this)) {
         inlinePosition = LayoutUnit::fromFloatRound(inlineBox->logicalLeft());
         blockPosition = inlineBox->logicalTop();
     } else if (LayoutIntegration::LineLayout::containing(*this)) {
@@ -802,21 +760,31 @@ void RenderInline::collectLineBoxRects(Vector<LayoutRect>& rects, const LayoutPo
     generateLineBoxRects(context);
 }
 
-bool isEmptyInline(const RenderInline& renderer)
+static RenderObject* firstContentfulChild(const RenderInline& renderer)
 {
     for (auto& current : childrenOfType<RenderObject>(renderer)) {
         if (current.isFloatingOrOutOfFlowPositioned())
             continue;
-        if (auto* text = dynamicDowncast<RenderText>(current)) {
-            if (!text->containsOnlyCollapsibleWhitespace())
-                return false;
+        if (auto* text = dynamicDowncast<RenderText>(current); text && text->containsOnlyCollapsibleWhitespace())
+            continue;
+        if (auto* renderInline = dynamicDowncast<RenderInline>(current)) {
+            if (auto* nested = firstContentfulChild(*renderInline))
+                return nested;
             continue;
         }
-        auto* renderInline = dynamicDowncast<RenderInline>(current);
-        if (!renderInline || !isEmptyInline(*renderInline))
-            return false;
+        return const_cast<RenderObject*>(&current);
     }
-    return true;
+    return { };
+}
+
+bool isEmptyInline(const RenderInline& renderer)
+{
+    return !firstContentfulChild(renderer);
+}
+
+RenderObject* firstContentfulChild(RenderInline& renderer)
+{
+    return firstContentfulChild(const_cast<const RenderInline&>(renderer));
 }
 
 bool RenderInline::requiresLayer() const

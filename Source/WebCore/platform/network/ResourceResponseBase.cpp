@@ -90,7 +90,7 @@ ResourceResponseBase::ResourceResponseBase(std::optional<ResourceResponseData>&&
     , m_tainting(data ? data->tainting : Tainting::Basic)
     , m_source(data ? data->source : Source::Unknown)
     , m_type(data ? data->type : Type::Default)
-    , m_ipAddressSpace(data ? data->ipAddressSpace : IPAddressSpace::Public)
+    , m_ipAddressSpace(data ? data->ipAddressSpace : IPAddressSpace::Unknown)
 {
 }
 
@@ -950,6 +950,7 @@ void Coder<WebCore::ResourceResponseData>::encodeForPersistence(Encoder& encoder
     encoder << data.wasPrivateRelayed;
     encoder << data.proxyName;
     encoder << data.isRangeRequested;
+    encoder << data.ipAddressSpace;
 }
 
 std::optional<WebCore::ResourceResponseData> Coder<WebCore::ResourceResponseData>::decodeForPersistence(Decoder& decoder)
@@ -1039,6 +1040,11 @@ std::optional<WebCore::ResourceResponseData> Coder<WebCore::ResourceResponseData
     if (!isRangeRequested)
         return std::nullopt;
 
+    std::optional<WebCore::IPAddressSpace> ipAddressSpace;
+    decoder >> ipAddressSpace;
+    if (!ipAddressSpace)
+        return std::nullopt;
+
     return WebCore::ResourceResponseData {
         WTF::move(*url),
         WTF::move(*mimeType),
@@ -1058,7 +1064,7 @@ std::optional<WebCore::ResourceResponseData> Coder<WebCore::ResourceResponseData
         WTF::move(*proxyName),
         *isRangeRequested,
         WTF::move(*certificateInfo),
-        WebCore::IPAddressSpace::Public
+        *ipAddressSpace
     };
 }
 

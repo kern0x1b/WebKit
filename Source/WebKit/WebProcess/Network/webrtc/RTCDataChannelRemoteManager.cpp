@@ -103,8 +103,8 @@ void RTCDataChannelRemoteManager::postTaskToHandler(WebCore::RTCDataChannelIdent
         return;
     auto& remoteHandler = iterator->value;
 
-    WebCore::ScriptExecutionContext::postTaskTo(*remoteHandler.contextIdentifier, [handler = remoteHandler.handler, function = WTF::move(function)](auto&) mutable {
-        if (handler)
+    WebCore::ScriptExecutionContext::postTaskTo(*remoteHandler.contextIdentifier, [weakHandler = remoteHandler.handler, function = WTF::move(function)](auto&) mutable {
+        if (CheckedPtr handler = weakHandler)
             function(*handler);
     });
 }

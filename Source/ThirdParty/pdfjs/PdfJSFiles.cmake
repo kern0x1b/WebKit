@@ -230,6 +230,7 @@ set(PdfJSFiles
     ${THIRDPARTY_DIR}/pdfjs/web/images/secondaryToolbarButton-spreadEven.svg
     ${THIRDPARTY_DIR}/pdfjs/web/images/secondaryToolbarButton-spreadNone.svg
     ${THIRDPARTY_DIR}/pdfjs/web/images/secondaryToolbarButton-spreadOdd.svg
+    ${THIRDPARTY_DIR}/pdfjs/web/images/signature-properties-row-check.svg
     ${THIRDPARTY_DIR}/pdfjs/web/images/toolbarButton-bookmark.svg
     ${THIRDPARTY_DIR}/pdfjs/web/images/toolbarButton-currentOutlineItem.svg
     ${THIRDPARTY_DIR}/pdfjs/web/images/toolbarButton-download.svg
@@ -239,6 +240,7 @@ set(PdfJSFiles
     ${THIRDPARTY_DIR}/pdfjs/web/images/toolbarButton-editorSignature.svg
     ${THIRDPARTY_DIR}/pdfjs/web/images/toolbarButton-editorStamp.svg
     ${THIRDPARTY_DIR}/pdfjs/web/images/toolbarButton-menuArrow.svg
+    ${THIRDPARTY_DIR}/pdfjs/web/images/toolbarButton-menuArrowNova.svg
     ${THIRDPARTY_DIR}/pdfjs/web/images/toolbarButton-openFile.svg
     ${THIRDPARTY_DIR}/pdfjs/web/images/toolbarButton-pageDown.svg
     ${THIRDPARTY_DIR}/pdfjs/web/images/toolbarButton-pageUp.svg
@@ -246,6 +248,8 @@ set(PdfJSFiles
     ${THIRDPARTY_DIR}/pdfjs/web/images/toolbarButton-print.svg
     ${THIRDPARTY_DIR}/pdfjs/web/images/toolbarButton-search.svg
     ${THIRDPARTY_DIR}/pdfjs/web/images/toolbarButton-secondaryToolbarToggle.svg
+    ${THIRDPARTY_DIR}/pdfjs/web/images/toolbarButton-signaturePropertiesError.svg
+    ${THIRDPARTY_DIR}/pdfjs/web/images/toolbarButton-signaturePropertiesVerified.svg
     ${THIRDPARTY_DIR}/pdfjs/web/images/toolbarButton-viewAttachments.svg
     ${THIRDPARTY_DIR}/pdfjs/web/images/toolbarButton-viewLayers.svg
     ${THIRDPARTY_DIR}/pdfjs/web/images/toolbarButton-viewOutline.svg

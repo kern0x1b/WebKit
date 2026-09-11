@@ -21,8 +21,6 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
 // THE POSSIBILITY OF SUCH DAMAGE.
 
-#if USE_APPLE_INTERNAL_SDK || (!os(tvOS) && !os(watchOS))
-
 import Foundation
 import WebKit_Internal
 
@@ -465,5 +463,3 @@ extension WKTextExtractionImageItem {
             )
     }
 }
-
-#endif // USE_APPLE_INTERNAL_SDK || (!os(tvOS) && !os(watchOS))

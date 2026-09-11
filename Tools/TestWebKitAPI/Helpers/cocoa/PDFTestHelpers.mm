@@ -87,4 +87,9 @@ RetainPtr<NSData> testPDFData()
     return [NSData dataWithContentsOfURL:[NSBundle.test_resourcesBundle URLForResource:@"test" withExtension:@"pdf"]];
 }
 
+RetainPtr<NSData> testPDFDataWithLink()
+{
+    return [TestPDFBuilder pdfDataWithLink];
+}
+
 }

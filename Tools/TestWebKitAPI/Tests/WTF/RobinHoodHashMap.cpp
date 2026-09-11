@@ -1125,7 +1125,7 @@ TEST(WTF_RobinHoodHashMap, ReserveInitialCapacity)
     EXPECT_EQ(9999u, map.size());
     EXPECT_EQ(16384u, map.capacity());
     EXPECT_TRUE(map.contains("foo3"_str));
-    EXPECT_STREQ("bar3", map.get("foo3"_str).utf8().data());
+    EXPECT_EQ("bar3"_s, map.get("foo3"_str));
 
     for (int i = 0; i < 9999; ++i)
         map.add(makeString("excess"_s, i), makeString("baz"_s, i));
@@ -1136,7 +1136,7 @@ TEST(WTF_RobinHoodHashMap, ReserveInitialCapacity)
         EXPECT_TRUE(map.remove(makeString("foo"_s, i)));
     EXPECT_EQ(9999u, map.size());
     EXPECT_EQ(32768u, map.capacity());
-    EXPECT_STREQ("baz3", map.get("excess3"_str).utf8().data());
+    EXPECT_EQ("baz3"_s, map.get("excess3"_str));
 
     for (int i = 0; i < 9999; ++i)
         EXPECT_TRUE(map.remove(makeString("excess"_s, i)));
@@ -1271,6 +1271,74 @@ TEST(WTF_RobinHoodHashMap, LargeRemoval)
     }
     EXPECT_EQ(map.size(), 0u);
     EXPECT_EQ(map.capacity(), 8u);
+}
+
+TEST(WTF_RobinHoodHashMap, RemoveIf)
+{
+    MemoryCompactLookupOnlyRobinHoodHashMap<unsigned, unsigned, RobinHoodHash<unsigned>> map;
+
+    // Removing from an empty map removes nothing and returns false.
+    EXPECT_FALSE(map.removeIf([](auto&) {
+        return true;
+    }));
+    EXPECT_TRUE(map.isEmpty());
+
+    for (unsigned i = 1; i <= 100; ++i)
+        map.add(i, i * 10);
+
+    // A predicate that never matches removes nothing and returns false.
+    EXPECT_FALSE(map.removeIf([](auto&) {
+        return false;
+    }));
+    EXPECT_EQ(100u, map.size());
+
+    // The predicate receives the key/value pair (not just the mapped value),
+    // and may carry a side effect before returning true.
+    unsigned removedCount = 0;
+    bool removed = map.removeIf([&](auto& entry) {
+        if (entry.key % 3)
+            return false;
+        EXPECT_EQ(entry.key * 10, entry.value);
+        ++removedCount;
+        return true;
+    });
+    EXPECT_TRUE(removed);
+    EXPECT_EQ(33u, removedCount); // 3, 6, ..., 99
+    EXPECT_EQ(100u - 33u, map.size());
+    for (unsigned i = 1; i <= 100; ++i) {
+        if (i % 3)
+            EXPECT_EQ(i * 10, map.get(i)) << i;
+        else
+            EXPECT_FALSE(map.contains(i)) << i;
+    }
+}
+
+TEST(WTF_RobinHoodHashMap, RemoveIfLarge)
+{
+    MemoryCompactRobinHoodHashMap<unsigned, unsigned, RobinHoodHash<unsigned>> map;
+    for (unsigned i = 1; i <= 10000; ++i)
+        map.add(i, i);
+    EXPECT_EQ(10000u, map.size());
+
+    // Remove every odd key. This drives heavy backward-shift deletion across
+    // many probe clusters (including clusters that wrap past the end of the
+    // table), with a single deferred shrink rather than a shrink per removal.
+    EXPECT_TRUE(map.removeIf([](auto& entry) {
+        return entry.key & 0x1u;
+    }));
+    EXPECT_EQ(5000u, map.size());
+
+    // The RobinHood probe-distance invariant must survive the sweep: every
+    // surviving key remains findable, and every removed key is gone.
+    for (unsigned i = 1; i <= 10000; ++i)
+        EXPECT_EQ(!(i & 0x1u), map.contains(i)) << i;
+
+    // Removing the remainder empties the map and shrinks it to the minimum.
+    EXPECT_TRUE(map.removeIf([](auto&) {
+        return true;
+    }));
+    EXPECT_TRUE(map.isEmpty());
+    EXPECT_EQ(8u, map.capacity());
 }
 
 } // namespace TestWebKitAPI

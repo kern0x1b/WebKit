@@ -71,7 +71,7 @@ void NetworkCORSPreflightChecker::startPreflight()
     CORS_CHECKER_RELEASE_LOG("startPreflight");
 
     NetworkLoadParameters loadParameters;
-    loadParameters.request = createAccessControlPreflightRequest(m_parameters.originalRequest, m_parameters.sourceOrigin, m_parameters.referrer, m_parameters.includeFetchMetadata);
+    loadParameters.request = createAccessControlPreflightRequest(m_parameters.originalRequest, protect(m_parameters.sourceOrigin), m_parameters.referrer, m_parameters.includeFetchMetadata);
     loadParameters.advancedPrivacyProtections = m_parameters.advancedPrivacyProtections;
     if (!m_parameters.userAgent.isNull())
         loadParameters.request.setHTTPHeaderField(HTTPHeaderName::UserAgent, m_parameters.userAgent);
@@ -124,13 +124,19 @@ void NetworkCORSPreflightChecker::didReceiveChallenge(WebCore::AuthenticationCha
 
 void NetworkCORSPreflightChecker::didReceiveResponse(WebCore::ResourceResponse&& response, NegotiatedLegacyTLS, PrivateRelayed, ResponseCompletionHandler&& completionHandler)
 {
-    CORS_CHECKER_RELEASE_LOG("didReceiveResponse");
-
     if (m_shouldCaptureExtraNetworkLoadMetrics)
         m_loadInformation.response = response;
 
     m_response = WTF::move(response);
-    completionHandler(PolicyAction::Use);
+
+    CORS_CHECKER_RELEASE_LOG("didReceiveResponse http_status_code=%d", m_response.httpStatusCode());
+
+    completionHandler(PolicyAction::Ignore);
+    if (RefPtr task = std::exchange(m_task, nullptr)) {
+        task->clearClient();
+        task->cancel();
+    }
+    completePreflight(ResourceError { });
 }
 
 void NetworkCORSPreflightChecker::didReceiveData(const WebCore::SharedBuffer&)
@@ -143,9 +149,16 @@ void NetworkCORSPreflightChecker::didCompleteWithError(const WebCore::ResourceEr
     if (m_shouldCaptureExtraNetworkLoadMetrics)
         m_loadInformation.metrics = metrics;
 
+    completePreflight(ResourceError { preflightError });
+}
+
+void NetworkCORSPreflightChecker::completePreflight(ResourceError&& preflightError)
+{
+    ASSERT(m_completionCallback);
+
     if (!preflightError.isNull()) {
         CORS_CHECKER_RELEASE_LOG("didCompleteWithError");
-        auto error = preflightError;
+        auto error = WTF::move(preflightError);
         if (error.isNull() || error.isGeneral())
             error.setType(ResourceError::Type::AccessControl);
 
@@ -155,9 +168,9 @@ void NetworkCORSPreflightChecker::didCompleteWithError(const WebCore::ResourceEr
 
     CORS_CHECKER_RELEASE_LOG("didComplete http_status_code=%d", m_response.httpStatusCode());
 
-    auto result = validatePreflightResponse(m_parameters.sessionID, m_parameters.originalRequest, m_response, m_parameters.storedCredentialsPolicy, m_parameters.topOrigin, m_parameters.sourceOrigin, m_networkResourceLoader.get());
+    auto result = validatePreflightResponse(m_parameters.sessionID, m_parameters.originalRequest, m_response, m_parameters.storedCredentialsPolicy, protect(m_parameters.topOrigin), protect(m_parameters.sourceOrigin), m_networkResourceLoader);
     if (!result) {
-        CORS_CHECKER_RELEASE_LOG("didComplete, AccessControl error: %s", result.error().utf8().data());
+        CORS_CHECKER_RELEASE_LOG("didComplete, AccessControl error: %s", result.error().utf8().legacyCStringPointer());
         m_completionCallback(ResourceError { errorDomainWebKitInternal, 0, m_parameters.originalRequest.url(), result.error(), ResourceError::Type::AccessControl });
         return;
     }

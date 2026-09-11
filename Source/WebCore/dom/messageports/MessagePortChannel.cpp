@@ -30,6 +30,7 @@
 #include "MessagePortChannelRegistry.h"
 #include <wtf/CompletionHandler.h>
 #include <wtf/MainThread.h>
+#include <wtf/text/TextStream.h>
 
 namespace WebCore {
 
@@ -43,8 +44,6 @@ MessagePortChannel::MessagePortChannel(MessagePortChannelRegistry& registry, con
     , m_registry(registry)
 {
     ASSERT(isMainThread());
-
-    relaxAdoptionRequirement();
 
     m_processes[0] = port1.processIdentifier;
     m_entangledToProcessProtectors[0] = this;
@@ -81,10 +80,14 @@ void MessagePortChannel::entanglePortWithProcess(const MessagePortIdentifier& po
     ASSERT(port == m_ports[0] || port == m_ports[1]);
     size_t i = port == m_ports[0] ? 0 : 1;
 
-    LOG(MessagePorts, "MessagePortChannel %s (%p) entangling port %s (that port has %zu messages available)", logString().utf8().data(), this, port.logString().utf8().data(), m_pendingMessages[i].size());
+    LOG_WITH_STREAM(MessagePorts, stream << "MessagePortChannel "_s << logString() << " ("_s << this << ") entangling port "_s << port.logString() << " (that port has "_s << m_pendingMessages[i].size() << " messages available)"_s);
 
     ASSERT(!m_processes[i] || *m_processes[i] == process);
     m_processes[i] = process;
+
+    if (m_status[i] == MessagePortStatus::Unclaimed)
+        m_status[i] = MessagePortStatus::Open;
+
     m_entangledToProcessProtectors[i] = this;
     m_pendingMessagePortTransfers[i].remove(*this);
 }
@@ -93,12 +96,12 @@ void MessagePortChannel::disentanglePort(const MessagePortIdentifier& port)
 {
     ASSERT(isMainThread());
 
-    LOG(MessagePorts, "MessagePortChannel %s (%p) disentangling port %s", logString().utf8().data(), this, port.logString().utf8().data());
+    LOG_WITH_STREAM(MessagePorts, stream << "MessagePortChannel "_s << logString() << " ("_s << this << ") disentangling port "_s << port.logString());
 
     ASSERT(port == m_ports[0] || port == m_ports[1]);
     size_t i = port == m_ports[0] ? 0 : 1;
 
-    ASSERT(m_processes[i] || m_isClosed[i]);
+    ASSERT(m_processes[i] || m_status[i] != MessagePortStatus::Open);
     m_processes[i] = std::nullopt;
     m_pendingMessagePortTransfers[i].add(*this);
 
@@ -107,15 +110,17 @@ void MessagePortChannel::disentanglePort(const MessagePortIdentifier& port)
     auto protectedThis = WTF::move(m_entangledToProcessProtectors[i]);
 }
 
-void MessagePortChannel::closePort(const MessagePortIdentifier& port)
+void MessagePortChannel::closePort(const MessagePortIdentifier& port, MessagePortStatus status)
 {
     ASSERT(isMainThread());
+    ASSERT(status != MessagePortStatus::Open);
 
     ASSERT(port == m_ports[0] || port == m_ports[1]);
     size_t i = port == m_ports[0] ? 0 : 1;
 
     m_processes[i] = std::nullopt;
-    m_isClosed[i] = true;
+    if (m_status[i] != MessagePortStatus::Closed)
+        m_status[i] = status;
 
     m_pendingMessages[i].clear();
     m_pendingMessagePortTransfers[i].clear();
@@ -130,11 +135,11 @@ bool MessagePortChannel::postMessageToRemote(MessageWithMessagePorts&& message, 
     ASSERT(remoteTarget == m_ports[0] || remoteTarget == m_ports[1]);
     size_t i = remoteTarget == m_ports[0] ? 0 : 1;
 
-    if (m_isClosed[i])
+    if (m_status[i] != MessagePortStatus::Open)
         return false;
 
     m_pendingMessages[i].append(WTF::move(message));
-    LOG(MessagePorts, "MessagePortChannel %s (%p) now has %zu messages pending on port %s", logString().utf8().data(), this, m_pendingMessages[i].size(), remoteTarget.logString().utf8().data());
+    LOG_WITH_STREAM(MessagePorts, stream << "MessagePortChannel "_s << logString() << " ("_s << this << ") now has "_s << m_pendingMessages[i].size() << " messages pending on port "_s << remoteTarget.logString());
 
     if (m_pendingMessages[i].size() == 1) {
         m_pendingMessageProtectors[i] = this;
@@ -149,7 +154,7 @@ void MessagePortChannel::takeAllMessagesForPort(const MessagePortIdentifier& por
 {
     ASSERT(isMainThread());
 
-    LOG(MessagePorts, "MessagePortChannel %p taking all messages for port %s", this, port.logString().utf8().data());
+    LOG_WITH_STREAM(MessagePorts, stream << "MessagePortChannel "_s << this << " taking all messages for port "_s << port.logString());
 
     ASSERT(port == m_ports[0] || port == m_ports[1]);
     size_t i = port == m_ports[0] ? 0 : 1;
@@ -166,7 +171,7 @@ void MessagePortChannel::takeAllMessagesForPort(const MessagePortIdentifier& por
 
     ++m_messageBatchesInFlight;
 
-    LOG(MessagePorts, "There are %zu messages to take for port %s. Taking them now, messages in flight is now %" PRIu64, result.size(), port.logString().utf8().data(), m_messageBatchesInFlight);
+    LOG_WITH_STREAM(MessagePorts, stream << "There are "_s << result.size() << " messages to take for port "_s << port.logString() << ". Taking them now, messages in flight is now "_s << m_messageBatchesInFlight);
 
     auto size = result.size();
     callback(WTF::move(result), [size, port, protectedThis = WTF::move(m_pendingMessageProtectors[i])] {
@@ -175,7 +180,7 @@ void MessagePortChannel::takeAllMessagesForPort(const MessagePortIdentifier& por
         UNUSED_PARAM(size);
 #endif
         --(protectedThis->m_messageBatchesInFlight);
-        LOG(MessagePorts, "Message port channel %s was notified that a batch of %zu message port messages targeted for port %s just completed dispatch, in flight is now %" PRIu64, protectedThis->logString().utf8().data(), size, port.logString().utf8().data(), protectedThis->m_messageBatchesInFlight);
+        LOG_WITH_STREAM(MessagePorts, stream << "Message port channel "_s << protectedThis->logString() << " was notified that a batch of "_s << size << " message port messages targeted for port "_s << port.logString() << " just completed dispatch, in flight is now "_s << protectedThis->m_messageBatchesInFlight);
 
     });
 }

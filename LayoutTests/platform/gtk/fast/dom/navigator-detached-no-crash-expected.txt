@@ -7,9 +7,9 @@ navigator.clearAppBadge() is OK
 navigator.clipboard is OK
 navigator.contacts is OK
 navigator.cookieEnabled is OK
-navigator.globalPrivacyControl is OK
 navigator.gpu is OK
 navigator.hardwareConcurrency is OK
+navigator.isLoggedIn() is OK
 navigator.javaEnabled() is OK
 navigator.language is OK
 navigator.languages is OK
@@ -29,6 +29,7 @@ navigator.requestMediaKeySystemAccess() is OK
 navigator.sendBeacon() threw err TypeError: Not enough arguments
 navigator.serviceWorker is OK
 navigator.setAppBadge() is OK
+navigator.setStatus() is OK
 navigator.storage is OK
 navigator.userActivation is OK
 navigator.userAgent is OK
@@ -44,9 +45,9 @@ navigator.clearAppBadge() is OK
 navigator.clipboard is OK
 navigator.contacts is OK
 navigator.cookieEnabled is OK
-navigator.globalPrivacyControl is OK
 navigator.gpu is OK
 navigator.hardwareConcurrency is OK
+navigator.isLoggedIn() is OK
 navigator.javaEnabled() is OK
 navigator.language is OK
 navigator.languages is OK
@@ -66,6 +67,7 @@ navigator.requestMediaKeySystemAccess() is OK
 navigator.sendBeacon() threw err TypeError: Not enough arguments
 navigator.serviceWorker is OK
 navigator.setAppBadge() is OK
+navigator.setStatus() is OK
 navigator.storage is OK
 navigator.userActivation is OK
 navigator.userAgent is OK

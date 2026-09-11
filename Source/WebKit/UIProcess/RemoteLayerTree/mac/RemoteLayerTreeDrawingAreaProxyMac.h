@@ -75,6 +75,7 @@ private:
 
     void adjustTransientZoom(double, WebCore::FloatPoint originInLayerForPageScale, WebCore::FloatPoint originInVisibleRect) override;
     void commitTransientZoom(double, WebCore::FloatPoint) override;
+    std::optional<double> committedTransientZoomScale() const override { return m_committedTransientZoomScale; }
 
     void sendCommitTransientZoom(double, WebCore::FloatPoint, std::optional<WebCore::ScrollingNodeID>);
 
@@ -106,7 +107,7 @@ private:
 
     std::optional<DisplayLinkObserverID> m_displayRefreshObserverID;
     std::optional<DisplayLinkObserverID> m_fullSpeedUpdateObserverID;
-    const UniqueRef<RemoteLayerTreeDisplayLinkClient> m_displayLinkClient;
+    const Ref<RemoteLayerTreeDisplayLinkClient> m_displayLinkClient;
     const WeakPtr<WebProcessPool> m_processPool;
 
     Markable<WebCore::PlatformLayerIdentifier> m_pageScalingLayerID;
@@ -121,6 +122,7 @@ private:
 
     std::optional<TransactionID> m_transactionIDAfterEndingTransientZoom;
     std::optional<double> m_transientZoomScale;
+    std::optional<double> m_committedTransientZoomScale;
     std::optional<WebCore::FloatPoint> m_transientZoomOriginInLayerForPageScale;
     std::optional<WebCore::FloatPoint> m_transientZoomOriginInVisibleRect;
 };

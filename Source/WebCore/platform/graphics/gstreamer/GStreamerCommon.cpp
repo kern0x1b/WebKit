@@ -95,11 +95,6 @@
 #include "WebKitWebSourceGStreamer.h"
 #endif
 
-#if USE(GSTREAMER_WEBRTC)
-#include "GStreamerRTPVideoRotationHeaderExtension.h"
-#include <gst/webrtc/webrtc-enumtypes.h>
-#endif
-
 #if USE(GSTREAMER_GL)
 #include <gst/gl/gl.h>
 #endif
@@ -331,8 +326,8 @@ bool isProtocolAllowed(const WTF::URL& url)
     auto protocol = url.protocol().toString().convertToLowercaseWithoutLocale();
     bool isAllowed = allowedProtocols.contains(protocol);
 
-    GST_DEBUG("URL: %s", url.string().utf8().data());
-    GST_DEBUG("Requested protocol: %s (allowed: %s)", protocol.utf8().data(), isAllowed ? "yes" : "no");
+    GST_DEBUG("URL: %s", url.string().utf8().legacyCStringPointer());
+    GST_DEBUG("Requested protocol: %s (allowed: %s)", protocol.utf8().legacyCStringPointer(), isAllowed ? "yes" : "no");
 
     return isAllowed;
 }
@@ -499,7 +494,7 @@ bool ensureGStreamerInitialized()
         auto argvSpan = unsafeMakeSpan(argv, argc);
         argvSpan[0] = g_strdup(FileSystem::currentExecutableName().data());
         for (auto [arg, parameter] : zippedRange(argvSpan.subspan(1), parameters))
-            arg = g_strdup(parameter.utf8().data());
+            arg = g_strdup(parameter.utf8().legacyCStringPointer());
 
         GUniqueOutPtr<GError> error;
         isGStreamerInitialized = gst_init_check(&argc, &argv, &error.outPtr());
@@ -570,10 +565,6 @@ void registerWebKitGStreamerElements()
         gst_element_register(nullptr, "mediastreamsrc", GST_RANK_PRIMARY, WEBKIT_TYPE_MEDIA_STREAM_SRC);
 #endif
         registerInternalVideoEncoder();
-
-#if USE(GSTREAMER_WEBRTC)
-        gst_element_register(nullptr, "webkitrtpvideorotationheaderextension", GST_RANK_MARGINAL, WEBKIT_TYPE_GST_RTP_VIDEO_ROTATION_HEADER_EXTENSION);
-#endif
 
 #if ENABLE(MEDIA_SOURCE)
         gst_element_register(nullptr, "webkitmediasrc", GST_RANK_PRIMARY, WEBKIT_TYPE_MEDIA_SRC);
@@ -714,7 +705,7 @@ void WebCoreLogObserver::didLogMessage(const WTFLogChannel& channel, WTFLogLevel
     const char* file = location ? location->file : __FILE__;
     const char* function = location ? location->function : __FUNCTION__;
     int line = location ? location->line : __LINE__;
-    gst_debug_log(debugCategory(), gstDebugLevel, file, function, line, nullptr, "%s", logString.utf8().data());
+    gst_debug_log(debugCategory(), gstDebugLevel, file, function, line, nullptr, "%s", logString.utf8().legacyCStringPointer());
 #else
     UNUSED_PARAM(channel);
     UNUSED_PARAM(level);
@@ -962,11 +953,59 @@ size_t GstMappedFrame::planeHeight(uint32_t planeIndex) const
 }
 
 #if USE(GSTREAMER_GL)
-GLuint GstMappedFrame::textureID(int planeIndex) const
+GstGLMemory* GstMappedFrame::glMemory(uint32_t planeIndex) const
 {
     RELEASE_ASSERT(isValid());
     RELEASE_ASSERT(m_frame.map->flags & GST_MAP_GL);
-    return *reinterpret_cast<GLuint*>(m_frame.data[planeIndex]);
+    RELEASE_ASSERT(planeIndex < GST_VIDEO_INFO_N_PLANES(&m_frame.info));
+    return GST_GL_MEMORY_CAST(m_frame.map[planeIndex].memory);
+}
+
+unsigned GstMappedFrame::textureID(uint32_t planeIndex) const
+{
+    return gst_gl_memory_get_texture_id(glMemory(planeIndex));
+}
+
+IntSize GstMappedFrame::textureSize(uint32_t planeIndex) const
+{
+    auto* memory = glMemory(planeIndex);
+    return { gst_gl_memory_get_texture_width(memory), gst_gl_memory_get_texture_height(memory) };
+}
+
+unsigned GstMappedFrame::textureFormat(uint32_t planeIndex) const
+{
+    auto format = gst_gl_memory_get_texture_format(glMemory(planeIndex));
+    switch (format) {
+    case GST_GL_RED:
+        if (GST_VIDEO_INFO_COMP_DEPTH(&m_frame.info, planeIndex) == 8)
+            return GST_GL_R8;
+        return GST_GL_R16;
+    case GST_GL_RG:
+        if (GST_VIDEO_INFO_COMP_DEPTH(&m_frame.info, planeIndex) == 8)
+            return GST_GL_RG8;
+        return GST_GL_RG16;
+    case GST_GL_RGB:
+        if (GST_VIDEO_INFO_COMP_DEPTH(&m_frame.info, planeIndex) == 8)
+            return GST_GL_RGB8;
+        return GST_GL_RGB16;
+    case GST_GL_RGBA:
+        if (GST_VIDEO_INFO_COMP_DEPTH(&m_frame.info, planeIndex) == 8)
+            return GST_GL_RGBA8;
+        return GST_GL_RGBA16;
+    default:
+        break;
+    }
+    return format;
+}
+
+void GstMappedFrame::waitForCPUSyncIfNeeded() const
+{
+    RELEASE_ASSERT(isValid());
+    if (!m_needsCPUSync)
+        return;
+
+    if (auto* meta = gst_buffer_get_gl_sync_meta(m_frame.buffer))
+        gst_gl_sync_meta_wait_cpu(meta, reinterpret_cast<GstGLBaseMemory*>(gst_buffer_peek_memory(m_frame.buffer, 0))->context);
 }
 #endif
 
@@ -1200,10 +1239,10 @@ GstElement* /* (transfer floating) */ createAutoAudioSink(const String& role)
         auto* role = reinterpret_cast<StringImpl*>(userData);
         auto* objectClass = G_OBJECT_GET_CLASS(object);
         if (role && g_object_class_find_property(objectClass, "stream-properties")) {
-            GUniquePtr<GstStructure> properties(gst_structure_new("stream-properties", "media.role", G_TYPE_STRING, role->utf8().data(), nullptr));
+            GUniquePtr<GstStructure> properties(gst_structure_new("stream-properties", "media.role", G_TYPE_STRING, role->utf8().legacyCStringPointer(), nullptr));
             g_object_set(object, "stream-properties", properties.get(), nullptr);
 IGNORE_WARNINGS_BEGIN("cast-align")
-            GST_DEBUG("Set media.role as %s on %" GST_PTR_FORMAT, role->utf8().data(), GST_ELEMENT_CAST(object));
+            GST_DEBUG("Set media.role as %s on %" GST_PTR_FORMAT, role->utf8().legacyCStringPointer(), GST_ELEMENT_CAST(object));
 IGNORE_WARNINGS_END
         }
         if (g_object_class_find_property(objectClass, "client-name")) {
@@ -1283,7 +1322,7 @@ bool webkitGstSetElementStateSynchronously(GstElement* pipeline, GstState target
 
 GstBuffer* /* (transfer full) */ gstBufferNewWrappedFast(void* data, size_t length)
 {
-    return gst_buffer_new_wrapped_full(static_cast<GstMemoryFlags>(0), data, length, 0, length, data, fastFree);
+    return gst_buffer_new_wrapped_full(static_cast<GstMemoryFlags>(0), data, length, 0, length, data, fastFreeCallback);
 }
 
 GstElement* /* (transfer floating) */ makeGStreamerElement(CStringView factoryName, const String& name)
@@ -1303,94 +1342,6 @@ GstElement* /* (transfer floating) */ makeGStreamerElement(CStringView factoryNa
     ASSERT(g_object_is_floating(element));
     return element;
 }
-
-#if USE(GSTREAMER_WEBRTC)
-static ASCIILiteral webrtcStatsTypeName(int value)
-{
-    switch (value) {
-    case GST_WEBRTC_STATS_CODEC:
-        return "codec"_s;
-    case GST_WEBRTC_STATS_INBOUND_RTP:
-        return "inbound-rtp"_s;
-    case GST_WEBRTC_STATS_OUTBOUND_RTP:
-        return "outbound-rtp"_s;
-    case GST_WEBRTC_STATS_REMOTE_INBOUND_RTP:
-        return "remote-inbound-rtp"_s;
-    case GST_WEBRTC_STATS_REMOTE_OUTBOUND_RTP:
-        return "remote-outbound-rtp"_s;
-    case GST_WEBRTC_STATS_CSRC:
-        return "csrc"_s;
-    case GST_WEBRTC_STATS_PEER_CONNECTION:
-        return "peer-connection"_s;
-    case GST_WEBRTC_STATS_TRANSPORT:
-        return "transport"_s;
-    case GST_WEBRTC_STATS_STREAM:
-        return "stream"_s;
-    case GST_WEBRTC_STATS_DATA_CHANNEL:
-        return "data-channel"_s;
-    case GST_WEBRTC_STATS_LOCAL_CANDIDATE:
-        return "local-candidate"_s;
-    case GST_WEBRTC_STATS_REMOTE_CANDIDATE:
-        return "remote-candidate"_s;
-    case GST_WEBRTC_STATS_CANDIDATE_PAIR:
-        return "candidate-pair"_s;
-    case GST_WEBRTC_STATS_CERTIFICATE:
-        return "certificate"_s;
-    }
-    ASSERT_NOT_REACHED();
-    return nullptr;
-}
-
-static ASCIILiteral webrtcDtlsTransportStateName(int value)
-{
-    switch (value) {
-    case GST_WEBRTC_DTLS_TRANSPORT_STATE_NEW:
-        return "new"_s;
-    case GST_WEBRTC_DTLS_TRANSPORT_STATE_CLOSED:
-        return "closed"_s;
-    case GST_WEBRTC_DTLS_TRANSPORT_STATE_FAILED:
-        return "failed"_s;
-    case GST_WEBRTC_DTLS_TRANSPORT_STATE_CONNECTING:
-        return "connecting"_s;
-    case GST_WEBRTC_DTLS_TRANSPORT_STATE_CONNECTED:
-        return "connected"_s;
-    }
-    ASSERT_NOT_REACHED();
-    return nullptr;
-}
-
-#if GST_CHECK_VERSION(1, 28, 0)
-static ASCIILiteral webrtcIceTcpCandidateTypeName(int value)
-{
-    switch (value) {
-    case GST_WEBRTC_ICE_TCP_CANDIDATE_TYPE_NONE:
-        return "none"_s;
-    case GST_WEBRTC_ICE_TCP_CANDIDATE_TYPE_ACTIVE:
-        return "active"_s;
-    case GST_WEBRTC_ICE_TCP_CANDIDATE_TYPE_PASSIVE:
-        return "passive"_s;
-    case GST_WEBRTC_ICE_TCP_CANDIDATE_TYPE_SO:
-        return "so"_s;
-    }
-    ASSERT_NOT_REACHED();
-    return nullptr;
-}
-
-static ASCIILiteral webrtcDtlsRoleName(int value)
-{
-    switch (value) {
-    case GST_WEBRTC_DTLS_ROLE_CLIENT:
-        return "client"_s;
-    case GST_WEBRTC_DTLS_ROLE_SERVER:
-        return "server"_s;
-    case GST_WEBRTC_DTLS_ROLE_UNKNOWN:
-        return "unknown"_s;
-    }
-    ASSERT_NOT_REACHED();
-    return nullptr;
-}
-#endif // GST_CHECK_VERSION
-#endif // USE(GSTREAMER_WEBRTC)
 
 template<typename T>
 std::optional<T> gstStructureGet(const GstStructure* structure, CStringView key)
@@ -1599,31 +1550,6 @@ static std::optional<RefPtr<JSON::Value>> gstStructureValueToJSON(const GValue* 
 
     if (valueType == G_TYPE_STRING)
         return JSON::Value::create(String(byteCast<char8_t>(unsafeSpan(g_value_get_string(value)))))->asValue();
-
-#if USE(GSTREAMER_WEBRTC)
-    if (valueType == GST_TYPE_WEBRTC_STATS_TYPE) {
-        auto name = webrtcStatsTypeName(g_value_get_enum(value));
-        if (!name.isEmpty()) [[likely]]
-            return JSON::Value::create(makeString(name))->asValue();
-    }
-    if (valueType == GST_TYPE_WEBRTC_DTLS_TRANSPORT_STATE) {
-        auto name = webrtcDtlsTransportStateName(g_value_get_enum(value));
-        if (!name.isEmpty()) [[likely]]
-            return JSON::Value::create(makeString(name))->asValue();
-    }
-#if GST_CHECK_VERSION(1, 28, 0)
-    if (valueType == GST_TYPE_WEBRTC_ICE_TCP_CANDIDATE_TYPE) {
-        auto name = webrtcIceTcpCandidateTypeName(g_value_get_enum(value));
-        if (!name.isEmpty()) [[likely]]
-            return JSON::Value::create(makeString(name))->asValue();
-    }
-    if (valueType == GST_TYPE_WEBRTC_DTLS_ROLE) {
-        auto name = webrtcDtlsRoleName(g_value_get_enum(value));
-        if (!name.isEmpty()) [[likely]]
-            return JSON::Value::create(makeString(name))->asValue();
-    }
-#endif // GST_CHECK_VERSION
-#endif // USE(GSTREAMER_WEBRTC)
 
     GST_WARNING("Unhandled GValue type: %s", G_VALUE_TYPE_NAME(value));
     return { };
@@ -1987,7 +1913,7 @@ void configureMediaStreamAudioDecoder(GstElement* element)
         g_object_set(element, "max-errors", -1, nullptr);
 }
 
-String configureMediaStreamVideoDecoder(GstElement* element)
+void configureMediaStreamVideoDecoder(GstElement* element)
 {
     if (gstObjectHasProperty(element, "automatic-request-sync-points"_s))
         g_object_set(element, "automatic-request-sync-points", TRUE, nullptr);
@@ -2000,22 +1926,6 @@ String configureMediaStreamVideoDecoder(GstElement* element)
 
     if (gstObjectHasProperty(element, "max-errors"_s))
         g_object_set(element, "max-errors", -1, nullptr);
-
-    auto factoryName = CStringView::unsafeFromUTF8(GST_OBJECT_NAME(gst_element_get_factory(element)));
-    StringBuilder builder;
-    builder.append("GStreamer "_s, factoryName.span());
-    if (factoryName == "vp9dec"_s || factoryName == "vp8dec"_s)
-        builder.append(" (fallback from: libvpx)"_s);
-    return builder.toString();
-}
-
-void configureVideoRTPDepayloader(GstElement* element)
-{
-    if (gstObjectHasProperty(element, "request-keyframe"_s))
-        g_object_set(element, "request-keyframe", TRUE, nullptr);
-
-    if (gstObjectHasProperty(element, "wait-for-keyframe"_s))
-        g_object_set(element, "wait-for-keyframe", TRUE, nullptr);
 }
 
 bool gstObjectHasProperty(GstObject* gstObject, ASCIILiteral name)
@@ -2184,7 +2094,7 @@ GRefPtr<GstCaps> buildDMABufCaps()
         for (auto token : String(formats.span()).split(',')) {
             GValue value = G_VALUE_INIT;
             g_value_init(&value, G_TYPE_STRING);
-            g_value_set_string(&value, token.utf8().data());
+            g_value_set_string(&value, token.utf8().legacyCStringPointer());
             gst_value_list_append_and_take_value(&drmSupportedFormats, &value);
         }
         gst_caps_set_value(caps.get(), "drm-format", &drmSupportedFormats);
@@ -2310,7 +2220,7 @@ GRefPtr<GstElement> createVideoConvertScaleElement(const String& name)
     // Enable multi-threading in the converter.
     g_object_set(videoConvert, "n-threads", 0U, nullptr);
 
-    GRefPtr bin = gst_bin_new(name.utf8().data());
+    GRefPtr bin = gst_bin_new(name.utf8().legacyCStringPointer());
     gst_bin_add_many(GST_BIN_CAST(bin.get()), videoScale, videoConvert, nullptr);
     gst_element_link(videoScale, videoConvert);
 
@@ -2330,13 +2240,19 @@ void dumpBinToDotFile(GstBin* bin, const String& filename, GstDebugGraphDetails 
         return;
 
     auto sanitizedFilename = makeStringByReplacingAll(filename, '/', '-');
-    GST_DEBUG_BIN_TO_DOT_FILE_WITH_TS(bin, details, sanitizedFilename.utf8().data());
+    GST_DEBUG_BIN_TO_DOT_FILE_WITH_TS(bin, details, sanitizedFilename.utf8().legacyCStringPointer());
 }
 
 void dumpBinToDotFile(const GRefPtr<GstElement>& element, const String& filename, GstDebugGraphDetails details)
 {
     ASSERT(GST_IS_BIN(element.get()));
     dumpBinToDotFile(GST_BIN_CAST(element.get()), filename, details);
+}
+
+bool enableMSEAdditionalPipelineDumps()
+{
+    static bool result = CStringView::unsafeFromUTF8(g_getenv("WEBKIT_GST_MSE_VERBOSE_PIPELINE_DUMPS")) == "1"_s;
+    return result;
 }
 
 GstDebugLevel gstDebugLevelFromWTFLogLevel(WTFLogLevel level)

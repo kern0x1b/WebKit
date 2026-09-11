@@ -61,12 +61,12 @@
 #include "Node.h"
 #include "NodeList.h"
 #include "NodeRenderStyle.h"
-#include "OrderIterator.h"
 #include "Page.h"
 #include "PageInspectorController.h"
 #include "PseudoElement.h"
 #include "RenderBoxInlines.h"
 #include "RenderBoxModelObject.h"
+#include "RenderChildIterator.h"
 #include "RenderElementStyleInlines.h"
 #include "RenderFlexibleBox.h"
 #include "RenderGrid.h"
@@ -994,7 +994,7 @@ void InspectorOverlay::drawRulers(GraphicsContext& context, const InspectorOverl
     {
         FontCascadeDescription fontDescription;
         fontDescription.setOneFamily(AtomString { page().settings().sansSerifFontFamily() });
-        fontDescription.setComputedSize(10);
+        fontDescription.setUsedSize(10);
 
         FontCascade font(WTF::move(fontDescription));
         font.update(nullptr);
@@ -1084,7 +1084,7 @@ void InspectorOverlay::drawRulers(GraphicsContext& context, const InspectorOverl
     {
         FontCascadeDescription fontDescription;
         fontDescription.setOneFamily(AtomString { page().settings().sansSerifFontFamily() });
-        fontDescription.setComputedSize(12);
+        fontDescription.setUsedSize(12);
 
         FontCascade font(WTF::move(fontDescription));
         font.update(nullptr);
@@ -1195,8 +1195,8 @@ Path InspectorOverlay::drawElementTitle(GraphicsContext& context, Node& node, co
     String elementHeight;
     if (is<RenderBoxModelObject>(renderer)) {
         CheckedPtr modelObject = downcast<RenderBoxModelObject>(renderer.get());
-        elementWidth = String::number(Style::adjustForAbsoluteZoom(roundToInt(modelObject->offsetWidth()), *modelObject));
-        elementHeight = String::number(Style::adjustForAbsoluteZoom(roundToInt(modelObject->offsetHeight()), *modelObject));
+        elementWidth = String::number(Style::unapplyingZoom<int>(roundToInt(modelObject->offsetWidth()), *modelObject));
+        elementHeight = String::number(Style::unapplyingZoom<int>(roundToInt(modelObject->offsetHeight()), *modelObject));
     } else {
         RefPtr containingView = node.document().frame()->view();
         IntRect boundingBox = snappedIntRect(containingView->contentsToRootView(renderer->absoluteBoundingBoxRect()));
@@ -1216,7 +1216,7 @@ Path InspectorOverlay::drawElementTitle(GraphicsContext& context, Node& node, co
     else if (CheckedPtr renderGrid = dynamicDowncast<RenderGrid>(renderer)) {
         if (renderGrid->isSubgrid())
             layoutContextBubbleStrings.append(WEB_UI_STRING_KEY("subgrid", "subgrid (Inspector Element Selection)", "Inspector element selection tooltip text for Subgrid containers."));
-        else if (renderGrid->isMasonry())
+        else if (renderGrid->isGridLanes())
             layoutContextBubbleStrings.append(WEB_UI_STRING_KEY("grid lanes", "grid lanes (Inspector Element Selection)", "Inspector element selection tooltip text for Grid Lanes containers."));
         else
             layoutContextBubbleStrings.append(WEB_UI_STRING_KEY("grid", "grid (Inspector Element Selection)", "Inspector element selection tooltip text for Grid containers."));
@@ -1573,19 +1573,19 @@ std::optional<InspectorOverlay::Highlight::GridHighlightOverlay> InspectorOverla
     if (!columnPositions.size() || !rowPositions.size())
         return { };
 
-    LayoutUnit masonryContentSize = renderGrid->masonryContentSize();
+    LayoutUnit gridLanesContentSize = renderGrid->gridLanesContentSizeForWebInspectorOverlay();
 
-    // There are no actual rows or columns in the masonry axis of a masonry layout.
-    // But we can borrow the concept to draw the two lines at the start and end of the masonry axis.
-    if (renderGrid->areMasonryRows()) {
+    // There are no actual rows or columns in the stacking axis of a grid lanes layout.
+    // But we can borrow the concept to draw the two lines at the start and end of the stacking axis.
+    if (renderGrid->hasStackingAxisRows()) {
         auto firstRowPosition = rowPositions[0];
-        auto lastRowPosition = rowPositions[0] + masonryContentSize;
+        auto lastRowPosition = rowPositions[0] + gridLanesContentSize;
         rowPositions = Vector<LayoutUnit> { firstRowPosition, lastRowPosition };
     }
 
-    if (renderGrid->areMasonryColumns()) {
+    if (renderGrid->hasStackingAxisColumns()) {
         auto firstColumnPosition = columnPositions[0];
-        auto lastColumnPosition = columnPositions[0] + masonryContentSize;
+        auto lastColumnPosition = columnPositions[0] + gridLanesContentSize;
         columnPositions = Vector<LayoutUnit> { firstColumnPosition, lastColumnPosition };
     }
 
@@ -1710,8 +1710,8 @@ std::optional<InspectorOverlay::Highlight::GridHighlightOverlay> InspectorOverla
             gridHighlightOverlay.gridLines.append(columnStartLine);
         }
 
-        // Draw only the bounding lines of the masonry axis.
-        if (renderGrid->areMasonryColumns())
+        // Draw only the bounding lines of the stacking axis.
+        if (renderGrid->hasStackingAxisColumns())
             continue;
         
         FloatLine gapLabelLine = columnStartLine;
@@ -1799,8 +1799,8 @@ std::optional<InspectorOverlay::Highlight::GridHighlightOverlay> InspectorOverla
             gridHighlightOverlay.gridLines.append(rowStartLine);
         }
 
-        // Draw only the bounding lines of the masonry axis.
-        if (renderGrid->areMasonryRows())
+        // Draw only the bounding lines of the stacking axis.
+        if (renderGrid->hasStackingAxisRows())
             continue;
 
         FloatPoint gapLabelPosition = rowStartLine.start();
@@ -1862,7 +1862,7 @@ std::optional<InspectorOverlay::Highlight::GridHighlightOverlay> InspectorOverla
         }
     }
 
-    if (gridOverlay.config.showAreaNames && !renderGrid->isMasonry()) {
+    if (gridOverlay.config.showAreaNames && !renderGrid->isGridLanes()) {
         for (auto& [name, area] : node->renderStyle()->gridTemplateAreas().map.map) {
             // Named grid areas will always be rectangular per the CSS Grid specification.
             auto columnStartLine = columnLineAt(columnPositions[area.columns.startLine()]);
@@ -1886,8 +1886,8 @@ std::optional<InspectorOverlay::Highlight::GridHighlightOverlay> InspectorOverla
         }
     }
 
-    // For masonry layouts, draw gaps between items in the masonry axis direction.
-    if (renderGrid->isMasonry()) {
+    // For grid lanes layouts, draw gaps between items in the stacking axis direction.
+    if (renderGrid->isGridLanes()) {
         auto& orderIterator = renderGrid->currentGrid().orderIterator();
 
         struct ItemInfo {
@@ -1910,7 +1910,7 @@ std::optional<InspectorOverlay::Highlight::GridHighlightOverlay> InspectorOverla
             auto maxCorner = localPointToRootPoint(containingView, absoluteRect.maxXMaxYCorner());
             FloatRect rootRect { minCorner, maxCorner - minCorner };
 
-            if (renderGrid->areMasonryRows()) {
+            if (renderGrid->hasStackingAxisRows()) {
                 auto& columnSpan = gridArea.columns;
                 if (!columnSpan.isTranslatedDefinite())
                     continue;
@@ -1923,7 +1923,7 @@ std::optional<InspectorOverlay::Highlight::GridHighlightOverlay> InspectorOverla
             }
         }
 
-        unsigned gridAxisTrackCount = renderGrid->areMasonryRows() ? columnWidths.size() : rowHeights.size();
+        unsigned gridAxisTrackCount = renderGrid->hasStackingAxisRows() ? columnWidths.size() : rowHeights.size();
 
         for (unsigned trackIndex = 0; trackIndex < gridAxisTrackCount; ++trackIndex) {
             Vector<ItemInfo*> itemsInTrack;
@@ -1935,7 +1935,7 @@ std::optional<InspectorOverlay::Highlight::GridHighlightOverlay> InspectorOverla
             if (itemsInTrack.size() < 2)
                 continue;
 
-            if (renderGrid->areMasonryRows()) {
+            if (renderGrid->hasStackingAxisRows()) {
                 std::sort(itemsInTrack.begin(), itemsInTrack.end(), [](ItemInfo* a, ItemInfo* b) {
                     return a->bounds.y() < b->bounds.y();
                 });
@@ -1950,7 +1950,7 @@ std::optional<InspectorOverlay::Highlight::GridHighlightOverlay> InspectorOverla
                 auto& currentItem = *itemsInTrack[i];
 
                 FloatQuad gapQuad;
-                if (renderGrid->areMasonryRows()) {
+                if (renderGrid->hasStackingAxisRows()) {
                     float gapTop = previousItem.bounds.maxY();
                     float gapBottom = currentItem.bounds.y();
                     if (gapBottom <= gapTop)
@@ -2018,8 +2018,8 @@ std::optional<InspectorOverlay::Highlight::GridHighlightOverlay> InspectorOverla
         for (CheckedPtr gridItem : gridItemsInGridOrder) {
             FloatQuad itemBounds;
 
-            if (renderGrid->isMasonry()) {
-                // For masonry layouts, use absoluteBoundingBoxRect to get the visual position
+            if (renderGrid->isGridLanes()) {
+                // For grid lanes layouts, use absoluteBoundingBoxRect to get the visual position
                 // accounting for all scroll offsets and transforms including zoom.
                 auto absoluteRect = FloatRect { gridItem->absoluteBoundingBoxRect(true) };
                 auto margins = gridItem->marginBox();
@@ -2154,7 +2154,7 @@ std::optional<InspectorOverlay::Highlight::FlexHighlightOverlay> InspectorOverla
 
     auto isRowDirection = wasRowDirection ^ !computedStyle->writingMode().isHorizontal();
     auto isMainAxisDirectionReversed = computedStyle->isReverseFlexDirection() ^ (wasRowDirection ? isRightToLeftDirection : isBlockFlipped);
-    auto isCrossAxisDirectionReversed = (computedStyle->flexWrap() == FlexWrap::Reverse) ^ (wasRowDirection ? isBlockFlipped : isRightToLeftDirection);
+    auto isCrossAxisDirectionReversed = computedStyle->flexWrap().isReverse() ^ (wasRowDirection ? isBlockFlipped : isRightToLeftDirection);
 
     auto localQuadToRootQuad = [&](const FloatQuad& quad) {
         return FloatQuad(
@@ -2243,10 +2243,16 @@ std::optional<InspectorOverlay::Highlight::FlexHighlightOverlay> InspectorOverla
     Vector<RenderBox*> renderChildrenInDOMOrder;
     bool hasCustomOrder = false;
 
-    for (auto& flexItem : renderFlex->flexItems()) {
-        if (flexItem)
-            renderChildrenInFlexOrder.append(flexItem.get());
+    // The container's in-flow children in order-modified document order, which is the order the flex algorithm laid
+    // them out in and so the order the cached line-start indices below are relative to. A stable sort by the used
+    // 'order' value keeps document order among equal values.
+    for (auto& flexItem : childrenOfType<RenderBox>(renderFlex.get())) {
+        if (!flexItem.isOutOfFlowPositioned() && !flexItem.isExcludedFromNormalLayout())
+            renderChildrenInFlexOrder.append(&flexItem);
     }
+    std::stable_sort(renderChildrenInFlexOrder.begin(), renderChildrenInFlexOrder.end(), [](auto& a, auto& b) {
+        return a->style().order().value < b->style().order().value;
+    });
 
     if (flexOverlay.config.showOrderNumbers) {
         for (RefPtr child = node->firstChild(); child; child = child->nextSibling()) {

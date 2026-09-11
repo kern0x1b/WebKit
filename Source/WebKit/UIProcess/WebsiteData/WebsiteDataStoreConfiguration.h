@@ -253,6 +253,9 @@ public:
     
     bool allowsHSTSWithUntrustedRootCertificate() const { return m_allowsHSTSWithUntrustedRootCertificate; }
     void setAllowsHSTSWithUntrustedRootCertificate(bool allows) { m_allowsHSTSWithUntrustedRootCertificate = allows; }
+
+    bool qualifiedServerTrustDebugEnabledForTesting() const { return m_qualifiedServerTrustDebugEnabledForTesting; }
+    void setQualifiedServerTrustDebugEnabledForTesting(bool enabled) { m_qualifiedServerTrustDebugEnabledForTesting = enabled; }
     
     void setPCMMachServiceName(String&& name) { m_pcmMachServiceName = WTF::move(name); }
     const String& pcmMachServiceName() const LIFETIME_BOUND { return m_pcmMachServiceName; }
@@ -274,6 +277,9 @@ public:
     const String& enhancedSecurityDirectory() const LIFETIME_BOUND { return m_directories.enhancedSecurityDirectory; }
     void setEnhancedSecurityDirectory(String&& directory) { m_directories.enhancedSecurityDirectory = WTF::move(directory); }
 
+    const String& isolatedSitesDirectory() const LIFETIME_BOUND { return m_directories.isolatedSitesDirectory; }
+    void setIsolatedSitesDirectory(String&& directory) { m_directories.isolatedSitesDirectory = WTF::move(directory); }
+
     std::optional<unsigned> overridePersistentNotificationMinimumLifetimeForTesting() const { return m_overrideServiceWorkerRegistrationCountTestingValue; }
     void setOverridePersistentNotificationMinimumLifetimeForTesting(unsigned count) { m_overrideServiceWorkerRegistrationCountTestingValue = count; }
 
@@ -288,6 +294,7 @@ public:
         String generalStorageDirectory;
         String hstsStorageDirectory;
         String indexedDBDatabaseDirectory;
+        String isolatedSitesDirectory;
         String javaScriptConfigurationDirectory;
         String localStorageDirectory;
         String mediaCacheDirectory;
@@ -361,6 +368,7 @@ private:
     URL m_standaloneApplicationURL;
     bool m_enableInAppBrowserPrivacyForTesting { false };
     bool m_allowsHSTSWithUntrustedRootCertificate { false };
+    bool m_qualifiedServerTrustDebugEnabledForTesting { false };
     bool m_trackingPreventionDebugModeEnabled { false };
 #if ENABLE(DECLARATIVE_WEB_PUSH)
     bool m_isDeclarativeWebPushEnabled { false };

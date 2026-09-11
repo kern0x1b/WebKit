@@ -75,7 +75,6 @@ public: // DOM
     void unpauseAnimations();
     bool resumePausedAnimationsIfNeeded(const IntRect&);
     bool NODELETE animationsPaused() const;
-    bool NODELETE hasActiveAnimation() const;
     float getCurrentTime() const;
     void setCurrentTime(float);
     
@@ -87,8 +86,8 @@ public: // DOM
 public:
     static Ref<SVGSVGElement> create(const QualifiedName&, Document&);
     static Ref<SVGSVGElement> create(Document&);
-    bool scrollToFragment(StringView fragmentIdentifier);
-    void resetScrollAnchor();
+    bool setViewForFragment(StringView fragmentIdentifier);
+    void resetViewToDefault();
 
     using PropertyRegistry = SVGPropertyOwnerRegistry<SVGSVGElement, SVGGraphicsElement, SVGFitToViewBox>;
     using SVGGraphicsElement::ref;
@@ -107,9 +106,18 @@ public:
     bool hasIntrinsicDimensions() const;
 
     FloatSize currentViewportSizeExcludingZoom() const;
-    void invalidateCachedViewportSizeExcludingZoom() const { m_cachedViewportSizeExcludingZoom = std::nullopt; }
+    void invalidateCachedViewportSizes() const
+    {
+        m_cachedViewportSizeExcludingZoom = std::nullopt;
+        m_cachedViewportSizeForLengthResolution = std::nullopt;
+    }
+
+    FloatSize viewportSizeForLengthResolution() const;
 
     FloatRect currentViewBoxRect() const;
+    bool hasSynthesizedViewBoxForSVGImage() const;
+
+    bool viewBoxDisablesPainting();
 
     AffineTransform viewBoxToViewTransform(float viewWidth, float viewHeight) const;
     bool hasTransformRelatedAttributes() const final;
@@ -165,6 +173,9 @@ private:
     RefPtr<SVGPoint> m_currentTranslate;
 
     mutable std::optional<FloatSize> m_cachedViewportSizeExcludingZoom;
+    mutable std::optional<FloatSize> m_cachedViewportSizeForLengthResolution;
+
+    float m_currentScale { 1 };
 
     const Ref<SVGAnimatedLength> m_x { SVGAnimatedLength::create(this, SVGLengthMode::Width) };
     const Ref<SVGAnimatedLength> m_y { SVGAnimatedLength::create(this, SVGLengthMode::Height) };

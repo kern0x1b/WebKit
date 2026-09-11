@@ -25,6 +25,7 @@
 
 #pragma once
 
+#include "AnimationFrameRate.h"
 #include "CanvasBase.h"
 #include "GraphicsLayerContentsDisplayDelegate.h"
 #include "ImageBuffer.h"
@@ -42,12 +43,13 @@ namespace WebCore {
 class CSSStyleImageValue;
 class CachedImage;
 class CanvasPattern;
-class DestinationColorSpace;
+class ColorSpace;
 class GraphicsLayer;
 class HTMLCanvasElement;
 class HTMLImageElement;
 class HTMLVideoElement;
 class ImageBitmap;
+class NativeImage;
 class SVGImageElement;
 class WebGLObject;
 enum class PixelFormat : uint8_t;
@@ -91,11 +93,16 @@ public:
     // Web Inspector and similar reads from the engine reads both.
     enum class SurfaceBuffer : uint8_t {
         DrawingBuffer,
-        DisplayBuffer
+        DisplayBuffer,
+        DisplayBufferForInspector,
     };
 
     // Draws the source buffer to the canvasBase().buffer().
     virtual RefPtr<ImageBuffer> surfaceBufferToImageBuffer(SurfaceBuffer) = 0;
+    // Returns the contents of the source buffer as an image. The image is immutable, so it stays
+    // valid after the context is drawn to again. Returns nullptr only if no image can be produced,
+    // for example because the canvas has no contents or an allocation failed.
+    virtual RefPtr<NativeImage> surfaceBufferToNativeImage(SurfaceBuffer) = 0;
     virtual bool isSurfaceBufferTransparentBlack(SurfaceBuffer) const = 0;
     bool NODELETE delegatesDisplay() const;
     virtual RefPtr<GraphicsLayerContentsDisplayDelegate> layerContentsDisplayDelegate();
@@ -118,8 +125,10 @@ public:
     // Swaps the current drawing buffer to display buffer.
     virtual void prepareForDisplay() { }
 
+    virtual std::optional<FramesPerSecond> preferredRenderingUpdateFramesPerSecond() const { return std::nullopt; }
+
     virtual PixelFormat pixelFormat() const;
-    virtual DestinationColorSpace colorSpace() const;
+    virtual ColorSpace colorSpace() const;
     virtual bool isOpaque() const;
     virtual bool NODELETE willReadFrequently() const;
     virtual std::optional<RenderingMode> renderingModeForTesting() const { return std::nullopt; }

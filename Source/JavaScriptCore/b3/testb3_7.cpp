@@ -39,13 +39,6 @@ void testPinRegisters()
         RegisterSet csrs;
         csrs.merge(RegisterSet::calleeSaveRegisters());
         csrs.exclude(RegisterSet::stackRegisters());
-#if CPU(ARM)
-        // FIXME We should allow this to be used. See the note
-        // in https://commits.webkit.org/257808@main for more
-        // info about why masm is using scratch registers on
-        // ARM-only.
-        csrs.remove(MacroAssembler::addressTempRegister);
-#endif // CPU(ARM)
         if (pin) {
             csrs.forEach(
                 [&] (Reg reg) {
@@ -968,7 +961,6 @@ void testLoadBaseIndexShift2()
 
 void testLoadBaseIndexShift32()
 {
-#if CPU(ADDRESS64)
     Procedure proc;
     BasicBlock* root = proc.addBlock();
     auto arguments = cCallArgumentValues<intptr_t, intptr_t>(proc, root);
@@ -988,15 +980,12 @@ void testLoadBaseIndexShift32()
     char* ptr = std::bit_cast<char*>(&value);
     for (unsigned i = 0; i < 10; ++i)
         CHECK_EQ(invoke<int32_t>(*code, ptr - (static_cast<intptr_t>(1) << static_cast<intptr_t>(32)) * i, i), 12341234);
-#endif
 }
 
 void testOptimizeMaterialization()
 {
     Procedure proc;
     if (proc.optLevel() < 2)
-        return;
-    if constexpr (is32Bit())
         return;
 
     BasicBlock* root = proc.addBlock();
@@ -1089,7 +1078,7 @@ void generateLoopNotBackwardsDominant(Procedure& proc, std::array<int, 100>& arr
                 loopHeader->appendNew<ConstPtrValue>(proc, Origin(), &array),
                 loopHeader->appendNew<Value>(
                     proc, Mul, Origin(),
-                    is32Bit() ? index : loopHeader->appendNew<Value>(proc, ZExt32, Origin(), index),
+                    loopHeader->appendNew<Value>(proc, ZExt32, Origin(), index),
                     loopHeader->appendNew<ConstPtrValue>(proc, Origin(), sizeof(int))))));
     loopHeader->setSuccessors(loopCall, loopFooter);
 
@@ -1530,6 +1519,151 @@ void testLICMControlDependentSideExits()
     CHECK_EQ(callCount, 100u);
 }
 
+// The side exit is taken on only some iterations, so it sits in a block of its own rather than in the
+// block holding the control-dependent value. Finding it requires walking back to the loop header over
+// the value's predecessors.
+void testLICMControlDependentSideExitInPredecessor()
+{
+    Procedure proc;
+    if (proc.optLevel() < 2)
+        return;
+
+    auto array = makeArrayForLoops();
+
+    BasicBlock* root = proc.addBlock();
+    BasicBlock* header = proc.addBlock();
+    BasicBlock* exiting = proc.addBlock();
+    BasicBlock* footer = proc.addBlock();
+    BasicBlock* end = proc.addBlock();
+
+    auto arguments = cCallArgumentValues<unsigned*>(proc, root);
+    Value* callCountArgument = arguments[0];
+    UpsilonValue* initialIndex = root->appendNew<UpsilonValue>(
+        proc, Origin(), root->appendNew<Const32Value>(proc, Origin(), 0));
+    root->appendNew<Value>(proc, Jump, Origin());
+    root->setSuccessors(header);
+
+    // if (array[index])
+    Value* index = header->appendNew<Value>(proc, Phi, Int32, Origin());
+    initialIndex->setPhi(index);
+    header->appendNew<Value>(
+        proc, Branch, Origin(),
+        header->appendNew<MemoryValue>(
+            proc, Load, Int32, Origin(),
+            header->appendNew<Value>(
+                proc, Add, Origin(),
+                header->appendNew<ConstPtrValue>(proc, Origin(), &array),
+                header->appendNew<Value>(
+                    proc, Mul, Origin(),
+                    header->appendNew<Value>(proc, ZExt32, Origin(), index),
+                    header->appendNew<ConstPtrValue>(proc, Origin(), sizeof(int))))));
+    header->setSuccessors(exiting, footer);
+
+    Effects effects = Effects::none();
+    effects.exitsSideways = true;
+    effects.reads = HeapRange::top();
+    exiting->appendNew<CCallValue>(
+        proc, Void, Origin(), effects,
+        exiting->appendNew<ConstPtrValue>(proc, Origin(), tagCFunction<OperationPtrTag>(noOpFunction)));
+    exiting->appendNew<Value>(proc, Jump, Origin());
+    exiting->setSuccessors(footer);
+
+    effects = Effects::none();
+    effects.controlDependent = true;
+    Value* one = footer->appendNew<CCallValue>(
+        proc, Int32, Origin(), effects,
+        footer->appendNew<ConstPtrValue>(proc, Origin(), tagCFunction<OperationPtrTag>(oneFunction)),
+        callCountArgument);
+
+    Value* nextIndex = footer->appendNew<Value>(proc, Add, Origin(), index, one);
+    UpsilonValue* loopIndex = footer->appendNew<UpsilonValue>(proc, Origin(), nextIndex);
+    loopIndex->setPhi(index);
+    footer->appendNew<Value>(
+        proc, Branch, Origin(),
+        footer->appendNew<Value>(
+            proc, LessThan, Origin(), nextIndex,
+            footer->appendNew<Const32Value>(proc, Origin(), 100)));
+    footer->setSuccessors(header, end);
+
+    end->appendNew<Value>(proc, Return, Origin());
+
+    unsigned callCount = 0;
+    compileAndRun<void>(proc, &callCount);
+    CHECK_EQ(callCount, 100u);
+}
+
+// The side exit runs in the first iteration and the control-dependent value's block is first entered
+// in the second, so the exit precedes the value while sitting in no block between the loop header and
+// it. Rejecting this relies on backwards dominance counting a back edge as a way for the procedure to
+// end, which makes the value's block not backwards-dominate the pre-header.
+void testLICMControlDependentSideExitInEarlierIteration()
+{
+    Procedure proc;
+    if (proc.optLevel() < 2)
+        return;
+
+    BasicBlock* root = proc.addBlock();
+    BasicBlock* header = proc.addBlock();
+    BasicBlock* exiting = proc.addBlock();
+    BasicBlock* body = proc.addBlock();
+    BasicBlock* end = proc.addBlock();
+
+    auto arguments = cCallArgumentValues<unsigned*>(proc, root);
+    Value* callCountArgument = arguments[0];
+    UpsilonValue* initialIndex = root->appendNew<UpsilonValue>(
+        proc, Origin(), root->appendNew<Const32Value>(proc, Origin(), 0));
+    root->appendNew<Value>(proc, Jump, Origin());
+    root->setSuccessors(header);
+
+    // if (!index), so only the first iteration takes the exiting block.
+    Value* index = header->appendNew<Value>(proc, Phi, Int32, Origin());
+    initialIndex->setPhi(index);
+    header->appendNew<Value>(
+        proc, Branch, Origin(),
+        header->appendNew<Value>(
+            proc, Equal, Origin(), index,
+            header->appendNew<Const32Value>(proc, Origin(), 0)));
+    header->setSuccessors(exiting, body);
+
+    Effects effects = Effects::none();
+    effects.exitsSideways = true;
+    effects.reads = HeapRange::top();
+    exiting->appendNew<CCallValue>(
+        proc, Void, Origin(), effects,
+        exiting->appendNew<ConstPtrValue>(proc, Origin(), tagCFunction<OperationPtrTag>(noOpFunction)));
+    UpsilonValue* indexAfterExiting = exiting->appendNew<UpsilonValue>(
+        proc, Origin(),
+        exiting->appendNew<Value>(
+            proc, Add, Origin(), index,
+            exiting->appendNew<Const32Value>(proc, Origin(), 1)));
+    indexAfterExiting->setPhi(index);
+    exiting->appendNew<Value>(proc, Jump, Origin());
+    exiting->setSuccessors(header);
+
+    effects = Effects::none();
+    effects.controlDependent = true;
+    Value* one = body->appendNew<CCallValue>(
+        proc, Int32, Origin(), effects,
+        body->appendNew<ConstPtrValue>(proc, Origin(), tagCFunction<OperationPtrTag>(oneFunction)),
+        callCountArgument);
+
+    Value* nextIndex = body->appendNew<Value>(proc, Add, Origin(), index, one);
+    UpsilonValue* loopIndex = body->appendNew<UpsilonValue>(proc, Origin(), nextIndex);
+    loopIndex->setPhi(index);
+    body->appendNew<Value>(
+        proc, Branch, Origin(),
+        body->appendNew<Value>(
+            proc, LessThan, Origin(), nextIndex,
+            body->appendNew<Const32Value>(proc, Origin(), 100)));
+    body->setSuccessors(header, end);
+
+    end->appendNew<Value>(proc, Return, Origin());
+
+    unsigned callCount = 0;
+    compileAndRun<void>(proc, &callCount);
+    CHECK_EQ(callCount, 99u);
+}
+
 void testLICMReadsPinnedWritesPinned()
 {
     Procedure proc;
@@ -1636,8 +1770,7 @@ void testDepend32()
     Value* ptr = arguments[0];
     Value* first = root->appendNew<MemoryValue>(proc, Load, Int32, Origin(), ptr, 0);
     Value* depend = root->appendNew<Value>(proc, Depend, Origin(), first);
-    if constexpr (!is32Bit())
-        depend = root->appendNew<Value>(proc, ZExt32, Origin(), depend);
+    depend = root->appendNew<Value>(proc, ZExt32, Origin(), depend);
     Value* second = root->appendNew<MemoryValue>(
         proc, Load, Int32, Origin(),
         root->appendNew<Value>(
@@ -1653,7 +1786,7 @@ void testDepend32()
     values[1] = 0xbeef;
 
     auto code = compileProc(proc);
-    if (isARM64() || isARM_THUMB2())
+    if (isARM64())
         checkUsesInstruction(*code, "eor");
     else if (isX86()) {
         checkDoesNotUseInstruction(*code, "mfence");
@@ -1759,8 +1892,7 @@ void testWasmAddress()
     // Body
     Value* pointer = body->appendNew<Value>(proc, Mul, Origin(), indexPhi,
         body->appendNew<Const32Value>(proc, Origin(), sizeof(unsigned)));
-    if (!is32Bit())
-        pointer = body->appendNew<Value>(proc, ZExt32, Origin(), pointer);
+    pointer = body->appendNew<Value>(proc, ZExt32, Origin(), pointer);
     body->appendNew<MemoryValue>(proc, Store, Origin(), valueToStore,
         body->appendNew<WasmAddressValue>(proc, Origin(), pointer, pinnedGPR), 0);
     UpsilonValue* incUpsilon = body->appendNew<UpsilonValue>(proc, Origin(),
@@ -1781,6 +1913,106 @@ void testWasmAddress()
         CHECK_EQ(numToStore, value);
 }
 
+void testWasmAddressZeroExtendScaledIndex()
+{
+    if (Options::defaultB3OptLevel() < 2)
+        return;
+
+    Procedure proc;
+    GPRReg pinnedGPR = GPRInfo::argumentGPR2;
+    proc.pinRegister(pinnedGPR);
+
+    BasicBlock* root = proc.addBlock();
+    auto arguments = cCallArgumentValues<int32_t, int32_t, unsigned*>(proc, root);
+    Value* index32 = arguments[0];
+    Value* pointer = root->appendNew<Value>(
+        proc, Shl, Origin(),
+        root->appendNew<Value>(proc, ZExt32, Origin(), index32),
+        root->appendNew<Const32Value>(proc, Origin(), 2));
+    root->appendNew<Value>(
+        proc, Return, Origin(),
+        root->appendNew<MemoryValue>(
+            proc, Load, Int32, Origin(),
+            root->appendNew<WasmAddressValue>(proc, Origin(), pointer, pinnedGPR), 0));
+
+    auto code = compileProc(proc);
+    if (isARM64())
+        checkUsesInstruction(*code, ".*ldr.*uxtw #0x2.*", true);
+
+    int32_t values[] = { 11, 22, 33, 44, 55 };
+    for (int32_t i = 0; i < 5; ++i)
+        CHECK_EQ(invoke<int32_t>(*code, i, 0, values), values[i]);
+
+    int32_t num = 99;
+    uint32_t wideIndex = 0x40000000;
+    intptr_t addr = std::bit_cast<intptr_t>(&num);
+    intptr_t base = addr - (static_cast<intptr_t>(wideIndex) << 2);
+    CHECK_EQ(invoke<int32_t>(*code, static_cast<int32_t>(wideIndex), 0, std::bit_cast<unsigned*>(base)), num);
+}
+
+void testWasmAddressZeroExtend32BitShiftWraps()
+{
+    Procedure proc;
+    GPRReg pinnedGPR = GPRInfo::argumentGPR2;
+    proc.pinRegister(pinnedGPR);
+
+    BasicBlock* root = proc.addBlock();
+    auto arguments = cCallArgumentValues<int32_t, int32_t, unsigned*>(proc, root);
+    Value* index32 = arguments[0];
+    Value* pointer = root->appendNew<Value>(
+        proc, ZExt32, Origin(),
+        root->appendNew<Value>(
+            proc, Shl, Origin(), index32,
+            root->appendNew<Const32Value>(proc, Origin(), 2)));
+    root->appendNew<Value>(
+        proc, Return, Origin(),
+        root->appendNew<MemoryValue>(
+            proc, Load, Int32, Origin(),
+            root->appendNew<WasmAddressValue>(proc, Origin(), pointer, pinnedGPR), 0));
+
+    auto code = compileProc(proc);
+    int32_t values[] = { 11, 22, 33, 44, 55 };
+    CHECK_EQ(invoke<int32_t>(*code, 0, 0, values), 11);
+    CHECK_EQ(invoke<int32_t>(*code, 1, 0, values), 22);
+    CHECK_EQ(invoke<int32_t>(*code, static_cast<int32_t>(0x40000000), 0, values), 11);
+}
+
+void testWasmAddressScaledIndexWithLockedShlChild()
+{
+    Procedure proc;
+    GPRReg pinnedGPR = GPRInfo::argumentGPR2;
+    proc.pinRegister(pinnedGPR);
+
+    BasicBlock* root = proc.addBlock();
+    BasicBlock* loadBlock = proc.addBlock();
+    BasicBlock* bailBlock = proc.addBlock();
+
+    auto arguments = cCallArgumentValues<uint64_t, uint64_t, int32_t*>(proc, root);
+    Value* masked = root->appendNew<Value>(
+        proc, BitAnd, Origin(), arguments[0],
+        root->appendNew<Const64Value>(proc, Origin(), 7));
+    Value* pointer = root->appendNew<Value>(
+        proc, Shl, Origin(), masked,
+        root->appendNew<Const32Value>(proc, Origin(), 2));
+    root->appendNewControlValue(proc, Branch, Origin(), arguments[1], FrequentedBlock(loadBlock), FrequentedBlock(bailBlock));
+
+    loadBlock->appendNewControlValue(
+        proc, Return, Origin(),
+        loadBlock->appendNew<MemoryValue>(
+            proc, Load, Int32, Origin(),
+            loadBlock->appendNew<WasmAddressValue>(proc, Origin(), pointer, pinnedGPR), 0));
+
+    bailBlock->appendNewControlValue(
+        proc, Return, Origin(),
+        bailBlock->appendNew<Const32Value>(proc, Origin(), -1));
+
+    auto code = compileProc(proc);
+    int32_t values[] = { 11, 22, 33, 44, 55, 66, 77, 88 };
+    for (uint64_t i = 0; i < 8; ++i)
+        CHECK_EQ(invoke<int32_t>(*code, 0x100 + i, 1, values), values[i]);
+    CHECK_EQ(invoke<int32_t>(*code, 0x100, 0, values), -1);
+}
+
 void testWasmAddressWithOffset()
 {
     Procedure proc;
@@ -1799,8 +2031,7 @@ void testWasmAddressWithOffset()
     Value* offset = arguments[0];
     Value* valueToStore = arguments[1];
     Value* pointer = offset;
-    if (!is32Bit())
-        pointer = root->appendNew<Value>(proc, ZExt32, Origin(), offset);
+    pointer = root->appendNew<Value>(proc, ZExt32, Origin(), offset);
     root->appendNew<MemoryValue>(proc, Store8, Origin(), valueToStore, root->appendNew<WasmAddressValue>(proc, Origin(), pointer, pinnedGPR), 1);
     root->appendNewControlValue(proc, Return, Origin());
 
@@ -2275,10 +2506,8 @@ static void testSimpleTuplePairUnused(unsigned first, int64_t second)
     patchpoint->setGenerator([&] (CCallHelpers& jit, const StackmapGenerationParams& params) {
         AllowMacroScratchRegisterUsage allowScratch(jit);
         jit.move(CCallHelpers::TrustedImm32(first), params[0].gpr());
-#if !CPU(ARM_THUMB2) // FIXME
         jit.move(CCallHelpers::TrustedImm64(second), params[1].gpr());
         jit.move64ToDouble(CCallHelpers::Imm64(std::bit_cast<uint64_t>(0.0)), params[2].fpr());
-#endif
     });
     Value* i32 = root->appendNew<Value>(proc, ZExt32, Origin(),
         root->appendNew<ExtractValue>(proc, Origin(), Int32, patchpoint, 0));
@@ -2299,9 +2528,7 @@ static void testSimpleTuplePairStack(unsigned first, int64_t second)
     patchpoint->setGenerator([&] (CCallHelpers& jit, const StackmapGenerationParams& params) {
         AllowMacroScratchRegisterUsage allowScratch(jit);
         jit.move(CCallHelpers::TrustedImm32(first), params[0].gpr());
-#if !CPU(ARM_THUMB2) // FIXME
         jit.store64(CCallHelpers::TrustedImm64(second), CCallHelpers::Address(CCallHelpers::framePointerRegister, params[1].offsetFromFP()));
-#endif
     });
     Value* i32 = root->appendNew<Value>(proc, ZExt32, Origin(),
         root->appendNew<ExtractValue>(proc, Origin(), Int32, patchpoint, 0));
@@ -2379,9 +2606,7 @@ static void tailDupedTuplePair(unsigned first, double second)
     patchpoint->setGenerator([&] (CCallHelpers& jit, const StackmapGenerationParams& params) {
         AllowMacroScratchRegisterUsage allowScratch(jit);
         jit.move(CCallHelpers::TrustedImm32(first), params[0].gpr());
-#if !CPU(ARM_THUMB2) // FIXME
         jit.store64(CCallHelpers::TrustedImm64(std::bit_cast<uint64_t>(second)), CCallHelpers::Address(CCallHelpers::framePointerRegister, params[1].offsetFromFP()));
-#endif
     });
     root->appendNew<VariableValue>(proc, Set, Origin(), var, patchpoint);
     root->appendNewControlValue(proc, Branch, Origin(), test, FrequentedBlock(truthy), FrequentedBlock(falsey));
@@ -2444,10 +2669,8 @@ static void tuplePairVariableLoop(unsigned first, uint64_t second)
             AllowMacroScratchRegisterUsage allowScratch(jit);
             CHECK(params[3].gpr() != params[0].gpr());
             CHECK(params[2].gpr() != params[0].gpr());
-#if !CPU(ARM_THUMB2) // FIXME
             jit.add64(CCallHelpers::TrustedImm32(1), params[3].gpr(), params[0].gpr());
             jit.store64(params[0].gpr(), CCallHelpers::Address(CCallHelpers::framePointerRegister, params[1].offsetFromFP()));
-#endif
 
             jit.move(params[2].gpr(), params[0].gpr());
             jit.urshift32(CCallHelpers::TrustedImm32(1), params[0].gpr());
@@ -4636,6 +4859,57 @@ void testVectorShrImmediate()
     testVectorShrImmediateForLane<uint64_t, int64_t>(SIMDLane::i64x2, SIMDSignMode::Signed, 32, 0xFFFFFFFF00000000ull);
     testVectorShrImmediateForLane<uint64_t, int64_t>(SIMDLane::i64x2, SIMDSignMode::Signed, 63, 0x8000000000000000ull);
 }
+
+// Verifies the B3ReduceStrength peephole that rewrites VectorZip{Lower,Higher}(x, zeroConstant)
+// into an unsigned VectorExtend{Low,High}(x): zip-with-zero interleaves each narrow lane with a
+// zero lane, which is exactly a zero-extension (uxtl / uxtl2). NarrowT/WideT are the source and
+// destination lane element types.
+template<typename NarrowT, typename WideT>
+static void testVectorZipZeroExtendForLane(SIMDLane narrowLane, bool high)
+{
+    if constexpr (!isARM64())
+        return;
+
+    alignas(16) v128_t vectors[2];
+    Procedure proc;
+    BasicBlock* root = proc.addBlock();
+    auto arguments = cCallArgumentValues<void*>(proc, root);
+    Value* address = arguments[0];
+    Value* input = root->appendNew<MemoryValue>(proc, Load, V128, Origin(), address);
+    Value* zero = root->appendNew<Const128Value>(proc, Origin(), vectorAllZeros());
+    B3::Opcode zipOp = high ? VectorZipHigher : VectorZipLower;
+    Value* result = root->appendNew<SIMDValue>(proc, Origin(), zipOp, B3::V128, narrowLane, SIMDSignMode::None, input, zero);
+    root->appendNew<MemoryValue>(proc, Store, Origin(), result, address, static_cast<int32_t>(sizeof(v128_t)));
+    root->appendNewControlValue(proc, Return, Origin());
+
+    auto code = compileProc(proc);
+
+    constexpr unsigned narrowLanes = sizeof(v128_t) / sizeof(NarrowT);
+    constexpr unsigned wideLanes = sizeof(v128_t) / sizeof(WideT);
+    for (unsigned i = 0; i < narrowLanes; ++i)
+        reinterpret_cast<NarrowT*>(&vectors[0])[i] = static_cast<NarrowT>(0x80 + i * 0x11);
+    invoke<void>(*code, vectors);
+
+    // Lower zips the low half of the input; higher zips the high half.
+    unsigned base = high ? wideLanes : 0;
+    for (unsigned i = 0; i < wideLanes; ++i) {
+        WideT expected = static_cast<WideT>(reinterpret_cast<NarrowT*>(&vectors[0])[base + i]);
+        CHECK(reinterpret_cast<WideT*>(&vectors[1])[i] == expected);
+    }
+}
+
+void testVectorZipWithZeroIsZeroExtend()
+{
+    if constexpr (!isARM64())
+        return;
+
+    for (bool high : { false, true }) {
+        testVectorZipZeroExtendForLane<uint8_t, uint16_t>(SIMDLane::i8x16, high);
+        testVectorZipZeroExtendForLane<uint16_t, uint32_t>(SIMDLane::i16x8, high);
+        testVectorZipZeroExtendForLane<uint32_t, uint64_t>(SIMDLane::i32x4, high);
+    }
+}
+
 // Helper: build a 3-child (binary) VectorSwizzle with the given byte pattern, verify result.
 static void testBinarySwizzlePattern(const char*, const uint8_t pattern[16], v128_t inputA, v128_t inputB, v128_t expected)
 {

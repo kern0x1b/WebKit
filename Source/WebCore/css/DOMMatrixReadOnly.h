@@ -37,6 +37,7 @@
 
 namespace WebCore {
 
+class AffineTransform;
 class DOMMatrix;
 class DOMPoint;
 class Document;
@@ -73,6 +74,8 @@ public:
 
     static ExceptionOr<void> validateAndFixup(DOMMatrix2DInit&);
     static ExceptionOr<void> validateAndFixup(DOMMatrixInit&);
+
+    static ExceptionOr<AffineTransform> toAffineTransform(DOMMatrix2DInit&);
 
     double a() const { return m_matrix.a(); }
     double b() const { return m_matrix.b(); }

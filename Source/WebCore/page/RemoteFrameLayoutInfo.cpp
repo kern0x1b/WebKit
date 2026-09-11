@@ -26,25 +26,70 @@
 #include "config.h"
 #include "RemoteFrameLayoutInfo.h"
 
+#include "FloatRect.h"
 #include <wtf/TZoneMallocInlines.h>
+#include <wtf/text/TextStream.h>
 
 namespace WebCore {
 
 WTF_MAKE_TZONE_ALLOCATED_IMPL(RemoteFrameLayoutInfo);
 
-Ref<RemoteFrameLayoutInfo> RemoteFrameLayoutInfo::create(std::optional<LayoutRect> visibleRectInParent, TransformationMatrix childFrameOwnerToRootContentTransform, TransformationMatrix absoluteToChildFrameOwnerLocalTransform, float usedZoom, LayoutPoint contentBoxLocation, OptionSet<FrameOwnerElementAppearance> ownerElementAppearance)
-{
-    return adoptRef(*new RemoteFrameLayoutInfo(visibleRectInParent, WTF::move(childFrameOwnerToRootContentTransform), WTF::move(absoluteToChildFrameOwnerLocalTransform), usedZoom, contentBoxLocation, ownerElementAppearance));
-}
-
-RemoteFrameLayoutInfo::RemoteFrameLayoutInfo(std::optional<LayoutRect> visibleRectInParent, TransformationMatrix childFrameOwnerToRootContentTransform, TransformationMatrix absoluteToChildFrameOwnerLocalTransform, float usedZoom, LayoutPoint contentBoxLocation, OptionSet<FrameOwnerElementAppearance> ownerElementAppearance)
+RemoteFrameLayoutInfo::RemoteFrameLayoutInfo(
+    std::optional<LayoutRect> visibleRectInParent,
+    IntRect onScreenRectInChildView,
+#if PLATFORM(IOS_FAMILY)
+    FloatRect exposedContentRectInChildView,
+#endif
+    bool ownerHasRenderer,
+    TransformationMatrix childFrameOwnerToRootContentTransform,
+    TransformationMatrix absoluteToChildFrameOwnerLocalTransform,
+    float usedZoom,
+    LayoutPoint contentBoxLocation,
+    OptionSet<FrameOwnerElementAppearance> ownerElementAppearance
+)
     : m_visibleRectInParent(visibleRectInParent)
+    , m_onScreenRectInChildView(onScreenRectInChildView)
+#if PLATFORM(IOS_FAMILY)
+    , m_exposedContentRectInChildView(exposedContentRectInChildView)
+#endif
+    , m_ownerHasRenderer(ownerHasRenderer)
     , m_childFrameOwnerToRootContentTransform(WTF::move(childFrameOwnerToRootContentTransform))
     , m_absoluteToChildFrameOwnerLocalTransform(WTF::move(absoluteToChildFrameOwnerLocalTransform))
     , m_usedZoom(usedZoom)
     , m_contentBoxLocation(contentBoxLocation)
     , m_ownerElementAppearance(ownerElementAppearance)
 {
+}
+
+WTF::TextStream& operator<<(WTF::TextStream& ts, FrameOwnerElementAppearance appearance)
+{
+    switch (appearance) {
+    case FrameOwnerElementAppearance::IsDark:
+        ts << "IsDark"_s;
+        break;
+    case FrameOwnerElementAppearance::ExplicitlySet:
+        ts << "ExplicitlySet"_s;
+        break;
+    }
+    return ts;
+}
+
+WTF::TextStream& operator<<(WTF::TextStream& ts, const RemoteFrameLayoutInfo& info)
+{
+    WTF::TextStream::GroupScope scope(ts);
+    ts << "RemoteFrameLayoutInfo"_s;
+    ts.dumpProperty("visibleRectInParent"_s, info.visibleRectInParent());
+    ts.dumpProperty("onScreenRectInChildView"_s, info.onScreenRectInChildView());
+#if PLATFORM(IOS_FAMILY)
+    ts.dumpProperty("exposedContentRectInChildView"_s, info.exposedContentRectInChildView());
+#endif
+    ts.dumpProperty("ownerHasRenderer"_s, info.ownerHasRenderer());
+    ts.dumpProperty("childFrameOwnerToRootContentTransform"_s, info.childFrameOwnerToRootContentTransform());
+    ts.dumpProperty("absoluteToChildFrameOwnerLocalTransform"_s, info.absoluteToChildFrameOwnerLocalTransform());
+    ts.dumpProperty("usedZoom"_s, info.usedZoom());
+    ts.dumpProperty("contentBoxLocation"_s, info.contentBoxLocation());
+    ts.dumpProperty("ownerElementAppearance"_s, info.ownerElementAppearance());
+    return ts;
 }
 
 } // namespace WebCore

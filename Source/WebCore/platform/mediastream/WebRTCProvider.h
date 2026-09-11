@@ -31,7 +31,6 @@
 #include <WebCore/RTCRtpCapabilities.h>
 #include <WebCore/ScriptExecutionContextIdentifier.h>
 #include <wtf/CompletionHandler.h>
-#include <wtf/Expected.h>
 #include <wtf/TZoneMalloc.h>
 #include <wtf/UniqueRef.h>
 #include <wtf/text/WTFString.h>
@@ -84,8 +83,6 @@ public:
 
     virtual bool isLibWebRTCProvider() const { return false; }
     virtual bool isWebCoreLibWebRTCProvider() const { return false; }
-
-    virtual bool isWebCoreGStreamerWebRTCProvider() const;
 
 protected:
 #if ENABLE(WEB_RTC)

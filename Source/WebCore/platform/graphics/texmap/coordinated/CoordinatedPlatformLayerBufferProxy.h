@@ -26,10 +26,16 @@
 #pragma once
 
 #if USE(COORDINATED_GRAPHICS)
-#include <wtf/Lock.h>
+#include <wtf/MainThread.h>
 #include <wtf/RefPtr.h>
 #include <wtf/RunLoop.h>
 #include <wtf/ThreadSafeRefCounted.h>
+
+#if !USE(TEXTURE_MAPPER)
+WTF_IGNORE_WARNINGS_IN_THIRD_PARTY_CODE_BEGIN
+#include <skia/gpu/ganesh/GrContextThreadSafeProxy.h>
+WTF_IGNORE_WARNINGS_IN_THIRD_PARTY_CODE_END
+#endif
 
 namespace WebCore {
 class CoordinatedPlatformLayer;
@@ -39,11 +45,14 @@ class TextureMapperLayer;
 
 class CoordinatedPlatformLayerBufferProxy final : public ThreadSafeRefCounted<CoordinatedPlatformLayerBufferProxy> {
 public:
-    static Ref<CoordinatedPlatformLayerBufferProxy> create();
+    static Ref<CoordinatedPlatformLayerBufferProxy> create(Ref<CoordinatedPlatformLayer>&&);
     ~CoordinatedPlatformLayerBufferProxy();
 
-    void setTargetLayer(CoordinatedPlatformLayer*);
+    void invalidate();
+    bool isValid() const { return !!m_layer; }
+
     void consumePendingBufferIfNeeded();
+    void setInitialDisplayBuffer(std::unique_ptr<CoordinatedPlatformLayerBuffer>&&);
     void setDisplayBuffer(std::unique_ptr<CoordinatedPlatformLayerBuffer>&&);
 
 #if ENABLE(VIDEO) && USE(GSTREAMER)
@@ -51,14 +60,17 @@ public:
     void dropCurrentBufferWhilePreservingTexture(ShouldWait);
 #endif
 
-private:
-    CoordinatedPlatformLayerBufferProxy();
+#if !USE(TEXTURE_MAPPER)
+    sk_sp<GrContextThreadSafeProxy> threadSafeGrContext() const;
+#endif
 
-    Lock m_lock;
-    RefPtr<CoordinatedPlatformLayer> m_layer WTF_GUARDED_BY_LOCK(m_lock);
-    std::unique_ptr<CoordinatedPlatformLayerBuffer> m_pendingBuffer WTF_GUARDED_BY_LOCK(m_lock);
+private:
+    explicit CoordinatedPlatformLayerBufferProxy(Ref<CoordinatedPlatformLayer>&&);
+
+    RefPtr<CoordinatedPlatformLayer> m_layer;
+    std::unique_ptr<CoordinatedPlatformLayerBuffer> m_pendingBuffer WTF_GUARDED_BY_CAPABILITY(mainThread);
 #if ENABLE(VIDEO) && USE(GSTREAMER)
-    RefPtr<RunLoop> m_compositingRunLoop WTF_GUARDED_BY_LOCK(m_lock);
+    RefPtr<RunLoop> m_compositingRunLoop;
 #endif
 };
 

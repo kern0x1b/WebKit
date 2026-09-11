@@ -64,16 +64,6 @@ Ref<HTMLEmbedElement> HTMLEmbedElement::create(Document& document)
     return create(embedTag, document);
 }
 
-// https://html.spec.whatwg.org/multipage/dom.html#exposed
-bool HTMLEmbedElement::isExposed() const
-{
-    for (Ref ancestor : ancestorsOfType<HTMLObjectElement>(*this)) {
-        if (ancestor->isExposed())
-            return false;
-    }
-    return true;
-}
-
 static inline RenderWidget* findWidgetRenderer(const Node* node)
 {
     if (!node->renderer())
@@ -93,8 +83,8 @@ void HTMLEmbedElement::collectPresentationalHintsForAttribute(const QualifiedNam
 {
     if (name == hiddenAttr) {
         ASSERT(!value.isNull());
-        addPropertyToPresentationalHintStyle(style, CSSPropertyWidth, 0, CSSUnitType::CSS_PX);
-        addPropertyToPresentationalHintStyle(style, CSSPropertyHeight, 0, CSSUnitType::CSS_PX);
+        addPropertyToPresentationalHintStyle(style, CSSPropertyWidth, 0, CSSUnitType::Px);
+        addPropertyToPresentationalHintStyle(style, CSSPropertyHeight, 0, CSSUnitType::Px);
     } else
         HTMLPlugInElement::collectPresentationalHintsForAttribute(name, value, style);
 }

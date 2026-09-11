@@ -47,8 +47,10 @@
 #include <algorithm>
 #include <wtf/CompletionHandler.h>
 #include <wtf/Scope.h>
+#include <wtf/SetForScope.h>
 #include <wtf/TZoneMallocInlines.h>
 #include <wtf/text/MakeString.h>
+#include <wtf/text/TextStream.h>
 
 namespace WebCore {
 using namespace JSC;
@@ -148,12 +150,12 @@ UniqueIDBDatabase::UniqueIDBDatabase(UniqueIDBDatabaseManager& manager, const ID
 {
     ASSERT(!isMainThread());
 
-    LOG(IndexedDB, "UniqueIDBDatabase::UniqueIDBDatabase() (%p) %s", this, m_identifier.loggingString().utf8().data());
+    LOG_WITH_STREAM(IndexedDB, stream << "UniqueIDBDatabase::UniqueIDBDatabase() ("_s << this << ") "_s << m_identifier.loggingString());
 }
 
 UniqueIDBDatabase::~UniqueIDBDatabase()
 {
-    LOG(IndexedDB, "UniqueIDBDatabase::~UniqueIDBDatabase() (%p) %s", this, m_identifier.loggingString().utf8().data());
+    LOG_WITH_STREAM(IndexedDB, stream << "UniqueIDBDatabase::~UniqueIDBDatabase() ("_s << this << ") "_s << m_identifier.loggingString());
     ASSERT(!isMainThread());
     ASSERT(m_pendingOpenDBRequests.isEmpty());
     ASSERT(!m_currentOpenDBRequest);
@@ -241,7 +243,7 @@ void UniqueIDBDatabase::performCurrentOpenOperationAfterSpaceCheck(bool isGrante
             if (!backingStoreOpenError)
                 m_databaseInfo = makeUnique<IDBDatabaseInfo>(databaseInfo);
             else {
-                LOG_ERROR("Failed to get database info '%s'", backingStoreOpenError.message().utf8().data());
+                LOG_ERROR("Failed to get database info '%s'", backingStoreOpenError.message().utf8().legacyCStringPointer());
                 m_backingStore = nullptr;
             }
         }
@@ -307,7 +309,7 @@ void UniqueIDBDatabase::performCurrentOpenOperationAfterSpaceCheck(bool isGrante
 
 void UniqueIDBDatabase::performCurrentDeleteOperation()
 {
-    LOG(IndexedDB, "UniqueIDBDatabase::performCurrentDeleteOperation - %s", m_identifier.loggingString().utf8().data());
+    LOG_WITH_STREAM(IndexedDB, stream << "UniqueIDBDatabase::performCurrentDeleteOperation - "_s << m_identifier.loggingString());
 
     ASSERT(m_currentOpenDBRequest);
     ASSERT(m_currentOpenDBRequest->isDeleteRequest());
@@ -566,7 +568,7 @@ void UniqueIDBDatabase::didFireVersionChangeEvent(UniqueIDBDatabaseConnection& c
 
 void UniqueIDBDatabase::openDBRequestCancelled(const IDBResourceIdentifier& requestIdentifier)
 {
-    LOG(IndexedDB, "UniqueIDBDatabase::openDBRequestCancelled - %s", requestIdentifier.loggingString().utf8().data());
+    LOG_WITH_STREAM(IndexedDB, stream << "UniqueIDBDatabase::openDBRequestCancelled - "_s << requestIdentifier.loggingString());
 
     if (m_currentOpenDBRequest && m_currentOpenDBRequest->requestData().requestIdentifier() == requestIdentifier)
         m_currentOpenDBRequest = nullptr;
@@ -778,7 +780,7 @@ void UniqueIDBDatabase::createIndexAsyncAfterQuotaCheck(UniqueIDBDatabaseTransac
         return didCreateIndexAsyncForTransaction(transaction, indexInfo, IDBError { ExceptionCode::InvalidStateError, "Object store does not exist."_s });
 
     objectStoreInfo->addExistingIndex(indexInfo);
-    m_databaseInfo->setMaxIndexID(indexInfo.identifier().toRawValue());
+    m_databaseInfo->setMaxIndexID(indexInfo.identifier().toUInt64());
 
     bool needsToWaitGenerateIndexKey = false;
     protect(m_backingStore)->forEachObjectStoreRecord(transaction.info().identifier(), indexInfo.objectStoreIdentifier(), [&, protectedTransaction](auto&& recordOrError) mutable {
@@ -1208,7 +1210,7 @@ void UniqueIDBDatabase::iterateCursor(const IDBRequestData& requestData, const I
 void UniqueIDBDatabase::commitTransaction(UniqueIDBDatabaseTransaction& transaction, uint64_t handledRequestResultsCount, ErrorCallback&& callback, SpaceCheckResult spaceCheckResult)
 {
     ASSERT(!isMainThread());
-    LOG(IndexedDB, "UniqueIDBDatabase::commitTransaction - %s", transaction.info().identifier().loggingString().utf8().data());
+    LOG_WITH_STREAM(IndexedDB, stream << "UniqueIDBDatabase::commitTransaction - "_s << transaction.info().identifier().loggingString());
 
     if (spaceCheckResult == SpaceCheckResult::Unknown) {
         CheckedPtr manager = m_manager.get();
@@ -1264,7 +1266,7 @@ void UniqueIDBDatabase::commitTransaction(UniqueIDBDatabaseTransaction& transact
 void UniqueIDBDatabase::abortTransaction(UniqueIDBDatabaseTransaction& transaction, ErrorCallback&& callback, SpaceCheckResult spaceCheckResult)
 {
     ASSERT(!isMainThread());
-    LOG(IndexedDB, "UniqueIDBDatabase::abortTransaction - %s", transaction.info().identifier().loggingString().utf8().data());
+    LOG_WITH_STREAM(IndexedDB, stream << "UniqueIDBDatabase::abortTransaction - "_s << transaction.info().identifier().loggingString());
 
     if (spaceCheckResult == SpaceCheckResult::Unknown) {
         CheckedPtr manager = m_manager.get();
@@ -1342,7 +1344,7 @@ void UniqueIDBDatabase::didFinishHandlingVersionChange(UniqueIDBDatabaseConnecti
 void UniqueIDBDatabase::connectionClosedFromClient(UniqueIDBDatabaseConnection& connection)
 {
     ASSERT(!isMainThread());
-    LOG(IndexedDB, "UniqueIDBDatabase::connectionClosedFromClient - %s (%" PRIu64 ")", connection.openRequestIdentifier().loggingString().utf8().data(), connection.identifier().toUInt64());
+    LOG_WITH_STREAM(IndexedDB, stream << "UniqueIDBDatabase::connectionClosedFromClient - "_s << connection.openRequestIdentifier().loggingString() << " ("_s << connection.identifier().toUInt64() << ")"_s);
 
     Ref<UniqueIDBDatabaseConnection> protectedConnection(connection);
     m_openDatabaseConnections.remove(&connection);
@@ -1382,7 +1384,7 @@ bool UniqueIDBDatabase::isVersionChangeTransactionActive(const UniqueIDBDatabase
 void UniqueIDBDatabase::connectionClosedFromServer(UniqueIDBDatabaseConnection& connection)
 {
     ASSERT(!isMainThread());
-    LOG(IndexedDB, "UniqueIDBDatabase::connectionClosedFromServer - %s (%" PRIu64 ")", connection.openRequestIdentifier().loggingString().utf8().data(), connection.identifier().toUInt64());
+    LOG_WITH_STREAM(IndexedDB, stream << "UniqueIDBDatabase::connectionClosedFromServer - "_s << connection.openRequestIdentifier().loggingString() << " ("_s << connection.identifier().toUInt64() << ")"_s);
 
     protect(connection.connectionToClient())->didCloseFromServer(connection, IDBError::userDeleteError());
 
@@ -1391,13 +1393,12 @@ void UniqueIDBDatabase::connectionClosedFromServer(UniqueIDBDatabaseConnection& 
 
 void UniqueIDBDatabase::enqueueTransaction(Ref<UniqueIDBDatabaseTransaction>&& transaction)
 {
-    LOG(IndexedDB, "UniqueIDBDatabase::enqueueTransaction - %s", transaction->info().loggingString().utf8().data());
+    LOG_WITH_STREAM(IndexedDB, stream << "UniqueIDBDatabase::enqueueTransaction - "_s << transaction->info().loggingString());
 
     ASSERT(transaction->info().mode() != IDBTransactionMode::Versionchange);
 
     m_pendingTransactions.append(WTF::move(transaction));
-
-    handleTransactions();
+    handleTransactionsAfterAbortingSuspendedClientTransactions();
 }
 
 void UniqueIDBDatabase::handleTransactions()
@@ -1423,10 +1424,6 @@ void UniqueIDBDatabase::handleTransactions()
         transaction = takeNextRunnableTransaction(hadDeferredTransactions);
     }
     LOG(IndexedDB, "UniqueIDBDatabase::handleTransactions - There are %zu pending after this round of handling", m_pendingTransactions.size());
-
-    // In-progress transactions of a suspended client process can never finish while the client
-    // stays suspended, so transactions queued behind them would be blocked indefinitely.
-    abortInProgressTransactionsBlockedOnSuspendedClients();
 }
 
 void UniqueIDBDatabase::activateTransactionInBackingStore(UniqueIDBDatabaseTransaction& transaction)
@@ -1450,6 +1447,12 @@ template<typename T> bool NODELETE scopesOverlap(const T& aScopes, const Vector<
     return false;
 }
 
+static bool isTransactionOfSuspendedClient(const UniqueIDBDatabaseTransaction& transaction)
+{
+    RefPtr databaseConnection = transaction.databaseConnection();
+    return databaseConnection && databaseConnection->connectionToClient().isClientSuspended();
+}
+
 RefPtr<UniqueIDBDatabaseTransaction> UniqueIDBDatabase::takeNextRunnableTransaction(bool& hadDeferredTransactions)
 {
     hadDeferredTransactions = false;
@@ -1470,15 +1473,22 @@ RefPtr<UniqueIDBDatabaseTransaction> UniqueIDBDatabase::takeNextRunnableTransact
     HashSet<IDBObjectStoreIdentifier> deferredReadWriteScopes;
 
     while (!m_pendingTransactions.isEmpty()) {
+        // Avoid starting transaction of suspended client since they cannot make any progress on it.
         currentTransaction = m_pendingTransactions.takeFirst();
+        if (isTransactionOfSuspendedClient(*currentTransaction)) {
+            deferredTransactions.append(currentTransaction.releaseNonNull());
+            continue;
+        }
 
         switch (currentTransaction->info().mode()) {
         case IDBTransactionMode::Readonly: {
             bool hasOverlappingScopes = scopesOverlap(deferredReadWriteScopes, currentTransaction->objectStoreIdentifiers());
             hasOverlappingScopes |= scopesOverlap(m_objectStoreWriteTransactions, currentTransaction->objectStoreIdentifiers());
 
-            if (hasOverlappingScopes)
+            if (hasOverlappingScopes) {
                 deferredTransactions.append(currentTransaction.releaseNonNull());
+                hadDeferredTransactions = true;
+            }
 
             break;
         }
@@ -1490,6 +1500,7 @@ RefPtr<UniqueIDBDatabaseTransaction> UniqueIDBDatabase::takeNextRunnableTransact
                 for (auto objectStore : currentTransaction->objectStoreIdentifiers())
                     deferredReadWriteScopes.add(objectStore);
                 deferredTransactions.append(currentTransaction.releaseNonNull());
+                hadDeferredTransactions = true;
             }
 
             break;
@@ -1504,10 +1515,6 @@ RefPtr<UniqueIDBDatabaseTransaction> UniqueIDBDatabase::takeNextRunnableTransact
             break;
     }
 
-    hadDeferredTransactions = !deferredTransactions.isEmpty();
-    if (!hadDeferredTransactions)
-        return currentTransaction;
-
     // Prepend the deferred transactions back on the beginning of the deque for future scheduling passes.
     while (!deferredTransactions.isEmpty())
         m_pendingTransactions.prepend(deferredTransactions.takeLast());
@@ -1515,7 +1522,7 @@ RefPtr<UniqueIDBDatabaseTransaction> UniqueIDBDatabase::takeNextRunnableTransact
     return currentTransaction;
 }
 
-void UniqueIDBDatabase::transactionCompleted(RefPtr<UniqueIDBDatabaseTransaction>&& transaction)
+void UniqueIDBDatabase::transactionCompleted(RefPtr<UniqueIDBDatabaseTransaction>&& transaction, ShouldStartRunnableWork shouldStartRunnableWork)
 {
     ASSERT(transaction);
     ASSERT(!m_inProgressTransactions.contains(transaction->info().identifier()));
@@ -1531,6 +1538,9 @@ void UniqueIDBDatabase::transactionCompleted(RefPtr<UniqueIDBDatabaseTransaction
 
     if (m_versionChangeTransaction == transaction)
         m_versionChangeTransaction = nullptr;
+
+    if (shouldStartRunnableWork == ShouldStartRunnableWork::No)
+        return;
 
     // Previously blocked operations might be runnable.
     handleDatabaseOperations();
@@ -1618,6 +1628,9 @@ bool UniqueIDBDatabase::transactionBlocksPendingTransactions(UniqueIDBDatabaseTr
     bool serializesReadWrites = backingStore && !backingStore->supportsSimultaneousReadWriteTransactions();
 
     for (auto& pendingTransaction : m_pendingTransactions) {
+        if (isTransactionOfSuspendedClient(pendingTransaction))
+            continue;
+
         if (pendingTransaction->isReadOnly()) {
             // A pending read-only transaction is only blocked by an overlapping in-progress write.
             if (!inProgressIsReadOnly && scopesOverlap(inProgressScopes, pendingTransaction->objectStoreIdentifiers()))
@@ -1635,29 +1648,43 @@ bool UniqueIDBDatabase::transactionBlocksPendingTransactions(UniqueIDBDatabaseTr
     return false;
 }
 
-void UniqueIDBDatabase::abortInProgressTransactionsBlockedOnSuspendedClients()
+void UniqueIDBDatabase::handleTransactionsAfterAbortingSuspendedClientTransactions()
 {
+    if (abortInProgressTransactionsOfSuspendedClientsIfNeeded() == DidAbortAnyTransaction::Yes) {
+        // Previously blocked requests might be able to run now.
+        handleDatabaseOperations();
+    }
+
+    handleTransactions();
+}
+
+UniqueIDBDatabase::DidAbortAnyTransaction UniqueIDBDatabase::abortInProgressTransactionsOfSuspendedClientsIfNeeded()
+{
+#if ASSERT_ENABLED
+    ASSERT(!m_isAbortingTransactionsOfSuspendedClients);
+    SetForScope abortingScope(m_isAbortingTransactionsOfSuspendedClients, true);
+#endif
+
     if (m_pendingTransactions.isEmpty() || m_inProgressTransactions.isEmpty())
-        return;
+        return DidAbortAnyTransaction::No;
 
     Vector<Ref<UniqueIDBDatabaseTransaction>> transactionsToAbort;
     for (auto& transaction : m_inProgressTransactions.values()) {
-        RefPtr databaseConnection = transaction->databaseConnection();
-        if (!databaseConnection || !databaseConnection->connectionToClient().isClientProcessSuspended())
+        if (!isTransactionOfSuspendedClient(transaction))
             continue;
+
         if (transactionBlocksPendingTransactions(transaction))
             transactionsToAbort.append(transaction);
     }
 
+    bool abortedAnyTransaction = false;
     for (auto& transaction : transactionsToAbort) {
-        // transactionCompleted() below re-enters handleTransactions(), which may have already
-        // aborted this transaction in a nested pass.
         auto transactionIdentifier = transaction->info().identifier();
         auto takenTransaction = m_inProgressTransactions.take(transactionIdentifier);
         if (!takenTransaction)
             continue;
 
-        LOG(IndexedDB, "UniqueIDBDatabase::abortInProgressTransactionsBlockedOnSuspendedClients - Aborting transaction %s of suspended client", transactionIdentifier.loggingString().utf8().data());
+        LOG_WITH_STREAM(IndexedDB, stream << "UniqueIDBDatabase::abortInProgressTransactionsOfSuspendedClientsIfNeeded - Aborting transaction "_s << transactionIdentifier.loggingString() << " of suspended client"_s);
 
         // Aborting a versionchange transaction must roll back the in-memory schema and clear the
         // version-change connection, matching the standard abort path, so an interrupted upgrade
@@ -1678,11 +1705,13 @@ void UniqueIDBDatabase::abortInProgressTransactionsBlockedOnSuspendedClients()
             error = backingStore->abortTransaction(transactionIdentifier);
         transaction->setSuspensionAbortResult(error);
 
-        // Completing the transaction lets the next pending transaction begin. The transaction
-        // object stays in its connection's transaction map so a client that later resumes can
-        // still abort or commit it and learn about the suspension abort.
-        transactionCompleted(WTF::move(takenTransaction));
+        // The transaction object stays in its connection's transaction map so a client that
+        // later resumes can still abort or commit it and learn about the suspension abort.
+        transactionCompleted(WTF::move(takenTransaction), ShouldStartRunnableWork::No);
+        abortedAnyTransaction = true;
     }
+
+    return abortedAnyTransaction ? DidAbortAnyTransaction::Yes : DidAbortAnyTransaction::No;
 }
 
 void UniqueIDBDatabase::close()

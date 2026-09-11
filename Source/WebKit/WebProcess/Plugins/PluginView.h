@@ -51,6 +51,7 @@ class PlatformMouseEvent;
 class RenderEmbeddedObject;
 class ShareableBitmap;
 class VoidCallback;
+enum class FetchOptionsDestination : uint8_t;
 enum class TextGranularity : uint8_t;
 }
 
@@ -66,6 +67,7 @@ struct DocumentEditingContextRequest;
 struct DocumentEditingContext;
 struct EditorState;
 struct FrameInfoData;
+struct PDFPluginTextExtractionContent;
 struct WebHitTestResultData;
 
 class PluginView final : public WebCore::PluginViewBase {
@@ -92,6 +94,8 @@ public:
 
     WebCore::HTMLPlugInElement& pluginElement() const { return m_pluginElement; }
     const URL& mainResourceURL() const LIFETIME_BOUND { return m_mainResourceURL; }
+
+    WebCore::FetchOptionsDestination fetchDestination() const;
 
     void didBeginMagnificationGesture();
     void didEndMagnificationGesture();
@@ -135,6 +139,7 @@ public:
     void scrollToRevealTextMatch(const WebFoundTextRange::PDFData&);
 
     String fullDocumentString() const;
+    PDFPluginTextExtractionContent textExtractionContent() const;
     String selectionString() const;
     std::pair<String, String> stringsBeforeAndAfterSelection(int characterCount) const;
 
@@ -161,7 +166,9 @@ public:
 
     void setPDFDisplayMode(PDFPluginDisplayMode);
 
+#if ENABLE(PDF_HUD)
     void openWithPreview(CompletionHandler<void(const String&, std::optional<FrameInfoData>&&, std::span<const uint8_t>)>&&);
+#endif
 
     void focusPluginElement();
 
@@ -266,6 +273,7 @@ private:
     Vector<WebCore::FloatRect> pdfAnnotationRectsForTesting() const override;
     void unlockPDFDocumentForTesting(const String& password) final;
     void setPDFTextAnnotationValueForTesting(unsigned pageIndex, unsigned annotationIndex, const String& value) final;
+    Vector<String> pdfContextMenuItemTitlesForTesting(const WebCore::IntPoint&) const final;
     void registerPDFTestCallback(RefPtr<WebCore::VoidCallback>&&) final;
 };
 

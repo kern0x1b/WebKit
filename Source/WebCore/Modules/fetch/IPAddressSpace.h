@@ -27,10 +27,15 @@
 
 namespace WebCore {
 
+class IPAddress;
+
+class Site;
+
 enum class IPAddressSpace : uint8_t {
     Public,
     Local,
-    Loopback
+    Loopback,
+    Unknown
 };
 
 constexpr uint8_t publicnessRank(IPAddressSpace space)
@@ -42,6 +47,8 @@ constexpr uint8_t publicnessRank(IPAddressSpace space)
         return 1;
     case IPAddressSpace::Public:
         return 2;
+    case IPAddressSpace::Unknown:
+        return 0;
     }
     return 2;
 }
@@ -52,5 +59,8 @@ inline bool isLessPublicThan(IPAddressSpace a, IPAddressSpace b)
 }
 
 WEBCORE_EXPORT IPAddressSpace determineIPAddressSpace(const WTF::URL&);
+WEBCORE_EXPORT IPAddressSpace determineIPAddressSpace(const Site&);
+
+WEBCORE_EXPORT IPAddressSpace classifyIPAddressSpace(const IPAddress&);
 
 } // namespace WebCore

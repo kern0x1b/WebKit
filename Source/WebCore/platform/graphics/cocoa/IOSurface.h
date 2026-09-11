@@ -28,7 +28,8 @@
 #if HAVE(IOSURFACE)
 
 #include <CoreGraphics/CoreGraphics.h>
-#include <WebCore/DestinationColorSpace.h>
+#include <WebCore/AlphaPremultiplication.h>
+#include <WebCore/ColorSpace.h>
 #include <WebCore/IntSize.h>
 #include <WebCore/PixelFormat.h>
 #include <WebCore/ProcessIdentity.h>
@@ -93,6 +94,13 @@ public:
         bool operator==(const UsedFormat&) const = default;
     };
 
+    // Optional properties of a newly created surface.
+    struct IOSurfaceOptions {
+#if HAVE(IOSURFACE_ALPHA_CHANNEL_MODE)
+        std::optional<AlphaPremultiplication> alphaPremultiplication;
+#endif
+    };
+
     enum class AccessMode : uint32_t {
         ReadWrite = 0,
         ReadOnly = kIOSurfaceLockReadOnly
@@ -147,12 +155,13 @@ public:
         RetainPtr<IOSurfaceRef> m_surface;
     };
 
-    WEBCORE_EXPORT static std::unique_ptr<IOSurface> create(IOSurfacePool*, IntSize, const DestinationColorSpace&, Name = Name::Default, Format = Format::BGRA, UseLosslessCompression = UseLosslessCompression::No);
+    WEBCORE_EXPORT static std::unique_ptr<IOSurface> create(IOSurfacePool*, IntSize, const ColorSpace&, Name = Name::Default, Format = Format::BGRA, UseLosslessCompression = UseLosslessCompression::No, IOSurfaceOptions = { });
     WEBCORE_EXPORT static std::unique_ptr<IOSurface> createFromImage(IOSurfacePool*, CGImageRef);
 
     WEBCORE_EXPORT static std::unique_ptr<IOSurface> createFromSendRight(const WTF::MachSendRight&&);
+    WEBCORE_EXPORT static std::unique_ptr<IOSurface> createFromUntrustedUncompressedWebKitSendRight(const WTF::MachSendRight&&);
     // If the colorSpace argument is non-null, it replaces any colorspace metadata on the surface.
-    WEBCORE_EXPORT static std::unique_ptr<IOSurface> createFromSurface(IOSurfaceRef, std::optional<DestinationColorSpace>&&);
+    WEBCORE_EXPORT static std::unique_ptr<IOSurface> createFromSurface(IOSurfaceRef, std::optional<ColorSpace>&&);
 
     WEBCORE_EXPORT static void moveToPool(std::unique_ptr<IOSurface>&&, IOSurfacePool*);
 
@@ -230,7 +239,7 @@ public:
     WEBCORE_EXPORT void loadContentEDRHeadroom();
 #endif
 
-    WEBCORE_EXPORT DestinationColorSpace colorSpace();
+    WEBCORE_EXPORT ColorSpace colorSpace();
     WEBCORE_EXPORT IOSurfaceID surfaceID() const;
     WEBCORE_EXPORT size_t bytesPerRow() const;
 
@@ -243,18 +252,22 @@ public:
     WEBCORE_EXPORT static void convertToFormat(IOSurfacePool*, std::unique_ptr<WebCore::IOSurface>&& inSurface, Name, Format, Function<void(std::unique_ptr<WebCore::IOSurface>)>&&);
 #endif // HAVE(IOSURFACE_ACCELERATOR)
 
+#if HAVE(IOSURFACE_ALPHA_CHANNEL_MODE)
+    WEBCORE_EXPORT void setContentsAlphaPremultiplication(std::optional<AlphaPremultiplication>);
+#endif
+
     WEBCORE_EXPORT void setOwnershipIdentity(const ProcessIdentity&);
     WEBCORE_EXPORT static void setOwnershipIdentity(IOSurfaceRef, const ProcessIdentity&);
 
     RetainPtr<CGContextRef> createCompatibleBitmap(unsigned width, unsigned height);
 
 private:
-    IOSurface(IntSize, const DestinationColorSpace&, Name, Format, UseLosslessCompression, bool& success);
-    IOSurface(IOSurfaceRef, std::optional<DestinationColorSpace>&&);
+    IOSurface(IntSize, const ColorSpace&, Name, Format, UseLosslessCompression, IOSurfaceOptions, bool& success);
+    IOSurface(IOSurfaceRef, std::optional<ColorSpace>&&);
 
     void setColorSpaceProperty();
     void ensureColorSpace();
-    std::optional<DestinationColorSpace> surfaceColorSpace() const;
+    std::optional<ColorSpace> surfaceColorSpace() const;
 
     void setName(Name name) { m_name = name; }
 
@@ -266,7 +279,8 @@ private:
     BitmapConfiguration NODELETE bitmapConfiguration() const;
 
     std::optional<UsedFormat> m_format;
-    std::optional<DestinationColorSpace> m_colorSpace;
+    std::optional<ColorSpace> m_colorSpace;
+    mutable std::optional<bool> m_knownIsVolatile;
     IntSize m_size;
     size_t m_totalBytes;
 #if HAVE(SUPPORT_HDR_DISPLAY)
@@ -280,6 +294,7 @@ private:
     static std::optional<IntSize> s_maximumSize;
 
     Name m_name;
+    std::optional<AlphaPremultiplication> m_contentsAlphaPremultiplication;
 
     WEBCORE_EXPORT friend WTF::TextStream& operator<<(WTF::TextStream&, const WebCore::IOSurface&);
 };
@@ -295,6 +310,8 @@ std::optional<IOSurface::Locker<Mode>> IOSurface::lock()
 constexpr IOSurface::Format convertToIOSurfaceFormat(PixelFormat format)
 {
     switch (format) {
+    case PixelFormat::RGBX8:
+        return IOSurface::Format::RGBX;
     case PixelFormat::RGBA8:
         return IOSurface::Format::RGBA;
     case PixelFormat::BGRX8:

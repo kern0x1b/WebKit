@@ -82,7 +82,6 @@ class RenderTreePosition;
 class Settings;
 class ShadowRoot;
 class SpaceSplitString;
-class SpatialPortalController;
 class StylePropertyMap;
 class StylePropertyMapReadOnly;
 class Text;
@@ -95,6 +94,10 @@ class WebAnimation;
 
 #if ENABLE(ATTACHMENT_ELEMENT)
 class AttachmentAssociatedElement;
+#endif
+
+#if ENABLE(SPATIAL_PORTAL)
+class SpatialPortalController;
 #endif
 
 enum CSSPropertyID : uint16_t;
@@ -927,8 +930,9 @@ public:
 
 #if ENABLE(SPATIAL_PORTAL)
     SpatialPortalController& ensureSpatialPortalController();
-    SpatialPortalController* spatialPortalController() const;
+    WEBCORE_EXPORT SpatialPortalController* spatialPortalController() const;
     void clearSpatialPortalController();
+    WEBCORE_EXPORT bool establishesSpatialPortal() const;
 #endif
 
 protected:
@@ -936,7 +940,7 @@ protected:
 
     NeedsPostConnectionSteps insertionSteps(InsertionType, ContainerNode&) override;
     void removingSteps(RemovalType, ContainerNode&) override;
-    void movingSteps(bool, ContainerNode&) override;
+    void movingSteps(IsSubtreeRoot, ContainerNode&) override;
     void childrenChanged(const ChildChange&) override;
     void removeAllEventListeners() override;
 

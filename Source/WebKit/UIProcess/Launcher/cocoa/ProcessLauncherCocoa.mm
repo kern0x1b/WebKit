@@ -222,7 +222,7 @@ void ProcessLauncher::launchProcess()
     auto handler = [](ThreadSafeWeakPtr<ProcessLauncher> weakProcessLauncher, ExtensionProcess&& process, ASCIILiteral name, NSError *error)
     {
         if (error) {
-            RELEASE_LOG_FAULT(Process, "Error launching process, description '%s', reason '%s'", String([error localizedDescription]).utf8().data(), String([error localizedFailureReason]).utf8().data());
+            RELEASE_LOG_FAULT(Process, "Error launching process, description '%s', reason '%s'", String([error localizedDescription]).utf8().legacyCStringPointer(), String([error localizedFailureReason]).utf8().legacyCStringPointer());
 #if PLATFORM(IOS)
             // Fallback to legacy extension identifiers
             // FIXME: this fallback is temporary and should be removed when possible. See rdar://120793705.
@@ -240,8 +240,7 @@ void ProcessLauncher::launchProcess()
                 if (!launcher)
                     return;
                 auto name = serviceName(launcher->m_launchOptions, launcher->m_client);
-                // FIXME: This is a false positive. <rdar://164843889>
-                SUPPRESS_RETAINPTR_CTOR_ADOPT launcher->m_xpcConnection = adoptOSObject(xpc_connection_create(name, nullptr));
+                launcher->m_xpcConnection = adoptOSObject(xpc_connection_create(name, nullptr));
                 launcher->finishLaunchingProcess(name);
             });
 #endif
@@ -277,9 +276,8 @@ void ProcessLauncher::launchProcess()
 
     launchWithExtensionKit(*this, m_launchOptions.processType, m_client.get(), WTF::move(handler));
 #else
-    auto name = serviceName(m_launchOptions, m_client.get());
-    // FIXME: This is a false positive. <rdar://164843889>
-    SUPPRESS_RETAINPTR_CTOR_ADOPT m_xpcConnection = adoptOSObject(xpc_connection_create(name, nullptr));
+    auto name = serviceName(m_launchOptions, protect(m_client));
+    m_xpcConnection = adoptOSObject(xpc_connection_create(name, nullptr));
     finishLaunchingProcess(name);
 #endif
 }
@@ -297,8 +295,7 @@ void ProcessLauncher::finishLaunchingProcess(ASCIILiteral name, int retriesRemai
             LOG_ERROR("Retrying launch of %s (%d retries remaining)", name.characters(), retriesRemaining - 1);
             // Each new launch requires a new XPC connection. tryFinishLaunchingProcess destroyed
             // the previous one.
-            // FIXME: This is a false positive. <rdar://164843889>
-            SUPPRESS_RETAINPTR_CTOR_ADOPT processLauncher->m_xpcConnection = adoptOSObject(xpc_connection_create(name, nullptr));
+            processLauncher->m_xpcConnection = adoptOSObject(xpc_connection_create(name, nullptr));
             processLauncher->finishLaunchingProcess(name, retriesRemaining - 1);
             return;
         }
@@ -325,8 +322,7 @@ void ProcessLauncher::tryFinishLaunchingProcess(ASCIILiteral name, Function<void
     // 1.1. An important case is WebKitTestRunner, where we should use English localizations for all system frameworks.
     // 2. When AppleLanguages is passed as command line argument for UI process, or set in its preferences, we should respect it in child processes.
 #if !USE(EXTENSIONKIT)
-    // FIXME: This is a false positive. <rdar://164843889>
-    SUPPRESS_RETAINPTR_CTOR_ADOPT auto initializationMessage = adoptOSObject(xpc_dictionary_create(nullptr, nullptr, 0));
+    OSObjectPtr initializationMessage = adoptOSObject(xpc_dictionary_create(nullptr, nullptr, 0));
     _CFBundleSetupXPCBootstrap(initializationMessage.get());
     xpc_connection_set_bootstrap(m_xpcConnection.get(), initializationMessage.get());
 #endif
@@ -359,8 +355,7 @@ void ProcessLauncher::tryFinishLaunchingProcess(ASCIILiteral name, Function<void
         clientIdentifier = [[NSBundle mainBundle] bundleIdentifier];
 
     // FIXME: Switch to xpc_connection_set_bootstrap once it's available everywhere we need.
-    // FIXME: This is a false positive. <rdar://164843889>
-    SUPPRESS_RETAINPTR_CTOR_ADOPT auto bootstrapMessage = adoptOSObject(xpc_dictionary_create(nullptr, nullptr, 0));
+    OSObjectPtr bootstrapMessage = adoptOSObject(xpc_dictionary_create(nullptr, nullptr, 0));
 
 #if PLATFORM(MAC) || PLATFORM(MACCATALYST)
     xpc_dictionary_set_string(bootstrapMessage.get(), "WebKitBundleVersion", WEBKIT_BUNDLE_VERSION);
@@ -369,10 +364,9 @@ void ProcessLauncher::tryFinishLaunchingProcess(ASCIILiteral name, Function<void
     auto languagesIterator = m_launchOptions.extraInitializationData.find<HashTranslatorASCIILiteral>("OverrideLanguages"_s);
     if (languagesIterator != m_launchOptions.extraInitializationData.end()) {
         LOG_WITH_STREAM(Language, stream << "Process Launcher is copying OverrideLanguages into initialization message: " << languagesIterator->value);
-        // FIXME: This is a false positive. <rdar://164843889>
-        SUPPRESS_RETAINPTR_CTOR_ADOPT auto languages = adoptOSObject(xpc_array_create(nullptr, 0));
+        OSObjectPtr languages = adoptOSObject(xpc_array_create(nullptr, 0));
         for (auto language : StringView(languagesIterator->value).split(','))
-            xpc_array_set_string(languages.get(), XPC_ARRAY_APPEND, language.utf8().data());
+            xpc_array_set_string(languages.get(), XPC_ARRAY_APPEND, language.utf8().legacyCStringPointer());
         xpc_dictionary_set_value(bootstrapMessage.get(), "OverrideLanguages", languages.get());
     }
 
@@ -410,9 +404,9 @@ void ProcessLauncher::tryFinishLaunchingProcess(ASCIILiteral name, Function<void
 
     xpc_dictionary_set_mach_send(bootstrapMessage.get(), "server-port", listeningPort);
 
-    xpc_dictionary_set_string(bootstrapMessage.get(), "client-identifier", !clientIdentifier.isEmpty() ? clientIdentifier.utf8().data() : *_NSGetProgname());
-    xpc_dictionary_set_string(bootstrapMessage.get(), "client-bundle-identifier", applicationBundleIdentifier().utf8().data());
-    xpc_dictionary_set_string(bootstrapMessage.get(), "process-identifier", String::number(m_launchOptions.processIdentifier.toUInt64()).utf8().data());
+    xpc_dictionary_set_string(bootstrapMessage.get(), "client-identifier", !clientIdentifier.isEmpty() ? clientIdentifier.utf8().legacyCStringPointer() : *_NSGetProgname());
+    xpc_dictionary_set_string(bootstrapMessage.get(), "client-bundle-identifier", applicationBundleIdentifier().utf8().legacyCStringPointer());
+    xpc_dictionary_set_string(bootstrapMessage.get(), "process-identifier", String::number(m_launchOptions.processIdentifier.toUInt64()).utf8().legacyCStringPointer());
     RetainPtr processName = [&]() -> RetainPtr<NSString> {
 #if PLATFORM(MAC)
         if (RetainPtr<NSString> name = NSRunningApplication.currentApplication.localizedName; name.get().length)
@@ -423,7 +417,18 @@ void ProcessLauncher::tryFinishLaunchingProcess(ASCIILiteral name, Function<void
     xpc_dictionary_set_string(bootstrapMessage.get(), "ui-process-name", [processName UTF8String]);
     xpc_dictionary_set_string(bootstrapMessage.get(), "service-name", name);
 
-    if (m_launchOptions.processType == ProcessLauncher::ProcessType::Web) {
+    bool shouldForwardLogsToUIProcess = false;
+    switch (m_launchOptions.processType) {
+    case ProcessLauncher::ProcessType::Web:
+#if ENABLE(MODEL_PROCESS)
+    case ProcessLauncher::ProcessType::Model:
+#endif
+        shouldForwardLogsToUIProcess = true;
+        break;
+    default:
+        break;
+    }
+    if (shouldForwardLogsToUIProcess) {
 #if ENABLE(LOGD_BLOCKING_IN_WEBCONTENT)
         bool disableLogging = true;
 #else
@@ -441,11 +446,10 @@ void ProcessLauncher::tryFinishLaunchingProcess(ASCIILiteral name, Function<void
     auto sdkBehaviorBytes = sdkBehaviors.storageBytes();
     xpc_dictionary_set_data(bootstrapMessage.get(), "client-sdk-aligned-behaviors", sdkBehaviorBytes.data(), sdkBehaviorBytes.size());
 
-    // FIXME: This is a false positive. <rdar://164843889>
-    SUPPRESS_RETAINPTR_CTOR_ADOPT auto extraInitializationData = adoptOSObject(xpc_dictionary_create(nullptr, nullptr, 0));
+    OSObjectPtr extraInitializationData = adoptOSObject(xpc_dictionary_create(nullptr, nullptr, 0));
 
     for (const auto& keyValuePair : m_launchOptions.extraInitializationData)
-        xpc_dictionary_set_string(extraInitializationData.get(), keyValuePair.key.utf8().data(), keyValuePair.value.utf8().data());
+        xpc_dictionary_set_string(extraInitializationData.get(), keyValuePair.key.utf8().legacyCStringPointer(), keyValuePair.value.utf8().legacyCStringPointer());
 
     xpc_dictionary_set_value(bootstrapMessage.get(), "extra-initialization-data", extraInitializationData.get());
 
@@ -464,7 +468,7 @@ void ProcessLauncher::tryFinishLaunchingProcess(ASCIILiteral name, Function<void
 #endif
 
         if (event)
-            LOG_ERROR("Error while launching %s: %s", logName.data(), xpcDictionaryGetString(event, xpcErrorDescriptionKey).utf8().data());
+            LOG_ERROR("Error while launching %s: %s", logName.data(), xpcDictionaryGetString(event, xpcErrorDescriptionKey).utf8().legacyCStringPointer());
         else
             LOG_ERROR("Error while launching %s: No xpc_object_t event available.", logName.data());
 
@@ -550,11 +554,15 @@ void ProcessLauncher::tryFinishLaunchingProcess(ASCIILiteral name, Function<void
     });
 }
 
-void ProcessLauncher::terminateProcess()
+void ProcessLauncher::terminateProcess([[maybe_unused]] const String& reason)
 {
 #if USE(EXTENSIONKIT)
-    if (m_process)
-        m_process->invalidate();
+    if (m_process) {
+        if (reason.isEmpty())
+            m_process->invalidate();
+        else
+            m_process->invalidate(reason);
+    }
 #endif
 
     terminateXPCConnection();

@@ -32,7 +32,7 @@ public import WebKit_Private._WKFrameTreeNode
 public import struct Swift.String
 private import TestWebKitAPILibrary.Helpers.cocoa.TestWKWebView
 
-#if os(macOS)
+#if WTF_PLATFORM_MAC
 private import Carbon
 #endif
 
@@ -45,6 +45,19 @@ extension WebPage {
         case toggleUnderline = "ToggleUnderline"
     }
 
+    /// The main frame tree node of this page.
+    public var mainFrame: _WKFrameTreeNode? {
+        get async {
+            await backingWebView._frames()
+        }
+    }
+
+    /// The scale factor by which the page scales content relative to its bounds.
+    public var pageZoom: Double {
+        get { backingWebView.pageZoom }
+        set { backingWebView.pageZoom = newValue }
+    }
+
     /// Suspends execution of the current context until the next presentation update has occurred for this page.
     public func waitForNextPresentationUpdate() async {
         await withCheckedContinuation { continuation in
@@ -53,6 +66,13 @@ extension WebPage {
             })
         }
     }
+
+    #if WTF_PLATFORM_MAC
+    /// The set of views containing the PDF HUDs within the page, if any.
+    public var pdfHUDs: Set<NSView> {
+        backingWebView._pdfHUDs()
+    }
+    #endif // WTF_PLATFORM_MAC
 
     /// Configures a specific preference for the engine to use.
     ///
@@ -86,19 +106,12 @@ extension WebPage {
     ///
     /// - Parameter text: The text to insert.
     public func insertText(_ text: String) async {
-        #if os(macOS)
+        #if WTF_PLATFORM_MAC
         backingWebView.insertText(text)
         #else
-        backingWebView.textInputContentView.insertText(text)
+        backingWebView.textInputContentView?.insertText(text)
         #endif
         await waitForNextPresentationUpdate()
-    }
-
-    /// The main frame tree node of this page.
-    public var mainFrame: _WKFrameTreeNode? {
-        get async {
-            await backingWebView._frames()
-        }
     }
 
     /// Perform the specified edit command on the webpage, optionally with an argument provided to the command.
@@ -111,8 +124,7 @@ extension WebPage {
         assert(success)
     }
 
-    #if os(macOS)
-
+    #if WTF_PLATFORM_MAC
     /// Determines if the specified point is located above a visible scrollbar.
     ///
     /// - Parameter locationInView: The point in view coordinates to test.
@@ -141,7 +153,11 @@ extension WebPage {
     ///   - location: The location in window coordinates.
     ///   - flags: Modifier flags to include in the event.
     public func mouseMove(to location: NSPoint, flags: NSEvent.ModifierFlags = []) {
-        backingWebView.mouseMoved(with: mouseEvent(.mouseMoved, at: location, flags: flags, clickCount: 0, pressure: 0))
+        // WKWebView receives mouse moves through tracking areas rather than the responder
+        // chain, so sending one to the view directly with `-mouseMoved:` would go nowhere.
+        // `_simulateMouseMove:` is the entry point that reaches `WebViewImpl::mouseMoved`.
+        // See precedent established in PlatformWebView, TestWKWebView, and EventSenderProxy.
+        backingWebView._simulateMouseMove(mouseEvent(.mouseMoved, at: location, flags: flags, clickCount: 0, pressure: 0))
     }
 
     /// Sends a left mouse-dragged NSEvent to the web view at the given location.
@@ -284,7 +300,7 @@ extension WebPage {
 
         return event
     }
-    #endif // os(macOS)
+    #endif // WTF_PLATFORM_MAC
 }
 
 #endif // ENABLE_SWIFTUI

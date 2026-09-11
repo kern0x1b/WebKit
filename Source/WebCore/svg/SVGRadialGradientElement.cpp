@@ -116,19 +116,9 @@ RenderPtr<RenderElement> SVGRadialGradientElement::createElementRenderer(Style::
     return createRenderer<LegacyRenderSVGResourceRadialGradient>(*this, WTF::move(style));
 }
 
-static void setGradientAttributes(SVGGradientElement& element, RadialGradientAttributes& attributes, bool isRadial = true)
+static void setGradientAttributes(SVGGradientElement& element, RadialGradientAttributes& attributes, bool isRadial)
 {
-    if (!attributes.hasSpreadMethod() && element.hasAttribute(SVGNames::spreadMethodAttr))
-        attributes.setSpreadMethod(element.spreadMethod());
-
-    if (!attributes.hasGradientUnits() && element.hasAttribute(SVGNames::gradientUnitsAttr))
-        attributes.setGradientUnits(element.gradientUnits());
-
-    if (!attributes.hasGradientTransform() && element.hasAttribute(SVGNames::gradientTransformAttr))
-        attributes.setGradientTransform(element.gradientTransform().concatenate().value_or(identity));
-
-    if (!attributes.hasStops())
-        attributes.setStops(element.buildStops());
+    element.collectCommonGradientAttributes(attributes);
 
     if (isRadial) {
         SVGRadialGradientElement& radial = downcast<SVGRadialGradientElement>(element);
@@ -159,28 +149,25 @@ bool SVGRadialGradientElement::collectGradientAttributes(RadialGradientAttribute
         return false;
 
     HashSet<Ref<SVGGradientElement>> processedGradients;
-    Ref<SVGGradientElement> current { *this };
+    RefPtr<SVGGradientElement> current { this };
 
-    setGradientAttributes(current, attributes);
-    processedGradients.add(current);
+    while (current) {
+        setGradientAttributes(*current, attributes, current->hasTagName(SVGNames::radialGradientTag));
 
-    while (true) {
         // Respect xlink:href, take attributes from referenced element
-        auto target = SVGURIReference::targetElementFromIRIString(current->href(), treeScopeForSVGReferences());
-        if (RefPtr gradientElement = dynamicDowncast<SVGGradientElement>(protect(target.element).get())) {
-            current = gradientElement.releaseNonNull();
-
-            // Cycle detection
-            if (processedGradients.contains(current))
-                break;
-
-            if (!current->renderer())
-                return false;
-
-            setGradientAttributes(current, attributes, current->hasTagName(SVGNames::radialGradientTag));
-            processedGradients.add(current);
-        } else
+        auto target = SVGURIReference::targetElementFromIRIString(current->href(), protect(treeScopeForSVGReferences()));
+        RefPtr next = dynamicDowncast<SVGGradientElement>(target.element.get());
+        if (!next)
             break;
+
+        processedGradients.add(current.releaseNonNull());
+        if (processedGradients.contains(*next))
+            break;
+
+        if (!next->renderer())
+            return false;
+
+        current = WTF::move(next);
     }
 
     // Handle default values for fx/fy

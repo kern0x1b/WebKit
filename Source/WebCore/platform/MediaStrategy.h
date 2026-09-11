@@ -63,6 +63,10 @@ public:
     virtual RefPtr<AudioVideoRenderer> createAudioVideoRenderer(WTF::LoggerHelper*, HTMLMediaElementIdentifier, MediaPlayerIdentifier) const;
 #endif
     virtual std::unique_ptr<NowPlayingManager> createNowPlayingManager() const;
+
+    virtual void isActiveNowPlayingSessionInGPUProcessForTesting(MediaSessionIdentifier, CompletionHandler<void(bool)>&&);
+    virtual void isRemoteCommandTargetSessionInGPUProcessForTesting(MediaSessionIdentifier, CompletionHandler<void(bool)>&&);
+    virtual bool postNowPlayingRemoteControlCommandToGPUProcessForTesting(PlatformMediaSession::RemoteControlCommandType, const PlatformMediaSession::RemoteCommandArgument&);
     void resetMediaEngines();
     virtual bool hasThreadSafeMediaSourceSupport() const;
 #if ENABLE(MEDIA_SOURCE)
@@ -102,5 +106,11 @@ inline void MediaStrategy::nativeImageFromVideoFrame(const VideoFrame&, Completi
     completionHandler(std::nullopt);
 }
 #endif
+
+inline bool MediaStrategy::postNowPlayingRemoteControlCommandToGPUProcessForTesting(PlatformMediaSession::RemoteControlCommandType, const PlatformMediaSession::RemoteCommandArgument&)
+{
+    return false;
+}
+
 
 } // namespace WebCore

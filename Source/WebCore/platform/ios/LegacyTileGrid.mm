@@ -100,16 +100,10 @@ void LegacyTileGrid::dropTilesOutsideRect(const IntRect& keepRect)
 
 void LegacyTileGrid::dropTilesBetweenRects(const IntRect& dropRect, const IntRect& keepRect)
 {
-    Vector<TileIndex, 16> toRemove;
-    for (const auto& tile : m_tiles) {
-        const TileIndex& index = tile.key;
+    m_tiles.removeIf([&](auto& tile) {
         IntRect tileRect = tile.value->rect();
-        if (tileRect.intersects(dropRect) && !tileRect.intersects(keepRect))
-            toRemove.append(index);
-    }
-    unsigned removeCount = toRemove.size();
-    for (unsigned n = 0; n < removeCount; ++n)
-        m_tiles.remove(toRemove[n]);
+        return tileRect.intersects(dropRect) && !tileRect.intersects(keepRect);
+    });
 }
 
 unsigned LegacyTileGrid::tileByteSize() const
@@ -371,17 +365,11 @@ void LegacyTileGrid::dropInvalidTiles()
 void LegacyTileGrid::dropInvalidTiles(const IntRect& bounds)
 {
     IntRect dropBounds = intersection(m_validBounds, bounds);
-    Vector<TileIndex, 16> toRemove;
-    for (const auto& tile : m_tiles) {
-        const TileIndex& index = tile.key;
+    m_tiles.removeIf([&](auto& tile) {
         const IntRect& tileRect = tile.value->rect();
-        IntRect expectedTileRect = tileRectForIndex(index, bounds);
-        if (expectedTileRect != tileRect || !dropBounds.contains(tileRect))
-            toRemove.append(index);
-    }
-    unsigned removeCount = toRemove.size();
-    for (unsigned n = 0; n < removeCount; ++n)
-        m_tiles.remove(toRemove[n]);
+        IntRect expectedTileRect = tileRectForIndex(tile.key);
+        return expectedTileRect != tileRect || !dropBounds.contains(tileRect);
+    });
 
     m_validBounds = bounds;
 }

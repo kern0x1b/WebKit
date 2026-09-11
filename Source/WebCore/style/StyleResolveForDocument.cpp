@@ -48,12 +48,11 @@
 #include "StyleResolver.h"
 
 namespace WebCore {
-
 namespace Style {
 
 Style::ComputedStyle resolveForDocument(const Document& document)
 {
-    ASSERT(document.hasLivingRenderTree());
+    ASSERT(document.renderTreeState() == Document::RenderTreeState::Built);
 
     CheckedRef renderView = *document.renderView();
 
@@ -88,18 +87,16 @@ Style::ComputedStyle resolveForDocument(const Document& document)
         auto& settings = renderView->frame().settings();
 
         FontCascadeDescription fontDescription;
-        fontDescription.setSpecifiedLocale(document.contentLanguage());
+        fontDescription.setComputedLocale(document.contentLanguage());
         fontDescription.setOneFamily(WebCore::FontFamily { standardFamily, FontFamilyKind::Generic });
         fontDescription.setShouldAllowUserInstalledFonts(settings.shouldAllowUserInstalledFonts() ? AllowUserInstalledFonts::Yes : AllowUserInstalledFonts::No);
-        // FIXME: We need evaluationTimeZoomEnabled to be accessible from FontDescription, not only from Style::ComputedStyle. Would it be weird to move it to FontDescription (which is already accessible from Style::ComputedStyle)?
-        fontDescription.setEvaluationTimeZoomEnabled(document.settings().evaluationTimeZoomEnabled());
 
         fontDescription.setKeywordSizeFromIdentifier(CSSValueMedium);
         int size = fontSizeForKeyword(CSSValueMedium, false, document);
-        fontDescription.setSpecifiedSize(size);
+        fontDescription.setComputedSize(size);
         bool useSVGZoomRules = document.isSVGDocument();
-        auto computedFontSize = computedFontSizeFromSpecifiedSize(size, fontDescription.isAbsoluteSize(), useSVGZoomRules, documentStyle, document);
-        fontDescription.setComputedSize(computedFontSize.size, computedFontSize.usedZoomFactor);
+        auto usedFontSize = usedFontSizeFromComputedSize(size, fontDescription.isAbsoluteSize(), useSVGZoomRules, documentStyle, document);
+        fontDescription.setUsedSize(usedFontSize.size, usedFontSize.zoomFactor);
 
         auto [fontOrientation, glyphOrientation] = documentStyle.fontAndGlyphOrientation();
         fontDescription.setOrientation(fontOrientation);
@@ -114,11 +111,10 @@ Style::ComputedStyle resolveForDocument(const Document& document)
     fontCascade.update(WTF::move(fontSelector));
     documentStyle.setFontCascade(WTF::move(fontCascade));
 
-    documentStyle.setEvaluationTimeZoomEnabled(document.settings().evaluationTimeZoomEnabled());
     documentStyle.setDeviceScaleFactor(document.deviceScaleFactor());
 
     return documentStyle;
 }
 
-}
-}
+} // namespace Style
+} // namespace WebCore

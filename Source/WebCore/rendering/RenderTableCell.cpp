@@ -418,7 +418,7 @@ void RenderTableCell::layout()
     // FIXME: This value isn't the intrinsic content logical height, but we need
     // to update the value as its used by flexbox layout. crbug.com/367324
     if (CheckedPtr flexContainer = dynamicDowncast<RenderFlexibleBox>(parent()))
-        flexContainer->setFlexItemContentLogicalHeightIfNeeded(*this, contentBoxLogicalHeight());
+        flexContainer->setFlexItemContentLogicalHeightFromLayout(*this, contentBoxLogicalHeight());
 
     setCellWidthChanged(false);
 }
@@ -605,13 +605,13 @@ LayoutUnit RenderTableCell::containingBlockLogicalWidthForContent() const
     return totalWidth;
 }
 
-auto RenderTableCell::computeVisibleRectsInContainer(const RepaintRects& rects, const RenderLayerModelObject* container, VisibleRectContext context) const -> std::optional<RepaintRects>
+auto RenderTableCell::computeVisibleRectsInContainer(const RepaintRects& rects, const RenderLayerModelObject* container, const VisibleRectContext& context, VisibleRectState state) const -> std::optional<RepaintRects>
 {
     if (container == this)
         return rects;
 
     auto adjustedRects = rects;
-    return RenderBlockFlow::computeVisibleRectsInContainer(adjustedRects, container, context);
+    return RenderBlockFlow::computeVisibleRectsInContainer(adjustedRects, container, context, state);
 }
 
 LayoutUnit RenderTableCell::cellBaselinePosition() const
@@ -1034,7 +1034,7 @@ CollapsedBorderValue RenderTableCell::computeCollapsedBeforeBorder(IncludeBorder
             return result;
         
         // (6) Previous row group's after border.
-        currSection = table->sectionAbove(currSection, SkipEmptySections);
+        currSection = table->sectionAbove(currSection, SkipEmptySections::Yes);
         if (currSection) {
             result = chooseBorder(CollapsedBorderValue(currSection->style().borderAfter(tableWritingMode()), includeColor ? resolvedBorderColor(currSection->style(), afterColorProperty) : Color(), BorderPrecedence::RowGroup, currSection->style().usedZoomForLength(), deviceScaleFactor), result);
             if (!result.exists())
@@ -1129,7 +1129,7 @@ CollapsedBorderValue RenderTableCell::computeCollapsedAfterBorder(IncludeBorderC
             return result;
         
         // (6) Following row group's before border.
-        currSection = table->sectionBelow(currSection, SkipEmptySections);
+        currSection = table->sectionBelow(currSection, SkipEmptySections::Yes);
         if (currSection) {
             result = chooseBorder(result, CollapsedBorderValue(currSection->style().borderBefore(tableWritingMode()), includeColor ? resolvedBorderColor(currSection->style(), beforeColorProperty) : Color(), BorderPrecedence::RowGroup, currSection->style().usedZoomForLength(), deviceScaleFactor));
             if (!result.exists())

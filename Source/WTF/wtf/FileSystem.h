@@ -31,6 +31,7 @@
 #pragma once
 
 #include <span>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <time.h>
 #include <utility>
@@ -52,6 +53,10 @@
 
 #if USE(CF)
 typedef const struct __CFData* CFDataRef;
+#endif
+
+#if !OS(WINDOWS)
+struct stat;
 #endif
 
 OBJC_CLASS NSString;
@@ -138,6 +143,10 @@ WTF_EXPORT_PRIVATE CString fileSystemRepresentation(const String&);
 WTF_EXPORT_PRIVATE String stringFromFileSystemRepresentation(const char*);
 #endif
 
+// stat() needs a null-terminated path, so these take the span including the terminator and check for it.
+WTF_EXPORT_PRIVATE int statFile(std::span<const char> pathIncludingNullTerminator, struct stat&);
+inline int statFile(std::span<const char8_t> pathIncludingNullTerminator, struct stat& result) { return statFile(byteCast<char>(pathIncludingNullTerminator), result); }
+
 using Salt = std::array<uint8_t, 8>;
 WTF_EXPORT_PRIVATE std::optional<Salt> readOrMakeSalt(const String& path);
 WTF_EXPORT_PRIVATE std::optional<Vector<uint8_t>> readEntireFile(const String& path);
@@ -189,10 +198,17 @@ WTF_EXPORT_PRIVATE String createTemporaryDirectory();
 WTF_EXPORT_PRIVATE NSString *createTemporaryDirectory(NSString *directoryPrefix = nil);
 WTF_EXPORT_PRIVATE NSString *systemDirectoryPath();
 
+WTF_EXPORT_PRIVATE String darwinCacheDirectory();
+WTF_EXPORT_PRIVATE String darwinTempDirectory();
+
 // Allow reading cloud files with no local copy.
 enum class PolicyScope : uint8_t { Process, Thread };
 WTF_EXPORT_PRIVATE bool setAllowsMaterializingDatalessFiles(bool, PolicyScope);
 WTF_EXPORT_PRIVATE std::optional<bool> allowsMaterializingDatalessFiles(PolicyScope);
+#endif
+
+#if PLATFORM(MAC) || PLATFORM(MACCATALYST)
+WTF_EXPORT_PRIVATE std::optional<String> homeDirectory();
 #endif
 
 // Impl for systems that do not already have createTemporaryDirectory

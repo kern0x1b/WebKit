@@ -326,7 +326,7 @@ WTF_EXPORT_PRIVATE bool WTFIsDebuggerAttached(void);
 
 #endif // CPU(ARM_THUMB2)
 
-#if ASAN_ENABLED
+#if ASAN_ENABLED || defined(__clang_analyzer__)
 #define WTFBreakpointTrap()  __builtin_trap()
 #elif CPU(X86_64) || CPU(X86) || CPU(ARM64) || CPU(ARM_THUMB2)
 #define WTFBreakpointTrap()  __asm__ volatile (WTF_FATAL_CRASH_INST)
@@ -693,7 +693,7 @@ static constexpr bool unreachableForValue = false;
         if (LOG_CHANNEL(channel).state != logChannelStateOff) { \
             WTF::TextStream stream(WTF::TextStream::LineMode::SingleLine); \
             commands; \
-            WTFLog(&LOG_CHANNEL(channel), "%s", stream.release().utf8().data()); \
+            WTFLog(&LOG_CHANNEL(channel), "%s", stream.release().utf8().legacyCStringPointer()); \
         } \
     } while (0)
 #endif
@@ -890,13 +890,13 @@ inline const char* wtfLogPriorityName(int priority)
 #define ALWAYS_LOG_WITH_STREAM(commands) do { \
         WTF::TextStream stream(WTF::TextStream::LineMode::SingleLine); \
         commands; \
-        WTFLogAlways("%s", stream.release().utf8().data()); \
+        WTFLogAlways("%s", stream.release().utf8().legacyCStringPointer()); \
     } while (0)
 
 #define WTF_ALWAYS_LOG(commands) do { \
         WTF::TextStream stream(WTF::TextStream::LineMode::SingleLine); \
         stream << commands; \
-        WTFLogAlways("%s", stream.release().utf8().data()); \
+        WTFLogAlways("%s", stream.release().utf8().legacyCStringPointer()); \
     } while (0)
 
 /* RELEASE_ASSERT */
@@ -908,6 +908,10 @@ inline const char* wtfLogPriorityName(int priority)
         CRASH_WITH_INFO(__VA_ARGS__); \
 } while (0)
 #define RELEASE_ASSERT_WITH_MESSAGE(assertion, ...) RELEASE_ASSERT(assertion)
+#define RELEASE_ASSERT_WITH_UNQUALIFIED_FUNCTION_NAME(assertion, ...) do { \
+    if (UNLIKELY_FOR_C_ASSERTIONS(!(assertion))) \
+        CRASH_WITH_UNQUALIFIED_FUNCTION_NAME_AND_INFO(__VA_ARGS__); \
+} while (0)
 #define RELEASE_ASSERT_WITH_SECURITY_IMPLICATION(assertion) RELEASE_ASSERT(assertion)
 #define RELEASE_ASSERT_NOT_REACHED(...) CRASH_WITH_INFO(__VA_ARGS__)
 #define RELEASE_ASSERT_NOT_REACHED_UNDER_CONSTEXPR_CONTEXT() CRASH_UNDER_CONSTEXPR_CONTEXT();
@@ -926,6 +930,7 @@ inline const char* wtfLogPriorityName(int priority)
 
 #define RELEASE_ASSERT(assertion, ...) ASSERT(assertion, __VA_ARGS__)
 #define RELEASE_ASSERT_WITH_MESSAGE(assertion, ...) ASSERT_WITH_MESSAGE(assertion, __VA_ARGS__)
+#define RELEASE_ASSERT_WITH_UNQUALIFIED_FUNCTION_NAME(assertion, ...) ASSERT(assertion, __VA_ARGS__)
 #define RELEASE_ASSERT_WITH_SECURITY_IMPLICATION(assertion) ASSERT_WITH_SECURITY_IMPLICATION(assertion)
 #define RELEASE_ASSERT_NOT_REACHED(...) ASSERT_NOT_REACHED(__VA_ARGS__)
 #define RELEASE_ASSERT_NOT_REACHED_UNDER_CONSTEXPR_CONTEXT() ASSERT_NOT_REACHED_UNDER_CONSTEXPR_CONTEXT()
@@ -979,7 +984,7 @@ WTF_EXPORT_PRIVATE NO_RETURN_DUE_TO_CRASH NOT_TAIL_CALLED void WTFCrashWithInfoI
 WTF_EXPORT_PRIVATE NO_RETURN_DUE_TO_CRASH NOT_TAIL_CALLED void WTFCrashWithInfoImpl(int line, const char* file, const char* function, UCPURegister reason, UCPURegister misc1, UCPURegister misc2);
 WTF_EXPORT_PRIVATE NO_RETURN_DUE_TO_CRASH NOT_TAIL_CALLED void WTFCrashWithInfoImpl(int line, const char* file, const char* function, UCPURegister reason, UCPURegister misc1);
 WTF_EXPORT_PRIVATE NO_RETURN_DUE_TO_CRASH NOT_TAIL_CALLED void WTFCrashWithInfoImpl(int line, const char* file, const char* function, UCPURegister reason);
-#if !ASAN_ENABLED && (OS(DARWIN) || PLATFORM(PLAYSTATION)) && (CPU(X86_64) || CPU(ARM64))
+#if !ASAN_ENABLED && !defined(__clang_analyzer__) && (OS(DARWIN) || PLATFORM(PLAYSTATION)) && (CPU(X86_64) || CPU(ARM64))
 NO_RETURN_DUE_TO_CRASH ALWAYS_INLINE void WTFCrashWithInfo(int line, const char* file, const char* function);
 #else
 NO_RETURN_DUE_TO_CRASH NOT_TAIL_CALLED void WTFCrashWithInfo(int line, const char* file, const char* function);
@@ -1033,7 +1038,7 @@ NO_RETURN_DUE_TO_CRASH ALWAYS_INLINE void WTFCrashWithInfo(int line, const char*
     WTFCrashWithInfoImpl(line, file, function, wtfCrashArg(reason), wtfCrashArg(misc1), wtfCrashArg(misc2), wtfCrashArg(misc3), wtfCrashArg(misc4), wtfCrashArg(misc5), wtfCrashArg(misc6));
 }
 
-#if !ASAN_ENABLED && (OS(DARWIN) || PLATFORM(PLAYSTATION)) && (CPU(X86_64) || CPU(ARM64))
+#if !ASAN_ENABLED && !defined(__clang_analyzer__) && (OS(DARWIN) || PLATFORM(PLAYSTATION)) && (CPU(X86_64) || CPU(ARM64))
 
 NO_RETURN_DUE_TO_CRASH ALWAYS_INLINE void WTFCrashWithInfo(int line, const char* file, const char* function)
 {
@@ -1102,6 +1107,22 @@ inline void compilerFenceForCrash()
     } while (false)
 #endif
 #endif // CRASH_WITH_INFO
+
+#ifndef CRASH_WITH_UNQUALIFIED_FUNCTION_NAME_AND_INFO
+#if !VA_OPT_SUPPORTED
+#define CRASH_WITH_UNQUALIFIED_FUNCTION_NAME_AND_INFO(...) do { \
+        WTF::isIntegralOrPointerType(__VA_ARGS__); \
+        compilerFenceForCrash(); \
+        WTFCrashWithInfo(__LINE__, __FILE__, __func__, ##__VA_ARGS__); \
+    } while (false)
+#else
+#define CRASH_WITH_UNQUALIFIED_FUNCTION_NAME_AND_INFO(...) do { \
+        WTF::isIntegralOrPointerType(__VA_ARGS__); \
+        compilerFenceForCrash(); \
+        WTFCrashWithInfo(__LINE__, __FILE__, __func__ __VA_OPT__(,) __VA_ARGS__); \
+    } while (false)
+#endif
+#endif // CRASH_WITH_UNQUALIFIED_FUNCTION_NAME_AND_INFO
 
 #ifndef CRASH_WITH_SECURITY_IMPLICATION_AND_INFO
 #define CRASH_WITH_SECURITY_IMPLICATION_AND_INFO CRASH_WITH_INFO

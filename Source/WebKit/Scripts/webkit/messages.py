@@ -26,6 +26,7 @@ import re
 import sys
 
 from webkit.opaque_ipc_types import opaque_ipc_types
+from webkit.untrusted_origins import unwrap_if_untrusted, unwrap_untrusted
 from webkit import parser
 from webkit.model import BUILTIN_ATTRIBUTE, SYNCHRONOUS_ATTRIBUTE, ALLOWEDWHENWAITINGFORSYNCREPLY_ATTRIBUTE, ALLOWEDWHENWAITINGFORSYNCREPLYDURINGUNBOUNDEDIPC_ATTRIBUTE, MAINTHREADCALLBACK_ATTRIBUTE, ANYTHREADCALLBACK_ATTRIBUTE, STREAM_ATTRIBUTE, CALL_WITH_REPLY_ID_ATTRIBUTE, MessageReceiver, Message
 
@@ -154,6 +155,7 @@ def types_that_must_be_moved():
         'std::optional<WebKit::SharedVideoFrame>',
         'Vector<WebCore::SharedMemory::Handle>',
         'WebKit::WebGPU::ExternalTextureDescriptor',
+        'WebKit::WebGPU::ImageCopyExternalImageVideoSource',
         'WebCore::GraphicsContextGL::ExternalImageSource',
         'WebCore::GraphicsContextGL::ExternalSyncSource',
         'WebCore::ProcessIdentity',
@@ -207,6 +209,8 @@ def types_that_must_be_moved():
         'HashMap<WebKit::ImageBufferSetIdentifier, std::unique_ptr<WebKit::BufferSetBackendHandle>>',
         'WebCore::DMABufBufferAttributes',
         'std::optional<WebCore::DMABufBufferAttributes>',
+        'WebCore::DocumentSyncSerializationData',
+        'WebCore::FrameTreeSyncSerializationData',
     ]
 
 
@@ -226,7 +230,10 @@ builtin_types = frozenset([
     'WebCore::TrackID',
 ])
 
+
 def function_parameter_type(type, kind, for_reply=False):
+    type = unwrap_if_untrusted(type)
+
     # Don't use references for built-in types.
     if type in builtin_types:
         return type
@@ -241,6 +248,7 @@ def function_parameter_type(type, kind, for_reply=False):
 
 
 def function_parameter_requires_suppress_forward_decl(type, kind, for_reply=False):
+    type = unwrap_if_untrusted(type)
     return not (
         type in builtin_types or
         kind.startswith('enum:') or
@@ -249,7 +257,7 @@ def function_parameter_requires_suppress_forward_decl(type, kind, for_reply=Fals
 
 
 def arguments_constructor_name(type, name):
-    if type in types_that_must_be_moved():
+    if unwrap_if_untrusted(type) in types_that_must_be_moved():
         return 'WTF::move(%s)' % name
 
     return name
@@ -328,15 +336,15 @@ def message_to_struct_declaration(receiver, message):
         if message.is_async_reply:
             # Extract original message name (remove 'Reply' suffix)
             original_message_name = message.name[:-5] if message.name.endswith('Reply') else message.name
-            if not opaque_ipc_types.reply_webcontent_dispatchable(receiver.name, original_message_name, parameter.name, parameter.type):
+            if not opaque_ipc_types.reply_webcontent_dispatchable(receiver.name, original_message_name, parameter.name, unwrap_if_untrusted(parameter.type)):
                 result.append('        ASSERT(!isInWebProcess());\n')
         else:
-            if not opaque_ipc_types.webcontent_dispatchable(receiver.name, message.name, parameter.name, parameter.type):
+            if not opaque_ipc_types.webcontent_dispatchable(receiver.name, message.name, parameter.name, unwrap_if_untrusted(parameter.type)):
                 result.append('        ASSERT(!isInWebProcess());\n')
         result.append('        ')
         if requires_suppress_forward_decl[i]:
             result.append('SUPPRESS_FORWARD_DECL_ARG ')
-        if parameter.type in types_that_must_be_moved():
+        if unwrap_if_untrusted(parameter.type) in types_that_must_be_moved():
             result.append('encoder << WTF::move(m_%s);\n' % parameter.name)
         else:
             result.append('encoder << m_%s;\n' % parameter.name)
@@ -355,11 +363,6 @@ def message_to_struct_declaration(receiver, message):
 
 def atomic_object_identifier(type):
     # FIXME: This can be derived from *.serialization.in files.
-    uuid_object_identifiers = [
-        'WebCore::FileSystemHandleGlobalIdentifier',
-    ]
-    if type in uuid_object_identifiers:
-        return 'UUID'
     atomic_object_identifiers = [
         'WebCore::FileSystemHandleIdentifier',
         'WebCore::FileSystemSyncAccessHandleIdentifier',
@@ -369,6 +372,7 @@ def atomic_object_identifier(type):
         'WebCore::IDBObjectStoreIdentifierType',
         'WebCore::IDBObjectStoreIdentifier',
         'WebCore::LibWebRTCSocketIdentifier',
+        'WebCore::PendingStreamIdentifier',
         'WebCore::RenderingResourceIdentifier',
         'WebCore::ResourceLoaderIdentifier',
         'WebCore::SamplesRendererTrackIdentifier',
@@ -445,7 +449,6 @@ def serialized_identifiers():
         'WebCore::DictationContext',
         'WebCore::NodeIdentifier',
         'WebCore::FetchIdentifier',
-        'WebCore::FileSystemHandleGlobalIdentifier',
         'WebCore::FileSystemHandleIdentifier',
         'WebCore::FileSystemSyncAccessHandleIdentifier',
         'WebCore::FileSystemWritableFileStreamIdentifier',
@@ -469,6 +472,7 @@ def serialized_identifiers():
         'WebCore::PlatformLayerIdentifierID',
         'WebCore::PlaybackTargetClientContextID',
         'WebCore::NonSerializedDataIdentifier',
+        'WebCore::PendingStreamIdentifier',
         'WebCore::PortIdentifier',
         'WebCore::ProcessIdentifier',
         'WebCore::PushSubscriptionIdentifier',
@@ -513,7 +517,6 @@ def serialized_identifiers():
         'WebKit::GPUProcessConnectionIdentifier',
         'WebKit::ImageBufferSetIdentifier',
         'WebKit::RemoteGraphicsContextGLIdentifier',
-        'WebKit::RiceBackendIdentifier',
         'WebKit::IPCConnectionTesterIdentifier',
         'WebKit::IPCStreamTesterIdentifier',
         'WebKit::JSObjectID',
@@ -577,6 +580,7 @@ def serialized_identifiers():
         'WebKit::WebTransportSessionIdentifier',
         'WebKit::WebURLSchemeHandlerIdentifier',
         'WebKit::WebUndoStepID',
+        'WebKit::XRDeviceIdentifier',
     ]
 
 
@@ -598,6 +602,7 @@ def types_that_cannot_be_forward_declared():
         'Inspector::SearchResult',
         'MachSendRight',
         'MediaTime',
+        'WebCore::NowPlayingCandidateState',
         'PlatformXR::CompositionLayerType',
         'PlatformXR::DeviceLayer',
         'PlatformXR::ReferenceSpaceType',
@@ -613,15 +618,16 @@ def types_that_cannot_be_forward_declared():
         'String',
         'WebCore::BackForwardFrameItemIdentifier',
         'WebCore::BackForwardItemIdentifier',
+        'WebCore::ColorSpace',
         'WebCore::ControlStyle',
         'WebCore::DOMCacheIdentifier',
         'WebCore::DOMCacheEngine::CacheIdentifierOrError',
         'WebCore::DOMCacheEngine::RemoveCacheIdentifierOrError',
-        'WebCore::DestinationColorSpace',
         'WebCore::DiagnosticLoggingDomain',
         'WebCore::DictationContext',
         'WebCore::DragApplicationFlags',
         'WebCore::DragEventTargetData',
+        'WebCore::FileSystemHandleGlobalIdentifier',
         'WebCore::FloatBoxExtent',
         'WebCore::GCGLExtension',
         'WebCore::GlyphBufferAdvance',
@@ -653,6 +659,7 @@ def types_that_cannot_be_forward_declared():
         'WebCore::PlatformMediaError',
         'WebCore::PlaybackTargetClientContextIdentifier',
         'WebCore::PointerID',
+        'WebCore::QualifiedMediaSessionIdentifier',
         'WebCore::RTCDataChannelIdentifier',
         'WebCore::ReferrerPolicy',
         'WebCore::RenderingMode',
@@ -688,6 +695,9 @@ def types_that_cannot_be_forward_declared():
         'WebKit::LegacyCustomProtocolID',
         'WebKit::PlaybackSessionContextIdentifier',
         'WebKit::RemoteMediaResourceLoaderIdentifier',
+        'WebKit::RemoteNativeImageReadReference',
+        'WebKit::RemoteNativeImageReference',
+        'WebKit::RemoteNativeImageWriteReference',
         'WebKit::RemoteVideoFrameReadReference',
         'WebKit::RemoteVideoFrameWriteReference',
         'WebKit::RenderingUpdateID',
@@ -706,6 +716,7 @@ def types_that_cannot_be_forward_declared():
         'WebKit::WebExtensionRegisteredScriptParameters',
         'WebKit::WebExtensionScriptInjectionParameters',
         'WebKit::WebExtensionScriptInjectionResultParameters',
+        'WebKit::WebExtensionSidebarSide',
         'WebKit::WebExtensionStorageAccessLevel',
         'WebKit::WebExtensionTabParameters',
         'WebKit::WebExtensionTabQueryParameters',
@@ -773,6 +784,9 @@ def forward_declarations_and_headers(receiver):
         '<wtf/ThreadSafeRefCounted.h>',
     ])
 
+    if (receiver.swift_receiver or receiver.swift_receiver_build_enabled_by) and receiver.has_attribute(STREAM_ATTRIBUTE):
+        headers.add('"StreamMessageReceiver.h"')
+
     non_template_wtf_types = frozenset([
         'MachSendRight',
         'MediaType',
@@ -783,6 +797,13 @@ def forward_declarations_and_headers(receiver):
     for parameter in receiver.iterparameters():
         kind = parameter.kind
         type = parameter.type
+
+        # The message class deals in the wrapped type, so forward declare that; the
+        # wrapper's own header is still needed for the Arguments tuple.
+        unwrapped_type = unwrap_untrusted(type)
+        if unwrapped_type:
+            headers.update(headers_for_type(type))
+            type = unwrapped_type
 
         if type.startswith('std::optional<') and type.endswith('>'):
             type = type[14: len(type) - 1]
@@ -873,18 +894,29 @@ def generate_messages_header(receiver):
                 sync_messages.append(message)
 
         result.append('namespace ' + handler_namespace + ' {\n\n')
-        result.append('class ' + forwarder_class + ': public RefCounted<' + forwarder_class + '>, public IPC::MessageReceiver {\n')
+        is_stream = receiver.has_attribute(STREAM_ATTRIBUTE)
+        if is_stream:
+            result.append('class ' + forwarder_class + ' final : public IPC::StreamMessageReceiver {\n')
+        else:
+            result.append('class ' + forwarder_class + ': public RefCounted<' + forwarder_class + '>, public IPC::MessageReceiver {\n')
         result.append('public:\n')
         result.append('    static Ref<' + forwarder_class + '> createFromWeak(' + handler_namespace + '::' + weak_ref_class + '* _Nonnull handler)\n')
         result.append('    {\n')
         result.append('        return adoptRef(*new ' + forwarder_class + '(handler));\n')
         result.append('    }\n')
         result.append('    ~' + forwarder_class + '();\n')
-        result.append('    void didReceiveMessage(IPC::Connection&, IPC::Decoder&);\n')
-        if not receiver.has_attribute(STREAM_ATTRIBUTE) and (sync_messages or receiver.has_attribute(WANTS_DISPATCH_MESSAGE_ATTRIBUTE)):
+        if is_stream:
+            result.append('    void didReceiveStreamMessage(IPC::StreamServerConnection&, IPC::Decoder&) final;\n')
+        else:
+            result.append('    void didReceiveMessage(IPC::Connection&, IPC::Decoder&);\n')
+        if not is_stream and (sync_messages or receiver.has_attribute(WANTS_DISPATCH_MESSAGE_ATTRIBUTE)):
             result.append('    void didReceiveSyncMessage(IPC::Connection&, IPC::Decoder&, UniqueRef<IPC::Encoder>&);\n')
-        result.append('    void ref() const final { RefCounted::ref(); }\n')
-        result.append('    void deref() const final { RefCounted::deref(); }\n')
+        if is_stream:
+            result.append('    void ref() const { StreamMessageReceiver::ref(); }\n')
+            result.append('    void deref() const { StreamMessageReceiver::deref(); }\n')
+        else:
+            result.append('    void ref() const final { RefCounted::ref(); }\n')
+            result.append('    void deref() const final { RefCounted::deref(); }\n')
         result.append('private:\n')
         result.append('    ' + forwarder_class + '(' + handler_namespace + '::' + weak_ref_class + '* _Nonnull);\n')
         result.append('    std::unique_ptr<' + handler_namespace + '::' + class_name + '> getMessageTarget();\n')
@@ -1048,7 +1080,7 @@ def class_template_headers(template_string):
 
     class_template_types = {
         'WebCore::RectEdges': {'headers': ['<WebCore/RectEdges.h>'], 'argument_coder_headers': ['"ArgumentCoders.h"']},
-        'Expected': {'headers': ['<wtf/Expected.h>'], 'argument_coder_headers': ['"ArgumentCoders.h"']},
+        'std::expected': {'headers': ['<expected>'], 'argument_coder_headers': ['"ArgumentCoders.h"']},
         'HashCountedSet': {'headers': ['<wtf/HashCountedSet.h>'], 'argument_coder_headers': ['"ArgumentCoders.h"']},
         'UncheckedKeyHashMap': {'headers': ['<wtf/HashMap.h>'], 'argument_coder_headers': ['"ArgumentCoders.h"']},
         'HashMap': {'headers': ['<wtf/HashMap.h>'], 'argument_coder_headers': ['"ArgumentCoders.h"']},
@@ -1057,11 +1089,14 @@ def class_template_headers(template_string):
         'Markable': {'headers': ['<wtf/Markable.h>'], 'argument_coder_headers': ['"ArgumentCoders.h"']},
         'OptionSet': {'headers': ['<wtf/OptionSet.h>'], 'argument_coder_headers': ['"ArgumentCoders.h"']},
         'Vector': {'headers': ['<wtf/Vector.h>'], 'argument_coder_headers': ['"ArgumentCoders.h"']},
+        'std::array': {'headers': ['<array>'], 'argument_coder_headers': ['"ArgumentCoders.h"']},
         'std::optional': {'headers': ['<optional>'], 'argument_coder_headers': ['"ArgumentCoders.h"']},
         'std::pair': {'headers': ['<utility>'], 'argument_coder_headers': ['"ArgumentCoders.h"']},
         'std::span': {'headers': ['<span>'], 'argument_coder_headers': ['"ArgumentCoders.h"']},
+        'std::tuple': {'headers': ['<tuple>'], 'argument_coder_headers': ['"ArgumentCoders.h"']},
         'Variant': {'headers': ['<wtf/Variant.h>'], 'argument_coder_headers': ['"ArgumentCoders.h"']},
         'IPC::ArrayReferenceTuple': {'headers': ['"ArrayReferenceTuple.h"'], 'argument_coder_headers': ['"ArgumentCoders.h"']},
+        'IPC::Untrusted': {'headers': ['"Untrusted.h"'], 'argument_coder_headers': ['"Untrusted.h"']},
         'Ref': {'headers': ['<wtf/Ref.h>'], 'argument_coder_headers': ['"ArgumentCoders.h"']},
         'RefPtr': {'headers': ['<wtf/RefCounted.h>'], 'argument_coder_headers': ['"ArgumentCoders.h"']},
         'RetainPtr': {'headers': ['<wtf/RetainPtr.h>'], 'argument_coder_headers': []},
@@ -1130,6 +1165,7 @@ def headers_for_type(type, for_implementation_file=False):
         'Inspector::SearchMatch': ['<WebCore/InspectorResourceUtilities.h>'],
         'Inspector::SearchResult': ['<WebCore/InspectorResourceUtilities.h>'],
         'IPC::AsyncReplyID': ['"Connection.h"'],
+        'IPC::MessageName': ['"MessageNames.h"'],
         'IPC::Signal': ['"IPCEvent.h"'],
         'IPC::Semaphore': ['"IPCSemaphore.h"'],
         'IPC::StreamServerConnectionHandle': ['"StreamServerConnection.h"'],
@@ -1167,13 +1203,14 @@ def headers_for_type(type, for_implementation_file=False):
         'WTF::UUID': ['<wtf/UUID.h>'],
         'WallTime': ['<wtf/WallTime.h>'],
         'WebCore::AXDebugInfo': ['<WebCore/AXObjectCache.h>'],
+        'WebCore::ActivityStateForCPUSampling': ['<WebCore/ActivityState.h>'],
         'WebCore::AccessibilityMode': ['<WebCore/AXObjectCache.h>'],
         'WebCore::AccessibilityRemoteToken': ['<WebCore/AXObjectCache.h>'],
         'WebCore::AccessibilitySearchCriteriaIPC': ['<WebCore/AXSearchManager.h>'],
         'WebCore::AriaNotifyData': ['<WebCore/AXObjectCache.h>'],
         'WebCore::LiveRegionAnnouncementData': ['<WebCore/AXObjectCache.h>'],
         'WebCore::AlternativeTextType': ['<WebCore/AlternativeTextClient.h>'],
-        'WebCore::ApplyTrackingPrevention': ['<WebCore/NetworkStorageSession.h>'],
+        'WebCore::ApplyTrackingPrevention': ['<WebCore/TrackingPreventionTypes.h>'],
         'WebCore::AttachmentAssociatedElementType': ['<WebCore/AttachmentAssociatedElement.h>'],
         'WebCore::AttributedStringTextListID': ['<WebCore/AttributedString.h>'],
         'WebCore::AttributedStringTextTableID': ['<WebCore/AttributedString.h>'],
@@ -1253,7 +1290,8 @@ def headers_for_type(type, for_implementation_file=False):
         'WebCore::FontInternalAttributes': ['<WebCore/Font.h>'],
         'WebCore::FileChooserSettings': ['<WebCore/FileChooser.h>'],
         'WebCore::FillLightMode': ['<WebCore/FillLightMode.h>'],
-        'WebCore::FirstPartyWebsiteDataRemovalMode': ['<WebCore/NetworkStorageSession.h>'],
+        'WebCore::FileSystemHandleGlobalIdentifier': ['<WebCore/FileSystemHandleGlobalIdentifier.h>'],
+        'WebCore::FirstPartyWebsiteDataRemovalMode': ['<WebCore/TrackingPreventionTypes.h>'],
         'WebCore::FontChanges': ['<WebCore/FontAttributeChanges.h>'],
         'WebCore::FontPlatformDataAttributes': ['<WebCore/FontPlatformData.h>'],
         'WebCore::FontCustomPlatformSerializedData': ['<WebCore/FontCustomPlatformData.h>'],
@@ -1320,6 +1358,7 @@ def headers_for_type(type, for_implementation_file=False):
         'WebCore::PlatformMediaSessionRemoteCommandArgument': ['<WebCore/PlatformMediaSession.h>'],
         'WebCore::PlayingToAutomotiveHeadUnit': ['<WebCore/MediaSessionHelperIOS.h>'],
         'WebCore::PlaybackSessionModelExternalPlaybackTargetType': ['<WebCore/PlaybackSessionModel.h>'],
+        'WebCore::QualifiedMediaSessionIdentifier': ['<WebCore/ProcessQualified.h>', '<WebCore/MediaSessionIdentifier.h>', '<wtf/ObjectIdentifier.h>'],
         'WebCore::LockBackForwardList': ['<WebCore/FrameLoaderTypes.h>'],
         'WebCore::MediaPlaybackTargetMockState': ['<WebCore/MediaPlaybackTargetMock.h>'],
         'WebCore::MediaPlayerBufferingPolicy': ['<WebCore/MediaPlayerEnums.h>'],
@@ -1352,6 +1391,7 @@ def headers_for_type(type, for_implementation_file=False):
         'WebCore::NetworkTransactionInformation': ['<WebCore/NetworkLoadInformation.h>'],
         'WebCore::NavigationUpgradeToHTTPSBehavior': ['<WebCore/FrameLoaderTypes.h>'],
         'WebCore::NowPlayingMetadata': ['<WebCore/NowPlayingInfo.h>'],
+        'WebCore::NowPlayingCandidateState': ['<WebCore/NowPlayingInfo.h>'],
         'WebCore::OpaqueOriginIdentifier': ['<WebCore/SecurityOriginData.h>'],
         'WebCore::PasteboardCustomData': ['<WebCore/Pasteboard.h>'],
         'WebCore::PasteboardBuffer': ['<WebCore/Pasteboard.h>'],
@@ -1375,6 +1415,7 @@ def headers_for_type(type, for_implementation_file=False):
         'WebCore::PlaybackTargetClientContextID': ['<WebCore/PlaybackTargetClientContextIdentifier.h>'],
         'WebCore::PluginInfo': ['<WebCore/PluginData.h>'],
         'WebCore::PolicyAction': ['<WebCore/FrameLoaderTypes.h>'],
+        'WebCore::PortalActionKind': ['<WebCore/PortalAction.h>'],
         'WebCore::NonSerializedDataIdentifier': ['<WebCore/NonSerializedDataIdentifier.h>'],
         'WebCore::PreserveResolution': ['<WebCore/ImageBufferBackend.h>'],
         'WebCore::ProcessIdentifier': ['<WebCore/ProcessIdentifier.h>'],
@@ -1390,10 +1431,10 @@ def headers_for_type(type, for_implementation_file=False):
         'WebCore::RenderingPurpose': ['<WebCore/RenderingMode.h>'],
         'WebCore::RequestStorageAccessResult': ['<WebCore/DocumentStorageAccess.h>'],
         'WebCore::RequiresClipToRect': ['<WebCore/GraphicsContext.h>'],
-        'WebCore::RequiresScriptTrackingPrivacy': ['<WebCore/NetworkStorageSession.h>'],
+        'WebCore::RequiresScriptTrackingPrivacy': ['<WebCore/TrackingPreventionTypes.h>'],
         'WebCore::RouteSharingPolicy': ['<WebCore/AudioSession.h>'],
         'WebCore::RubberBandingBehavior': ['<WebCore/ScrollTypes.h>'],
-        'WebCore::SameSiteStrictEnforcementEnabled': ['<WebCore/NetworkStorageSession.h>'],
+        'WebCore::SameSiteStrictEnforcementEnabled': ['<WebCore/TrackingPreventionTypes.h>'],
         'WebCore::SamplesRendererTrackIdentifier':  ['<WebCore/AudioVideoRenderer.h>'],
         'WebCore::ScriptExecutionContextIdentifier': ['<WebCore/ProcessQualified.h>', '<WebCore/ScriptExecutionContextIdentifier.h>', '<wtf/ObjectIdentifier.h>'],
         'WebCore::ScriptTrackingPrivacyFlag': ['<WebCore/ScriptTrackingPrivacyCategory.h>'],
@@ -1463,7 +1504,7 @@ def headers_for_type(type, for_implementation_file=False):
         'WebCore::TextIndicatorLifetime': ['<WebCore/TextIndicator.h>'],
         'WebCore::TextManipulationControllerManipulationResult': ['<WebCore/TextManipulationControllerManipulationFailure.h>'],
         'WebCore::TextManipulationTokenIdentifier': ['<WebCore/TextManipulationToken.h>'],
-        'WebCore::ThirdPartyCookieBlockingMode': ['<WebCore/NetworkStorageSession.h>'],
+        'WebCore::ThirdPartyCookieBlockingMode': ['<WebCore/ThirdPartyCookieBlockingMode.h>'],
         'WebCore::TrackID': ['<WebCore/TrackBase.h>'],
         'WebCore::TrackInfo::TrackType': ['<WebCore/TrackInfo.h>'],
         'WebCore::TrackInfoTrackType': ['<WebCore/TrackInfo.h>'],
@@ -1485,6 +1526,7 @@ def headers_for_type(type, for_implementation_file=False):
         'WebCore::WritingTools::TextSuggestion::ID': ['<WebCore/WritingToolsTypes.h>'],
         'WebCore::WritingTools::TextSuggestionState': ['<WebCore/WritingToolsTypes.h>'],
         'WebCore::UsedLegacyTLS': ['<WebCore/ResourceResponseBase.h>'],
+        'WebCore::UsedPortalTransform': ['<WebCore/PortalTransform.h>'],
         'WebCore::VideoFrameRotation': ['<WebCore/VideoFrame.h>'],
         'WebCore::VideoPlaybackQualityMetrics': ['<WebCore/VideoPlaybackQualityMetrics.h>'],
         'WebCore::VideoPresetData': ['<WebCore/VideoPreset.h>'],
@@ -1566,8 +1608,6 @@ def headers_for_type(type, for_implementation_file=False):
         'WebKit::GestureRecognizerState': ['"GestureTypes.h"'],
         'WebKit::GestureType': ['"GestureTypes.h"'],
         'WebKit::InputType': ['"FocusedElementInformation.h"'],
-        'WebKit::RiceBackendIdentifier': ['"RiceBackend.h"'],
-        'WebKit::RiceGatherResult': ['"RiceBackend.h"'],
         'WebKit::JSObjectID': ['"JavaScriptEvaluationResult.h"'],
         'WebKit::SnapshotOption': ['"ImageOptions.h"'],
         'WebKit::LastNavigationWasAppInitiated': ['"AppPrivacyReport.h"'],
@@ -1575,6 +1615,7 @@ def headers_for_type(type, for_implementation_file=False):
         'WebKit::MessageBatchIdentifier': ['"NetworkConnectionToWebProcess.h"'],
         'WebKit::NetworkActivityTracker::CompletionCode': ['"NetworkActivityTracker.h"'],
         'WebKit::PageGroupIdentifier': ['"IdentifierTypes.h"'],
+        'WebKit::PDFAccessibilityDisplayModeState': ['"PDFAccessibilityDisplayModeState.h"'],
         'WebKit::PDFPluginDisplayMode': ['"PDFDisplayMode.h"'],
         'WebKit::RealmIdentifier': ['"IdentifierTypes.h"'],
         'WebKit::PaymentSetupConfiguration': ['"PaymentSetupConfigurationWebKit.h"'],
@@ -1588,12 +1629,16 @@ def headers_for_type(type, for_implementation_file=False):
         'WebKit::RemoteLayerBackingStoreProperties': ['"RemoteLayerBackingStore.h"'],
         'WebKit::RemoteVideoFrameReadReference': ['"RemoteVideoFrameIdentifier.h"'],
         'WebKit::RemoteVideoFrameWriteReference': ['"RemoteVideoFrameIdentifier.h"'],
+        'WebKit::RemoteNativeImageReference': ['"RemoteNativeImageIdentifier.h"'],
+        'WebKit::RemoteNativeImageReadReference': ['"RemoteNativeImageIdentifier.h"'],
+        'WebKit::RemoteNativeImageWriteReference': ['"RemoteNativeImageIdentifier.h"'],
         'WebKit::RespectSelectionAnchor': ['"GestureTypes.h"'],
         'WebKit::SandboxExtensionHandle': ['"SandboxExtension.h"'],
         'WebKit::ScriptTrackingPrivacyHost': ['"ScriptTrackingPrivacyFilter.h"'],
         'WebKit::ScriptTrackingPrivacyRules': ['"ScriptTrackingPrivacyFilter.h"'],
         'WebKit::SelectionFlags': ['"GestureTypes.h"'],
         'WebKit::SelectionTouch': ['"GestureTypes.h"'],
+        'WebKit::SelectWithGestureResult': ['"GestureTypes.h"'],
         'WebKit::SwapBuffersDisplayRequirement': ['"PrepareBackingStoreBuffersData.h"'],
         'WebKit::TapIdentifier': ['"IdentifierTypes.h"'],
         'WebKit::TextCheckerRequestID': ['"IdentifierTypes.h"'],
@@ -1603,6 +1648,7 @@ def headers_for_type(type, for_implementation_file=False):
         'WebKit::WebExtensionContextInstallReason': ['"WebExtensionContext.h"'],
         'WebKit::WebExtensionCookieFilterParameters': ['"WebExtensionCookieParameters.h"'],
         'WebKit::WebExtensionError': ['"WebExtensionError.h"'],
+        'WebKit::WebExtensionSidebarSide': ['"WebExtensionSidebarParameters.h"'],
         'WebKit::WebExtensionTabImageFormat': ['"WebExtensionTab.h"'],
         'WebKit::WebExtensionWindowTypeFilter': ['"WebExtensionWindow.h"'],
         'WebKit::WebModelIdentifier': ['"WebModelIdentifier.h"'],
@@ -1636,6 +1682,7 @@ def headers_for_type(type, for_implementation_file=False):
         'WebKit::WebGPU::Identifier': ['"WebGPUIdentifier.h"'],
         'WebKit::WebGPU::ImageCopyBuffer': ['"WebGPUImageCopyBuffer.h"'],
         'WebKit::WebGPU::ImageCopyExternalImage': ['"WebGPUImageCopyExternalImage.h"'],
+        'WebKit::WebGPU::ImageCopyExternalImageVideoSource': ['"WebGPUImageCopyExternalImage.h"'],
         'WebKit::WebGPU::ImageCopyTexture': ['"WebGPUImageCopyTexture.h"'],
         'WebKit::WebGPU::ImageCopyTextureTagged': ['"WebGPUImageCopyTextureTagged.h"'],
         'WebKit::WebGPU::ImageDataLayout': ['"WebGPUImageDataLayout.h"'],
@@ -1782,61 +1829,77 @@ def generate_header_includes_from_conditions(header_conditions):
     return result
 
 
+PROCESS_NAME_PREDICATES = {
+    "UI": "!isInAuxiliaryProcess()",
+    "Networking": "isInNetworkProcess()",
+    "GPU": "isInGPUProcess()",
+    "WebContent": "isInWebProcess()",
+    "Model": "isInModelProcess()",
+}
+
+
 def generate_dispatched_for_x(dispatched_x, spacing='    '):
-    if dispatched_x == "WebContent":
-        return ['%sASSERT(isInWebProcess());\n' % spacing]
-    elif dispatched_x == "Networking":
-        return ['%sASSERT(isInNetworkProcess());\n' % spacing]
-    elif dispatched_x == "GPU":
-        return ['%sASSERT(isInGPUProcess());\n' % spacing]
-    elif dispatched_x == "UI":
-        return ['%sASSERT(!isInAuxiliaryProcess());\n' % spacing]
-    elif dispatched_x == "Model":
-        return ['%sASSERT(isInModelProcess());\n' % spacing]
-    return []
+    if not dispatched_x:
+        return []
+    predicates = [PROCESS_NAME_PREDICATES[name] for name in dispatched_x.split('|') if name in PROCESS_NAME_PREDICATES]
+    if not predicates:
+        return []
+    return ['%sASSERT(%s);\n' % (spacing, ' || '.join(predicates))]
 
 
-def generate_enabled_by_for_receiver(receiver, messages):
+def process_name_enumerator(dispatched_x):
+    if not dispatched_x or '|' in dispatched_x:
+        return "Unknown"
+    return dispatched_x
+
+
+def generate_target_and_enabled_by_statements(receiver, messages):
     enabled_by = receiver.receiver_enabled_by
     enabled_by_conjunction = receiver.receiver_enabled_by_conjunction
-    shared_preferences_retrieval = [
-        '    auto sharedPreferences = sharedPreferencesForWebProcess(%s);\n' % ('connection' if receiver.shared_preferences_needs_connection else ''),
-        '    UNUSED_VARIABLE(sharedPreferences);\n'
-    ]
-    result = []
-    if not enabled_by:
-        if any([message.enabled_by for message in messages]):
-            result += shared_preferences_retrieval
-        return result
+    needs_shared_preferences = bool(enabled_by) or any([message.enabled_by for message in messages])
+    connection_argument = 'connection' if receiver.shared_preferences_needs_connection else ''
 
-    runtime_enablement = generate_enabled_by(receiver, enabled_by, enabled_by_conjunction)
-    return shared_preferences_retrieval + [
-        '    if (!sharedPreferences || !%s) {\n' % ('(%s)' % runtime_enablement if len(enabled_by) > 1 else runtime_enablement),
-        '        RELEASE_LOG_ERROR(IPC, "Message %s received by a disabled message receiver %s", IPC::description(decoder.messageName()).characters());\n' % ('%s', receiver.name),
-        '        decoder.markInvalid();\n',
-        '        return;\n',
-        '    }\n',
-    ]
-
-
-def generate_get_target_statements(receiver):
-    result = []
-
-    def append_swift_get_target_statements(result):
+    def append_swift_statements(result):
         result.append('    auto target = getMessageTarget();\n')
-        # If target is a nullptr, this means the Swift message receiver has been destroyed.
-        # This makes no sense, since that Swift message receiver owns this class, the C++
-        # message forwarder, so we should also have been destroyed. If this happens,
-        # something somewhere is keeping an unexpected reference alive.
-        # In debug builds, crash. In release builds, attempt to survive by behaving as if
-        # corrupted data was received from the sender.
-        result.append('    if (!target) {\n')
-        result.append('        FATAL("Something is keeping a reference to the message forwarder");\n')
-        result.append('        decoder.markInvalid();\n')
-        result.append('        return;\n')
-        result.append('    }\n')
+        if receiver.has_attribute(STREAM_ATTRIBUTE):
+            # Stream receivers hold the target weakly and dispatch off the main thread, so a null
+            # target is a benign teardown race that must not crash the process. Mark the message
+            # invalid, which tears the stream connection down cleanly.
+            result.append('    if (!target) {\n')
+            result.append('        decoder.markInvalid();\n')
+            result.append('        return;\n')
+            result.append('    }\n')
+        else:
+            # If target is a nullptr, this means the Swift message receiver has been destroyed.
+            # This makes no sense, since that Swift message receiver owns this class, the C++
+            # message forwarder, so we should also have been destroyed. If this happens,
+            # something somewhere is keeping an unexpected reference alive.
+            # In debug builds, crash. In release builds, attempt to survive by behaving as if
+            # corrupted data was received from the sender.
+            result.append('    if (!target) {\n')
+            result.append('        FATAL("Something is keeping a reference to the message forwarder");\n')
+            result.append('        decoder.markInvalid();\n')
+            result.append('        return;\n')
+            result.append('    }\n')
+        if needs_shared_preferences:
+            result.append('    auto sharedPreferences = target->sharedPreferencesForWebProcess(%s);\n' % connection_argument)
 
-    if_swift_enabled(receiver, result, append_swift_get_target_statements, None)
+    def append_cpp_statements(result):
+        result.append('    auto sharedPreferences = sharedPreferencesForWebProcess(%s);\n' % connection_argument)
+
+    result = []
+    if_swift_enabled(receiver, result, append_swift_statements, append_cpp_statements if needs_shared_preferences else None)
+    if needs_shared_preferences:
+        result.append('    UNUSED_VARIABLE(sharedPreferences);\n')
+    if enabled_by:
+        runtime_enablement = generate_enabled_by(receiver, enabled_by, enabled_by_conjunction)
+        result += [
+            '    if (!sharedPreferences || !%s) {\n' % ('(%s)' % runtime_enablement if len(enabled_by) > 1 else runtime_enablement),
+            '        RELEASE_LOG_ERROR(IPC, "Message %s received by a disabled message receiver %s", IPC::description(decoder.messageName()).characters());\n' % ('%s', receiver.name),
+            '        decoder.markInvalid();\n',
+            '        return;\n',
+            '    }\n',
+        ]
     return result
 
 
@@ -1901,10 +1964,9 @@ def generate_message_handler(receiver):
     if receiver.has_attribute(STREAM_ATTRIBUTE):
         append_with_potentially_swiftified_classname(receiver, result, 'void %s::didReceiveStreamMessage(IPC::StreamServerConnection& connection, IPC::Decoder& decoder)\n')
         result.append('{\n')
-        result += generate_enabled_by_for_receiver(receiver, receiver.messages)
         assert(not receiver.has_attribute(WANTS_DISPATCH_MESSAGE_ATTRIBUTE))
         assert(not receiver.has_attribute(WANTS_ASYNC_DISPATCH_MESSAGE_ATTRIBUTE))
-        result += generate_get_target_statements(receiver)
+        result += generate_target_and_enabled_by_statements(receiver, receiver.messages)
         result += async_message_statements
         result += sync_message_statements
         if (receiver.superclass):
@@ -1921,9 +1983,7 @@ def generate_message_handler(receiver):
         else:
             append_with_potentially_swiftified_classname(receiver, result, 'void %s::didReceiveMessage(IPC::Connection& connection, IPC::Decoder& decoder)\n')
         result.append('{\n')
-        enable_by_statement = generate_enabled_by_for_receiver(receiver, async_messages)
-        result += enable_by_statement
-        result += generate_get_target_statements(receiver)
+        result += generate_target_and_enabled_by_statements(receiver, async_messages)
         result += async_message_statements
         if receiver.has_attribute(WANTS_DISPATCH_MESSAGE_ATTRIBUTE) or receiver.has_attribute(WANTS_ASYNC_DISPATCH_MESSAGE_ATTRIBUTE):
             result.append('    if (dispatchMessage(connection, decoder))\n')
@@ -1942,8 +2002,7 @@ def generate_message_handler(receiver):
         append_with_potentially_swiftified_classname(receiver, result, 'void %s::didReceiveSyncMessage(IPC::Connection& connection, IPC::Decoder& decoder, UniqueRef<IPC::Encoder>& replyEncoder)\n')
         result.append('{\n')
         result += generate_dispatched_for_x(receiver.receiver_dispatched_to)
-        result += generate_enabled_by_for_receiver(receiver, sync_messages)
-        result += generate_get_target_statements(receiver)
+        result += generate_target_and_enabled_by_statements(receiver, sync_messages)
         result += sync_message_statements
         if receiver.has_attribute(WANTS_DISPATCH_MESSAGE_ATTRIBUTE):
             result.append('    if (dispatchSyncMessage(connection, decoder, replyEncoder))\n')
@@ -2270,11 +2329,11 @@ def generate_message_names_implementation(receivers):
                 result.append(', %s' % value)
             result.append(', %s' % ("true" if enumerator.messages[0].is_async_reply else "false"))
             if enumerator.messages[0].is_async_reply:
-                result.append(', ProcessName::%s' % (enumerator.receiver.receiver_dispatched_to or "Unknown"))
-                result.append(', ProcessName::%s' % (enumerator.receiver.receiver_dispatched_from or "Unknown"))
+                result.append(', ProcessName::%s' % process_name_enumerator(enumerator.receiver.receiver_dispatched_to))
+                result.append(', ProcessName::%s' % process_name_enumerator(enumerator.receiver.receiver_dispatched_from))
             else:
-                result.append(', ProcessName::%s' % (enumerator.receiver.receiver_dispatched_from or "Unknown"))
-                result.append(', ProcessName::%s' % (enumerator.receiver.receiver_dispatched_to or "Unknown"))
+                result.append(', ProcessName::%s' % process_name_enumerator(enumerator.receiver.receiver_dispatched_from))
+                result.append(', ProcessName::%s' % process_name_enumerator(enumerator.receiver.receiver_dispatched_to))
             result.append(' },\n')
         if condition:
             result.append('#endif\n')

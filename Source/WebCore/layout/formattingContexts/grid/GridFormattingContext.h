@@ -26,12 +26,14 @@
 #pragma once
 
 #include "GridTypeAliases.h"
+#include "UsedTrackSizes.h"
 #include <WebCore/LayoutIntegrationUtils.h>
 #include <WebCore/LayoutState.h>
 #include <WebCore/StyleGapGutter.h>
 #include <WebCore/StyleGridTemplateList.h>
 #include <WebCore/StyleGridTrackSizes.h>
 #include <WebCore/StylePrimitiveNumericTypes+Evaluation.h>
+#include <WebCore/StyleZoomPrimitives.h>
 #include <wtf/CheckedRef.h>
 
 namespace WebCore {
@@ -44,7 +46,6 @@ class UnplacedGridItem;
 struct GridAreaLines;
 struct GridLayoutConstraints;
 struct UnplacedGridItems;
-struct UsedTrackSizes;
 
 enum class PackingStrategy : bool {
     Sparse,
@@ -61,6 +62,21 @@ struct GridAutoFlowOptions {
     GridAutoFlowDirection direction;
 };
 
+struct GridLayoutResult {
+    UsedTrackSizes usedTrackSizes;
+    GridItemRects gridItemRects;
+};
+
+// The number of implicit tracks generated before the start of the explicit grid, per axis, because
+// an item is placed with a negative line that resolves before line 1. Every item's resolved line is
+// shifted forward by these counts when the UnplacedGridItems are constructed so that matrix indices
+// are non-negative, and layout uses them to include the leading tracks in the grid's initial
+// dimensions and track sizing functions.
+struct LeadingImplicitTracks {
+    size_t columnsCount { 0 };
+    size_t rowsCount { 0 };
+};
+
 // https://drafts.csswg.org/css-grid-1/#grid-definition
 struct GridDefinition {
     Style::GridTemplateList gridTemplateColumns;
@@ -68,6 +84,7 @@ struct GridDefinition {
     Style::GridTrackSizes gridAutoColumns;
     Style::GridTrackSizes gridAutoRows;
     GridAutoFlowOptions autoFlowOptions;
+    Style::ZoomFactor zoom;
 };
 
 // Static classification of how much grid-sizing work is required to compute
@@ -84,7 +101,7 @@ public:
 
     GridFormattingContext(const ElementBox& gridBox, LayoutState&);
 
-    UsedTrackSizes layout(GridLayoutConstraints);
+    GridLayoutResult layout(GridLayoutConstraints);
 
     struct IntrinsicWidths {
         LayoutUnit minimum;
@@ -101,8 +118,6 @@ public:
     const IntegrationUtils& integrationUtils() const LIFETIME_BOUND { return m_integrationUtils; }
 
     const BoxGeometry& geometryForGridItem(const ElementBox&) const LIFETIME_BOUND;
-
-    const Style::ZoomFactor zoomFactor() const { return m_gridBox->style().usedZoomForLength(); }
 
     const WritingMode writingMode() const { return m_gridBox->style().writingMode(); }
 
@@ -123,7 +138,7 @@ public:
     }
 
 private:
-    UnplacedGridItems constructUnplacedGridItems() const;
+    UnplacedGridItems constructUnplacedGridItems(const LogicalGridItems&, LeadingImplicitTracks) const;
 
     IntrinsicWidthSizingPath classifyIntrinsicWidthSizingPath() const;
 

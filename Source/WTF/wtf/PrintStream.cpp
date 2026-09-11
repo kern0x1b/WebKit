@@ -80,7 +80,7 @@ void printInternal(PrintStream& out, const char* string)
     out.printf("%s", string);
 }
 
-static void printExpectedCStringHelper(PrintStream& out, const char* type, Expected<CString, UTF8ConversionError> expectedCString)
+static void printExpectedCStringHelper(PrintStream& out, const char* type, std::expected<UTF8CString, UTF8ConversionError> expectedCString)
 {
     if (!expectedCString) [[unlikely]] {
         if (expectedCString.error() == UTF8ConversionError::OutOfMemory) {
@@ -107,7 +107,7 @@ void printInternal(PrintStream& out, const CString& string)
     if (out.truncatesLongStrings() && string.length() > stringLengthThresholdToTriggerTruncation) [[unlikely]] {
         size_t lengthNotPrinted = string.length() - stringLengthToTruncateToForPrinting;
         auto subString = makeString(string.span().first(stringLengthToTruncateToForPrinting), "...["_s, lengthNotPrinted, " characters not shown]"_s);
-        printInternal(out, subString.utf8().data());
+        printInternal(out, subString);
         return;
     }
     printInternal(out, string.data());

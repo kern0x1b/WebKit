@@ -95,8 +95,8 @@ WK_CLASS_AVAILABLE(macos(14.5), ios(17.5), visionos(1.2))
 - (void)_setObjectsForBundleParametersWithDictionary:(NSDictionary *)dictionary WK_API_AVAILABLE(macos(10.12), ios(10.0));
 
 #if !TARGET_OS_IPHONE
-- (void)_resetPluginLoadClientPolicies:(NSDictionary *)policies WK_API_AVAILABLE(macos(10.13));
-@property (nonatomic, readonly, copy) NSDictionary *_pluginLoadClientPolicies WK_API_AVAILABLE(macos(10.13));
+- (void)_resetPluginLoadClientPolicies:(NSDictionary *)policies WK_API_DEPRECATED("NPAPI plugins are no longer supported", macos(10.13, WK_MAC_TBA));
+@property (nonatomic, readonly, copy) NSDictionary *_pluginLoadClientPolicies WK_API_DEPRECATED("NPAPI plugins are no longer supported", macos(10.13, WK_MAC_TBA));
 #endif
 
 @property (nonatomic, weak, setter=_setDownloadDelegate:) id <_WKDownloadDelegate> _downloadDelegate WK_API_DEPRECATED_WITH_REPLACEMENT("WKDownload.downloadDelegate", macos(10.10, 12.0), ios(8.0, 15.0));
@@ -109,6 +109,7 @@ WK_CLASS_AVAILABLE(macos(14.5), ios(17.5), visionos(1.2))
 + (NSURL *)_websiteDataURLForContainerWithURL:(NSURL *)containerURL;
 + (NSURL *)_websiteDataURLForContainerWithURL:(NSURL *)containerURL bundleIdentifierIfNotInContainer:(NSString *)bundleIdentifier;
 
+// A limit of 0 implies resetting back to the default process count limit.
 + (void)_setWebProcessCountLimit:(unsigned)limit WK_API_AVAILABLE(macos(13.0), ios(16.0));
 
 - (void)_warmInitialProcess WK_API_AVAILABLE(macos(10.12), ios(10.0));
@@ -144,7 +145,7 @@ WK_CLASS_AVAILABLE(macos(14.5), ios(17.5), visionos(1.2))
 - (size_t)_webProcessCountIgnoringPrewarmed WK_API_AVAILABLE(macos(10.14), ios(12.0));
 - (size_t)_webProcessCountIgnoringPrewarmedAndCached WK_API_AVAILABLE(macos(10.14.4), ios(12.2));
 - (NSUInteger)_prewarmedProcessCountLimit WK_API_AVAILABLE(macos(27.0), ios(27.0));
-- (size_t)_pluginProcessCount WK_API_AVAILABLE(macos(10.13.4), ios(11.3));
+- (size_t)_pluginProcessCount WK_API_DEPRECATED("NPAPI plugins are no longer supported", macos(10.13.4, WK_MAC_TBA), ios(11.3, WK_IOS_TBA));
 - (size_t)_serviceWorkerProcessCount WK_API_AVAILABLE(macos(10.14), ios(12.0));
 - (void)_isJITDisabledInAllRemoteWorkerProcesses:(void(^)(BOOL))completionHandler;
 - (void)_makeNextWebProcessLaunchFailForTesting WK_API_AVAILABLE(macos(10.14), ios(12.0));
@@ -199,6 +200,7 @@ WK_CLASS_AVAILABLE(macos(14.5), ios(17.5), visionos(1.2))
 + (_WKProcessInfo *)_gpuProcessInfo WK_API_AVAILABLE(macos(14.5));
 + (NSArray<_WKProcessInfo *> *)_networkingProcessInfo WK_API_AVAILABLE(macos(14.5));
 + (NSArray<_WKProcessInfo *> *)_webContentProcessInfo WK_API_AVAILABLE(macos(14.5));
++ (NSArray<_WKProcessInfo *> *)_webContentProcessInfoForTesting;
 @end
 
 @interface WKProcessPool (WKPrivateMac)

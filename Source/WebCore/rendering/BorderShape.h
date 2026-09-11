@@ -29,17 +29,21 @@
 
 #pragma once
 
+#include "FloatRoundedRect.h"
 #include "LayoutRoundedRect.h"
+#include "PathUtilities.h"
 #include "RectCorners.h"
 #include "RectEdges.h"
 #include "RenderStyleConstants.h"
+#include <optional>
+#include <wtf/Vector.h>
 
 namespace WebCore {
 
 class Color;
 class GraphicsContext;
 class FloatRect;
-class FloatRoundedRect;
+class HitTestLocation;
 class Path;
 
 namespace Style {
@@ -83,12 +87,27 @@ public:
     bool innerShapeContains(const LayoutRect&) const;
     bool outerShapeContains(const LayoutRect&) const;
 
+    bool shapeIntersectsHitTestLocation(const HitTestLocation&, float deviceScaleFactor) const;
+
+    static std::optional<Path> pathForShapedRect(const FloatRoundedRect&, const RectCorners<float>& cornerCurvatures);
+
+    // https://drafts.csswg.org/css-borders-4/#corner-shape-constrain-radii, combined with the
+    // adjacent-corner constraint. Callers building radii by hand must scale them by this.
+    static float constrainedRadiiScale(const LayoutRect& borderRect, const LayoutRoundedRectRadii&, const RectCorners<float>& cornerCurvatures);
+
+    // Polyline approximations of the border and padding edges, in layout coordinates, accurate to within
+    // `tolerance`. Returns an empty vecotr when every corner is round, since callers can use rounded rect functions in that case.
+    Vector<FloatPoint> outerShapeAsPolygon(float tolerance = defaultPathFlatteningTolerance) const;
+    Vector<FloatPoint> innerShapeAsPolygon(float tolerance = defaultPathFlatteningTolerance) const;
+
     // Returns true if no corner regions of the outer border intersect the given rect,
     // meaning border painting can use simpler rectangular paths.
     bool allCornersClippedOut(const LayoutRect&) const;
 
     const LayoutRoundedRectRadii& radii() const LIFETIME_BOUND { return m_borderRect.radii(); }
     void setRadii(const LayoutRoundedRectRadii& radii) { m_borderRect.setRadii(radii); }
+
+    const RectCorners<float>& cornerCurvatures() const LIFETIME_BOUND { return m_cornerCurvatures; }
 
     // Note that the inner edge isn't necessarily a rounded rect, but the radii still represent where the straight edge sections terminate.
     const LayoutRoundedRectRadii& innerEdgeRadii() const LIFETIME_BOUND { return m_innerEdgeRect.radii(); }
@@ -100,6 +119,8 @@ public:
 
     bool NODELETE outerShapeIsRectangular() const;
     bool NODELETE innerShapeIsRectangular() const;
+
+    bool hasNonRoundCornerShape() const;
 
     bool isEmpty() const { return m_borderRect.rect().isEmpty(); }
 
@@ -133,19 +154,22 @@ private:
     // Insets the snapped outer rect by device-rounded widths so opposite sides stay equal thickness.
     FloatRoundedRect snappedInnerEdgeRectForPainting(float deviceScaleFactor) const;
 
-    // True if any corner uses a non-`round` shape (curvature != 1), so the shape
-    bool hasNonRoundCornerShape() const;
+    std::optional<FloatRoundedRect> snappedOffsetReferenceRect(float deviceScaleFactor) const;
+    // Only for use in contexts where pixel snapping doesn't matter.
+    std::optional<FloatRoundedRect> offsetReferenceRect() const;
 
     Path pathForOuterRoundedRect(const FloatRoundedRect& outerSnapped) const;
     Path pathForInnerRoundedRect(const FloatRoundedRect& innerSnapped) const;
 
-    Path pathForOuterCornerShape(const FloatRoundedRect& outerSnapped) const;
-    Path pathForInnerCornerShape(const FloatRoundedRect& outerSnapped, const FloatRoundedRect& innerSnapped) const;
+    Path pathForOuterCornerShape(const FloatRoundedRect& outerSnapped, const std::optional<FloatRoundedRect>& snappedOffsetReference) const;
+    Path pathForInnerCornerShape(const FloatRoundedRect& outerSnapped, const FloatRoundedRect& innerSnapped, const std::optional<FloatRoundedRect>& snappedOffsetReference) const;
 
     LayoutRoundedRect m_borderRect;
     LayoutRoundedRect m_innerEdgeRect;
     RectEdges<LayoutUnit> m_borderWidths;
     RectCorners<float> m_cornerCurvatures { 1.0f, 1.0f, 1.0f, 1.0f };
+
+    std::optional<LayoutRoundedRect> m_offsetReferenceRect;
 };
 
 } // namespace WebCore

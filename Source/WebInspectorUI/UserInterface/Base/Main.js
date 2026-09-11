@@ -1481,9 +1481,6 @@ WI.showSourceCodeForFrame = function(frameIdentifier, options = {})
 
 WI.showSourceCode = function(sourceCode, options = {})
 {
-    const positionToReveal = options.positionToReveal;
-
-    console.assert(!positionToReveal || positionToReveal instanceof WI.SourceCodePosition, positionToReveal);
     var representedObject = sourceCode;
 
     if (representedObject instanceof WI.Script) {
@@ -1491,7 +1488,24 @@ WI.showSourceCode = function(sourceCode, options = {})
         representedObject = representedObject.resource || representedObject;
     }
 
-    var cookie = positionToReveal ? {lineNumber: positionToReveal.lineNumber, columnNumber: positionToReveal.columnNumber} : {};
+    let cookie = {};
+
+    let positionToReveal = options.positionToReveal;
+    if (positionToReveal) {
+        console.assert(positionToReveal instanceof WI.SourceCodePosition, positionToReveal);
+        cookie.lineNumber = positionToReveal.lineNumber;
+        cookie.columnNumber = positionToReveal.columnNumber;
+    }
+
+    let textRangeToSelect = options.textRangeToSelect;
+    if (textRangeToSelect) {
+        console.assert(textRangeToSelect instanceof WI.TextRange, textRangeToSelect);
+        cookie.startLine = textRangeToSelect.startLine;
+        cookie.startColumn = textRangeToSelect.startColumn;
+        cookie.endLine = textRangeToSelect.endLine;
+        cookie.endColumn = textRangeToSelect.endColumn;
+    }
+
     WI.showRepresentedObject(representedObject, cookie, options);
 };
 
@@ -1928,26 +1942,6 @@ WI._contextMenuRequested = function(event)
         proposedContextMenu.appendItem(WI.unlocalizedString("Reload Web Inspector"), () => {
             InspectorFrontendHost.reopen();
         });
-
-        let protocolSubMenu = proposedContextMenu.appendSubMenuItem(WI.unlocalizedString("Protocol Debugging"), null, false);
-        let isCapturingTraffic = InspectorBackend.activeTracer instanceof WI.CapturingProtocolTracer;
-
-        protocolSubMenu.appendCheckboxItem(WI.unlocalizedString("Capture Trace"), () => {
-            if (isCapturingTraffic)
-                InspectorBackend.activeTracer = null;
-            else
-                InspectorBackend.activeTracer = new WI.CapturingProtocolTracer;
-        }, isCapturingTraffic);
-
-        let trace = InspectorBackend.activeTracer?.trace;
-        if (trace && WI.FileUtilities.canSave(trace.saveMode)) {
-            protocolSubMenu.appendSeparator();
-
-            protocolSubMenu.appendItem(WI.unlocalizedString("Export Trace\u2026"), () => {
-                const forceSaveAs = true;
-                WI.FileUtilities.save(trace.saveMode, trace.saveData, forceSaveAs);
-            }, !isCapturingTraffic);
-        }
     } else {
         const onlyExisting = true;
         proposedContextMenu = WI.ContextMenu.createFromEvent(event, onlyExisting);
@@ -2687,6 +2681,7 @@ WI._resourceCachingDisabledSettingChanged = function(event)
 WI._clearResourceDataOnNavigateSettingChanged = function(event)
 {
     for (let target of WI.targets) {
+        // COMPATIBILITY (macOS 26.4, iOS 26.4): Network.setClearResourceDataOnNavigate did not exist yet.
         if (target.hasCommand("Network.setClearResourceDataOnNavigate"))
             target.NetworkAgent.setClearResourceDataOnNavigate(WI.settings.clearNetworkOnNavigate.value);
     }
@@ -2898,7 +2893,7 @@ WI.linkifyURLAsNode = function(url, linkText, className)
 WI.linkifyStringAsFragmentWithCustomLinkifier = function(string, linkifier)
 {
     var container = document.createDocumentFragment();
-    var linkStringRegEx = /(?:[a-zA-Z][a-zA-Z0-9+.-]{2,}:\/\/|www\.)[\w$\-_+*'=\|\/\\(){}[\]%@&#~,:;.!?]{2,}[\w$\-_+*=\|\/\\({%@&#~]/;
+    let linkStringRegEx = /(?:[a-zA-Z][a-zA-Z0-9+.-]{2,}:\/\/|www\.)[\w$\-_+*'=|/\\(){}[\]%@&#~,:;.!?]{2,}[\w$\-_+*=|/\\({%@&#~]/;
     var lineColumnRegEx = /:(\d+)(:(\d+))?$/;
 
     while (string) {

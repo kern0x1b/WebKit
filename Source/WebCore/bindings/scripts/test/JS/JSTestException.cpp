@@ -29,10 +29,12 @@
 #include "JSDOMBinding.h"
 #include "JSDOMBindingFacade.h"
 #include "JSDOMConstructorNotConstructable.h"
+#include "JSDOMConvertInterface.h"
 #include "JSDOMConvertStrings.h"
 #include "JSDOMExceptionHandling.h"
 #include "JSDOMGlobalObjectInlines.h"
 #include "JSDOMWrapperCache.h"
+#include "JSTestExceptionSubclass.h"
 #include "ScriptExecutionContext.h"
 #include "WebCoreJSClientData.h"
 #include <JavaScriptCore/FunctionPrototype.h>
@@ -125,7 +127,7 @@ void JSTestExceptionPrototype::finishCreation(VM& vm)
 const ClassInfo JSTestException::s_info = { "TestException"_s, &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(JSTestException) };
 
 JSTestException::JSTestException(Structure* structure, JSDOMGlobalObject& globalObject, Ref<TestException>&& impl)
-    : JSDOMWrapper<TestException>(structure, globalObject, WTF::move(impl))
+    : JSDOMErrorWrapper<TestException>(structure, globalObject, WTF::move(impl))
 {
 }
 
@@ -133,7 +135,7 @@ static_assert(!std::is_base_of<ActiveDOMObject, TestException>::value, "Interfac
 
 JSTestException* JSTestException::create(JSC::Structure* structure, JSDOMGlobalObject* globalObject, Ref<TestException>&& impl)
 {
-    SUPPRESS_UNCOUNTED_LOCAL auto& vm = globalObject->vm();
+    auto& vm = globalObject->vm();
     JSTestException* ptr = new (NotNull, JSC::allocateCell<JSTestException>(vm)) JSTestException(structure, *globalObject, WTF::move(impl));
     ptr->finishCreation(vm);
     return ptr;
@@ -141,7 +143,7 @@ JSTestException* JSTestException::create(JSC::Structure* structure, JSDOMGlobalO
 
 JSC::Structure* JSTestException::createStructure(JSC::VM& vm, JSC::JSGlobalObject* globalObject, JSC::JSValue prototype)
 {
-    return JSC::Structure::create(vm, globalObject, prototype, JSC::TypeInfo(JSC::ObjectType, StructureFlags), info(), JSC::NonArray);
+    return JSC::Structure::create(vm, globalObject, prototype, JSC::TypeInfo(JSC::ErrorInstanceType, StructureFlags), info(), JSC::NonArray);
 }
 
 JSObject* JSTestException::createPrototype(VM& vm, JSDOMGlobalObject& globalObject)
@@ -169,7 +171,7 @@ void JSTestException::destroy(JSC::JSCell* cell)
 
 JSC_DEFINE_CUSTOM_GETTER(jsTestExceptionConstructor, (JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, PropertyName))
 {
-    SUPPRESS_UNCOUNTED_LOCAL auto& vm = JSC::getVM(lexicalGlobalObject);
+    auto& vm = JSC::getVM(lexicalGlobalObject);
     auto throwScope = DECLARE_THROW_SCOPE(vm);
     auto* prototype = dynamicDowncast<JSTestExceptionPrototype>(JSValue::decode(thisValue));
     if (!prototype) [[unlikely]]
@@ -179,7 +181,7 @@ JSC_DEFINE_CUSTOM_GETTER(jsTestExceptionConstructor, (JSGlobalObject* lexicalGlo
 
 static inline JSValue jsTestException_nameGetter(JSGlobalObject& lexicalGlobalObject, JSTestException& thisObject)
 {
-    SUPPRESS_UNCOUNTED_LOCAL auto& vm = JSC::getVM(&lexicalGlobalObject);
+    auto& vm = JSC::getVM(&lexicalGlobalObject);
     auto throwScope = DECLARE_THROW_SCOPE(vm);
     SUPPRESS_UNCOUNTED_LOCAL auto& impl = thisObject.wrapped();
     RELEASE_AND_RETURN(throwScope, (toJS<IDLDOMString>(lexicalGlobalObject, throwScope, impl.name())));
@@ -192,11 +194,12 @@ JSC_DEFINE_CUSTOM_GETTER(jsTestException_name, (JSGlobalObject* lexicalGlobalObj
 
 JSC::GCClient::IsoSubspace* JSTestException::subspaceForImpl(JSC::VM& vm)
 {
-    return WebCore::subspaceForImpl<JSTestException, UseCustomHeapCellType::No>(vm, "JSTestException"_s,
+    return WebCore::subspaceForImpl<JSTestException, UseCustomHeapCellType::Yes>(vm, "JSTestException"_s,
         [] (auto& spaces) { return spaces.m_clientSubspaceForTestException.get(); },
         [] (auto& spaces, auto&& space) { spaces.m_clientSubspaceForTestException = std::forward<decltype(space)>(space); },
         [] (auto& spaces) { return spaces.m_subspaceForTestException.get(); },
-        [] (auto& spaces, auto&& space) { spaces.m_subspaceForTestException = std::forward<decltype(space)>(space); }
+        [] (auto& spaces, auto&& space) { spaces.m_subspaceForTestException = std::forward<decltype(space)>(space); },
+        [] (auto& server) -> JSC::HeapCellType& { return server.m_heapCellTypeForJSTestException; }
     );
 }
 
@@ -249,7 +252,7 @@ static inline void verifyVTable(TestException* ptr)
         // TestException has subclasses. If TestException has subclasses that get passed
         // to toJS() we currently require TestException you to opt out of binding hardening
         // by adding the SkipVTableValidation attribute to the interface IDL definition
-        RELEASE_ASSERT(actualVTablePointer == expectedVTablePointer);
+        RELEASE_ASSERT_WITH_UNQUALIFIED_FUNCTION_NAME(actualVTablePointer == expectedVTablePointer);
     }
 }
 #endif
@@ -258,9 +261,8 @@ WTF_ALLOW_UNSAFE_BUFFER_USAGE_END
 JSC::JSValue toJSNewlyCreated(JSC::JSGlobalObject* lexicalGlobalObject, JSDOMGlobalObject* globalObject, Ref<TestException>&& impl)
 {
     UNUSED_PARAM(lexicalGlobalObject);
-#if ENABLE(BINDING_INTEGRITY)
-    verifyVTable<TestException>(impl.ptr());
-#endif
+    if (is<TestExceptionSubclass>(impl))
+        return toJSNewlyCreated(lexicalGlobalObject, globalObject, uncheckedDowncast<TestExceptionSubclass>(WTF::move(impl)));
     return createWrapper<TestException>(globalObject, WTF::move(impl));
 }
 

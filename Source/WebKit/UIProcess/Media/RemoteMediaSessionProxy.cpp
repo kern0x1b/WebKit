@@ -68,13 +68,29 @@ void RemoteMediaSessionProxy::updateState(const RemoteMediaSessionState& remoteS
 {
     m_sessionState = remoteState;
     downcast<RemoteMediaSessionClientProxy>(protect(client())).updateState(remoteState);
+}
 
+std::optional<WebCore::QualifiedMediaSessionIdentifier> RemoteMediaSessionProxy::qualifiedSessionIdentifier() const
+{
+    RefPtr process = m_process.get();
+    if (!process)
+        return std::nullopt;
+
+    return WebCore::QualifiedMediaSessionIdentifier { m_sessionState.sessionIdentifier, process->coreProcessIdentifier() };
 }
 
 void RemoteMediaSessionProxy::setState(WebCore::PlatformMediaSessionState state)
 {
     PlatformMediaSession::setState(state);
     m_sessionState.state = state;
+}
+
+bool RemoteMediaSessionProxy::commitPlaybackAdmission(WebCore::PlatformMediaSessionState)
+{
+    // The content process already decided whether playback may begin — this proxy only mirrors
+    // that decision, so there is no pause-race to check locally; committing always succeeds.
+    setState(WebCore::PlatformMediaSessionState::Playing);
+    return true;
 }
 
 WeakPtr<WebCore::PlatformMediaSessionInterface> RemoteMediaSessionProxy::selectBestMediaSession(const Vector<WeakPtr<WebCore::PlatformMediaSessionInterface>>&, WebCore::PlatformMediaSessionPlaybackControlsPurpose)

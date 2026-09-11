@@ -110,19 +110,9 @@ RenderPtr<RenderElement> SVGLinearGradientElement::createElementRenderer(Style::
     return createRenderer<LegacyRenderSVGResourceLinearGradient>(*this, WTF::move(style));
 }
 
-static void setGradientAttributes(SVGGradientElement& element, LinearGradientAttributes& attributes, bool isLinear = true)
+static void setGradientAttributes(SVGGradientElement& element, LinearGradientAttributes& attributes, bool isLinear)
 {
-    if (!attributes.hasSpreadMethod() && element.hasAttribute(SVGNames::spreadMethodAttr))
-        attributes.setSpreadMethod(element.spreadMethod());
-
-    if (!attributes.hasGradientUnits() && element.hasAttribute(SVGNames::gradientUnitsAttr))
-        attributes.setGradientUnits(element.gradientUnits());
-
-    if (!attributes.hasGradientTransform() && element.hasAttribute(SVGNames::gradientTransformAttr))
-        attributes.setGradientTransform(element.gradientTransform().concatenate().value_or(identity));
-
-    if (!attributes.hasStops())
-        attributes.setStops(element.buildStops());
+    element.collectCommonGradientAttributes(attributes);
 
     if (isLinear) {
         SVGLinearGradientElement& linear = downcast<SVGLinearGradientElement>(element);
@@ -147,32 +137,28 @@ bool SVGLinearGradientElement::collectGradientAttributes(LinearGradientAttribute
         return false;
 
     HashSet<Ref<SVGGradientElement>> processedGradients;
-    Ref<SVGGradientElement> current { *this };
+    RefPtr<SVGGradientElement> current { this };
 
-    setGradientAttributes(current.get(), attributes);
-    processedGradients.add(current.copyRef());
+    while (current) {
+        setGradientAttributes(*current, attributes, current->hasTagName(SVGNames::linearGradientTag));
 
-    while (true) {
         // Respect xlink:href, take attributes from referenced element
         auto target = SVGURIReference::targetElementFromIRIString(current->href(), protect(treeScopeForSVGReferences()));
-        if (RefPtr gradientElement = dynamicDowncast<SVGGradientElement>(target.element.get())) {
-            current = *gradientElement;
+        RefPtr next = dynamicDowncast<SVGGradientElement>(target.element.get());
+        if (!next)
+            break;
 
-            // Cycle detection
-            if (processedGradients.contains(current))
-                return true;
+        processedGradients.add(current.releaseNonNull());
+        if (processedGradients.contains(*next))
+            break;
 
-            if (!current->renderer())
-                return false;
+        if (!next->renderer())
+            return false;
 
-            setGradientAttributes(current.get(), attributes, current->hasTagName(SVGNames::linearGradientTag));
-            processedGradients.add(current.copyRef());
-        } else
-            return true;
+        current = WTF::move(next);
     }
 
-    ASSERT_NOT_REACHED();
-    return false;
+    return true;
 }
 
 bool SVGLinearGradientElement::selfHasRelativeLengths() const

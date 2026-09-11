@@ -373,6 +373,7 @@ localizedStrings["Clear Filters @ Heap Allocations Timeline View"] = "Clear Filt
 localizedStrings["Clear Local Storage"] = "Clear Local Storage";
 localizedStrings["Clear Log"] = "Clear Log";
 localizedStrings["Clear Network Items (%s)"] = "Clear Network Items (%s)";
+localizedStrings["Clear Recordings"] = "Clear Recordings";
 localizedStrings["Clear Session Storage"] = "Clear Session Storage";
 localizedStrings["Clear Timeline (%s)"] = "Clear Timeline (%s)";
 localizedStrings["Clear focus"] = "Clear focus";
@@ -740,6 +741,7 @@ localizedStrings["Error: "] = "Error: ";
 localizedStrings["Errors"] = "Errors";
 localizedStrings["Errors:"] = "Errors:";
 localizedStrings["Estimated energy impact."] = "Estimated energy impact.";
+localizedStrings["Estimated memory usage of this canvas and its associated graphics resources"] = "Estimated memory usage of this canvas and its associated graphics resources";
 localizedStrings["Eval Code"] = "Eval Code";
 localizedStrings["Evaluate JavaScript"] = "Evaluate JavaScript";
 localizedStrings["Evaluations"] = "Evaluations";
@@ -784,6 +786,7 @@ localizedStrings["Failed to upgrade"] = "Failed to upgrade";
 localizedStrings["Failure status code"] = "Failure status code";
 /* Section title for font feature properties. */
 localizedStrings["Feature Properties @ Font Details Sidebar Section"] = "Feature Properties";
+localizedStrings["Features"] = "Features";
 /* Resource loaded via 'fetch' method */
 localizedStrings["Fetch"] = "Fetch";
 /* Resources loaded via 'fetch' method */
@@ -1109,7 +1112,6 @@ localizedStrings["Medium @ Network Priority"] = "Medium";
 localizedStrings["Medium @ Timeline Energy Impact"] = "Medium";
 localizedStrings["Memory"] = "Memory";
 localizedStrings["Memory Cache"] = "Memory Cache";
-localizedStrings["Memory usage of this canvas"] = "Memory usage of this canvas";
 localizedStrings["Memory: %s"] = "Memory: %s";
 localizedStrings["Message"] = "Message";
 localizedStrings["Method"] = "Method";
@@ -1389,6 +1391,8 @@ localizedStrings["Recording Type Canvas WebGL"] = "WebGL";
 /* A type of canvas recording in the Graphics Tab. */
 localizedStrings["Recording Type Canvas WebGL2"] = "WebGL2";
 /* A type of canvas recording in the Graphics Tab. */
+localizedStrings["Recording Type Canvas WebGPU"] = "WebGPU";
+/* A type of canvas recording in the Graphics Tab. */
 localizedStrings["Recording Type Offscreen Canvas 2D"] = "Offscreen2D";
 /* A type of canvas recording in the Graphics Tab. */
 localizedStrings["Recording Type Offscreen Canvas Bitmap Renderer"] = "Bitmap Renderer (Offscreen)";
@@ -1422,6 +1426,7 @@ localizedStrings["Regular Expression @ Settings"] = "Regular Expression";
 localizedStrings["Reload Web Inspector"] = "Reload Web Inspector";
 localizedStrings["Reload page (%s)\nReload page ignoring cache (%s)"] = "Reload page (%s)\nReload page ignoring cache (%s)";
 localizedStrings["Removals"] = "Removals";
+localizedStrings["Remove Recording"] = "Remove Recording";
 localizedStrings["Removed ancestor "] = "Removed ancestor ";
 localizedStrings["Removed descendant "] = "Removed descendant ";
 localizedStrings["Render Pipeline %d"] = "Render Pipeline %d";
@@ -1451,6 +1456,7 @@ localizedStrings["Resource Size"] = "Resource Size";
 localizedStrings["Resource Type"] = "Resource Type";
 localizedStrings["Resource does not have timing data"] = "Resource does not have timing data";
 localizedStrings["Resource failed to load."] = "Resource failed to load.";
+localizedStrings["Resource has binary content."] = "Resource has binary content.";
 /* An error message shown when there is no cached content for a HTTP 304 Not Modified resource response. */
 localizedStrings["Resource has no cached content. @ Resource Preview"] = "Resource has no cached content.";
 localizedStrings["Resource has no content."] = "Resource has no content.";
@@ -2037,8 +2043,6 @@ localizedStrings["WebGL2 @ Offscreen Canvas Context Type"] = "WebGL2 (Offscreen)
 /* WebGPU is a type of rendering context associated with a <canvas> element. */
 localizedStrings["WebGPU @ Canvas Context Type"] = "WebGPU";
 localizedStrings["WebKit Threads"] = "WebKit Threads";
-/* WebMetal is a type of rendering context associated with a <canvas> element. */
-localizedStrings["WebMetal @ Canvas Context Type"] = "WebMetal";
 localizedStrings["WebP"] = "WebP";
 localizedStrings["WebRTC"] = "WebRTC";
 localizedStrings["WebRTC Logging:"] = "WebRTC Logging:";
@@ -2078,6 +2082,7 @@ localizedStrings["\u0022%s\u0022 has a non-number \u0022%s\u0022 value"] = "\u00
 localizedStrings["\u0022%s\u0022 has a non-object \u0022%s\u0022 value"] = "\u0022%s\u0022 has a non-object \u0022%s\u0022 value";
 localizedStrings["\u0022%s\u0022 has a non-string \u0022%s\u0022 value"] = "\u0022%s\u0022 has a non-string \u0022%s\u0022 value";
 localizedStrings["\u0022%s\u0022 has an invalid \u0022%s\u0022 value"] = "\u0022%s\u0022 has an invalid \u0022%s\u0022 value";
+localizedStrings["\u0022%s\u0022 is deprecated. Use \u0022%s\u0022 instead."] = "\u0022%s\u0022 is deprecated. Use \u0022%s\u0022 instead.";
 localizedStrings["\u0022%s\u0022 is not JSON serializable"] = "\u0022%s\u0022 is not JSON serializable";
 localizedStrings["\u0022%s\u0022 is not valid for %s"] = "\u0022%s\u0022 is not valid for %s";
 localizedStrings["\u0022%s\u0022 is too new to run in the inspected page"] = "\u0022%s\u0022 is too new to run in the inspected page";

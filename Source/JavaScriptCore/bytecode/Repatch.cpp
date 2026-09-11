@@ -597,7 +597,7 @@ static InlineCacheAction tryCacheGetBy(JSGlobalObject* globalObject, CodeBlock* 
 
             RefPtr<PolyProtoAccessChain> prototypeAccessChain;
 
-            PropertyOffset offset = slot.isUnset() ? invalidOffset : slot.cachedOffset();
+            PropertyOffset offset = slot.isUnset() || slot.isCustom() ? invalidOffset : slot.cachedOffset();
 
             if (slot.isCustom() && slot.slotBase() == baseValue) {
                 // To cache self customs, we must disallow dictionaries because we
@@ -664,6 +664,14 @@ static InlineCacheAction tryCacheGetBy(JSGlobalObject* globalObject, CodeBlock* 
                     }
                 }
             }
+
+            // Fresh dictionaries were flattened above, but one that has already been flattened once is not
+            // re-flattened and stays a dictionary. A custom with no backing property in the slot base's structure
+            // (invalidOffset, such as one served from a static property table) is shadowed by adding that
+            // property, which on a dictionary happens in place with no structure transition, leaving the
+            // constant custom getter recorded here stale.
+            if (slot.isCacheableCustom() && slot.slotBase()->structure()->isDictionary() && !isValidOffset(slot.cachedOffset()))
+                return GiveUpOnCache;
 
             JSFunction* getter = nullptr;
             if (slot.isCacheableGetter())
@@ -813,10 +821,6 @@ static InlineCacheAction tryCacheArrayGetByVal(JSGlobalObject* globalObject, Cod
             accessType = AccessCase::IndexedProxyObjectLoad;
         else if (isTypedView(base->type())) {
             auto* typedArray = uncheckedDowncast<JSArrayBufferView>(base);
-#if USE(JSVALUE32_64)
-            if (typedArray->isResizableOrGrowableShared())
-                return GiveUpOnCache;
-#endif
             switch (typedArray->type()) {
             case Int8ArrayType:
                 accessType = typedArray->isResizableOrGrowableShared() ? AccessCase::IndexedResizableTypedArrayInt8Load : AccessCase::IndexedTypedArrayInt8Load;
@@ -1215,6 +1219,13 @@ static InlineCacheAction tryCachePutBy(JSGlobalObject* globalObject, CodeBlock* 
                 if (!cacheStatus)
                     return GiveUpOnCache;
 
+                // prepareChainForCaching leaves a dictionary that has already been flattened once as a dictionary.
+                // A custom with no backing property in the base's structure (invalidOffset, such as one served from
+                // a static property table) is shadowed by adding that property, which on a dictionary happens in
+                // place with no structure transition, leaving this cache stale.
+                if (!isValidOffset(slot.cachedOffset()) && slot.base()->structure()->isDictionary())
+                    return GiveUpOnCache;
+
                 if (slot.base() != baseValue) {
                     if (cacheStatus->usesPolyProto) {
                         prototypeAccessChain = PolyProtoAccessChain::tryCreate(globalObject, baseCell, propertyName, slot.base());
@@ -1390,10 +1401,6 @@ static InlineCacheAction tryCacheArrayPutByVal(JSGlobalObject* globalObject, Cod
             }
         } else if (isTypedView(base->type())) {
             auto* typedArray = uncheckedDowncast<JSArrayBufferView>(base);
-#if USE(JSVALUE32_64)
-            if (typedArray->isResizableOrGrowableShared())
-                return GiveUpOnCache;
-#endif
             switch (typedArray->type()) {
             case Int8ArrayType:
                 accessType = typedArray->isResizableOrGrowableShared() ? AccessCase::IndexedResizableTypedArrayInt8Store : AccessCase::IndexedTypedArrayInt8Store;
@@ -1995,10 +2002,6 @@ static InlineCacheAction tryCacheArrayInByVal(JSGlobalObject* globalObject, Code
             accessType = AccessCase::IndexedProxyObjectIn;
         else if (isTypedView(base->type())) {
             auto* typedArray = uncheckedDowncast<JSArrayBufferView>(base);
-#if USE(JSVALUE32_64)
-            if (typedArray->isResizableOrGrowableShared())
-                return GiveUpOnCache;
-#endif
             switch (typedArray->type()) {
             case Int8ArrayType:
                 accessType = typedArray->isResizableOrGrowableShared() ? AccessCase::IndexedResizableTypedArrayInt8In : AccessCase::IndexedTypedArrayInt8In;

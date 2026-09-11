@@ -36,7 +36,6 @@
 #include <WebCore/LoaderMalloc.h>
 #include <WebCore/RegistrableDomain.h>
 #include <WebCore/ResourceLoaderIdentifier.h>
-#include <wtf/Expected.h>
 #include <wtf/Forward.h>
 #include <wtf/Platform.h>
 #include <wtf/TZoneMalloc.h>
@@ -349,7 +348,7 @@ public:
 #endif
 
     virtual void prefetchDNS(const String&) = 0;
-    virtual void sendH2Ping(const URL&, CompletionHandler<void(Expected<Seconds, ResourceError>&&)>&&) = 0;
+    virtual void sendH2Ping(const URL&, CompletionHandler<void(std::expected<Seconds, ResourceError>&&)>&&) = 0;
 
     virtual void didRestoreScrollPosition() { }
 
@@ -365,6 +364,10 @@ public:
     virtual Vector<RegistrableDomain> loadedSubresourceDomains() const { return { }; }
 
     virtual RefPtr<Frame> provisionalParentFrame() const;
+
+    // True while this frame is a provisional frame for a cross-process navigation that has not
+    // committed yet, and so is not in the frame tree even though it has a parent to be attached to.
+    virtual bool isProvisionalFrame() const;
 
     virtual AllowsContentJavaScript allowsContentJavaScriptFromMostRecentNavigation() const { return AllowsContentJavaScript::Yes; }
 

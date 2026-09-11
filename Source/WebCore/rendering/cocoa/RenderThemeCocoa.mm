@@ -144,7 +144,7 @@ static void drawFocusRingForPathForVectorBasedControls(const RenderObject& box, 
     // macOS controls have never honored outline offset.
 #if PLATFORM(IOS_FAMILY)
     auto deviceScaleFactor = box.style().deviceScaleFactor();
-    auto outlineOffset = floorToDevicePixel(Style::evaluate<float>(box.style().usedOutlineOffset(), box.style().usedZoomForLength()), deviceScaleFactor);
+    auto outlineOffset = Style::evaluate<float>(box.style().usedOutlineOffset(), box.style().usedZoomForLength(), deviceScaleFactor);
 
     if (outlineOffset > 0) {
         const auto center = rect.center();
@@ -623,10 +623,6 @@ static bool renderThemePaintLiquidGlassSwitchThumb(OptionSet<ControlStyle::State
     const auto styleColorOptions = renderer.styleColorOptions();
 
     auto thumbColor = liquidGlassSwitchThumbColor(renderer);
-#if PLATFORM(MAC)
-    if (states.contains(ControlStyle::State::Pressed) && states.contains(ControlStyle::State::Enabled))
-        adjustSwitchColorForPressedState(thumbColor, styleColorOptions);
-#endif
     auto roundedTrackRect = switchTrackRoundedRect(trackRect, isVertical, switchCornerRadiusFraction);
 
     Path trackPath = continuousRoundedRectFromRoundedRect(roundedTrackRect);
@@ -936,7 +932,7 @@ void RenderThemeCocoa::adjustApplePayButtonStyle(Style::ComputedStyle& style, co
     style.setMinHeight(Style::MinimumSize::Fixed { applePayButtonMinimumHeight });
 
     if (!style.hasExplicitlySetBorderRadius()) {
-        auto radius = Style::LengthPercentage<CSS::NonnegativeUnzoomed>::Dimension { static_cast<float>(PKApplePayButtonDefaultCornerRadius) };
+        auto radius = Style::LengthPercentage<CSS::Nonnegative>::Dimension { static_cast<float>(PKApplePayButtonDefaultCornerRadius) };
         style.setBorderRadius({ radius, radius });
     }
 }
@@ -1469,6 +1465,7 @@ bool RenderThemeCocoa::controlSupportsTints(const RenderElement& box) const
     case StyleAppearance::Checkbox:
     case StyleAppearance::Radio:
         return isChecked(box) || isIndeterminate(box);
+    case StyleAppearance::InnerSpinButton:
     case StyleAppearance::ListButton:
     case StyleAppearance::ProgressBar:
     case StyleAppearance::SliderHorizontal:
@@ -1911,14 +1908,6 @@ static bool NODELETE searchFieldCanBeCapsule(const RenderElement& box, const Flo
     return textGapEmSize * pixelsPerEm >= borderRadius;
 }
 
-static CSSToLengthConversionData conversionDataForStyle(const Style::ComputedStyle& style)
-{
-    CSSToLengthConversionData conversionData(style, nullptr, nullptr, nullptr);
-    if (style.evaluationTimeZoomEnabled())
-        return conversionData.copyWithAdjustedZoom(1.0f, CSS::RangeZoomOptions::Unzoomed);
-    return conversionData;
-}
-
 static RoundedShape shapeForSearchField(const RenderElement& box, const FloatRect& rect, ShouldComputePath computePath = ShouldComputePath::Yes)
 {
     CheckedRef style = box.style();
@@ -1930,7 +1919,7 @@ static RoundedShape shapeForSearchField(const RenderElement& box, const FloatRec
         supportsResults = input->maxResults() > 0;
 #endif
 
-    const auto pixelsPerEm = Style::emToPx<float>(1, style);
+    const auto pixelsPerEm = Style::emToPxZoomed<float>(1, style);
     const auto usingCapsuleShape = searchFieldCanBeCapsule(box, rect, pixelsPerEm, supportsResults);
 
     float rectRadius = 0.f;
@@ -2465,7 +2454,7 @@ bool RenderThemeCocoa::adjustInnerSpinButtonStyleForVectorBasedControls(Style::C
     // change according to the height of the inner container.
 
     const auto logicalWidthEm = style.writingMode().isVertical() ? 1.5f : 1.f;
-    const auto pixelsPerEm = Style::emToPx<float>(logicalWidthEm, conversionDataForStyle(style));
+    const auto pixelsPerEm = Style::emToPx<float>(logicalWidthEm, style);
 
     style.setLogicalWidth(Style::PreferredSize::Fixed { pixelsPerEm });
     style.setLogicalHeight(CSS::Keyword::Auto { });
@@ -2798,11 +2787,12 @@ static void applyEmPadding(Style::ComputedStyle& style, float paddingInlineEm, f
 {
     const auto usedZoom = style.usedZoomForLength().value;
 
+    // FIXME: These should probably use the unzoomed Style::emToPx conversion rather than applying zoom and then unapply zoom. Due to the truncation from the explicit int type, using Style::emToPx will result in slightly different metrics.
     const auto paddingInlinePixels = Style::PaddingEdge::Fixed {
-        static_cast<float>(Style::emToPx<int>(paddingInlineEm, style)) / usedZoom
+        static_cast<float>(Style::emToPxZoomed<int>(paddingInlineEm, style)) / usedZoom
     };
     const auto paddingBlockPixels = Style::PaddingEdge::Fixed {
-        static_cast<float>(Style::emToPx<int>(paddingBlockEm, style)) / usedZoom
+        static_cast<float>(Style::emToPxZoomed<int>(paddingBlockEm, style)) / usedZoom
     };
 
     const auto isVertical = !style.writingMode().isHorizontal();
@@ -2821,11 +2811,12 @@ static Style::PaddingBox paddingBoxForNumberField(const Style::ComputedStyle& st
 {
     const auto usedZoom = style.usedZoomForLength().value;
 
+    // FIXME: These should probably use the unzoomed Style::emToPx conversion rather than applying zoom and then unapply zoom. Due to the truncation from the explicit int type, using Style::emToPx will result in slightly different metrics.
     const auto paddingInlineStartPixels = Style::PaddingEdge::Fixed {
-        static_cast<float>(Style::emToPx<int>(standardTextControlInlinePaddingEm, style)) / usedZoom
+        static_cast<float>(Style::emToPxZoomed<int>(standardTextControlInlinePaddingEm, style)) / usedZoom
     };
     const auto paddingInlineEndAndBlockPixels = Style::PaddingEdge::Fixed {
-        static_cast<float>(Style::emToPx<int>(standardTextControlBlockPaddingEm, style)) / usedZoom
+        static_cast<float>(Style::emToPxZoomed<int>(standardTextControlBlockPaddingEm, style)) / usedZoom
     };
 
     Style::PaddingBox paddingBox { paddingInlineEndAndBlockPixels };
@@ -3150,8 +3141,10 @@ bool RenderThemeCocoa::paintTextAreaDecorationsForVectorBasedControls(const Rend
 static void applyCommonButtonPaddingToStyleForVectorBasedControls(Style::ComputedStyle& style)
 {
     const auto usedZoom = style.usedZoomForLength().value;
+
+    // FIXME: This should probably use the unzoomed Style::emToPx conversion rather than applying zoom and then unapply zoom. Due to the truncation from the explicit int type, using Style::emToPx will result in slightly different metrics.
     const auto pixels = Style::PaddingEdge::Fixed {
-        static_cast<float>(Style::emToPx<int>(0.5, style)) / usedZoom
+        static_cast<float>(Style::emToPxZoomed<int>(0.5, style)) / usedZoom
     };
 
     auto paddingBox = Style::PaddingBox { 0_css_px, pixels, 0_css_px, pixels };
@@ -3220,7 +3213,9 @@ static void adjustSelectListButtonStyleForVectorBasedControls(Style::ComputedSty
 #if PLATFORM(IOS_FAMILY)
     applyCommonButtonPaddingToStyleForVectorBasedControls(style);
 #endif
-    style.setLineHeight(CSS::Keyword::Normal { });
+
+    style.setLineHeight(Style::ComputedStyle::initialLineHeight());
+    style.setTextAutosizingAdjustedLineHeight(Style::ComputedStyle::initialLineHeight());
 }
 
 bool RenderThemeCocoa::adjustMenuListStyleForVectorBasedControls(Style::ComputedStyle& style, const Element* element) const
@@ -3240,8 +3235,10 @@ bool RenderThemeCocoa::adjustMenuListStyleForVectorBasedControls(Style::Computed
     style.setBoxShadow(CSS::Keyword::None  { });
 
     // Enforce "line-height: normal" as long as this element isn't a non-select element using `-webkit-appearance: menulist`.
-    if (element && is<HTMLSelectElement>(*element))
+    if (element && is<HTMLSelectElement>(*element)) {
         style.setLineHeight(CSS::Keyword::Normal { });
+        style.setTextAutosizingAdjustedLineHeight(CSS::Keyword::Normal { });
+    }
 
     return true;
 }
@@ -3334,10 +3331,12 @@ bool RenderThemeCocoa::adjustButtonStyleForVectorBasedControls(Style::ComputedSt
     constexpr auto controlBaseHeight = 20.0f;
     constexpr auto controlBaseFontSize = 11.0f;
 
+    // FIXME: unzoomedUsedSize() doesn't quite match 1em due to minimum font size restrictions. Likely this should use `Style::emToPx<int>(controlBaseHeight / controlBaseFontSize, style)` instead.
+
     if (!style.logicalWidth().isSpecified() || style.logicalHeight().isAuto()) {
-        auto minimumHeight = controlBaseHeight / controlBaseFontSize * style.fontDescription().computedSizeForRangeZoomOption(CSS::RangeZoomOptions::Unzoomed);
+        auto minimumHeight = controlBaseHeight / controlBaseFontSize * style.fontDescription().unzoomedUsedSize();
         if (auto fixedValue = style.logicalMinHeight().tryFixed())
-            minimumHeight = std::max(minimumHeight, fixedValue->resolveZoom(Style::ZoomFactor { 1.0f }));
+            minimumHeight = std::max(minimumHeight, fixedValue->resolveZoom(Style::ZoomFactor::none()));
         // FIXME: This may need to be a layout time adjustment to support various
         // values like fit-content etc.
         style.setLogicalMinHeight(Style::MinimumSize::Fixed { minimumHeight });
@@ -3347,8 +3346,10 @@ bool RenderThemeCocoa::adjustButtonStyleForVectorBasedControls(Style::ComputedSt
         return true;
 
     const auto usedZoom = style.usedZoomForLength().value;
+
+    // FIXME: This should probably use the unzoomed Style::emToPx conversion rather than applying zoom and then unapply zoom. Due to the truncation from the explicit int type, using Style::emToPx will result in slightly different metrics.
     const auto pixels = Style::PaddingEdge::Fixed {
-        static_cast<float>(Style::emToPx<int>(1, style)) / usedZoom
+        static_cast<float>(Style::emToPxZoomed<int>(1, style)) / usedZoom
     };
     auto paddingBox = Style::PaddingBox { 0_css_px, pixels, 0_css_px, pixels };
 #else
@@ -3382,8 +3383,10 @@ bool RenderThemeCocoa::adjustMenuListButtonStyleForVectorBasedControls(Style::Co
     const float menuListBaseHeight = 20;
     const float menuListBaseFontSize = 11;
 
+    // FIXME: unzoomedUsedSize() doesn't quite match 1em due to minimum font size restrictions. Likely this should use `Style::emToPx<int>(menuListBaseHeight / menuListBaseFontSize, style)` instead.
+
     if (style.logicalHeight().isAuto())
-        style.setLogicalMinHeight(Style::MinimumSize::Fixed { static_cast<float>(std::max(menuListMinHeight, static_cast<int>(menuListBaseHeight / menuListBaseFontSize * style.fontDescription().computedSizeForRangeZoomOption(CSS::RangeZoomOptions::Unzoomed)))) });
+        style.setLogicalMinHeight(Style::MinimumSize::Fixed { static_cast<float>(std::max(menuListMinHeight, static_cast<int>(menuListBaseHeight / menuListBaseFontSize * style.fontDescription().unzoomedUsedSize()))) });
     else
         style.setLogicalMinHeight(Style::MinimumSize::Fixed { static_cast<float>(menuListMinHeight) });
 
@@ -3462,7 +3465,7 @@ bool RenderThemeCocoa::paintMenuListButtonDecorationsForVectorBasedControls(cons
         glyphPath.addBezierCurveTo({ 6.31419f, 19.9961f }, { 6.6506f, 20.1625f }, { 7.05356f, 20.1625f });
     }
 
-    const auto emPixels = Style::emToPx<float>(1, style);
+    const auto emPixels = Style::emToPxZoomed<float>(1, style);
     const auto glyphScale = 0.55f * emPixels / glyphSize.width();
     glyphSize = glyphScale * glyphSize;
 
@@ -4272,7 +4275,7 @@ bool RenderThemeCocoa::adjustSearchFieldCancelButtonStyleForVectorBasedControls(
     if (!formControlRefreshEnabled(element))
         return false;
 
-    auto pixelsPerEm = Style::emToPx<float>(1, conversionDataForStyle(style));
+    auto pixelsPerEm = Style::emToPx<float>(1, style);
     style.setWidth(Style::PreferredSize::Fixed { searchFieldDecorationEmSize * pixelsPerEm });
     style.setHeight(Style::PreferredSize::Fixed { searchFieldDecorationEmSize * pixelsPerEm });
     return true;
@@ -4365,7 +4368,7 @@ bool RenderThemeCocoa::adjustSearchFieldDecorationPartStyleForVectorBasedControl
     if (!formControlRefreshEnabled(element))
         return false;
 
-    auto pixelsPerEm = Style::emToPx<float>(1, conversionDataForStyle(style));
+    auto pixelsPerEm = Style::emToPx<float>(1, style);
 
 #if PLATFORM(MAC)
     RefPtr input = dynamicDowncast<HTMLInputElement>(element->shadowHost());

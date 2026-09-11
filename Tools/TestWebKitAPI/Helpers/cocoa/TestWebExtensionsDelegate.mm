@@ -198,6 +198,19 @@
         _didUpdateSidebar(sidebar);
 }
 
+- (void)_webExtensionController:(WKWebExtensionController *)controller didInvalidateSidebar:(_WKWebExtensionSidebar *)sidebar forExtensionContext:(WKWebExtensionContext *)context
+{
+    if (_didInvalidateSidebar)
+        _didInvalidateSidebar(sidebar);
+}
+
+- (_WKWebExtensionSidebarSide)_webExtensionController:(WKWebExtensionController *)controller sidebarSideForExtensionContext:(WKWebExtensionContext *)context
+{
+    if (_sidebarSide)
+        return _sidebarSide();
+    return _WKWebExtensionSidebarSideRight;
+}
+
 
 - (void)_webExtensionController:(WKWebExtensionController *)controller createBookmarkWithParentIdentifier:(NSString *)parentId index:(NSNumber *)index url:(NSString *)url title:(NSString *)title forExtensionContext:(WKWebExtensionContext *)context completionHandler:(void (^)(NSObject<_WKWebExtensionBookmark> *, NSError *))completionHandler
 {

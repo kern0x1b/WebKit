@@ -25,7 +25,7 @@
 
 WI.ShaderProgram = class ShaderProgram extends WI.Object
 {
-    constructor(target, identifier, programType, canvas, {sharesVertexFragmentShader} = {})
+    constructor(target, identifier, programType, canvas, {sharesVertexFragmentShader, displayName} = {})
     {
         console.assert(target instanceof WI.Target, target);
         console.assert(target === canvas.target, target, canvas.target);
@@ -33,6 +33,7 @@ WI.ShaderProgram = class ShaderProgram extends WI.Object
         console.assert(Object.values(ShaderProgram.ProgramType).includes(programType));
         console.assert(canvas instanceof WI.Canvas);
         console.assert(ShaderProgram.contextTypeSupportsProgramType(canvas.contextType, programType));
+        console.assert(!displayName || typeof displayName === "string", displayName);
 
         super();
 
@@ -40,6 +41,7 @@ WI.ShaderProgram = class ShaderProgram extends WI.Object
         this._identifier = identifier;
         this._programType = programType;
         this._canvas = canvas;
+        this._displayName = displayName || "";
 
         this._sharesVertexFragmentShader = !!sharesVertexFragmentShader;
         console.assert(!this._sharesVertexFragmentShader || (this._canvas.contextType === WI.Canvas.ContextType.WebGPU && this._programType === ShaderProgram.ProgramType.Render));
@@ -60,7 +62,8 @@ WI.ShaderProgram = class ShaderProgram extends WI.Object
 
         case WI.Canvas.ContextType.WebGPU:
             return programType === ShaderProgram.ProgramType.Compute
-                || programType === ShaderProgram.ProgramType.Render;
+                || programType === ShaderProgram.ProgramType.Render
+                || programType === ShaderProgram.ProgramType.Vertex;
         }
 
         console.assert();
@@ -76,6 +79,9 @@ WI.ShaderProgram = class ShaderProgram extends WI.Object
         case ShaderProgram.ProgramType.Render:
             return shaderType === ShaderProgram.ShaderType.Fragment
                 || shaderType === ShaderProgram.ShaderType.Vertex;
+
+        case ShaderProgram.ProgramType.Vertex:
+            return shaderType === ShaderProgram.ShaderType.Vertex;
         }
 
         console.assert();
@@ -90,8 +96,39 @@ WI.ShaderProgram = class ShaderProgram extends WI.Object
     get canvas() { return this._canvas; }
     get sharesVertexFragmentShader() { return this._sharesVertexFragmentShader; }
 
+    get supportsDisabling()
+    {
+        switch (this._programType) {
+        case ShaderProgram.ProgramType.Render:
+        case ShaderProgram.ProgramType.Vertex:
+            return true;
+        case ShaderProgram.ProgramType.Compute:
+            return false;
+        }
+        console.assert(false, this._programType);
+        return false;
+    }
+
+    get supportsHighlighting()
+    {
+        switch (this._canvas.contextType) {
+        case WI.Canvas.ContextType.WebGL:
+        case WI.Canvas.ContextType.OffscreenWebGL:
+        case WI.Canvas.ContextType.WebGL2:
+        case WI.Canvas.ContextType.OffscreenWebGL2:
+            return true;
+        case WI.Canvas.ContextType.WebGPU:
+            return this._programType === ShaderProgram.ProgramType.Render;
+        }
+        console.assert(false, this._canvas.contextType, this._programType);
+        return false;
+    }
+
     get displayName()
     {
+        if (this._displayName)
+            return this._displayName;
+
         let format = null;
         switch (this._canvas.contextType) {
         case WI.Canvas.ContextType.WebGL:
@@ -106,14 +143,17 @@ WI.ShaderProgram = class ShaderProgram extends WI.Object
                 format = WI.UIString("Compute Pipeline %d");
                 break;
             case ShaderProgram.ProgramType.Render:
+            case ShaderProgram.ProgramType.Vertex:
                 format = WI.UIString("Render Pipeline %d");
                 break;
             }
             break;
         }
         console.assert(format);
-        if (!this._uniqueDisplayNumber)
-            this._uniqueDisplayNumber = this._canvas.nextShaderProgramDisplayNumberForProgramType(this._programType);
+        if (!this._uniqueDisplayNumber) {
+            let programType = this._programType === ShaderProgram.ProgramType.Vertex ? ShaderProgram.ProgramType.Render : this._programType;
+            this._uniqueDisplayNumber = this._canvas.nextShaderProgramDisplayNumberForProgramType(programType);
+        }
         return format.format(this._uniqueDisplayNumber);
     }
 
@@ -124,11 +164,7 @@ WI.ShaderProgram = class ShaderProgram extends WI.Object
 
     set disabled(disabled)
     {
-        console.assert(this._programType === ShaderProgram.ProgramType.Render);
-        console.assert(this._canvas.isWebGL || this._canvas.isWebGL2);
-
-        if (this._canvas.contextType === WI.Canvas.ContextType.WebGPU)
-            return;
+        console.assert(this.supportsDisabling);
 
         if (this._disabled === disabled)
             return;
@@ -167,16 +203,14 @@ WI.ShaderProgram = class ShaderProgram extends WI.Object
 
     showHighlight()
     {
-        console.assert(this._programType === ShaderProgram.ProgramType.Render);
-        console.assert(this._canvas.isWebGL || this._canvas.isWebGL2);
+        console.assert(this.supportsHighlighting);
 
         this._target.CanvasAgent.setShaderProgramHighlighted(this._identifier, true);
     }
 
     hideHighlight()
     {
-        console.assert(this._programType === ShaderProgram.ProgramType.Render);
-        console.assert(this._canvas.isWebGL || this._canvas.isWebGL2);
+        console.assert(this.supportsHighlighting);
 
         this._target.CanvasAgent.setShaderProgramHighlighted(this._identifier, false);
     }
@@ -185,6 +219,7 @@ WI.ShaderProgram = class ShaderProgram extends WI.Object
 WI.ShaderProgram.ProgramType = {
     Compute: "compute",
     Render: "render",
+    Vertex: "vertex",
 };
 
 WI.ShaderProgram.ShaderType = {

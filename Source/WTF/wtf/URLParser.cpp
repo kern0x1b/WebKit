@@ -28,6 +28,7 @@
 
 #include <array>
 #include <functional>
+#include <wtf/SIMDHelpers.h>
 #include <wtf/text/CodePointIterator.h>
 #include <wtf/text/MakeString.h>
 
@@ -324,17 +325,17 @@ bool isForbiddenHostCodePoint(char16_t character)
     return character <= 0x7F && characterClassTable[character] & ForbiddenHost;
 }
 
-template<typename CharacterType> ALWAYS_INLINE static bool isC0Control(CharacterType character) { return character <= 0x1F; }
-template<typename CharacterType> ALWAYS_INLINE static bool isC0ControlOrSpace(CharacterType character) { return character <= 0x20; }
-template<typename CharacterType> ALWAYS_INLINE static bool isTabOrNewline(CharacterType character) { return character <= 0xD && character >= 0x9 && character != 0xB && character != 0xC; }
-template<typename CharacterType> ALWAYS_INLINE static bool isInC0ControlEncodeSet(CharacterType character) { return character > 0x7E || isC0Control(character); }
-template<typename CharacterType> ALWAYS_INLINE static bool isInFragmentEncodeSet(CharacterType character) { return character > 0x7E || character == '`' || ((characterClassTable[character] & QueryEncode) && character != '#'); }
-template<typename CharacterType> ALWAYS_INLINE static bool isInPathEncodeSet(CharacterType character) { return character > 0x7E || characterClassTable[character] & PathEncode; }
-template<typename CharacterType> ALWAYS_INLINE static bool isInUserInfoEncodeSet(CharacterType character) { return character > 0x7E || characterClassTable[character] & UserInfoEncode; }
-template<typename CharacterType> ALWAYS_INLINE static bool isPercentOrNonASCII(CharacterType character) { return !isASCII(character) || character == '%'; }
-template<typename CharacterType> ALWAYS_INLINE static bool isSlashQuestionOrHash(CharacterType character) { return character <= '\\' && characterClassTable[character] & SlashQuestionOrHash; }
-template<typename CharacterType> ALWAYS_INLINE static bool isValidSchemeCharacter(CharacterType character) { return character <= 'z' && characterClassTable[character] & ValidScheme; }
-template<typename CharacterType> ALWAYS_INLINE static bool isSpecialCharacterForFragmentDirective(CharacterType character) { return !isASCII(character) || character == ',' || character == '-'; }
+template<typename CharacterType> ALWAYS_INLINE static constexpr bool isC0Control(CharacterType character) { return character <= 0x1F; }
+template<typename CharacterType> ALWAYS_INLINE static constexpr bool isC0ControlOrSpace(CharacterType character) { return character <= 0x20; }
+template<typename CharacterType> ALWAYS_INLINE static constexpr bool isTabOrNewline(CharacterType character) { return character <= 0xD && character >= 0x9 && character != 0xB && character != 0xC; }
+template<typename CharacterType> ALWAYS_INLINE static constexpr bool isInC0ControlEncodeSet(CharacterType character) { return character > 0x7E || isC0Control(character); }
+template<typename CharacterType> ALWAYS_INLINE static constexpr bool isInFragmentEncodeSet(CharacterType character) { return character > 0x7E || character == '`' || ((characterClassTable[character] & QueryEncode) && character != '#'); }
+template<typename CharacterType> ALWAYS_INLINE static constexpr bool isInPathEncodeSet(CharacterType character) { return character > 0x7E || characterClassTable[character] & PathEncode; }
+template<typename CharacterType> ALWAYS_INLINE static constexpr bool isInUserInfoEncodeSet(CharacterType character) { return character > 0x7E || characterClassTable[character] & UserInfoEncode; }
+template<typename CharacterType> ALWAYS_INLINE static constexpr bool isPercentOrNonASCII(CharacterType character) { return !isASCII(character) || character == '%'; }
+template<typename CharacterType> ALWAYS_INLINE static constexpr bool isSlashQuestionOrHash(CharacterType character) { return character <= '\\' && characterClassTable[character] & SlashQuestionOrHash; }
+template<typename CharacterType> ALWAYS_INLINE static constexpr bool isValidSchemeCharacter(CharacterType character) { return character <= 'z' && characterClassTable[character] & ValidScheme; }
+template<typename CharacterType> ALWAYS_INLINE static constexpr bool isSpecialCharacterForFragmentDirective(CharacterType character) { return !isASCII(character) || character == ',' || character == '-'; }
 
 template<typename CharacterType>
 ALWAYS_INLINE bool URLParser::isForbiddenHostCodePoint(CharacterType character)
@@ -350,7 +351,7 @@ ALWAYS_INLINE bool URLParser::isForbiddenDomainCodePoint(CharacterType character
     return character <= 0x7F && characterClassTable[character] & ForbiddenDomain;
 }
 
-ALWAYS_INLINE static bool shouldPercentEncodeQueryByte(uint8_t byte, bool urlIsSpecial)
+ALWAYS_INLINE static constexpr bool shouldPercentEncodeQueryByte(uint8_t byte, bool urlIsSpecial)
 {
     if (characterClassTable[byte] & QueryEncode)
         return true;
@@ -418,6 +419,86 @@ ALWAYS_INLINE void URLParser::appendToASCIIBuffer(std::span<const Latin1Characte
 {
     if (m_didSeeSyntaxViolation) [[unlikely]]
         m_asciiBuffer.append(characters);
+}
+
+ALWAYS_INLINE void URLParser::appendToASCIIBuffer(std::span<const char16_t> characters)
+{
+    if (!m_didSeeSyntaxViolation) [[likely]]
+        return;
+    ASSERT_WITH_SECURITY_IMPLICATION(charactersAreAllASCII(characters));
+    size_t offset = m_asciiBuffer.size();
+    m_asciiBuffer.grow(offset + characters.size());
+    copyElements(m_asciiBuffer.mutableSpan().subspan(offset), characters);
+}
+
+template<bool special> static constexpr bool isInQueryEncodeSet(Latin1Character character) { return shouldPercentEncodeQueryByte(character, special); }
+
+template<auto isInEncodeSet, Latin1Character... stopCharacters>
+static consteval bool stopCharactersCoverEncodeSet()
+{
+    for (unsigned character = 0x21; character <= 0x7E; ++character) {
+        if (isInEncodeSet(static_cast<Latin1Character>(character)) && !((character == stopCharacters) || ...))
+            return false;
+    }
+    return true;
+}
+
+template<typename CharacterType, auto isInEncodeSet, Latin1Character... stopCharacters>
+ALWAYS_INLINE static std::span<const CharacterType> trivialCodePointPrefix(std::span<const CharacterType> span)
+{
+    static_assert(stopCharactersCoverEncodeSet<isInEncodeSet, stopCharacters...>());
+    using UnsignedType = SameSizeUnsignedInteger<CharacterType>;
+    auto vectorMatch = [&](auto vec) ALWAYS_INLINE_LAMBDA {
+        return SIMD::findFirstNonZeroIndex(SIMD::bitOr(
+            SIMD::lessThanOrEqual(vec, SIMD::splat<UnsignedType>(0x20)),
+            SIMD::greaterThanOrEqual(vec, SIMD::splat<UnsignedType>(0x7F)),
+            SIMD::equal<stopCharacters...>(vec)));
+    };
+    auto scalarMatch = [&](auto character) ALWAYS_INLINE_LAMBDA {
+        return character <= 0x20 || character >= 0x7F || ((character == stopCharacters) || ...);
+    };
+    return span.first(SIMD::find<CharacterType>(span, vectorMatch, scalarMatch) - span.data());
+}
+
+template<typename CharacterType>
+ALWAYS_INLINE static std::span<const CharacterType> trivialPathCodePointPrefix(std::span<const CharacterType> span, bool special)
+{
+    if (special)
+        return trivialCodePointPrefix<CharacterType, isInPathEncodeSet<Latin1Character>, '"', '#', '<', '>', '?', '^', '`', '{', '}', '/', '\\'>(span);
+    return trivialCodePointPrefix<CharacterType, isInPathEncodeSet<Latin1Character>, '"', '#', '<', '>', '?', '^', '`', '{', '}', '/'>(span);
+}
+
+template<typename CharacterType>
+ALWAYS_INLINE static std::span<const CharacterType> trivialFragmentCodePointPrefix(std::span<const CharacterType> span)
+{
+    return trivialCodePointPrefix<CharacterType, isInFragmentEncodeSet<Latin1Character>, '"', '<', '>', '`'>(span);
+}
+
+template<typename CharacterType>
+ALWAYS_INLINE static std::span<const CharacterType> trivialQueryCodePointPrefix(std::span<const CharacterType> span, bool special)
+{
+    if (special)
+        return trivialCodePointPrefix<CharacterType, isInQueryEncodeSet<true>, '"', '#', '<', '>', '\''>(span);
+    return trivialCodePointPrefix<CharacterType, isInQueryEncodeSet<false>, '"', '#', '<', '>'>(span);
+}
+
+template<typename CharacterType>
+ALWAYS_INLINE static std::span<const CharacterType> trivialOpaquePathCodePointPrefix(std::span<const CharacterType> span)
+{
+    return trivialCodePointPrefix<CharacterType, isInC0ControlEncodeSet<Latin1Character>, '?', '#', '/'>(span);
+}
+
+template<typename CharacterType, typename TrivialCodePointPrefix>
+ALWAYS_INLINE void URLParser::consumeTrivialCodePoints(CodePointIterator<CharacterType>& c, NOESCAPE const TrivialCodePointPrefix& trivialCodePointPrefix)
+{
+    if (c.atEnd())
+        return;
+    auto span = c.span();
+    if (m_didSeeSyntaxViolation && span.size() < SIMD::stride<CharacterType>)
+        return;
+    auto prefix = trivialCodePointPrefix(span);
+    appendToASCIIBuffer(prefix);
+    c.advanceBy(prefix.size());
 }
 
 template<typename CharacterType>
@@ -794,12 +875,8 @@ void URLParser::copyASCIIStringUntil(const String& string, size_t length)
     ASSERT(m_asciiBuffer.isEmpty());
     if (string.is8Bit())
         appendToASCIIBuffer(string.span8().first(length));
-    else {
-        for (auto character : string.span16().first(length)) {
-            ASSERT_WITH_SECURITY_IMPLICATION(isASCII(character));
-            appendToASCIIBuffer(character);
-        }
-    }
+    else
+        appendToASCIIBuffer(string.span16().first(length));
 }
 
 template<typename CharacterType>
@@ -1127,7 +1204,7 @@ URLParser::URLParser(String&& input, const URL& base, const URLTextEncoding* non
 template<typename CharacterType>
 void URLParser::parse(std::span<const CharacterType> input, const URL& base, const URLTextEncoding* nonUTF8QueryEncoding)
 {
-    URL_PARSER_LOG("Parsing URL <%s> base <%s>", String(input).utf8().data(), base.string().utf8().data());
+    URL_PARSER_LOG("Parsing URL <%s> base <%s>", String(input).utf8().legacyCStringPointer(), base.string().utf8().legacyCStringPointer());
     m_url = { };
     ASSERT(m_asciiBuffer.isEmpty());
 
@@ -1175,7 +1252,7 @@ void URLParser::parse(std::span<const CharacterType> input, const URL& base, con
         Fragment,
     };
 
-#define LOG_STATE(x) URL_PARSER_LOG("State %s, code point %c, parsed data <%s> size %zu", x, *c, parsedDataView(0, currentPosition(c)).utf8().data(), currentPosition(c))
+#define LOG_STATE(x) URL_PARSER_LOG("State %s, code point %c, parsed data <%s> size %zu", x, *c, parsedDataView(0, currentPosition(c)).utf8().legacyCStringPointer(), currentPosition(c))
 #define LOG_FINAL_STATE(x) URL_PARSER_LOG("Final State: %s", x)
 
     State state = State::SchemeStart;
@@ -1773,6 +1850,7 @@ void URLParser::parse(std::span<const CharacterType> input, const URL& base, con
             }
             utf8PercentEncode<isInPathEncodeSet>(c);
             ++c;
+            consumeTrivialCodePoints(c, [&](auto span) { return trivialPathCodePointPrefix<CharacterType>(span, m_urlIsSpecial); });
             break;
         case State::OpaquePath:
             LOG_STATE("OpaquePath");
@@ -1806,6 +1884,7 @@ void URLParser::parse(std::span<const CharacterType> input, const URL& base, con
             } else {
                 utf8PercentEncode<isInC0ControlEncodeSet>(c);
                 ++c;
+                consumeTrivialCodePoints(c, [&](auto span) { return trivialOpaquePathCodePointPrefix<CharacterType>(span); });
             }
             break;
         case State::UTF8Query:
@@ -1819,6 +1898,7 @@ void URLParser::parse(std::span<const CharacterType> input, const URL& base, con
             ASSERT(!nonUTF8QueryEncoding);
             utf8QueryEncode(c);
             ++c;
+            consumeTrivialCodePoints(c, [&](auto span) { return trivialQueryCodePointPrefix<CharacterType>(span, m_urlIsSpecial); });
             break;
         case State::NonUTF8Query:
             do {
@@ -1838,6 +1918,7 @@ void URLParser::parse(std::span<const CharacterType> input, const URL& base, con
             URL_PARSER_LOG("State Fragment");
             utf8PercentEncode<isInFragmentEncodeSet>(c);
             ++c;
+            consumeTrivialCodePoints(c, [&](auto span) { return trivialFragmentCodePointPrefix<CharacterType>(span); });
             break;
         }
     }
@@ -2064,7 +2145,7 @@ void URLParser::parse(std::span<const CharacterType> input, const URL& base, con
     } else
         m_url.m_string = String::adopt(WTF::move(m_asciiBuffer));
     m_url.m_isValid = true;
-    URL_PARSER_LOG("Parsed URL <%s>\n\n", m_url.m_string.utf8().data());
+    URL_PARSER_LOG("Parsed URL <%s>\n\n", m_url.m_string.utf8().legacyCStringPointer());
 }
 
 template<typename CharacterType>
@@ -2206,7 +2287,7 @@ enum class URLParser::IPv4PieceParsingError {
 };
 
 template<typename CharacterType>
-Expected<uint32_t, URLParser::IPv4PieceParsingError> URLParser::parseIPv4Piece(CodePointIterator<CharacterType>& iterator, bool& didSeeSyntaxViolation)
+std::expected<uint32_t, URLParser::IPv4PieceParsingError> URLParser::parseIPv4Piece(CodePointIterator<CharacterType>& iterator, bool& didSeeSyntaxViolation)
 {
     enum class State : uint8_t {
         UnknownBase,
@@ -2295,9 +2376,9 @@ enum class URLParser::IPv4ParsingError {
 };
 
 template<typename CharacterTypeForSyntaxViolation, typename CharacterType>
-Expected<URLParser::IPv4Address, URLParser::IPv4ParsingError> URLParser::parseIPv4Host(const CodePointIterator<CharacterTypeForSyntaxViolation>& iteratorForSyntaxViolationPosition, CodePointIterator<CharacterType> iterator)
+std::expected<URLParser::IPv4Address, URLParser::IPv4ParsingError> URLParser::parseIPv4Host(const CodePointIterator<CharacterTypeForSyntaxViolation>& iteratorForSyntaxViolationPosition, CodePointIterator<CharacterType> iterator)
 {
-    Vector<Expected<uint32_t, URLParser::IPv4PieceParsingError>, 4> items;
+    Vector<std::expected<uint32_t, URLParser::IPv4PieceParsingError>, 4> items;
     bool didSeeSyntaxViolation = false;
     if (!iterator.atEnd() && *iterator == '.')
         return makeUnexpected(IPv4ParsingError::NotIPv4);
@@ -2852,6 +2933,12 @@ auto URLParser::parseHostAndPort(CodePointIterator<CharacterType> iterator) -> H
 
 std::optional<String> URLParser::formURLDecode(StringView input)
 {
+    // Fast path for input that decodes to itself. The general path below makes four full copies
+    // of the input, which is very expensive for long query parameter values. Restricted to ASCII
+    // because the UTF-8 round trip below is what rejects unpaired surrogates. rdar://185796614
+    if (input.containsOnlyASCII() && input.find('%') == notFound)
+        return input.toString();
+
     auto utf8 = input.utf8(StrictConversion);
     if (utf8.isNull())
         return std::nullopt;
@@ -2949,7 +3036,7 @@ bool URLParser::allValuesEqual(const URL& a, const URL& b)
         a.m_pathAfterLastSlash,
         a.m_pathEnd,
         a.m_queryEnd,
-        a.m_string.utf8().data(),
+        a.m_string.utf8().legacyCStringPointer(),
         b.m_isValid,
         b.m_hasOpaquePath,
         b.m_protocolIsInHTTPFamily,
@@ -2962,7 +3049,7 @@ bool URLParser::allValuesEqual(const URL& a, const URL& b)
         b.m_pathAfterLastSlash,
         b.m_pathEnd,
         b.m_queryEnd,
-        b.m_string.utf8().data());
+        b.m_string.utf8().legacyCStringPointer());
 
     return a.m_string == b.m_string
         && a.m_isValid == b.m_isValid

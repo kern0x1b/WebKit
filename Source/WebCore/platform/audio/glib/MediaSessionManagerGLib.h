@@ -76,7 +76,7 @@ protected:
     void addSession(PlatformMediaSessionInterface&) final;
     void setCurrentSession(PlatformMediaSessionInterface&) final;
 
-    void sessionWillBeginPlayback(PlatformMediaSessionInterface&, CompletionHandler<void(bool)>&&) override;
+    void sessionDidCompleteAdmission(PlatformMediaSessionInterface&) override;
     void sessionWillEndPlayback(PlatformMediaSessionInterface&, DelayCallingUpdateNowPlaying) override;
     void sessionStateChanged(PlatformMediaSessionInterface&) override;
     void sessionDidEndRemoteScrubbing(PlatformMediaSessionInterface&) final;
@@ -90,6 +90,7 @@ protected:
     RemoteCommandListener::RemoteCommandsSet supportedCommands() const final;
 
     void resetHaveEverRegisteredAsNowPlayingApplicationForTesting() final { m_haveEverRegisteredAsNowPlayingApplication = false; };
+    void resetToConsistentStateForTesting() final;
 
 private:
 #if !RELEASE_LOG_DISABLED

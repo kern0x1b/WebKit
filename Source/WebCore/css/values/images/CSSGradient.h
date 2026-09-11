@@ -27,9 +27,9 @@
 #pragma once
 
 #include <WebCore/CSSColor.h>
+#include <WebCore/CSSColorInterpolationMethod.h>
 #include <WebCore/CSSPosition.h>
 #include <WebCore/CSSValueTypes.h>
-#include <WebCore/ColorInterpolationMethod.h>
 
 namespace WebCore {
 namespace CSS {
@@ -54,7 +54,10 @@ struct GradientColorInterpolationMethod {
 
     static GradientColorInterpolationMethod legacyMethod(AlphaPremultiplication alphaPremultiplication)
     {
-        return { { ColorInterpolationMethod::SRGB { }, alphaPremultiplication }, Default::SRGB };
+        return {
+            .method = { WebCore::ColorInterpolationMethod::SRGB { }, alphaPremultiplication },
+            .defaultMethod = Default::SRGB
+        };
     }
 
     bool operator==(const GradientColorInterpolationMethod&) const = default;
@@ -84,8 +87,8 @@ using GradientAngularColorStop = GradientColorStop<GradientAngularColorStopColor
 using GradientAngularColorStopList = GradientColorStopList<GradientAngularColorStop>;
 
 using GradientLinearColorStopColor = Markable<Color>;
-// FIXME: `GradientLinearColorStopPosition` should use a range of `AllUnzoomed`, but doing so was causing imported/w3c/web-platform-tests/css/css-images/gradient/gradient-infinity-001.html to fail for the GTK/WPE graphics backends.
-using GradientLinearColorStopPosition = std::optional<LengthPercentage<AllLayoutUnitClampedUnzoomed>>;
+// FIXME: `GradientLinearColorStopPosition` should use a range of `All`, but doing so was causing imported/w3c/web-platform-tests/css/css-images/gradient/gradient-infinity-001.html to fail for the GTK/WPE graphics backends.
+using GradientLinearColorStopPosition = std::optional<LengthPercentage<AllLayoutUnitClamped>>;
 using GradientLinearColorStop = GradientColorStop<GradientLinearColorStopColor, GradientLinearColorStopPosition>;
 using GradientLinearColorStopList = GradientColorStopList<GradientLinearColorStop>;
 
@@ -145,13 +148,13 @@ template<> struct Serialize<DeprecatedLinearGradient> { void operator()(StringBu
 struct RadialGradient {
     using Extent = RadialGradientExtent;
     struct Ellipse {
-        using Size = SpaceSeparatedArray<LengthPercentage<NonnegativeUnzoomed>, 2>;
+        using Size = SpaceSeparatedArray<LengthPercentage<Nonnegative>, 2>;
         Variant<Size, Extent> size;
         std::optional<Position> position;
         bool operator==(const Ellipse&) const = default;
     };
     struct Circle {
-        using Length = CSS::Length<NonnegativeUnzoomed>;
+        using Length = CSS::Length<Nonnegative>;
         Variant<Length, Extent> size;
         std::optional<Position> position;
         bool operator==(const Circle&) const = default;
@@ -174,7 +177,7 @@ template<> struct Serialize<RadialGradient> { void operator()(StringBuilder&, co
 struct PrefixedRadialGradient {
     using Extent = PrefixedRadialGradientExtent;
     struct Ellipse {
-        using Size = SpaceSeparatedArray<LengthPercentage<NonnegativeUnzoomed>, 2>;
+        using Size = SpaceSeparatedArray<LengthPercentage<Nonnegative>, 2>;
         std::optional<Variant<Size, Extent>> size;
         std::optional<Position> position;
         bool operator==(const Ellipse&) const = default;

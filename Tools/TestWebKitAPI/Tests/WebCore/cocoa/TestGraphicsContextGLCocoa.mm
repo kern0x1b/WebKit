@@ -30,6 +30,7 @@
 #import "Helpers/GraphicsTestUtilities.h"
 #import "Helpers/WebCoreTestUtilities.h"
 #import <Metal/Metal.h>
+#import <WebCore/AlphaPremultiplication.h>
 #import <WebCore/Color.h>
 #import <WebCore/GraphicsContextGLCocoa.h>
 #import <WebCore/ProcessIdentity.h>
@@ -51,7 +52,8 @@ namespace {
 class MockGraphicsContextGLClient final : public GraphicsContextGL::Client {
 public:
     void forceContextLost() final { ++m_contextLostCalls; }
-    void addDebugMessage(GCGLenum, GCGLenum, GCGLenum, const CString&) final { }
+    void addDebugMessage(GCGLenum, GCGLenum, GCGLenum, const UTF8CString&) final { }
+    void didChangeMemoryCost() final { }
     int contextLostCalls() { return m_contextLostCalls; }
 private:
     int m_contextLostCalls { 0 };
@@ -92,11 +94,20 @@ private:
     std::optional<ScopedSetAuxiliaryProcessTypeForTesting> m_scopedProcessType;
 };
 
-class AnyContextAttributeTest : public testing::TestWithParam<std::tuple<bool, bool, bool>> {
+// The ways the contents of a context can describe their alpha. premultipliedAlpha does not
+// apply to a context without alpha, so there are three cases and not four.
+enum class AlphaMode : uint8_t { NoAlpha, Unpremultiplied, Premultiplied };
+
+class AnyContextAttributeTest : public testing::TestWithParam<std::tuple<bool, bool, bool, AlphaMode>> {
 protected:
     bool antialias() const { return std::get<0>(GetParam()); }
     bool preserveDrawingBuffer() const { return std::get<1>(GetParam()); }
     bool isWebGL2() const { return std::get<2>(GetParam()); }
+    AlphaMode alphaMode() const { return std::get<3>(GetParam()); }
+    bool hasAlpha() const { return alphaMode() != AlphaMode::NoAlpha; }
+    // How the contents of the drawing buffer describe their alpha. Without alpha the
+    // contents are opaque, so premultiplication does not apply to them.
+    AlphaPremultiplication contentsAlphaPremultiplication() const { return alphaMode() == AlphaMode::Premultiplied ? AlphaPremultiplication::Premultiplied : AlphaPremultiplication::Unpremultiplied; }
     GraphicsContextGLAttributes attributes();
     RefPtr<TestedGraphicsContextGLCocoa> createTestContext(IntSize contextSize);
 
@@ -120,7 +131,8 @@ GraphicsContextGLAttributes AnyContextAttributeTest::attributes()
     attributes.antialias = antialias();
     attributes.depth = false;
     attributes.stencil = false;
-    attributes.alpha = true;
+    attributes.alpha = hasAlpha();
+    attributes.premultipliedAlpha = alphaMode() != AlphaMode::Unpremultiplied;
     attributes.preserveDrawingBuffer = preserveDrawingBuffer();
     return attributes;
 }
@@ -371,7 +383,7 @@ TEST_F(GraphicsContextGLCocoaTest, ClearBufferIncorrectSizes)
     auto texture = gl->createTexture();
     gl->bindTexture(GL::TEXTURE_2D, texture);
     gl->texParameteri(GL::TEXTURE_2D, GL::TEXTURE_MIN_FILTER, GL::NEAREST);
-    gl->texImage2D(GL::TEXTURE_2D, 0, GL::R8UI, 1, 1, 0, GL::RED_INTEGER, GL::UNSIGNED_BYTE, 0);
+    gl->texImage2D(GL::TEXTURE_2D, 0, GL::R8UI, 1, 1, 0, GL::RED_INTEGER, GL::UNSIGNED_BYTE, std::span<const uint8_t> { });
     ASSERT_TRUE(gl->getErrors().isEmpty());
 
     auto fbo = gl->createFramebuffer();
@@ -441,8 +453,8 @@ TEST_F(GraphicsContextGLCocoaTest, CopyNativeImageNoDrawingBufferReturnsNullptr)
 {
     using GL = GraphicsContextGL;
     auto gl = TestedGraphicsContextGLCocoa::create({ });
-    RefPtr drawingImage = gl->copyNativeImageYFlipped(GL::SurfaceBuffer::DrawingBuffer);
-    RefPtr displayImage = gl->copyNativeImageYFlipped(GL::SurfaceBuffer::DisplayBuffer);
+    RefPtr drawingImage = gl->copyNativeImage(GL::SurfaceBuffer::DrawingBuffer);
+    RefPtr displayImage = gl->copyNativeImage(GL::SurfaceBuffer::DisplayBuffer);
     EXPECT_EQ(drawingImage, nullptr);
     EXPECT_EQ(displayImage, nullptr);
 }
@@ -453,12 +465,72 @@ TEST_F(GraphicsContextGLCocoaTest, CopyNativeImageAfterReshape)
     using GL = GraphicsContextGL;
     auto gl = TestedGraphicsContextGLCocoa::create({ });
     gl->reshape(10, 10);
-    RefPtr drawingImage = gl->copyNativeImageYFlipped(GL::SurfaceBuffer::DrawingBuffer);
-    RefPtr displayImage = gl->copyNativeImageYFlipped(GL::SurfaceBuffer::DisplayBuffer);
+    RefPtr drawingImage = gl->copyNativeImage(GL::SurfaceBuffer::DrawingBuffer);
+    RefPtr displayImage = gl->copyNativeImage(GL::SurfaceBuffer::DisplayBuffer);
     EXPECT_NE(drawingImage, nullptr);
     EXPECT_EQ(displayImage, nullptr);
     EXPECT_EQ(drawingImage->size(), FloatSize(10, 10));
     EXPECT_TRUE(imagePixelIs(Color::transparentBlack, *drawingImage, FloatPoint(5, 5)));
+}
+
+static void clearBottomHalf(GraphicsContextGL& gl, IntSize size, Color color, AlphaPremultiplication contentsAlpha)
+{
+    auto [r, g, b, a] = color.toColorTypeLossy<SRGBA<float>>().resolved();
+    if (contentsAlpha == AlphaPremultiplication::Premultiplied) {
+        r *= a;
+        g *= a;
+        b *= a;
+    }
+    gl.enable(GraphicsContextGL::SCISSOR_TEST);
+    gl.scissor(0, 0, size.width(), size.height() / 2);
+    gl.clearColor(r, g, b, a);
+    gl.clear(GraphicsContextGL::COLOR_BUFFER_BIT);
+    gl.disable(GraphicsContextGL::SCISSOR_TEST);
+}
+
+// Test that the copy is in image orientation, i.e. the first row of the image is the top
+// row, even though the first row of the drawing buffer is the bottom row, and that the copy
+// describes its alpha the way the contents of the context do. Unpremultiplied contents
+// cannot be described by a CGIOSurfaceContext image, so the alpha mode affects how the copy
+// is made. The premultiplication semantics themselves are covered by the WebGL conformance
+// tests.
+TEST_P(AnyContextAttributeTest, CopyNativeImage)
+{
+    using GL = GraphicsContextGL;
+    constexpr IntSize size { 10, 10 };
+    auto gl = createTestContext(size);
+    ASSERT_NE(gl, nullptr);
+    // Half transparent green. Premultiplying it is lossless, so the value read back is the
+    // value filled with, whichever way the contents are described.
+    auto fillColor = Color { SRGBA<uint8_t> { 0, 255, 0, 128 } };
+    clearBottomHalf(*gl, size, fillColor, contentsAlphaPremultiplication());
+
+    CGImageAlphaInfo expectedAlphaInfo;
+    if (!hasAlpha())
+        expectedAlphaInfo = kCGImageAlphaNoneSkipFirst;
+    else if (alphaMode() == AlphaMode::Premultiplied)
+        expectedAlphaInfo = kCGImageAlphaPremultipliedFirst;
+    else
+        expectedAlphaInfo = kCGImageAlphaFirst;
+    // Without alpha the fill is opaque, as the alpha channel is ignored, and the half that
+    // was not filled is the initial opaque black instead of transparent.
+    auto expectedFill = hasAlpha() ? fillColor : Color::green;
+    auto expectedRest = hasAlpha() ? Color::transparentBlack : Color::black;
+
+    for (auto buffer : { GL::SurfaceBuffer::DrawingBuffer, GL::SurfaceBuffer::DisplayBuffer }) {
+        if (buffer == GL::SurfaceBuffer::DisplayBuffer)
+            gl->prepareForDisplay();
+        SCOPED_TRACE(buffer == GL::SurfaceBuffer::DrawingBuffer ? "drawing buffer" : "display buffer");
+        RefPtr image = gl->copyNativeImage(buffer);
+        ASSERT_NE(image, nullptr);
+        EXPECT_EQ(image->size(), FloatSize(size));
+        // The image must describe the contents as the context produced them: an
+        // unpremultiplied context must not be described as premultiplied, or the colors
+        // would be wrong wherever the contents are not opaque.
+        EXPECT_EQ(CGImageGetAlphaInfo(image->platformImage().get()), expectedAlphaInfo);
+        EXPECT_TRUE(imagePixelIs(expectedFill, *image, FloatPoint(5, 8)));
+        EXPECT_TRUE(imagePixelIs(expectedRest, *image, FloatPoint(5, 1)));
+    }
 }
 
 // Test copying images and mutating the drawing buffer.
@@ -468,12 +540,12 @@ TEST_F(GraphicsContextGLCocoaTest, CopyImageAndMutateDrawingBuffer)
     using GL = GraphicsContextGL;
     auto gl = TestedGraphicsContextGLCocoa::create({ });
     gl->reshape(10, 10);
-    RefPtr drawingImage0 = gl->copyNativeImageYFlipped(GL::SurfaceBuffer::DrawingBuffer);
+    RefPtr drawingImage0 = gl->copyNativeImage(GL::SurfaceBuffer::DrawingBuffer);
     ASSERT_NE(drawingImage0, nullptr);
     EXPECT_TRUE(imagePixelIs(Color::transparentBlack, *drawingImage0, FloatPoint(5, 5)));
     gl->clearColor(0.f, 1.f, 0.f, 1.f);
     gl->clear(GL::COLOR_BUFFER_BIT);
-    RefPtr drawingImage1 = gl->copyNativeImageYFlipped(GL::SurfaceBuffer::DrawingBuffer);
+    RefPtr drawingImage1 = gl->copyNativeImage(GL::SurfaceBuffer::DrawingBuffer);
     ASSERT_NE(drawingImage1, nullptr);
     EXPECT_TRUE(imagePixelIs(Color::transparentBlack, *drawingImage0, FloatPoint(5, 5)));
     EXPECT_TRUE(imagePixelIs(Color::green, *drawingImage1, FloatPoint(5, 5)));
@@ -482,13 +554,13 @@ TEST_F(GraphicsContextGLCocoaTest, CopyImageAndMutateDrawingBuffer)
     gl->clear(GL::COLOR_BUFFER_BIT);
     EXPECT_TRUE(imagePixelIs(Color::transparentBlack, *drawingImage0, FloatPoint(5, 5)));
     EXPECT_TRUE(imagePixelIs(Color::green, *drawingImage1, FloatPoint(5, 5)));
-    RefPtr drawingImage2 = gl->copyNativeImageYFlipped(GL::SurfaceBuffer::DrawingBuffer);
+    RefPtr drawingImage2 = gl->copyNativeImage(GL::SurfaceBuffer::DrawingBuffer);
     ASSERT_NE(drawingImage2, nullptr);
     EXPECT_TRUE(imagePixelIs(Color::transparentBlack, *drawingImage0, FloatPoint(5, 5)));
     EXPECT_TRUE(imagePixelIs(Color::green, *drawingImage1, FloatPoint(5, 5)));
     EXPECT_TRUE(imagePixelIs(Color::blue, *drawingImage2, FloatPoint(5, 5)));
     gl->prepareForDisplay();
-    RefPtr displayImage = gl->copyNativeImageYFlipped(GL::SurfaceBuffer::DisplayBuffer);
+    RefPtr displayImage = gl->copyNativeImage(GL::SurfaceBuffer::DisplayBuffer);
     ASSERT_NE(displayImage, nullptr);
     EXPECT_TRUE(imagePixelIs(Color::transparentBlack, *drawingImage0, FloatPoint(5, 5)));
     EXPECT_TRUE(imagePixelIs(Color::green, *drawingImage1, FloatPoint(5, 5)));
@@ -738,13 +810,36 @@ TEST_P(AnyContextAttributeTest, WebXRBlitTest)
 }
 #endif
 
+static std::string anyContextAttributeTestName(const testing::TestParamInfo<AnyContextAttributeTest::ParamType>& info)
+{
+    auto [antialias, preserveDrawingBuffer, isWebGL2, alphaMode] = info.param;
+    std::string name = isWebGL2 ? "WebGL2" : "WebGL1";
+    if (antialias)
+        name += "_Antialias";
+    if (preserveDrawingBuffer)
+        name += "_PreserveDrawingBuffer";
+    switch (alphaMode) {
+    case AlphaMode::NoAlpha:
+        name += "_NoAlpha";
+        break;
+    case AlphaMode::Unpremultiplied:
+        name += "_Unpremultiplied";
+        break;
+    case AlphaMode::Premultiplied:
+        name += "_Premultiplied";
+        break;
+    }
+    return name;
+}
+
 INSTANTIATE_TEST_SUITE_P(GraphicsContextGLCocoaTest,
     AnyContextAttributeTest,
     testing::Combine(
         testing::Values(true, false),
         testing::Values(true, false),
-        testing::Values(true, false)),
-    TestParametersToStringFormatter());
+        testing::Values(true, false),
+        testing::Values(AlphaMode::NoAlpha, AlphaMode::Unpremultiplied, AlphaMode::Premultiplied)),
+    anyContextAttributeTestName);
 
 class GraphicsContextGLCocoaReadPixelsTest : public ::testing::Test {
 protected:
@@ -851,6 +946,94 @@ TEST_F(GraphicsContextGLCocoaReshapeTest, reshapeHeightTooLarge)
     m_context->reshape(framebufferSize.width(), framebufferSize.height());
     EXPECT_EQ(m_context->getInternalFramebufferSize().width(), INITIAL_WIDTH);
     EXPECT_EQ(m_context->getInternalFramebufferSize().height(), INITIAL_HEIGHT);
+}
+
+TEST_F(GraphicsContextGLCocoaTest, CompressedTexImage2DRejectsOffsetWithNoPBO)
+{
+    using GL = GraphicsContextGL;
+    GraphicsContextGLAttributes attributes;
+    attributes.isWebGL2 = true;
+    auto gl = TestedGraphicsContextGLCocoa::create(WTF::move(attributes));
+    gl->reshape(1, 1);
+    gl->compressedTexImage2D(GL::TEXTURE_2D, 0, GL::COMPRESSED_RGB8_ETC2, 4, 4, 0, 8, 0x41414140);
+    EXPECT_TRUE(gl->getErrors().contains(GCGLErrorCode::InvalidOperation));
+}
+
+TEST_F(GraphicsContextGLCocoaTest, CompressedTexSubImage2DRejectsOffsetWithNoPBO)
+{
+    using GL = GraphicsContextGL;
+    GraphicsContextGLAttributes attributes;
+    attributes.isWebGL2 = true;
+    auto gl = TestedGraphicsContextGLCocoa::create(WTF::move(attributes));
+    gl->reshape(1, 1);
+    gl->compressedTexSubImage2D(GL::TEXTURE_2D, 0, 0, 0, 4, 4, GL::COMPRESSED_RGB8_ETC2, 8, 0x41414140);
+    EXPECT_TRUE(gl->getErrors().contains(GCGLErrorCode::InvalidOperation));
+}
+
+TEST_F(GraphicsContextGLCocoaTest, CompressedTexImage3DRejectsOffsetWithNoPBO)
+{
+    using GL = GraphicsContextGL;
+    GraphicsContextGLAttributes attributes;
+    attributes.isWebGL2 = true;
+    auto gl = TestedGraphicsContextGLCocoa::create(WTF::move(attributes));
+    gl->reshape(1, 1);
+    gl->compressedTexImage3D(GL::TEXTURE_2D_ARRAY, 0, GL::COMPRESSED_RGB8_ETC2, 4, 4, 1, 0, 8, 0x41414140);
+    EXPECT_TRUE(gl->getErrors().contains(GCGLErrorCode::InvalidOperation));
+}
+
+TEST_F(GraphicsContextGLCocoaTest, CompressedTexSubImage3DRejectsOffsetWithNoPBO)
+{
+    using GL = GraphicsContextGL;
+    GraphicsContextGLAttributes attributes;
+    attributes.isWebGL2 = true;
+    auto gl = TestedGraphicsContextGLCocoa::create(WTF::move(attributes));
+    gl->reshape(1, 1);
+    gl->compressedTexSubImage3D(GL::TEXTURE_2D_ARRAY, 0, 0, 0, 0, 4, 4, 1, GL::COMPRESSED_RGB8_ETC2, 8, 0x41414140);
+    EXPECT_TRUE(gl->getErrors().contains(GCGLErrorCode::InvalidOperation));
+}
+
+TEST_F(GraphicsContextGLCocoaTest, TexImage2DRejectsOffsetWithNoPBO)
+{
+    using GL = GraphicsContextGL;
+    GraphicsContextGLAttributes attributes;
+    attributes.isWebGL2 = true;
+    auto gl = TestedGraphicsContextGLCocoa::create(WTF::move(attributes));
+    gl->reshape(1, 1);
+    gl->texImage2D(GL::TEXTURE_2D, 0, GL::RGBA, 4, 4, 0, GL::RGBA, GL::UNSIGNED_BYTE, 0x41414140);
+    EXPECT_TRUE(gl->getErrors().contains(GCGLErrorCode::InvalidOperation));
+}
+
+TEST_F(GraphicsContextGLCocoaTest, TexSubImage2DRejectsOffsetWithNoPBO)
+{
+    using GL = GraphicsContextGL;
+    GraphicsContextGLAttributes attributes;
+    attributes.isWebGL2 = true;
+    auto gl = TestedGraphicsContextGLCocoa::create(WTF::move(attributes));
+    gl->reshape(1, 1);
+    gl->texSubImage2D(GL::TEXTURE_2D, 0, 0, 0, 4, 4, GL::RGBA, GL::UNSIGNED_BYTE, 0x41414140);
+    EXPECT_TRUE(gl->getErrors().contains(GCGLErrorCode::InvalidOperation));
+}
+
+TEST_F(GraphicsContextGLCocoaTest, TexImage3DRejectsOffsetWithNoPBO)
+{
+    using GL = GraphicsContextGL;
+    GraphicsContextGLAttributes attributes;
+    attributes.isWebGL2 = true;
+    auto gl = TestedGraphicsContextGLCocoa::create(WTF::move(attributes));
+    gl->reshape(1, 1);
+    gl->texImage3D(GL::TEXTURE_2D_ARRAY, 0, GL::RGBA, 4, 4, 1, 0, GL::RGBA, GL::UNSIGNED_BYTE, 0x41414140);
+    EXPECT_TRUE(gl->getErrors().contains(GCGLErrorCode::InvalidOperation));
+}
+
+TEST_F(GraphicsContextGLCocoaTest, TexSubImage3DRejectsOffsetWithNoPBO)
+{
+    using GL = GraphicsContextGL;
+    GraphicsContextGLAttributes attributes;
+    attributes.isWebGL2 = true;
+    auto gl = TestedGraphicsContextGLCocoa::create(WTF::move(attributes));
+    gl->reshape(1, 1);
+    gl->texSubImage3D(GL::TEXTURE_2D_ARRAY, 0, 0, 0, 0, 4, 4, 1, GL::RGBA, GL::UNSIGNED_BYTE, 0x41414140);
+    EXPECT_TRUE(gl->getErrors().contains(GCGLErrorCode::InvalidOperation));
 }
 
 }

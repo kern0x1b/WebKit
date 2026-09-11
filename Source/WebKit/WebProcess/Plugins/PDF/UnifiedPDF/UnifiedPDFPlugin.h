@@ -27,6 +27,8 @@
 
 #if ENABLE(UNIFIED_PDF)
 
+#include "PDFAccessibilityDisplayMode.h"
+#include "PDFAccessibilityDisplayModeState.h"
 #include "PDFDocumentLayout.h"
 #include "PDFPageCoverage.h"
 #include "PDFPluginBase.h"
@@ -83,6 +85,7 @@ struct PDFContextMenu;
 struct PDFContextMenuItem;
 
 enum class WebEventType : uint32_t;
+enum class WebEventInputSource : uint8_t;
 enum class WebMouseEventButton : int8_t;
 enum class WebEventModifier : uint8_t;
 
@@ -170,6 +173,9 @@ public:
     float documentFittingScale() const { return m_documentLayout.scale(); }
 
     bool shouldCachePagePreviews() const;
+
+    PDFAccessibilityDisplayMode accessibilityDisplayMode() const;
+    PDFAccessibilityDisplayModeState accessibilityDisplayModeState() const final { return m_accessibilityDisplayModeState; }
 
     WebCore::FloatRect convertFromPDFPageToScreenForAccessibility(const WebCore::FloatRect&, PDFDocumentLayout::PageIndex) const;
 #if PLATFORM(MAC)
@@ -376,12 +382,12 @@ private:
         Unknown,
     };
 
-    std::optional<PDFContextMenu> createContextMenu(const WebMouseEvent&) const;
+    std::optional<PDFContextMenu> createContextMenu(const WebCore::IntPoint& contextMenuEventRootViewPoint, WebEventInputSource) const;
     PDFContextMenuItem contextMenuItem(ContextMenuItemTag, bool hasAction = true) const;
     String titleForContextMenuItemTag(ContextMenuItemTag) const;
     bool NODELETE isDisplayModeContextMenuItemTag(ContextMenuItemTag) const;
     PDFContextMenuItem NODELETE separatorContextMenuItem() const;
-    Vector<PDFContextMenuItem> selectionContextMenuItems(const WebCore::IntPoint& contextMenuEventRootViewPoint, bool shouldPresentLookupAndSearchOptions) const;
+    Vector<PDFContextMenuItem> selectionContextMenuItems(const WebCore::IntPoint& contextMenuEventRootViewPoint) const;
     Vector<PDFContextMenuItem> displayModeContextMenuItems() const;
     Vector<PDFContextMenuItem> scaleContextMenuItems() const;
     Vector<PDFContextMenuItem> navigationContextMenuItemsForPageAtIndex(PDFDocumentLayout::PageIndex) const;
@@ -391,6 +397,8 @@ private:
 
     ContextMenuItemTag NODELETE contextMenuItemTagFromDisplayMode(const PDFPluginDisplayMode&) const;
     PDFPluginDisplayMode NODELETE displayModeFromContextMenuItemTag(const ContextMenuItemTag&) const;
+
+    Vector<String> contextMenuItemTitlesForTesting(const WebCore::IntPoint& contextMenuEventRootViewPoint) const final;
 #endif
 
     // Autoscroll
@@ -429,6 +437,7 @@ private:
     void showOrHideSelectionLayerAsNecessary();
 
     String fullDocumentString() const override;
+    PDFPluginTextExtractionContent textExtractionContent() const override;
     String selectionString() const override;
     std::pair<String, String> stringsBeforeAndAfterSelection(int characterCount) const override;
     bool existingSelectionContainsPoint(const WebCore::FloatPoint&) const override;
@@ -499,6 +508,14 @@ private:
 
     void didChangeSettings() override;
 
+    PDFAccessibilityDisplayModeState defaultAccessibilityDisplayModeStateForCurrentSettings() const;
+    void setAccessibilityDisplayModeState(PDFAccessibilityDisplayModeState);
+#if ENABLE(PDF_HUD) && ENABLE(AX_PDF_SUPPORT)
+    void updateHUDAccessibilityDisplayMode();
+#endif
+
+    WebCore::Color pluginBackgroundColor() const final;
+
     void createScrollbarsController() override;
 
     bool usesAsyncScrolling() const final { return true; }
@@ -546,6 +563,8 @@ private:
     void zoomIn() final;
     void zoomOut() final;
     void resetZoom();
+
+    void toggleAccessibilityDisplayMode() final;
 #endif
 
 #if ENABLE(PDF_PAGE_NUMBER_INDICATOR)
@@ -746,6 +765,8 @@ private:
     HashMap<WebFoundTextRange::PDFData, RetainPtr<PDFSelection>> m_webFoundTextRangePDFDataSelectionMap;
 
     mutable std::optional<bool> m_cachedIsFullMainFramePlugin;
+
+    PDFAccessibilityDisplayModeState m_accessibilityDisplayModeState { PDFAccessibilityDisplayModeState::Ineligible };
 };
 
 WTF::TextStream& operator<<(WTF::TextStream&, RepaintRequirement);

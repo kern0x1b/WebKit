@@ -69,14 +69,14 @@ static void __asan_unpoison_memory_region(const void *addr, size_t size) {}
 #endif
 
 #if defined(BORINGSSL_DETECT_SDALLOCX)
-// sdallocx is a sized |free| function. By passing the size (which we happen to
+// sdallocx is a sized `free` function. By passing the size (which we happen to
 // always know in BoringSSL), the malloc implementation can save work. We cannot
-// depend on |sdallocx| being available, however, so it's a weak symbol.
+// depend on `sdallocx` being available, however, so it's a weak symbol.
 //
-// This mechanism is kept opt-in because it assumes that, when |sdallocx| is
-// defined, it is part of the same allocator as |malloc|. This is usually true
-// but may break if |malloc| does not implement |sdallocx|, but some other
-// allocator with |sdallocx| is imported which does.
+// This mechanism is kept opt-in because it assumes that, when `sdallocx` is
+// defined, it is part of the same allocator as `malloc`. This is usually true
+// but may break if `malloc` does not implement `sdallocx`, but some other
+// allocator with `sdallocx` is imported which does.
 WEAK_SYMBOL_FUNC(void, sdallocx, (void *ptr, size_t size, int flags))
 #else
 static void (*const sdallocx)(void *ptr, size_t size, int flags) = nullptr;
@@ -84,8 +84,8 @@ static void (*const sdallocx)(void *ptr, size_t size, int flags) = nullptr;
 
 // The following three functions can be defined to override default heap
 // allocation and freeing. If defined, it is the responsibility of
-// |OPENSSL_memory_free| to zero out the memory before returning it to the
-// system. |OPENSSL_memory_free| will not be passed NULL pointers.
+// `OPENSSL_memory_free` to zero out the memory before returning it to the
+// system. `OPENSSL_memory_free` will not be passed NULL pointers.
 //
 // WARNING: These functions are called on every allocation and free in
 // BoringSSL across the entire process. They may be called by any code in the
@@ -180,6 +180,15 @@ void bssl::OPENSSL_enable_malloc_failures_for_testing() {
 static int should_fail_allocation() { return 0; }
 #endif
 
+#if defined(WEBRTC_WEBKIT_BUILD)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wallocator-wrappers" // rdar://170138232
+// |OPENSSL_malloc| is taken by-address at line ~516
+// (|allocate = system_malloc ? malloc : OPENSSL_malloc;|), so |_MALLOC_TYPED|
+// cannot be applied -- the rewriter cannot rewrite calls made through a
+// runtime function pointer, and removing the untyped symbol breaks linking
+// of |OPENSSL_vasprintf_internal|.
+#endif
 void *OPENSSL_malloc(size_t size) {
   void *ptr = nullptr;
   if (should_fail_allocation()) {
@@ -215,6 +224,9 @@ err:
   OPENSSL_PUT_ERROR(CRYPTO, ERR_R_MALLOC_FAILURE);
   return nullptr;
 }
+#if defined(WEBRTC_WEBKIT_BUILD)
+#pragma clang diagnostic pop
+#endif
 
 void *OPENSSL_zalloc(size_t size) {
   void *ret = OPENSSL_malloc(size);

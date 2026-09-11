@@ -2,7 +2,7 @@ set(MINIBROWSER_DIR "${TOOLS_DIR}/MiniBrowser/mac")
 
 find_library(SECURITYINTERFACE_LIBRARY SecurityInterface)
 
-set(PRODUCT_BUNDLE_IDENTIFIER "org.WebKit.MiniBrowser")
+set(PRODUCT_BUNDLE_IDENTIFIER "org.webkit.MiniBrowser")
 
 #FIXME: This should not need WEBCORE_EXPORT defined.  This means we are including WebCore headers, and we should not.
 add_definitions("-include MiniBrowser_Prefix.pch -DWEBCORE_EXPORT=")
@@ -48,10 +48,9 @@ set(CMAKE_EXE_LINKER_FLAGS "-framework Cocoa")
 
 set(EXECUTABLE_NAME MiniBrowser)
 set(PRODUCT_NAME MiniBrowser)
-set(MiniBrowser_CODE_SIGN_ENTITLEMENTS ${MINIBROWSER_DIR}/MiniBrowser.entitlements)
 
 set(MiniBrowser_Contents_Directory ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/MiniBrowser.app/Contents)
-make_directory(${MiniBrowser_Contents_Directory}/Resources)
+file(MAKE_DIRECTORY ${MiniBrowser_Contents_Directory}/Resources)
 add_custom_command(OUTPUT ${MiniBrowser_Contents_Directory}/Resources/BrowserWindow.nib
     COMMAND ibtool --compile ${MiniBrowser_Contents_Directory}/Resources/BrowserWindow.nib ${MINIBROWSER_DIR}/BrowserWindow.xib VERBATIM)
 add_custom_command(OUTPUT ${MiniBrowser_Contents_Directory}/Resources/ExtensionManagerWindowController.nib
@@ -79,6 +78,9 @@ endif ()
 foreach (_service IN LISTS MiniBrowser_XPC_SERVICES)
     set_property(TARGET MiniBrowser APPEND PROPERTY LINK_DEPENDS $<TARGET_FILE:${_service}>)
 endforeach ()
+
+set(MiniBrowser_CODE_SIGN_ENTITLEMENTS ${MINIBROWSER_DIR}/../MiniBrowser.entitlements)
+_WEBKIT_ADD_CODE_SIGN(MiniBrowser)
 
 # SIP strips DYLD_* for XPC children, so they load system WebKit -> version mismatch crash.
 # Set __XPC_DYLD_FRAMEWORK_PATH so XPC services find this build's frameworks.

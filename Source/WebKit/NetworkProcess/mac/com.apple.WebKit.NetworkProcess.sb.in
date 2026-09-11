@@ -31,7 +31,7 @@
 
 #if USE(SANDBOX_VERSION_3)
 (with-filter (mac-policy-name "Sandbox")
-    (allow system-mac-syscall (mac-syscall-number 5)))
+    (allow system-mac-syscall (mac-syscall-number 5 65)))
 
 (with-filter (mac-policy-name "vnguard")
     (allow system-mac-syscall (mac-syscall-number 1)))
@@ -254,6 +254,7 @@
 (define (system-network)
     (allow file-read*
          (literal "/Library/Preferences/com.apple.networkd.plist")
+         (literal "/Library/Preferences/com.apple.networkextension.uuidcache.plist")
          (literal "/private/var/db/nsurlstoraged/dafsaData.bin"))
     (deny mach-lookup 
          (global-name "com.apple.SystemConfiguration.PPPController")
@@ -488,10 +489,11 @@
        (ipc-posix-name "com.apple.AppleDatabaseChanged"))
 
 (system-network)
-(allow network-outbound
-    ;; Local mDNSResponder for DNS, arbitrary outbound TCP
-    (literal "/private/var/run/mDNSResponder")
-    (remote tcp))
+(with-filter (require-not (state-flag "BlockNetworkAccess"))
+    (allow network-outbound
+        ;; Local mDNSResponder for DNS, arbitrary outbound TCP
+        (literal "/private/var/run/mDNSResponder")
+        (remote tcp)))
 
 (with-filter (uid 0)
     (allow mach-lookup
@@ -558,11 +560,12 @@
         (set! allow orig-allow))))
 
 ;; FIXME should be removed when <rdar://problem/30498072> is fixed.
-(allow network* 
-    (local udp)
-    (remote udp)
-    (local tcp)
-    (remote tcp))
+(with-filter (require-not (state-flag "BlockNetworkAccess"))
+    (allow network*
+        (local udp)
+        (remote udp)
+        (local tcp)
+        (remote tcp)))
 
 ;; For reporting progress for active downloads <rdar://problem/44405661>
 (allow mach-lookup
@@ -692,7 +695,6 @@
         SYS_open_dprotected_np
         SYS_open_nocancel
         SYS_openat
-        SYS_openat_dprotected_np
         SYS_os_fault_with_payload
         SYS_pathconf
         SYS_pipe
@@ -716,7 +718,6 @@
         SYS_recvfrom_nocancel
         SYS_recvmsg
         SYS_rename
-        SYS_renameat
         SYS_rmdir
         SYS_select
         SYS_select_nocancel
@@ -755,6 +756,11 @@
 
 (when (defined? 'SYS_map_with_linking_np)
     (allow syscall-unix (syscall-number SYS_map_with_linking_np)))
+
+(allow syscall-unix (with telemetry)
+    (syscall-number
+        SYS_openat_dprotected_np
+        SYS_renameat))
 
 (define (allowed-mig-syscalls)
     (kernel-mig-routine

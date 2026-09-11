@@ -27,7 +27,7 @@ from unittest.mock import patch
 
 from webkitbugspy import Tracker, bugzilla, radar
 from webkitbugspy import mocks as bmocks
-from webkitcorepy import OutputCapture, testing
+from webkitcorepy import OutputCapture, run, testing
 from webkitcorepy import mocks as wkmocks
 from webkitcorepy.mocks import Environment
 from webkitcorepy.mocks import Terminal as MockTerminal
@@ -79,7 +79,7 @@ class TestBranch(testing.PathTestCase):
             self.assertEqual(local.Git(self.path).branch, 'eng/example')
 
         self.assertEqual(captured.root.log.getvalue(), "Creating the local development branch 'eng/example'...\n")
-        self.assertEqual(captured.stdout.getvalue(), "Enter name of new branch (or issue URL): \nCreated the local development branch 'eng/example'\n")
+        self.assertEqual(captured.stdout.getvalue(), "Enter name of new branch: \nCreated the local development branch 'eng/example'\n")
 
     def test_prompt_number(self):
         with MockTerminal.input('2'), OutputCapture(level=logging.INFO) as captured, mocks.local.Git(self.path), bmocks.Bugzilla(
@@ -93,7 +93,7 @@ class TestBranch(testing.PathTestCase):
             self.assertEqual(0, program.main(args=('branch', '-v'), path=self.path))
             self.assertEqual(local.Git(self.path).branch, 'eng/Example-feature-1')
         self.assertEqual(captured.root.log.getvalue(), "Creating the local development branch 'eng/Example-feature-1'...\n")
-        self.assertEqual(captured.stdout.getvalue(), "Enter issue URL or title of new issue: \nCreated the local development branch 'eng/Example-feature-1'\n")
+        self.assertEqual(captured.stdout.getvalue(), "Enter issue URL, Bugzilla ID, or title of new issue: \nCreated the local development branch 'eng/Example-feature-1'\n")
 
     def test_prompt_url(self):
         with MockTerminal.input('<rdar://2>'), OutputCapture(level=logging.INFO) as captured, mocks.local.Git(self.path), \
@@ -133,7 +133,7 @@ class TestBranch(testing.PathTestCase):
         )
         self.assertEqual(
             captured.stdout.getvalue(),
-            "Enter issue URL or title of new issue: \n"
+            "Enter issue URL, Bugzilla ID, or title of new issue: \n"
             "Existing radar to CC (leave empty to create new radar): \n"
             "Created the local development branch 'eng/Example-feature-1'\n",
         )
@@ -167,7 +167,7 @@ class TestBranch(testing.PathTestCase):
         )
         self.assertEqual(
             captured.stdout.getvalue(),
-            "Enter issue URL or title of new issue: \n"
+            "Enter issue URL, Bugzilla ID, or title of new issue: \n"
             "Existing radar to CC (leave empty to create new radar): \n"
             "Created the local development branch 'eng/Example-feature-1'\n",
         )
@@ -201,7 +201,7 @@ class TestBranch(testing.PathTestCase):
         )
         self.assertEqual(
             captured.stdout.getvalue(),
-            "Enter issue URL or title of new issue: \n"
+            "Enter issue URL, Bugzilla ID, or title of new issue: \n"
             "Existing radar to CC (leave empty to create new radar): \n"
             "Created the local development branch 'eng/Example-feature-1'\n",
         )
@@ -235,7 +235,7 @@ class TestBranch(testing.PathTestCase):
         )
         self.assertEqual(
             captured.stdout.getvalue(),
-            "Enter issue URL or title of new issue: \n"
+            "Enter issue URL, Bugzilla ID, or title of new issue: \n"
             "Existing radar to CC (leave empty to create new radar): \n"
             "Created the local development branch 'eng/Example-feature-1'\n",
         )
@@ -272,7 +272,7 @@ class TestBranch(testing.PathTestCase):
         )
         self.assertEqual(
             captured.stdout.getvalue(),
-            "Enter issue URL or title of new issue: \n"
+            "Enter issue URL, Bugzilla ID, or title of new issue: \n"
             "Created the local development branch 'eng/Example-feature-1'\n",
         )
 
@@ -311,7 +311,7 @@ class TestBranch(testing.PathTestCase):
         )
         self.assertEqual(
             captured.stdout.getvalue(),
-            "Enter issue URL or title of new issue: \n"
+            "Enter issue URL, Bugzilla ID, or title of new issue: \n"
             "Existing radar to CC (leave empty to create new radar): \n"
             "Created the local development branch 'eng/Example-feature-1'\n",
         )
@@ -342,7 +342,7 @@ class TestBranch(testing.PathTestCase):
         )
         self.assertEqual(
             captured.stdout.getvalue(),
-            "Enter issue URL or title of new issue: \n"
+            "Enter issue URL, Bugzilla ID, or title of new issue: \n"
             "Created the local development branch 'eng/Example-feature-1'\n",
         )
 
@@ -399,9 +399,9 @@ class TestBranch(testing.PathTestCase):
 
         self.assertEqual(
             captured.stdout.getvalue(),
-            '''Enter issue URL or title of new issue: 
-Issue description: 
-What project should the bug be associated with?:
+            'Enter issue URL, Bugzilla ID, or title of new issue: \n'
+            'Issue description: \n'
+            '''What project should the bug be associated with?:
     1) CFNetwork
     2) WebKit
 : 
@@ -440,9 +440,9 @@ Created the local development branch 'eng/Area-New-Issue'
 
         self.assertEqual(
             captured.stdout.getvalue(),
-            '''Enter issue URL or title of new issue: 
-Issue description: 
-What component in 'WebKit' should the bug be associated with?:
+            'Enter issue URL or title of new issue: \n'
+            'Issue description: \n'
+            '''What component in 'WebKit' should the bug be associated with?:
     1) SVG
     2) Scrolling
     3) Tables
@@ -567,3 +567,105 @@ Created the local development branch 'eng/4'
         self.assertEqual(captured.root.log.getvalue(), '')
         self.assertEqual(captured.stdout.getvalue(), '')
         self.assertEqual(captured.stderr.getvalue(), '')
+
+    def test_bug_urls_stored_separately(self):
+        with OutputCapture(), mocks.local.Git(self.path), bmocks.Bugzilla(
+            self.BUGZILLA.split('://')[-1],
+            issues=bmocks.ISSUES,
+            projects=bmocks.PROJECTS,
+            users=bmocks.USERS,
+            environment=Environment(
+                BUGS_EXAMPLE_COM_USERNAME='tcontributor@example.com',
+                BUGS_EXAMPLE_COM_PASSWORD='password',
+            ),
+        ), bmocks.Radar(issues=bmocks.ISSUES), patch('webkitbugspy.Tracker._trackers', [
+            bugzilla.Tracker(self.BUGZILLA, radar_importer=bmocks.USERS['Radar WebKit Bug Importer']),
+            radar.Tracker(),
+        ]), mocks.local.Svn(), MockTime, MockTerminal.input(
+            f'{self.BUGZILLA}/show_bug.cgi?id=2', '',
+        ):
+            self.assertEqual(0, program.main(args=('branch',), path=self.path))
+
+            entries = run(
+                [local.Git.executable(), 'config', '--list'],
+                cwd=self.path, capture_output=True, encoding='utf-8',
+            ).stdout.splitlines()
+
+            # Each URL is a value of its own, rather than one truncated value and one bogus key
+            self.assertEqual(
+                [line for line in entries if line.startswith('branch.eng/Example-feature-1.bug=')],
+                [
+                    f'branch.eng/Example-feature-1.bug={self.BUGZILLA}/show_bug.cgi?id=2',
+                    'branch.eng/Example-feature-1.bug=rdar://4',
+                ],
+            )
+            self.assertEqual(
+                sorted({
+                    line.split('=')[0] for line in entries
+                    if line.startswith('branch.eng/Example-feature-1.')
+                }),
+                ['branch.eng/Example-feature-1.bug', 'branch.eng/Example-feature-1.title'],
+            )
+
+    def test_truncate_branch_name_under_limit(self):
+        self.assertEqual('eng/short-name', program.Branch.truncate_branch_name('eng/short-name', limit=30))
+
+    def test_truncate_branch_name_at_limit(self):
+        self.assertEqual('eng/exactly-ten', program.Branch.truncate_branch_name('eng/exactly-ten', limit=len('eng/exactly-ten')))
+
+    def test_truncate_branch_name_over_limit(self):
+        self.assertEqual(
+            'eng/revert-5-main-a-reason',
+            program.Branch.truncate_branch_name('eng/revert-5-main-a-reason-that-is-much-too-long', limit=30),
+        )
+
+    def test_truncate_branch_name_without_separator(self):
+        self.assertEqual('a' * 10, program.Branch.truncate_branch_name('a' * 20, limit=10))
+
+    def test_truncate_branch_name_strips_trailing_separators(self):
+        self.assertEqual('eng/reason', program.Branch.truncate_branch_name('eng/reason-----tail', limit=16))
+
+    def test_truncate_branch_name_default_limit(self):
+        name = 'eng/{}'.format('a-' * 200)
+        self.assertEqual(program.Branch.MAX_BRANCH_NAME_LENGTH - 1, len(program.Branch.truncate_branch_name(name)))
+
+    def branch_matches_issue(self, branch, issue_id=1, associated_issue_id=None):
+        with OutputCapture(), mocks.local.Git(self.path), mocks.local.Svn(), bmocks.Bugzilla(
+            self.BUGZILLA.split('://')[-1],
+            issues=bmocks.ISSUES,
+            environment=Environment(
+                BUGS_EXAMPLE_COM_USERNAME='tcontributor@example.com',
+                BUGS_EXAMPLE_COM_PASSWORD='password',
+            ),
+        ), patch('webkitbugspy.Tracker._trackers', [bugzilla.Tracker(self.BUGZILLA)]):
+            repository = local.Git(self.path)
+            if associated_issue_id:
+                program.Command.write_branch_variables(
+                    repository, branch,
+                    bug=Tracker.instance().issue(associated_issue_id).link,
+                )
+            return program.Branch.branch_matches_issue(repository, branch, Tracker.instance().issue(issue_id))
+
+    def test_branch_matches_issue_from_config(self):
+        self.assertTrue(self.branch_matches_issue('eng/unrelated-branch-name', associated_issue_id=1))
+
+    def test_branch_matches_issue_id(self):
+        self.assertTrue(self.branch_matches_issue('eng/1'))
+
+    def test_branch_matches_issue_id_with_prefix(self):
+        self.assertTrue(self.branch_matches_issue('eng/revert-5-main-1'))
+
+    def test_branch_matches_issue_title(self):
+        self.assertTrue(self.branch_matches_issue('eng/Example-issue-1'))
+
+    def test_branch_matches_issue_title_with_prefix(self):
+        self.assertTrue(self.branch_matches_issue('eng/revert-5-main-Example-issue-1'))
+
+    def test_branch_matches_issue_truncated_title(self):
+        self.assertTrue(self.branch_matches_issue('eng/revert-5-main-Example-iss'))
+
+    def test_branch_matches_issue_different_issue(self):
+        self.assertFalse(self.branch_matches_issue('eng/revert-5-main-Example-issue-1', issue_id=2))
+
+    def test_branch_matches_issue_no_branch(self):
+        self.assertFalse(self.branch_matches_issue(''))

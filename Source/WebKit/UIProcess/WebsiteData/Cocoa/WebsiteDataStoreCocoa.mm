@@ -40,10 +40,11 @@
 #import "WebProcessProxy.h"
 #import "WebResourceLoadStatisticsStore.h"
 #import "WebsiteDataStoreParameters.h"
-#import <WebCore/NetworkStorageSession.h>
 #import <WebCore/RegistrableDomain.h>
 #import <WebCore/SearchPopupMenuCocoa.h>
 #import <WebCore/SecurityOriginData.h>
+#import <WebCore/ThirdPartyCookieBlockingMode.h>
+#import <WebCore/TrackingPreventionTypes.h>
 #import <pal/spi/cf/CFNetworkSPI.h>
 #import <pal/spi/cocoa/NetworkSPI.h>
 #import <wtf/FileSystem.h>
@@ -247,48 +248,13 @@ void WebsiteDataStore::platformSetNetworkParameters(WebsiteDataStoreParameters& 
 
     if (m_uiProcessCookieStorageIdentifier.isEmpty()) {
         auto utf8File = cookieFile.utf8();
-        auto url = adoptCF(CFURLCreateFromFileSystemRepresentation(kCFAllocatorDefault, (const UInt8 *)utf8File.data(), (CFIndex)utf8File.length(), true));
+        RetainPtr url = adoptCF(CFURLCreateFromFileSystemRepresentation(kCFAllocatorDefault, byteCast<UInt8>(utf8File.span()).data(), static_cast<CFIndex>(utf8File.length()), true));
         RetainPtr cfCookieStorage = adoptCF(CFHTTPCookieStorageCreateFromFile(kCFAllocatorDefault, url.get(), nullptr));
         m_uiProcessCookieStorageIdentifier = identifyingDataFromCookieStorage(cfCookieStorage.get());
     }
 
     parameters.uiProcessCookieStorageIdentifier = m_uiProcessCookieStorageIdentifier;
     parameters.networkSessionParameters.enablePrivateClickMeasurementDebugMode = experimentalFeatureEnabled(WebPreferencesKey::privateClickMeasurementDebugModeEnabledKey());
-}
-
-std::optional<bool> WebsiteDataStore::useNetworkLoader()
-{
-#if !HAVE(NETWORK_LOADER)
-    return false;
-#else
-
-    [[maybe_unused]] const auto isSafari =
-#if PLATFORM(MAC)
-        WTF::MacApplication::isSafari();
-#elif PLATFORM(IOS_FAMILY)
-        WTF::IOSApplication::isMobileSafari() || WTF::IOSApplication::isSafariViewService();
-#else
-        false;
-#endif
-
-    if (auto isEnabled = optionalExperimentalFeatureEnabled(WebPreferencesKey::cFNetworkNetworkLoaderEnabledKey(), std::nullopt))
-        return isEnabled;
-    if (!linkedOnOrAfterSDKWithBehavior(SDKAlignedBehavior::UseCFNetworkNetworkLoader))
-        return std::nullopt;
-#if HAVE(NWSETTINGS_UNIFIED_HTTP) && defined(NW_SETTINGS_HAS_UNIFIED_HTTP)
-    if (isRunningTest(applicationBundleIdentifier()))
-        return true;
-    if (nw_settings_get_unified_http_enabled() && isSafari)
-        return true;
-#endif // HAVE(NWSETTINGS_UNIFIED_HTTP) && defined(NW_SETTINGS_HAS_UNIFIED_HTTP)
-
-#if HAVE(NWSETTINGS_UNIFIED_HTTP_WEBKIT)
-    if (canLoad_Network_nw_settings_get_unified_http_enabled_webkit())
-        return softLink_Network_nw_settings_get_unified_http_enabled_webkit();
-#endif
-    return std::nullopt;
-
-#endif // NETWORK_LOADER
 }
 
 void WebsiteDataStore::platformInitialize()
@@ -359,10 +325,10 @@ void WebsiteDataStore::removeDataStoreWithIdentifier(const WTF::UUID& identifier
     ASSERT(isMainRunLoop());
 
     auto completionHandler = [identifier, callback = WTF::move(callback)](const String& error) mutable {
-        RELEASE_LOG(Storage, "WebsiteDataStore::removeDataStoreWithIdentifier: Removal completed for identifier %" PUBLIC_LOG_STRING " (error '%" PUBLIC_LOG_STRING "')", identifier.toString().utf8().data(), error.isEmpty() ? "null"_s : error.utf8().data());
+        RELEASE_LOG(Storage, "WebsiteDataStore::removeDataStoreWithIdentifier: Removal completed for identifier %" PUBLIC_LOG_STRING " (error '%" PUBLIC_LOG_STRING "')", identifier.toString().utf8().legacyCStringPointer(), error.isEmpty() ? "null"_s : error.utf8().legacyCStringPointer());
         callback(error);
     };
-    RELEASE_LOG(Storage, "WebsiteDataStore::removeDataStoreWithIdentifier: Removal started for identifier %" PUBLIC_LOG_STRING, identifier.toString().utf8().data());
+    RELEASE_LOG(Storage, "WebsiteDataStore::removeDataStoreWithIdentifier: Removal started for identifier %" PUBLIC_LOG_STRING, identifier.toString().utf8().legacyCStringPointer());
     if (!identifier.isValid())
         return completionHandler("Identifier is invalid"_s);
 
@@ -480,6 +446,14 @@ String WebsiteDataStore::defaultIndexedDBDatabaseDirectory(const String& baseDir
         return FileSystem::pathByAppendingComponent(baseDirectory, "IndexedDB"_s);
 
     return websiteDataDirectoryFileSystemRepresentation("IndexedDB"_s);
+}
+
+String WebsiteDataStore::defaultIsolatedSitesDirectory(const String& baseDirectory)
+{
+    if (!baseDirectory.isEmpty())
+        return FileSystem::pathByAppendingComponent(baseDirectory, "IsolatedSites"_s);
+
+    return websiteDataDirectoryFileSystemRepresentation("IsolatedSites"_s, { }, ShouldCreateDirectory::No);
 }
 
 String WebsiteDataStore::defaultServiceWorkerRegistrationDirectory(const String& baseDirectory)

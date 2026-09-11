@@ -32,8 +32,8 @@ import WebKit_Private.WKSnapshotConfigurationPrivate
 import WebKit_Private.WKWebViewPrivate
 
 @available(anyAppleOSAndDownlevels 26.0, *)
-@available(watchOS, unavailable)
-@available(tvOS, unavailable)
+@_spi_available(watchOSAndOpenSourceTBA, *)
+@_spi_available(tvOSAndOpenSourceTBA, *)
 extension WebPage: Transferable {
     /// A specialized configuration of a specific exportable type that can have specific properties unique to the content type.
     public nonisolated struct ExportedContentConfiguration: Sendable {
@@ -241,7 +241,7 @@ extension WebPage {
         let configuration = WKSnapshotConfiguration()
         configuration.rect = region.rect ?? .null
 
-        #if os(macOS)
+        #if WTF_PLATFORM_MAC
         // FIXME: This should not be limited to macOS.
         configuration._usesContentsRect = region.usesContentsRect
         #endif
@@ -258,7 +258,7 @@ extension WebPage {
             throw WKError(.unknown)
         }
 
-        #if os(macOS)
+        #if WTF_PLATFORM_MAC
         let image = Image(nsImage: snapshot)
         #else
         let image = Image(uiImage: snapshot)

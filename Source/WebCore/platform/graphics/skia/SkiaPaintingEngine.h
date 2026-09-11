@@ -58,11 +58,12 @@ public:
     static std::unique_ptr<SkiaPaintingEngine> create(sk_sp<GrContextThreadSafeProxy>&&);
 
     static unsigned numberOfCPUPaintingThreads();
+#if USE(TEXTURE_MAPPER)
     static unsigned numberOfGPUPaintingThreads();
+#endif
     static bool shouldUseDMABufAtlasTextures();
     static bool shouldUseLinearTileTextures();
     static bool shouldUseVivanteSuperTiledTileTextures();
-    static bool isDDLEnabled();
 
     const sk_sp<GrContextThreadSafeProxy>& threadSafeGrContext() const { return m_threadSafeGrContext; }
 
@@ -74,7 +75,6 @@ private:
     void paintIntoGraphicsContext(const GraphicsLayer&, GraphicsContext&, const IntRect&, bool contentsOpaque, float contentsScale) const;
     RefPtr<SkiaGPUAtlas> createAtlas(const SkiaImageAtlasLayout&, AtlasUploadCondition&);
     bool tryReuseCachedAtlases(SkiaRecordingResult&, unsigned fingerprint);
-    bool canUseDDL() const;
 
     sk_sp<GrContextThreadSafeProxy> m_threadSafeGrContext;
     RefPtr<WorkerPool> m_paintingWorkerPool;

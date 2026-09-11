@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008-2023 Apple Inc. All rights reserved.
+ * Copyright (C) 2008-2026 Apple Inc. All rights reserved.
  * Copyright (C) 2014 Adobe Systems Incorporated. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -54,37 +54,25 @@ static ImageDataPixelFormat NODELETE computePixelFormat(std::optional<ImageDataS
     return settings ? settings->pixelFormat : defaultPixelFormat;
 }
 
-Ref<ImageData> ImageData::create(Ref<ByteArrayPixelBuffer>&& pixelBuffer, std::optional<ImageDataPixelFormat> overridingPixelFormat)
+Ref<ImageData> ImageData::create(Ref<ArrayPixelBuffer>&& pixelBuffer, std::optional<ImageDataPixelFormat> overridingPixelFormat)
 {
-    auto colorSpace = toPredefinedColorSpace(pixelBuffer->format().colorSpace);
-    return adoptRef(*new ImageData(pixelBuffer->size(), WTF::move(pixelBuffer.get()).takeData(), *colorSpace, overridingPixelFormat));
-}
-
-#if ENABLE(PIXEL_FORMAT_RGBA16F)
-Ref<ImageData> ImageData::create(Ref<Float16ArrayPixelBuffer>&& pixelBuffer, std::optional<ImageDataPixelFormat> overridingPixelFormat)
-{
-    auto colorSpace = toPredefinedColorSpace(pixelBuffer->format().colorSpace);
     auto size = pixelBuffer->size();
-    return adoptRef(*new ImageData(size, WTF::move(pixelBuffer.get()).takeData(), *colorSpace, overridingPixelFormat));
-}
-#endif // ENABLE(PIXEL_FORMAT_RGBA16F)
-
-RefPtr<ImageData> ImageData::create(RefPtr<ByteArrayPixelBuffer>&& pixelBuffer, std::optional<ImageDataPixelFormat> overridingPixelFormat)
-{
-    if (!pixelBuffer)
-        return nullptr;
-    return create(pixelBuffer.releaseNonNull(), overridingPixelFormat);
+    auto colorSpace = toPredefinedColorSpace(pixelBuffer->format().colorSpace);
+    return adoptRef(*new ImageData(size, ImageDataArray(WTF::move(pixelBuffer.get()).takeData()), *colorSpace, overridingPixelFormat));
 }
 
 RefPtr<ImageData> ImageData::create(Ref<PixelBuffer>&& pixelBuffer, std::optional<ImageDataPixelFormat> overridingPixelFormat)
 {
-    if (is<ByteArrayPixelBuffer>(pixelBuffer))
-        return create(uncheckedDowncast<ByteArrayPixelBuffer>(WTF::move(pixelBuffer)), overridingPixelFormat);
-#if ENABLE(PIXEL_FORMAT_RGBA16F)
-    if (is<Float16ArrayPixelBuffer>(pixelBuffer))
-        return create(uncheckedDowncast<Float16ArrayPixelBuffer>(WTF::move(pixelBuffer)), overridingPixelFormat);
-#endif // ENABLE(PIXEL_FORMAT_RGBA16F)
+    if (is<ArrayPixelBuffer>(pixelBuffer))
+        return create(uncheckedDowncast<ArrayPixelBuffer>(WTF::move(pixelBuffer)), overridingPixelFormat);
     return nullptr;
+}
+
+RefPtr<ImageData> ImageData::create(RefPtr<ArrayPixelBuffer>&& pixelBuffer, std::optional<ImageDataPixelFormat> overridingPixelFormat)
+{
+    if (!pixelBuffer)
+        return nullptr;
+    return create(pixelBuffer.releaseNonNull(), overridingPixelFormat);
 }
 
 RefPtr<ImageData> ImageData::create(const IntSize& size, PredefinedColorSpace colorSpace, ImageDataPixelFormat imageDataPixelFormat)
@@ -133,8 +121,10 @@ ExceptionOr<Ref<ImageData>> ImageData::create(unsigned sw, unsigned sh, std::opt
     return create(sw, sh, PredefinedColorSpace::SRGB, settings);
 }
 
-ExceptionOr<Ref<ImageData>> ImageData::create(ImageDataArray&& array, unsigned sw, std::optional<unsigned> sh, std::optional<ImageDataSettings> settings)
+ExceptionOr<Ref<ImageData>> ImageData::create(Ref<JSC::ArrayBufferView>&& arrayBufferView, unsigned sw, std::optional<unsigned> sh, std::optional<ImageDataSettings> settings)
 {
+    auto array = ImageDataArray(WTF::move(arrayBufferView));
+
     auto length = array.length();
     if (!length || length % 4)
         return Exception { ExceptionCode::InvalidStateError, "Length is not a non-zero multiple of 4"_s };
@@ -150,6 +140,9 @@ ExceptionOr<Ref<ImageData>> ImageData::create(ImageDataArray&& array, unsigned s
     if (sh && sh.value() != height)
         return Exception { ExceptionCode::IndexSizeError, "sh value is not equal to height"_s };
 
+    if (settings && settings->pixelFormat != array.pixelFormat())
+        return Exception { ExceptionCode::InvalidStateError, "Mismatched pixel formats in data and settings"_s };
+
     IntSize size(sw, height.value());
     auto dataSize = computeDataSize(size, computePixelFormat(settings));
     if (dataSize.hasOverflowed() || dataSize != length)
@@ -163,6 +156,7 @@ ImageData::ImageData(const IntSize& size, ImageDataArray&& data, PredefinedColor
     : m_size(size)
     , m_data(WTF::move(data))
     , m_colorSpace(colorSpace)
+    , m_memoryCost(m_data.byteLength())
 {
 }
 
@@ -170,6 +164,7 @@ ImageData::ImageData(const IntSize& size, ImageDataArray&& data, PredefinedColor
     : m_size(size)
     , m_data(WTF::move(data), overridingPixelFormat)
     , m_colorSpace(colorSpace)
+    , m_memoryCost(m_data.byteLength())
 {
 }
 
@@ -178,7 +173,7 @@ ImageData::~ImageData() = default;
 Ref<ByteArrayPixelBuffer> ImageData::byteArrayPixelBuffer() const
 {
     Ref uint8Data = m_data.asUint8ClampedArray();
-    PixelBufferFormat format { AlphaPremultiplication::Unpremultiplied, PixelFormat::RGBA8, toDestinationColorSpace(m_colorSpace) };
+    PixelBufferFormat format { AlphaPremultiplication::Unpremultiplied, PixelFormat::RGBA8, toColorSpace(m_colorSpace) };
     return ByteArrayPixelBuffer::create(format, m_size, uint8Data.get());
 }
 
@@ -186,7 +181,7 @@ Ref<ByteArrayPixelBuffer> ImageData::byteArrayPixelBuffer() const
 Ref<Float16ArrayPixelBuffer> ImageData::float16ArrayPixelBuffer() const
 {
     Ref float16Data = m_data.asFloat16Array();
-    PixelBufferFormat format { AlphaPremultiplication::Unpremultiplied, PixelFormat::RGBA16F, toDestinationColorSpace(m_colorSpace) };
+    PixelBufferFormat format { AlphaPremultiplication::Unpremultiplied, PixelFormat::RGBA16F, toExtendedColorSpace(m_colorSpace) };
     return Float16ArrayPixelBuffer::create(format, m_size, float16Data.get());
 }
 #endif // ENABLE(PIXEL_FORMAT_RGBA16F)
@@ -196,11 +191,9 @@ Ref<PixelBuffer> ImageData::pixelBuffer() const
     switch (m_data.pixelFormat()) {
     case ImageDataPixelFormat::RgbaUnorm8:
         return byteArrayPixelBuffer();
-    case ImageDataPixelFormat::RgbaFloat16:
 #if ENABLE(PIXEL_FORMAT_RGBA16F)
+    case ImageDataPixelFormat::RgbaFloat16:
         return float16ArrayPixelBuffer();
-#else
-        RELEASE_ASSERT_NOT_REACHED("Unexpected ImageDataPixelFormat::RgbaFloat16");
 #endif
     }
     RELEASE_ASSERT_NOT_REACHED("Unexpected ImageDataPixelFormat value");

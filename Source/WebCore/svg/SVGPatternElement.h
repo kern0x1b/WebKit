@@ -1,7 +1,7 @@
 /*
  * Copyright (C) 2004, 2005, 2006, 2008 Nikolas Zimmermann <zimmermann@kde.org>
  * Copyright (C) 2004, 2005, 2006, 2007 Rob Buis <buis@kde.org>
- * Copyright (C) 2018-2024 Apple Inc. All rights reserved.
+ * Copyright (C) 2018-2026 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -39,7 +39,8 @@ class SVGPatternElement final : public SVGElement, public SVGFitToViewBox, publi
 public:
     static Ref<SVGPatternElement> create(const QualifiedName&, Document&);
 
-    void collectPatternAttributes(PatternAttributes&) const;
+    bool collectPatternAttributes(PatternAttributes&);
+    void collectOwnPatternAttributes(PatternAttributes&) const;
 
     AffineTransform localCoordinateSpaceTransform(CTMScope) const final;
 
@@ -70,7 +71,8 @@ private:
 
     RenderPtr<RenderElement> createElementRenderer(Style::ComputedStyle&&, const RenderTreePosition&) final;
 
-    bool isValid() const final { return SVGTests::isValid(); }
+    bool hasPatternTransformAttribute() const;
+
     bool needsPendingResourceHandling() const final { return false; }
     bool selfHasRelativeLengths() const final { return true; }
     bool supportsFocus() const final { return false; }

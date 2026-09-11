@@ -77,11 +77,24 @@ bool RenderSVGModelObject::requiresLayer() const
         return true;
     if (requiresLayerForSVGIntrinsicReasons())
         return true;
+    if (clipsSubtree(*this) && isRenderSVGContainer())
+        return true;
+    // Other renderers inside a resource container are not composited, so the transformed-container rule
+    // below (which exists only to expose the induced transform to RenderLayerCompositor) is unneeded.
+    // paintRendererByApplyingTransformForSVG still dispatches transformed content without a layer.
+    if (isInsideSVGResourceContainer())
+        return false;
     // All transformed containers (not leaves) gain a layer, so the induced transformations are
     // visible to RenderLayerCompositor and the composition code paths.
     if (isTransformed() && isRenderSVGContainer())
         return true;
     return false;
+}
+
+bool RenderSVGModelObject::isInsideSVGResourceContainer() const
+{
+    RefPtr svgElement = dynamicDowncast<SVGElement>(RenderElement::element());
+    return svgElement && svgElement->isInSVGResourceContainer();
 }
 
 void RenderSVGModelObject::updateFromStyle()
@@ -106,6 +119,23 @@ LayoutRect RenderSVGModelObject::overflowClipRect(const LayoutPoint&, OverlayScr
     return LayoutRect();
 }
 
+LayoutRect RenderSVGModelObject::overflowClipRectForPainting(const LayoutPoint& location, OverlayScrollbarSizeRelevancy relevancy, PaintPhase phase) const
+{
+    auto clipRect = overflowClipRect(location, relevancy, phase);
+    if (clipRect.isEmpty() || clipRect.isInfinite())
+        return clipRect;
+
+    if (!m_cachedVisualOverflowRect)
+        updateCachedVisualOverflowRect();
+
+    auto contentRect = m_cachedVisualOverflowRect->repaintBoundingBox;
+    contentRect.moveBy(location);
+    if (clipRect.contains(contentRect))
+        return LayoutRect::infiniteRect();
+
+    return clipRect;
+}
+
 auto RenderSVGModelObject::localRectsForRepaint(RepaintOutlineBounds repaintOutlineBounds) const -> RepaintRects
 {
     if (isInsideEntirelyHiddenLayer())
@@ -119,9 +149,9 @@ auto RenderSVGModelObject::localRectsForRepaint(RepaintOutlineBounds repaintOutl
     return rects;
 }
 
-auto RenderSVGModelObject::computeVisibleRectsInContainer(const RepaintRects& rects, const RenderLayerModelObject* container, VisibleRectContext context) const -> std::optional<RepaintRects>
+auto RenderSVGModelObject::computeVisibleRectsInContainer(const RepaintRects& rects, const RenderLayerModelObject* container, const VisibleRectContext& context, VisibleRectState state) const -> std::optional<RepaintRects>
 {
-    return computeVisibleRectsInSVGContainer(rects, container, context);
+    return computeVisibleRectsInSVGContainer(rects, container, context, state);
 }
 
 const RenderElement* RenderSVGModelObject::pushMappingToContainer(const RenderLayerModelObject* ancestorToStopAt, RenderGeometryMap& geometryMap) const
@@ -170,6 +200,13 @@ void RenderSVGModelObject::absoluteQuads(Vector<FloatQuad>& quads, bool* wasFixe
 void RenderSVGModelObject::styleDidChange(Style::Difference diff, const Style::ComputedStyle* oldStyle)
 {
     RenderLayerModelObject::styleDidChange(diff, oldStyle);
+
+    // A non-layer renderer with a clip-path or a mask is an atomic paint boundary, so rebuild the
+    // enclosing layer's DOM-order paint cache when either is added or removed.
+    if (oldStyle && (oldStyle->clipPath().isNone() != style().clipPath().isNone() || oldStyle->hasMask() != style().hasMask())) {
+        if (CheckedPtr layer = enclosingLayer(); layer && layer->isSVGLayer())
+            layer->dirtyChildrenInDOMOrderForSVG();
+    }
 
     // Invalidate cached transform origin when relevant styles change.
     if (!oldStyle
@@ -323,7 +360,7 @@ LayoutSize RenderSVGModelObject::cachedSizeForOverflowClip() const
     return currentSVGLayoutRect().size();
 }
 
-bool RenderSVGModelObject::applyCachedClipAndScrollPosition(RepaintRects& rects, const RenderLayerModelObject* container, VisibleRectContext context) const
+bool RenderSVGModelObject::applyCachedClipAndScrollPosition(RepaintRects& rects, const RenderLayerModelObject* container, const VisibleRectContext& context) const
 {
     // Based on RenderBox::applyCachedClipAndScrollPosition -- unused options removed.
     if (!context.options.contains(VisibleRectContext::Option::ApplyContainerClip) && this == container)

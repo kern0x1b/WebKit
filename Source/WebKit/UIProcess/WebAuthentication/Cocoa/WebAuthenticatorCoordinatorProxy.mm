@@ -35,6 +35,7 @@
 #import "LocalService.h"
 #import "Logging.h"
 #import "PageClient.h"
+#import "RelatedOriginsValidator.h"
 #import "WKError.h"
 #import "WKWebView.h"
 #import "WebAuthenticationRequestData.h"
@@ -54,6 +55,7 @@
 #import <WebCore/SecurityOrigin.h>
 #import <WebCore/UnknownCredentialOptions.h>
 #import <WebCore/WebAuthenticationUtils.h>
+#import <WebCore/WellKnownOriginList.h>
 #import <ranges>
 #import <wtf/BlockPtr.h>
 #import <wtf/CompletionHandler.h>
@@ -85,7 +87,7 @@
         return nil;
 
     if (page)
-        m_view = page->cocoaView();
+        m_view = protect(page)->cocoaView();
     m_completionHandler = WTF::move(completionHandler);
 
     return self;
@@ -463,7 +465,7 @@ RetainPtr<NSArray> WebAuthenticatorCoordinatorProxy::requestsForAssertion(const 
             if (prf->evalByCredential) {
                 perCredentialInputValues = adoptNS([[NSMutableDictionary alloc] init]);
                 for (auto& credentialIDAndInputValues : *prf->evalByCredential) {
-                    auto key = base64URLDecode(credentialIDAndInputValues.key.utf8().span());
+                    auto key = base64URLDecode(credentialIDAndInputValues.key);
                     if (!key)
                         continue;
                     [perCredentialInputValues setObject:toASAssertionPRFInputValue(credentialIDAndInputValues.value).get() forKey: toNSData(*key).get()];
@@ -499,7 +501,7 @@ RetainPtr<NSArray> WebAuthenticatorCoordinatorProxy::requestsForAssertion(const 
             if (prf->evalByCredential) {
                 perCredentialInputValues = adoptNS([[NSMutableDictionary alloc] init]);
                 for (auto& credentialIDAndInputValues : *prf->evalByCredential) {
-                    auto key = base64URLDecode(credentialIDAndInputValues.key.utf8().span());
+                    auto key = base64URLDecode(credentialIDAndInputValues.key);
                     if (!key)
                         continue;
                     [perCredentialInputValues setObject:toASAssertionPRFInputValue(credentialIDAndInputValues.value).get() forKey: toNSData(*key).get()];
@@ -550,13 +552,12 @@ void WebAuthenticatorCoordinatorProxy::unpauseConditionalAssertion()
 
 void WebAuthenticatorCoordinatorProxy::makeActiveConditionalAssertion()
 {
-    if (auto& activeProxy = activeConditionalMediationProxy()) {
+    if (RefPtr activeProxy = activeConditionalMediationProxy()) {
         if (activeProxy == this && !m_paused)
             return;
         activeProxy->pauseConditionalAssertion([weakThis = WeakPtr { *this }] () {
-            if (!weakThis)
-                return;
-            weakThis->unpauseConditionalAssertion();
+            if (RefPtr protectedThis = weakThis)
+                protectedThis->unpauseConditionalAssertion();
         });
         return;
     }
@@ -582,16 +583,69 @@ static inline AuthenticatorAttachment NODELETE fromASAuthorizationPublicKeyCrede
 
 #endif // HAVE(WEB_AUTHN_AS_MODERN)
 
+static String relyingPartyIdentifierForRequest(const WebAuthenticationRequestData& requestData)
+{
+    return WTF::switchOn(requestData.options, [](const PublicKeyCredentialCreationOptions& options) {
+        return options.rp.id;
+    }, [](const PublicKeyCredentialRequestOptions& options) {
+        return options.rpId;
+    });
+}
+
 void WebAuthenticatorCoordinatorProxy::performRequest(WebAuthenticationRequestData &&requestData, RequestCompletionHandler &&handler)
 {
-    if (m_webPageProxy->configuration().backgroundTextExtractionEnabled()) {
+    RefPtr webPageProxy = m_webPageProxy.get();
+    if (!webPageProxy) {
+        handler(WebCore::AuthenticatorResponseData { }, AuthenticatorAttachment::Platform, { ExceptionCode::NotAllowedError, @"" });
+        return;
+    }
+
+    auto relyingPartyIdentifier = relyingPartyIdentifierForRequest(requestData);
+
+    if (!requestData.frameInfo) {
+        RELEASE_LOG_ERROR(WebAuthn, "No frame info for a Web Authentication request.");
+        handler({ }, AuthenticatorAttachment::Platform, ExceptionData { ExceptionCode::NotAllowedError, "The origin of the document could not be determined."_s });
+        return;
+    }
+
+    auto callerOrigin = requestData.frameInfo->securityOrigin;
+    if (relyingPartyIdentifier.isEmpty() || callerOrigin.securityOrigin()->isMatchingRegistrableDomainSuffix(relyingPartyIdentifier)) {
+        performRequestWithValidatedRelyingPartyIdentifier(WTF::move(requestData), WTF::move(handler));
+        return;
+    }
+
+    RelatedOriginsValidation::validate(*webPageProxy, callerOrigin, relyingPartyIdentifier, [weakThis = WeakPtr { *this }, requestData = WTF::move(requestData), handler = WTF::move(handler)](RelatedOriginsValidation::Result&& result) mutable {
+        if (!result.isRelated) {
+            RELEASE_LOG_ERROR(WebAuthn, "The origin of the document is not authorized for the provided RP ID.");
+            handler({ }, AuthenticatorAttachment::Platform, ExceptionData { ExceptionCode::SecurityError, "The origin of the document is not authorized for the provided RP ID."_s });
+            return;
+        }
+
+        RefPtr protectedThis = weakThis.get();
+        if (!protectedThis) {
+            handler(WebCore::AuthenticatorResponseData { }, AuthenticatorAttachment::Platform, { ExceptionCode::NotAllowedError, @"" });
+            return;
+        }
+
+        protectedThis->performRequestWithValidatedRelyingPartyIdentifier(WTF::move(requestData), WTF::move(handler));
+    });
+}
+
+void WebAuthenticatorCoordinatorProxy::performRequestWithValidatedRelyingPartyIdentifier(WebAuthenticationRequestData &&requestData, RequestCompletionHandler &&handler)
+{
+    RefPtr webPageProxy = m_webPageProxy.get();
+    if (!webPageProxy) {
+        handler(WebCore::AuthenticatorResponseData { }, AuthenticatorAttachment::Platform, { ExceptionCode::NotAllowedError, @"" });
+        return;
+    }
+
+    if (webPageProxy->configuration().backgroundTextExtractionEnabled()) {
         handler(WebCore::AuthenticatorResponseData { }, AuthenticatorAttachment::Platform, { ExceptionCode::NotAllowedError, @"" });
         return;
     }
 
 #if HAVE(UNIFIED_ASC_AUTH_UI)
-    RefPtr webPageProxy = m_webPageProxy.get();
-    if (!webPageProxy || !protect(webPageProxy->preferences())->webAuthenticationASEnabled()) {
+    if (!protect(webPageProxy->preferences())->webAuthenticationASEnabled()) {
         auto context = contextForRequest(WTF::move(requestData));
         if (context.get() == nullptr) {
             handler({ }, (AuthenticatorAttachment)0, ExceptionData { ExceptionCode::NotAllowedError, "The origin of the document is not the same as its ancestors."_s });
@@ -1306,17 +1360,36 @@ static inline void getArePasskeysDisallowedForRelyingParty(const WebCore::Securi
     handler(false);
 }
 
-void WebAuthenticatorCoordinatorProxy::isConditionalMediationAvailable(const WebCore::SecurityOriginData& data, QueryCompletionHandler&& handler)
+void WebAuthenticatorCoordinatorProxy::isConditionalMediationAvailable(IPC::Untrusted<WebCore::SecurityOriginData>&& untrustedOrigin, QueryCompletionHandler&& handler)
 {
+    auto data = WTF::move(untrustedOrigin).unsafeExtractWithoutValidation(IPC::UnvalidatedReason::NeedsReview);
     getCanCurrentProcessAccessPasskeyForRelyingParty(data, [handler = WTF::move(handler)](bool canAccessPasskeyData) mutable {
         handler(canAccessPasskeyData && [getASCWebKitSPISupportClassSingleton() shouldUseAlternateCredentialStore]);
     });
 }
 
-void WebAuthenticatorCoordinatorProxy::getClientCapabilities(const WebCore::SecurityOriginData& originData, CapabilitiesCompletionHandler&& handler)
+static constexpr auto relatedOriginsCapability = "relatedOrigins"_s;
+
+static void setRelatedOriginsCapability(Vector<KeyValuePair<String, bool>>& capabilities)
 {
+    auto index = capabilities.findIf([](auto& capability) {
+        return capability.key == relatedOriginsCapability;
+    });
+    if (index != notFound) {
+        capabilities[index].value = true;
+        return;
+    }
+
+    capabilities.append({ relatedOriginsCapability, true });
+}
+
+void WebAuthenticatorCoordinatorProxy::getClientCapabilities(IPC::Untrusted<WebCore::SecurityOriginData>&& untrustedOrigin, CapabilitiesCompletionHandler&& handler)
+{
+    auto originData = WTF::move(untrustedOrigin).unsafeExtractWithoutValidation(IPC::UnvalidatedReason::NeedsReview);
+
     if (![getASCWebKitSPISupportClassSingleton() respondsToSelector:@selector(getClientCapabilitiesForRelyingParty:withCompletionHandler:)]) {
         Vector<KeyValuePair<String, bool>> capabilities;
+        setRelatedOriginsCapability(capabilities);
         handler(WTF::move(capabilities));
         return;
     }
@@ -1325,6 +1398,7 @@ void WebAuthenticatorCoordinatorProxy::getClientCapabilities(const WebCore::Secu
         Vector<KeyValuePair<String, bool>> capabilities;
         for (NSString *key in result)
             capabilities.append({ key, result[key].boolValue });
+        setRelatedOriginsCapability(capabilities);
         std::ranges::sort(capabilities, codePointCompareLessThan, &KeyValuePair<String, bool>::key);
 
         ensureOnMainRunLoop([handler = WTF::move(handler), capabilities = WTF::move(capabilities)] () mutable {
@@ -1333,8 +1407,9 @@ void WebAuthenticatorCoordinatorProxy::getClientCapabilities(const WebCore::Secu
     }).get()];
 }
 
-void WebAuthenticatorCoordinatorProxy::isUserVerifyingPlatformAuthenticatorAvailable(const SecurityOriginData& data, QueryCompletionHandler&& handler)
+void WebAuthenticatorCoordinatorProxy::isUserVerifyingPlatformAuthenticatorAvailable(IPC::Untrusted<SecurityOriginData>&& untrustedOrigin, QueryCompletionHandler&& handler)
 {
+    auto data = WTF::move(untrustedOrigin).unsafeExtractWithoutValidation(IPC::UnvalidatedReason::NeedsReview);
     if (m_webPageProxy->configuration().backgroundTextExtractionEnabled()) {
         handler(false);
         return;
@@ -1397,8 +1472,10 @@ void WebAuthenticatorCoordinatorProxy::cancel(CompletionHandler<void()>&& handle
 #endif
 }
 
-void WebAuthenticatorCoordinatorProxy::signalUnknownCredential(const WebCore::SecurityOriginData&, WebCore::UnknownCredentialOptions&& options, CompletionHandler<void(std::optional<ExceptionData>)>&& completionHandler)
+void WebAuthenticatorCoordinatorProxy::signalUnknownCredential(IPC::Untrusted<WebCore::SecurityOriginData>&& untrustedOrigin, WebCore::UnknownCredentialOptions&& options, CompletionHandler<void(std::optional<ExceptionData>)>&& completionHandler)
 {
+    auto originData = WTF::move(untrustedOrigin).unsafeExtractWithoutValidation(IPC::UnvalidatedReason::NeedsReview);
+
     auto decodedCredentialId = base64URLDecode(options.credentialId);
     if (!decodedCredentialId) {
         RELEASE_LOG_ERROR(WebAuthn, "Failed to parse credentialId for signalUnknownCredential.");
@@ -1408,18 +1485,24 @@ void WebAuthenticatorCoordinatorProxy::signalUnknownCredential(const WebCore::Se
 
 #if USE(APPLE_INTERNAL_SDK)
     [getCredentialUpdaterShimClassSingleton() signalUnknownCredentialWithRelyingPartyIdentifier:options.rpId.createNSString().get() credentialID:WTF::toNSData(*decodedCredentialId).get() completionHandler:makeBlockPtr([completionHandler = WTF::move(completionHandler)](NSError *error) mutable {
-        if (error) {
-            RELEASE_LOG_ERROR(WebAuthn, "Error signaling unknown credential: %@.", error.localizedDescription);
-            completionHandler(ExceptionData { ExceptionCode::UnknownError, "Error signaling unknown credential."_s });
-            return;
-        }
-        completionHandler(std::nullopt);
+        ensureOnMainRunLoop([error = protect(error), completionHandler = WTF::move(completionHandler)] mutable {
+            if (error) {
+                RELEASE_LOG_ERROR(WebAuthn, "Error signaling unknown credential: %@.", error.get().localizedDescription);
+                completionHandler(ExceptionData { ExceptionCode::UnknownError, "Error signaling unknown credential."_s });
+                return;
+            }
+            completionHandler(std::nullopt);
+        });
     }).get()];
+#else
+    completionHandler(ExceptionData { ExceptionCode::UnknownError, "Unsupported."_s });
 #endif
 }
 
-void WebAuthenticatorCoordinatorProxy::signalAllAcceptedCredentials(const WebCore::SecurityOriginData&, WebCore::AllAcceptedCredentialsOptions&& options, CompletionHandler<void(std::optional<ExceptionData>)>&& completionHandler)
+void WebAuthenticatorCoordinatorProxy::signalAllAcceptedCredentials(IPC::Untrusted<WebCore::SecurityOriginData>&& untrustedOrigin, WebCore::AllAcceptedCredentialsOptions&& options, CompletionHandler<void(std::optional<ExceptionData>)>&& completionHandler)
 {
+    auto originData = WTF::move(untrustedOrigin).unsafeExtractWithoutValidation(IPC::UnvalidatedReason::NeedsReview);
+
     auto userHandle = base64URLDecode(options.userId);
     if (!userHandle) {
         RELEASE_LOG_ERROR(WebAuthn, "Failed to parse userHandle for signalAllAcceptedCredentials.");
@@ -1439,18 +1522,24 @@ void WebAuthenticatorCoordinatorProxy::signalAllAcceptedCredentials(const WebCor
 
 #if USE(APPLE_INTERNAL_SDK)
     [getCredentialUpdaterShimClassSingleton() signalAllAcceptedCredentialsWithRelyingPartyIdentifier:options.rpId.createNSString().get() userHandle:WTF::toNSData(*userHandle).get() acceptedCredentialIDs:credentialIds.get() completionHandler:makeBlockPtr([completionHandler = WTF::move(completionHandler)](NSError *error) mutable {
-        if (error) {
-            RELEASE_LOG_ERROR(WebAuthn, "Error signaling all accepted credentials: %@.", error.localizedDescription);
-            completionHandler(ExceptionData { ExceptionCode::UnknownError, "Error signaling all accepted credentials"_s });
-            return;
-        }
-        completionHandler(std::nullopt);
+        ensureOnMainRunLoop([completionHandler = WTF::move(completionHandler), error = retainPtr(error)]() mutable {
+            if (error) {
+                RELEASE_LOG_ERROR(WebAuthn, "Error signaling all accepted credentials: %@.", error.get().localizedDescription);
+                completionHandler(ExceptionData { ExceptionCode::UnknownError, "Error signaling all accepted credentials"_s });
+                return;
+            }
+            completionHandler(std::nullopt);
+        });
     }).get()];
+#else
+    completionHandler(ExceptionData { ExceptionCode::UnknownError, "Unsupported."_s });
 #endif
 }
 
-void WebAuthenticatorCoordinatorProxy::signalCurrentUserDetails(const WebCore::SecurityOriginData&, WebCore::CurrentUserDetailsOptions&& options, CompletionHandler<void(std::optional<ExceptionData>)>&& completionHandler)
+void WebAuthenticatorCoordinatorProxy::signalCurrentUserDetails(IPC::Untrusted<WebCore::SecurityOriginData>&& untrustedOrigin, WebCore::CurrentUserDetailsOptions&& options, CompletionHandler<void(std::optional<ExceptionData>)>&& completionHandler)
 {
+    auto originData = WTF::move(untrustedOrigin).unsafeExtractWithoutValidation(IPC::UnvalidatedReason::NeedsReview);
+
     auto userHandle = base64URLDecode(options.userId);
     if (!userHandle) {
         RELEASE_LOG_ERROR(WebAuthn, "Failed to parse userHandle for signalAllAcceptedCredentials.");
@@ -1460,13 +1549,17 @@ void WebAuthenticatorCoordinatorProxy::signalCurrentUserDetails(const WebCore::S
 
 #if USE(APPLE_INTERNAL_SDK)
     [getCredentialUpdaterShimClassSingleton() signalCurrentUserDetailsWithRelyingPartyIdentifier:options.rpId.createNSString().get() userHandle:WTF::toNSData(*userHandle).get() newName:options.name.createNSString().get() completionHandler:makeBlockPtr([completionHandler = WTF::move(completionHandler)](NSError *error) mutable {
-        if (error) {
-            RELEASE_LOG_ERROR(WebAuthn, "Error signaling current user details: %@.", error.localizedDescription);
-            completionHandler(ExceptionData { ExceptionCode::UnknownError, "Error signaling current user details."_s });
-            return;
-        }
-        completionHandler(std::nullopt);
+        ensureOnMainRunLoop([completionHandler = WTF::move(completionHandler), error = retainPtr(error)]() mutable {
+            if (error) {
+                RELEASE_LOG_ERROR(WebAuthn, "Error signaling current user details: %@.", error.get().localizedDescription);
+                completionHandler(ExceptionData { ExceptionCode::UnknownError, "Error signaling current user details."_s });
+                return;
+            }
+            completionHandler(std::nullopt);
+        });
     }).get()];
+#else
+    completionHandler(ExceptionData { ExceptionCode::UnknownError, "Unsupported."_s });
 #endif
 }
 

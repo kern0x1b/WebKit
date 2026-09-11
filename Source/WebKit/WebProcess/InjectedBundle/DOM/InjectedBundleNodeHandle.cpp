@@ -109,7 +109,7 @@ Ref<InjectedBundleNodeHandle> InjectedBundleNodeHandle::create(Node& node)
 }
 
 InjectedBundleNodeHandle::InjectedBundleNodeHandle(Node& node)
-    : ActiveDOMObject(node.document())
+    : ActiveDOMObject(protect(node.document()))
     , m_node(&node)
 {
 }
@@ -174,7 +174,7 @@ static RefPtr<WebImage> imageForRect(LocalFrameView* frameView, Node* nodeToDraw
     if (bitmapSize.isEmpty())
         return nullptr;
 
-    auto snapshot = WebImage::create(bitmapSize, snapshotOptionsToImageOptions(options), DestinationColorSpace::SRGB());
+    auto snapshot = WebImage::create(bitmapSize, snapshotOptionsToImageOptions(options), ColorSpace::SRGB());
     if (!snapshot->context())
         return nullptr;
 
@@ -230,7 +230,7 @@ RefPtr<WebImage> InjectedBundleNodeHandle::renderedImage(SnapshotOptions options
         paintingRect = snappedIntRect(renderer->subtreePaintRootRect(topLevelRect));
     }
 
-    return imageForRect(frameView.get(), m_node.get(), paintingRect, bitmapWidth, options);
+    return imageForRect(frameView.get(), protect(m_node), paintingRect, bitmapWidth, options);
 }
 
 RefPtr<InjectedBundleRangeHandle> InjectedBundleNodeHandle::visibleRange()

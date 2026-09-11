@@ -260,7 +260,9 @@ WebCore::FloatRect WebPageProxy::computeLayoutViewportRect(const FloatRect& unob
         constrainedUnobscuredRect.setHeight(adjustedUnexposedMaxEdge(documentRect.maxY(), constrainedUnobscuredRect.maxY(), factor) - constrainedUnobscuredRect.y());
     }
 
-    FloatSize constrainedSize = isBelowMinimumScale ? constrainedUnobscuredRect.size() : unobscuredContentRect.size();
+    bool resizesContent = pageClient->viewportMetaTagInteractiveWidget() == WebCore::InteractiveWidgetValue::ResizesContent;
+    FloatRect sizeSourceRect = resizesContent ? unobscuredContentRectRespectingInputViewBounds : unobscuredContentRect;
+    FloatSize constrainedSize = isBelowMinimumScale ? constrainedUnobscuredRect.size() : sizeSourceRect.size();
     FloatRect unobscuredContentRectForViewport = isBelowMinimumScale ? constrainedUnobscuredRect : unobscuredContentRectRespectingInputViewBounds;
 
     double heightExpansionFactor = internals().allowsLayoutViewportHeightExpansion ? protect(m_preferences)->layoutViewportHeightExpansionFactor() : 0;
@@ -396,7 +398,8 @@ void WebPageProxy::updateSelectionWithTouches(IntPoint point, SelectionTouch tou
     if (!hasRunningProcess())
         return callback(WebCore::IntPoint(), SelectionTouch::Started, { });
 
-    protect(legacyMainFrameProcess())->sendWithAsyncReply(Messages::WebPage::UpdateSelectionWithTouches(point, touches, baseIsStart), WTF::move(callback), webPageIDInMainFrameProcess());
+    RefPtr focusedFrame = focusedOrMainFrame();
+    sendWithAsyncReplyToProcessContainingFrame(focusedFrame ? std::optional(focusedFrame->frameID()) : std::nullopt, Messages::WebPage::UpdateSelectionWithTouches(point, touches, baseIsStart), Messages::WebPage::UpdateSelectionWithTouches::Reply { WTF::move(callback) });
 }
 
 void WebPageProxy::willInsertFinalDictationResult()
@@ -411,7 +414,10 @@ void WebPageProxy::didInsertFinalDictationResult()
 
 void WebPageProxy::replaceDictatedText(const String& oldText, const String& newText)
 {
-    protect(m_legacyMainFrameProcess)->send(Messages::WebPage::ReplaceDictatedText(oldText, newText), webPageIDInMainFrameProcess());
+    RefPtr frame = focusedOrMainFrame();
+    if (!frame)
+        return;
+    sendToProcessContainingFrame(frame->frameID(), Messages::WebPage::ReplaceDictatedText(oldText, newText));
 }
 
 void WebPageProxy::replaceSelectedText(const String& oldText, const String& newText)
@@ -776,7 +782,7 @@ void WebPageProxy::executeSavedCommandBySelector(IPC::Connection&, const String&
     completionHandler(false);
 }
 
-bool WebPageProxy::shouldDelayWindowOrderingForEvent(const WebKit::WebMouseEvent&)
+bool WebPageProxy::shouldDelayWindowOrderingForEvent(Ref<WebKit::WebMouseEvent>&&)
 {
     notImplemented();
     return false;
@@ -907,6 +913,7 @@ void WebPageProxy::didProgrammaticallyClearFocusedElement(WebCore::ElementContex
 void WebPageProxy::elementDidFocus(IPC::Connection& connection, const FocusedElementInformation& information, bool userIsInteracting, bool blurPreviousNode, OptionSet<WebCore::ActivityState> activityStateChanges, const UserData& userData)
 {
     m_pendingInputModeChange = std::nullopt;
+    m_focusedElementProcessID = WebProcessProxy::fromConnection(connection)->coreProcessIdentifier();
 
     RefPtr pageClient = this->pageClient();
     if (!pageClient)
@@ -929,8 +936,12 @@ void WebPageProxy::elementDidFocus(IPC::Connection& connection, const FocusedEle
         });
 }
 
-void WebPageProxy::elementDidBlur()
+void WebPageProxy::elementDidBlur(IPC::Connection& connection)
 {
+    if (m_focusedElementProcessID && *m_focusedElementProcessID != WebProcessProxy::fromConnection(connection)->coreProcessIdentifier())
+        return;
+
+    m_focusedElementProcessID = std::nullopt;
     m_pendingInputModeChange = std::nullopt;
     if (RefPtr pageClient = this->pageClient())
         pageClient->elementDidBlur();
@@ -964,15 +975,21 @@ void WebPageProxy::convertFocusedElementInformationRectsToMainFrameCoordinates(F
 
     Vector<FloatRect> rects;
     rects.append(information.interactionRect);
+    // The last interaction location is the tap point as delivered to the frame's own process, so it is in
+    // that frame's root-view coordinates. Convert it too, so that comparing it against interactionRect in
+    // -[WKContentView rectToRevealWhenZoomingToFocusedElement] compares points in the same space.
+    rects.append({ FloatPoint { information.lastInteractionLocation }, FloatSize { } });
     if (information.hasNextNode)
         rects.append(information.nextNodeRect);
     if (information.hasPreviousNode)
         rects.append(information.previousNodeRect);
 
-    convertRectsToMainFrameCoordinates(WTF::move(rects), frame->rootFrame()->frameID(), [information = WTF::move(information), completionHandler = WTF::move(completionHandler)](std::optional<Vector<FloatRect>> convertedRects) mutable {
-        if (convertedRects) {
+    auto expectedRectCount = rects.size();
+    convertRectsToMainFrameCoordinates(WTF::move(rects), frame->rootFrame()->frameID(), [expectedRectCount, information = WTF::move(information), completionHandler = WTF::move(completionHandler)](std::optional<Vector<FloatRect>> convertedRects) mutable {
+        if (convertedRects && convertedRects->size() == expectedRectCount) {
             size_t index = 0;
             information.interactionRect = IntRect(convertedRects->at(index++));
+            information.lastInteractionLocation = IntPoint(convertedRects->at(index++).location());
             if (information.hasNextNode)
                 information.nextNodeRect = IntRect(convertedRects->at(index++));
             if (information.hasPreviousNode)
@@ -1195,7 +1212,7 @@ void WebPageProxy::didUpdateEditorState(const EditorState& oldEditorState, const
     
     if (newEditorState.shouldIgnoreSelectionChanges)
         return;
-    
+
     updateFontAttributesAfterEditorStateChange();
     // We always need to notify the client on iOS to make sure the selection is redrawn,
     // even during composition to support phrase boundary gesture.
@@ -1295,18 +1312,6 @@ WebCore::FloatRect WebPageProxy::selectionBoundingRectInRootViewCoordinates() co
         bounds = visualData.caretRectAtStart;
 
     return bounds;
-}
-
-void WebPageProxy::convertEditorStateSelectionRectToMainFrameCoordinates(WebCore::FloatRect rect, CompletionHandler<void(WebCore::FloatRect)>&& completionHandler)
-{
-    if (!editorState().hasVisualData()) {
-        completionHandler(rect);
-        return;
-    }
-
-    convertRectToMainFrameCoordinates(rect, editorState().visualData->rootFrameID, [rect, completionHandler = WTF::move(completionHandler)](std::optional<WebCore::FloatRect> convertedRect) mutable {
-        completionHandler(convertedRect.value_or(rect));
-    });
 }
 
 void WebPageProxy::requestDocumentEditingContext(WebKit::DocumentEditingContextRequest&& request, CompletionHandler<void(WebKit::DocumentEditingContext&&)>&& completionHandler)
@@ -1574,12 +1579,27 @@ WebContentMode WebPageProxy::effectiveContentModeAfterAdjustingPolicies(API::Web
         policies.setCustomNavigatorPlatform("iPhone"_s);
     };
 
+    auto applyCapabilityPoliciesForContentMode = [&](WebContentMode contentMode) {
+        bool shouldEmulateDesktopClassHardware = contentMode == WebContentMode::Desktop && m_configuration->backgroundTextExtractionEnabled();
+#if ENABLE(TOUCH_EVENTS)
+        bool shouldOmitTouchEventDOMAttributes = shouldEmulateDesktopClassHardware
+            || (contentMode == WebContentMode::Desktop && needsSiteSpecificQuirks && Quirks::shouldOmitTouchEventDOMAttributesForDesktopWebsite(request.url()));
+        policies.setOverrideTouchEventDOMAttributesEnabled(!shouldOmitTouchEventDOMAttributes);
+#endif
+#if ENABLE(IOS_TOUCH_EVENTS)
+        policies.setOverrideShouldReportZeroMaxTouchPoints(shouldEmulateDesktopClassHardware);
+#endif
+        policies.setOverrideShouldReportViewportSizeAsScreenSize(shouldEmulateDesktopClassHardware && !desktopClassBrowsingSupported());
+        policies.setOverrideShouldReportDesktopClassPointingDevice(shouldEmulateDesktopClassHardware);
+    };
+
     if (needsSiteSpecificQuirks) {
         if (auto selectors = Quirks::defaultVisibilityAdjustmentSelectors(request.url()))
             policies.setVisibilityAdjustmentSelectors({ WTF::move(*selectors) });
 
         if (Quirks::needsIPhoneUserAgent(request.url())) {
             applyIPhoneUserAgent();
+            applyCapabilityPoliciesForContentMode(WebContentMode::Mobile);
             return WebContentMode::Mobile;
         }
     }
@@ -1590,6 +1610,7 @@ WebContentMode WebPageProxy::effectiveContentModeAfterAdjustingPolicies(API::Web
 
     if (!useDesktopBrowsingMode) {
         policies.setIdempotentModeAutosizingOnlyHonorsPercentages(true);
+        applyCapabilityPoliciesForContentMode(WebContentMode::Mobile);
         return WebContentMode::Mobile;
     }
 
@@ -1621,10 +1642,7 @@ WebContentMode WebPageProxy::effectiveContentModeAfterAdjustingPolicies(API::Web
         m_preferFasterClickOverDoubleTap = true;
     }
 
-#if ENABLE(TOUCH_EVENTS)
-    if (needsSiteSpecificQuirks && Quirks::shouldOmitTouchEventDOMAttributesForDesktopWebsite(request.url()))
-        policies.setOverrideTouchEventDOMAttributesEnabled(false);
-#endif
+    applyCapabilityPoliciesForContentMode(WebContentMode::Desktop);
 
     policies.setInlineMediaPlaybackPolicy(WebsiteInlineMediaPlaybackPolicy::DoesNotRequirePlaysInlineAttribute);
 

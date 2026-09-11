@@ -29,34 +29,9 @@ namespace WebCore {
 class JSEventListener;
 class WindowProxy;
 
-#if PLATFORM(COCOA)
-// Diagnostic (rdar://157587352): allocate the m_wrappers hash-table backing in its own page(s)
-// so it can be kept read-only except during the world's own mutating operations. Any stray write
-// that corrupts the map (the bug we are hunting) then faults immediately with the writer's stack.
-// To keep the cost off Speedometer, guarding is sampled per-process: gGuardWrapperMaps is decided
-// once at startup, and when false the allocator falls back to FastMalloc and the scopes are no-ops.
-// The whole facility relies on mmap/mprotect and is only built on Cocoa; elsewhere m_wrappers is a
-// plain HashMap and none of this code exists.
-WEBCORE_EXPORT extern bool gGuardWrapperMaps;
-
-struct WrapperMapTableMalloc {
-    WEBCORE_EXPORT static void* malloc(size_t);
-    WEBCORE_EXPORT static void* zeroedMalloc(size_t);
-    WEBCORE_EXPORT static void free(void*);
-private:
-    static void* allocate(size_t);
-};
-
-using DOMObjectWrapperMap = HashMap<void*, JSC::Weak<JSC::JSObject>, WTF::DefaultHash<void*>, WTF::HashTraits<void*>, WTF::HashTraits<JSC::Weak<JSC::JSObject>>, WTF::HashTableTraits, WTF::ShouldValidateKey::Yes, WrapperMapTableMalloc>;
-#else
-using DOMObjectWrapperMap = HashMap<void*, JSC::Weak<JSC::JSObject>>;
-#endif
+typedef HashMap<void*, JSC::Weak<JSC::JSObject>> DOMObjectWrapperMap;
 
 class DOMWrapperWorld : public RefCounted<DOMWrapperWorld>, public CanMakeSingleThreadWeakPtr<DOMWrapperWorld> {
-#if PLATFORM(COCOA)
-    friend struct WrapperMapTableMalloc;
-    friend class WrapperMutationScope;
-#endif
 public:
     enum class Type {
         Normal,   // Main (e.g. Page)
@@ -126,19 +101,6 @@ private:
     JSC::VM& m_vm;
     HashSet<WindowProxy*> m_jsWindowProxies;
     DOMObjectWrapperMap m_wrappers;
-
-#if PLATFORM(COCOA)
-    // Diagnostic page-protection state for m_wrappers (rdar://157587352). The backing is kept
-    // read-only except inside a WrapperMutationScope; WrapperMapTableMalloc reports each (re)allocated
-    // backing here so the scope can re-protect the current (possibly grown/shrunk) table. The whole
-    // facility relies on mmap/mprotect and is only built on Cocoa.
-    void noteTableBacking(void* base, size_t size) { m_wrappersTableBase = base; m_wrappersTableSize = size; }
-    void forgetTableBacking(void* base) { if (m_wrappersTableBase == base) { m_wrappersTableBase = nullptr; m_wrappersTableSize = 0; } }
-    SUPPRESS_NODELETE void NODELETE setWrappersTableWritable(bool);
-    void* m_wrappersTableBase { nullptr };
-    size_t m_wrappersTableSize { 0 };
-    unsigned m_wrappersTableWritableDepth { 0 };
-#endif
 
     WeakHashSet<JSEventListener> m_eventListeners;
 

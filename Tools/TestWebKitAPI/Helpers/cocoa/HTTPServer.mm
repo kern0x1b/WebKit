@@ -27,6 +27,7 @@
 #import "Helpers/cocoa/HTTPServer.h"
 
 #import "Helpers/Utilities.h"
+#import "Helpers/cocoa/NetworkSPI.h"
 #import <WebKit/WKWebsiteDataStorePrivate.h>
 #import <WebKit/_WKWebsiteDataStoreConfiguration.h>
 #import <wtf/BlockPtr.h>
@@ -115,18 +116,63 @@ static bool shouldDisableTLS(HTTPServer::Protocol protocol)
     case HTTPServer::Protocol::Http:
     case HTTPServer::Protocol::HttpsProxy:
     case HTTPServer::Protocol::HttpsProxyWithAuthentication:
+    case HTTPServer::Protocol::Http2Proxy:
         return true;
     case HTTPServer::Protocol::Https:
     case HTTPServer::Protocol::HttpsWithLegacyTLS:
+    case HTTPServer::Protocol::Http2Raw:
     case HTTPServer::Protocol::Http2:
+    case HTTPServer::Protocol::Http3:
         return false;
     }
 }
+
+#if HAVE(NETWORK_FRAMEWORK_HTTP_MESSAGING)
+
+static void attachHTTPMessagingListener(nw_parameters_t parameters)
+{
+    nw_parameters_set_server_mode(parameters, true);
+    nw_parameters_set_attach_protocol_listener(parameters, true);
+    RetainPtr stack = adoptNS(nw_parameters_copy_default_protocol_stack(parameters));
+    RetainPtr httpOptions = adoptNS(nw_http_messaging_create_options());
+    nw_protocol_stack_prepend_application_protocol(stack.get(), httpOptions.get());
+}
+
+static RetainPtr<nw_parameters_t> quicListenerParameters(HTTPServer::CertificateVerifier&& verifier, RetainPtr<SecIdentityRef>&& testIdentity, std::optional<uint16_t> port)
+{
+    RetainPtr identity = adoptNS(sec_identity_create(testIdentity.get()));
+    auto configureQuicConnection = [verifier = WTF::move(verifier), identity = WTF::move(identity)] (nw_protocol_options_t quicConnectionOptions) mutable {
+        RetainPtr options = adoptNS(nw_quic_connection_copy_sec_protocol_options(quicConnectionOptions));
+        sec_protocol_options_set_local_identity(options.get(), identity.get());
+        if (verifier) {
+            sec_protocol_options_set_peer_authentication_required(options.get(), true);
+            sec_protocol_options_set_verify_block(options.get(), makeBlockPtr([verifier = WTF::move(verifier)](sec_protocol_metadata_t metadata, sec_trust_t trust, sec_protocol_verify_complete_t completion) {
+                verifier(metadata, trust, completion);
+            }).get(), mainDispatchQueueSingleton());
+        }
+        sec_protocol_options_add_transport_specific_application_protocol(options.get(), "h3", sec_protocol_transport_quic);
+    };
+
+    RetainPtr parameters = adoptNS(nw_parameters_create_quic_stream(^(nw_protocol_options_t options) {
+        nw_quic_stream_set_is_unidirectional(options, true);
+    }, makeBlockPtr(WTF::move(configureQuicConnection)).get()));
+    if (port)
+        nw_parameters_set_local_endpoint(parameters.get(), nw_endpoint_create_host("::", makeString(*port).utf8().legacyCStringPointer()));
+    attachHTTPMessagingListener(parameters.get());
+    return parameters;
+}
+
+#endif // HAVE(NETWORK_FRAMEWORK_HTTP_MESSAGING)
 
 RetainPtr<nw_parameters_t> HTTPServer::listenerParameters(Protocol protocol, CertificateVerifier&& verifier, RetainPtr<SecIdentityRef>&& customTestIdentity, std::optional<uint16_t> port)
 {
     if (protocol != Protocol::Http && !customTestIdentity)
         customTestIdentity = testIdentity();
+
+#if HAVE(NETWORK_FRAMEWORK_HTTP_MESSAGING)
+    if (protocol == Protocol::Http3)
+        return quicListenerParameters(WTF::move(verifier), WTF::move(customTestIdentity), port);
+#endif
 
     auto configureTLS = [protocol, verifier = WTF::move(verifier), testIdentity = WTF::move(customTestIdentity)] (nw_protocol_options_t protocolOptions) mutable {
         RetainPtr options = adoptNS(nw_tls_copy_sec_protocol_options(protocolOptions));
@@ -144,16 +190,16 @@ RetainPtr<nw_parameters_t> HTTPServer::listenerParameters(Protocol protocol, Cer
                 verifier(metadata, trust, completion);
             }).get(), mainDispatchQueueSingleton());
         }
-        if (protocol == Protocol::Http2)
+        if (protocol == Protocol::Http2Raw || protocol == Protocol::Http2 || protocol == Protocol::Http2Proxy)
             sec_protocol_options_add_tls_application_protocol(options.get(), "h2");
     };
 
     auto configureTLSBlock = shouldDisableTLS(protocol) ? makeBlockPtr(NW_PARAMETERS_DISABLE_PROTOCOL) : makeBlockPtr(WTF::move(configureTLS));
     RetainPtr parameters = adoptNS(nw_parameters_create_secure_tcp(configureTLSBlock.get(), NW_PARAMETERS_DEFAULT_CONFIGURATION));
     if (port)
-        nw_parameters_set_local_endpoint(parameters.get(), nw_endpoint_create_host("::", makeString(*port).utf8().data()));
+        nw_parameters_set_local_endpoint(parameters.get(), nw_endpoint_create_host("::", makeString(*port).utf8().legacyCStringPointer()));
 
-    if (protocol == Protocol::HttpsProxy || protocol == Protocol::HttpsProxyWithAuthentication) {
+    if (protocol == Protocol::HttpsProxy || protocol == Protocol::HttpsProxyWithAuthentication || protocol == Protocol::Http2Proxy) {
         RetainPtr stack = adoptNS(nw_parameters_copy_default_protocol_stack(parameters.get()));
         RetainPtr options = adoptNS(nw_framer_create_options(proxyDefinition(protocol).get()));
         nw_protocol_stack_prepend_application_protocol(stack.get(), options.get());
@@ -161,7 +207,21 @@ RetainPtr<nw_parameters_t> HTTPServer::listenerParameters(Protocol protocol, Cer
         RetainPtr tlsOptions = adoptNS(nw_tls_create_options());
         configureTLS(tlsOptions.get());
         nw_protocol_stack_prepend_application_protocol(stack.get(), tlsOptions.get());
+
+#if HAVE(NETWORK_FRAMEWORK_HTTP_MESSAGING)
+        if (protocol == Protocol::Http2Proxy) {
+            nw_parameters_set_server_mode(parameters.get(), true);
+            nw_parameters_set_attach_protocol_listener(parameters.get(), true);
+            RetainPtr httpOptions = adoptNS(nw_http_messaging_create_options());
+            nw_protocol_stack_prepend_application_protocol(stack.get(), httpOptions.get());
+        }
+#endif
     }
+
+#if HAVE(NETWORK_FRAMEWORK_HTTP_MESSAGING)
+    if (protocol == Protocol::Http2)
+        attachHTTPMessagingListener(parameters.get());
+#endif
 
     return parameters;
 }
@@ -232,11 +292,18 @@ HTTPServer::HTTPServer(
     , m_protocol(protocol)
 {
     nw_listener_set_queue(m_listener.get(), mainDispatchQueueSingleton());
-    nw_listener_set_new_connection_handler(m_listener.get(), makeBlockPtr([requestData = m_requestData](nw_connection_t connection) {
+    nw_listener_set_new_connection_handler(m_listener.get(), makeBlockPtr([requestData = m_requestData, protocol](nw_connection_t connection) {
         requestData->connections.append(Connection(connection));
         nw_connection_set_queue(connection, mainDispatchQueueSingleton());
         nw_connection_start(connection);
-        respondToRequests(Connection(connection), requestData);
+        if (protocol == Protocol::Http2 || protocol == Protocol::Http3 || protocol == Protocol::Http2Proxy) {
+#if HAVE(NETWORK_FRAMEWORK_HTTP_MESSAGING)
+            respondToHTTPMessagingRequests(Connection(connection), requestData);
+#else
+            RELEASE_ASSERT_NOT_REACHED();
+#endif
+        } else
+            respondToRequests(Connection(connection), requestData);
     }).get());
 
     if (deferListening == DeferListening::No) {
@@ -348,6 +415,11 @@ String HTTPServer::lastRequestCookies() const
     return m_requestData->lastRequestCookies;
 }
 
+bool HTTPServer::sawAuthorizationHeader() const
+{
+    return m_requestData->sawAuthorizationHeader;
+}
+
 static ASCIILiteral statusText(unsigned statusCode)
 {
     switch (statusCode) {
@@ -365,6 +437,8 @@ static ASCIILiteral statusText(unsigned statusCode)
         return "See Other"_s;
     case 304:
         return "Not Modified"_s;
+    case 401:
+        return "Unauthorized"_s;
     case 403:
         return "Forbidden"_s;
     case 404:
@@ -414,33 +488,42 @@ String HTTPServer::parsePath(const Vector<char>& request)
         pathPrefixLength = postPathPrefix.length();
     ASSERT_WITH_MESSAGE(pathPrefixLength, "HTTPServer assumes request is GET or POST");
     size_t pathLength = pathEnd - pathPrefixLength;
-    return request.subspan(pathPrefixLength, pathLength);
+    return String::fromUTF8(request.subspan(pathPrefixLength, pathLength));
 }
 
-String HTTPServer::parseCookies(const Vector<char>& characters)
+static String parseHeaderValue(const Vector<char>& characters, ASCIILiteral headerPrefix)
 {
     if (!characters.size())
         return { };
 
-    String request { characters.span() };
-    ASCIILiteral cookiePrefix = "Cookie: "_s;
-    size_t cookieStringStart = request.find(cookiePrefix);
-    if (cookieStringStart == notFound)
+    String request = String::fromLatin1(characters.span());
+    size_t valueStart = request.find(headerPrefix);
+    if (valueStart == notFound)
         return { };
-    cookieStringStart += cookiePrefix.length();
+    valueStart += headerPrefix.length();
 
-    size_t cookieStringEnd = request.find("\r\n"_s, cookieStringStart);
-    if (cookieStringEnd == notFound)
+    size_t valueEnd = request.find("\r\n"_s, valueStart);
+    if (valueEnd == notFound)
         return { };
 
-    return request.substring(cookieStringStart, cookieStringEnd - cookieStringStart);
+    return request.substring(valueStart, valueEnd - valueStart);
+}
+
+String HTTPServer::parseCookies(const Vector<char>& characters)
+{
+    return parseHeaderValue(characters, "Cookie: "_s);
+}
+
+String HTTPServer::parseAuthorization(const Vector<char>& characters)
+{
+    return parseHeaderValue(characters, "Authorization: "_s);
 }
 
 String HTTPServer::parseBody(const Vector<char>& request)
 {
     auto headerEndBytes = "\r\n\r\n"_s;
     size_t headerEnd = find(request.span(), headerEndBytes.span()) + strlen(headerEndBytes);
-    return request.subspan(headerEnd);
+    return String::fromUTF8(request.subspan(headerEnd));
 }
 
 static bool isConditionalRequest(std::span<const char> request)
@@ -469,9 +552,11 @@ void HTTPServer::respondToRequests(Connection connection, Ref<RequestData> reque
 
         requestData->requestCount++;
         requestData->lastRequestCookies = parseCookies(request);
+        if (!parseAuthorization(request).isEmpty())
+            requestData->sawAuthorizationHeader = true;
 
         auto path = parsePath(request);
-        ASSERT_WITH_MESSAGE(requestData->requestMap.contains(path), "This HTTPServer does not know how to respond to a request for %s", path.utf8().data());
+        ASSERT_WITH_MESSAGE(requestData->requestMap.contains(path), "This HTTPServer does not know how to respond to a request for %s", path.utf8().legacyCStringPointer());
 
         auto response = requestData->requestMap.get(path);
         if (response.shouldRespondWith304ToConditionalRequests) {
@@ -495,6 +580,45 @@ void HTTPServer::respondToRequests(Connection connection, Ref<RequestData> reque
     });
 }
 
+#if HAVE(NETWORK_FRAMEWORK_HTTP_MESSAGING)
+
+// Each HTTP/2 stream (i.e. each request) arrives as its own one-shot pseudo-connection via
+// nw_parameters_set_attach_protocol_listener(); unlike respondToRequests(), this must not recurse
+// to await a second message on the same Connection, since a second request never arrives here.
+void HTTPServer::respondToHTTPMessagingRequests(Connection connection, Ref<RequestData> requestData)
+{
+    connection.receiveHTTPMessagingRequest([connection, requestData] (HTTPRequestData&& request) mutable {
+        // receiveHTTPMessagingRequest() leaves an empty (null-path) HTTPRequestData on error/reset before any data arrives.
+        if (request.path.isNull())
+            return;
+
+        requestData->requestCount++;
+        // HTTP/2 requires lowercase header field names on the wire (RFC 7540 8.1.2).
+        requestData->lastRequestCookies = request.headerFields.get("cookie"_s);
+        if (!request.headerFields.get("authorization"_s).isEmpty())
+            requestData->sawAuthorizationHeader = true;
+
+        ASSERT_WITH_MESSAGE(requestData->requestMap.contains(request.path), "This HTTPServer does not know how to respond to a request for %s", request.path.utf8().legacyCStringPointer());
+
+        auto response = requestData->requestMap.get(request.path);
+        if (response.shouldRespondWith304ToConditionalRequests) {
+            if (request.headerFields.contains("if-none-match"_s))
+                return connection.sendHTTPMessagingResponse(HTTPResponse(304, copyToVector(response.headerFieldsFor304)));
+        }
+
+        switch (response.behavior) {
+        case HTTPResponse::Behavior::TerminateConnectionAfterReceivingRequest:
+            return connection.terminate();
+        case HTTPResponse::Behavior::SendResponseNormally:
+            return connection.sendHTTPMessagingResponse(response);
+        case HTTPResponse::Behavior::NeverSendResponse:
+            return;
+        }
+    });
+}
+
+#endif // HAVE(NETWORK_FRAMEWORK_HTTP_MESSAGING)
+
 uint16_t HTTPServer::port() const
 {
     return nw_listener_get_port(m_listener.get());
@@ -509,11 +633,14 @@ const char* HTTPServer::scheme() const
         break;
     case Protocol::Https:
     case Protocol::HttpsWithLegacyTLS:
+    case Protocol::Http2Raw:
     case Protocol::Http2:
+    case Protocol::Http3:
         scheme = "https";
         break;
     case Protocol::HttpsProxy:
     case Protocol::HttpsProxyWithAuthentication:
+    case Protocol::Http2Proxy:
         RELEASE_ASSERT_NOT_REACHED();
     }
     return scheme;
@@ -557,7 +684,7 @@ Vector<uint8_t> HTTPResponse::serialize(IncludeContentLength includeContentLengt
     for (auto& pair : headerFields)
         responseBuilder.append(pair.key, ": "_s, pair.value, "\r\n"_s);
     responseBuilder.append("\r\n"_s);
-    
+
     auto bytesToSend = toUTF8Vector(responseBuilder.toString());
     bytesToSend.appendVector(body);
     return bytesToSend;

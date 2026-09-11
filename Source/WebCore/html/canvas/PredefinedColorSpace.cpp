@@ -26,41 +26,92 @@
 #include "config.h"
 #include "PredefinedColorSpace.h"
 
-#include "DestinationColorSpace.h"
+#include "ColorSpace.h"
+#include "PixelFormat.h"
 
 namespace WebCore {
 
-DestinationColorSpace toDestinationColorSpace(PredefinedColorSpace colorSpace)
+ColorSpace toColorSpace(PredefinedColorSpace colorSpace)
 {
     switch (colorSpace) {
     case PredefinedColorSpace::SRGB:
-        return DestinationColorSpace::SRGB();
+        return ColorSpace::SRGB();
     case PredefinedColorSpace::SRGBLinear:
-        return DestinationColorSpace::LinearSRGB();
+        return ColorSpace::LinearSRGB();
 #if ENABLE(PREDEFINED_COLOR_SPACE_DISPLAY_P3)
     case PredefinedColorSpace::DisplayP3:
-        return DestinationColorSpace::DisplayP3();
+        return ColorSpace::DisplayP3();
     case PredefinedColorSpace::DisplayP3Linear:
-        return DestinationColorSpace::LinearDisplayP3();
+        return ColorSpace::LinearDisplayP3();
 #endif
     }
 
     ASSERT_NOT_REACHED();
-    return DestinationColorSpace::SRGB();
+    return ColorSpace::SRGB();
 }
 
-std::optional<PredefinedColorSpace> toPredefinedColorSpace(const DestinationColorSpace& colorSpace)
+ColorSpace toExtendedColorSpace(PredefinedColorSpace colorSpace)
 {
-    if (colorSpace == DestinationColorSpace::SRGB())
+    switch (colorSpace) {
+    case PredefinedColorSpace::SRGB:
+#if ENABLE(DESTINATION_COLOR_SPACE_EXTENDED_SRGB)
+        return ColorSpace::ExtendedSRGB();
+#else
+        return ColorSpace::SRGB();
+#endif
+    case PredefinedColorSpace::SRGBLinear:
+#if ENABLE(DESTINATION_COLOR_SPACE_EXTENDED_SRGB)
+        return ColorSpace::ExtendedLinearSRGB();
+#else
+        return ColorSpace::LinearSRGB();
+#endif
+#if ENABLE(PREDEFINED_COLOR_SPACE_DISPLAY_P3)
+    case PredefinedColorSpace::DisplayP3:
+        return ColorSpace::ExtendedDisplayP3();
+    case PredefinedColorSpace::DisplayP3Linear:
+        return ColorSpace::ExtendedLinearDisplayP3();
+#endif
+    }
+
+    ASSERT_NOT_REACHED();
+#if ENABLE(DESTINATION_COLOR_SPACE_EXTENDED_SRGB)
+    return ColorSpace::ExtendedSRGB();
+#else
+    return ColorSpace::SRGB();
+#endif
+}
+
+ColorSpace toColorSpace(PredefinedColorSpace colorSpace, AllowExtendedColorSpace allowExtendedColorSpace)
+{
+    return (allowExtendedColorSpace == AllowExtendedColorSpace::No) ? toColorSpace(colorSpace) : toExtendedColorSpace(colorSpace);
+}
+
+std::optional<PredefinedColorSpace> toPredefinedColorSpace(const ColorSpace& colorSpace)
+{
+    if (colorSpace == ColorSpace::SRGB())
         return PredefinedColorSpace::SRGB;
-    if (colorSpace == DestinationColorSpace::LinearSRGB())
+    if (colorSpace == ColorSpace::LinearSRGB())
         return PredefinedColorSpace::SRGBLinear;
 #if ENABLE(PREDEFINED_COLOR_SPACE_DISPLAY_P3)
-    if (colorSpace == DestinationColorSpace::DisplayP3())
+    if (colorSpace == ColorSpace::DisplayP3())
         return PredefinedColorSpace::DisplayP3;
-    if (colorSpace == DestinationColorSpace::LinearDisplayP3())
+    if (colorSpace == ColorSpace::LinearDisplayP3())
         return PredefinedColorSpace::DisplayP3Linear;
 #endif
+
+#if ENABLE(DESTINATION_COLOR_SPACE_EXTENDED_SRGB)
+    if (colorSpace == ColorSpace::ExtendedSRGB())
+        return PredefinedColorSpace::SRGB;
+    if (colorSpace == ColorSpace::ExtendedLinearSRGB())
+        return PredefinedColorSpace::SRGBLinear;
+#endif
+#if ENABLE(PREDEFINED_COLOR_SPACE_DISPLAY_P3)
+    if (colorSpace == ColorSpace::ExtendedDisplayP3())
+        return PredefinedColorSpace::DisplayP3;
+    if (colorSpace == ColorSpace::ExtendedLinearDisplayP3())
+        return PredefinedColorSpace::DisplayP3Linear;
+#endif
+
     return std::nullopt;
 }
 

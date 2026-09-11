@@ -33,6 +33,7 @@
 #include "RemoteImageBufferProxy.h"
 #include "RemoteNativeImageProxy.h"
 #include "RemoteRenderingBackendProxy.h"
+#include "RemoteSharedResourceCacheProxy.h"
 #include "WebProcess.h"
 #include <WebCore/FontCustomPlatformData.h>
 #include <wtf/TZoneMallocInlines.h>
@@ -47,7 +48,7 @@ struct CreateShareableBitmapResult {
 };
 }
 
-static std::optional<CreateShareableBitmapResult> createShareableBitmapForNativeImage(const NativeImage& image, const DestinationColorSpace& fallbackColorSpace)
+static std::optional<CreateShareableBitmapResult> createShareableBitmapForNativeImage(const NativeImage& image, const ColorSpace& fallbackColorSpace)
 {
     RefPtr<ShareableBitmap> bitmap;
     PlatformImagePtr platformImage;
@@ -66,7 +67,7 @@ static std::optional<CreateShareableBitmapResult> createShareableBitmapForNative
         // If createGraphicsContext() failed because the image fallbackColorSpace is not
         // supported for output, fallback to SRGB.
         if (!platformImage) {
-            bitmap = ShareableBitmap::createFromImageDraw(image, DestinationColorSpace::SRGB());
+            bitmap = ShareableBitmap::createFromImageDraw(image, ColorSpace::SRGB());
             if (bitmap)
                 platformImage = bitmap->createPlatformImage(DontCopyBackingStore, ShouldInterpolate::Yes);
         }
@@ -132,7 +133,7 @@ void RemoteResourceCacheProxy::recordFilterUse(Filter& filter)
     }
 }
 
-bool RemoteResourceCacheProxy::recordNativeImageUse(const NativeImage& image, const DestinationColorSpace& fallbackColorSpace)
+bool RemoteResourceCacheProxy::recordNativeImageUse(const NativeImage& image, const ColorSpace& fallbackColorSpace)
 {
     if (isMainRunLoop())
         WebProcess::singleton().deferNonVisibleProcessEarlyMemoryCleanupTimer();
@@ -173,6 +174,15 @@ bool RemoteResourceCacheProxy::recordNativeImageUse(const NativeImage& image, co
     }
     m_remoteRenderingBackendProxy->cacheNativeImage(WTF::move(*handle), image.renderingResourceIdentifier());
     return true;
+}
+
+RemoteNativeImageReadReference RemoteResourceCacheProxy::recordSharedNativeImageUse(RemoteNativeImageProxy& image)
+{
+    // The image reports its destruction to this cache from now on, so that the rendering backend cache
+    // entry created by the caller is released, and so that pixel read-back can be routed through here.
+    image.attachResourceCache(m_remoteNativeImageProxyWeakFactory.createWeakPtr(*this).releaseNonNull());
+    m_nativeImages.add(&image, NativeImageEntry { nullptr, true });
+    return image.newReadReference();
 }
 
 void RemoteResourceCacheProxy::recordFontUse(Font& font)

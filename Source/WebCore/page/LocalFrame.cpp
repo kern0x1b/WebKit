@@ -317,7 +317,7 @@ void LocalFrame::setView(RefPtr<LocalFrameView>&& view)
     
     m_eventHandler->clear();
 
-    RELEASE_ASSERT(!m_doc || !m_doc->hasLivingRenderTree());
+    RELEASE_ASSERT(!m_doc || m_doc->renderTreeState() != Document::RenderTreeState::Built);
 
     m_view = WTF::move(view);
     
@@ -1206,6 +1206,18 @@ FloatSize LocalFrame::screenSize() const
         return m_overrideScreenSize->size;
 
     auto defaultSize = screenRect(protect(view()).get()).size();
+
+    if (settings().shouldReportViewportSizeAsScreenSize()) {
+        if (RefPtr view = this->view()) {
+            auto unobscuredSize = view->unobscuredContentRectIncludingScrollbars().size();
+            return {
+                static_cast<float>(view->mapFromLayoutToCSSUnits(unobscuredSize.width())),
+                static_cast<float>(view->mapFromLayoutToCSSUnits(unobscuredSize.height()))
+            };
+        }
+        return defaultSize;
+    }
+
     RefPtr document = this->document();
     if (!document)
         return defaultSize;
@@ -1419,6 +1431,13 @@ AutoplayPolicy LocalFrame::autoplayPolicy() const
     return AutoplayPolicy::Default;
 }
 
+ColorSchemePreference LocalFrame::colorSchemePreference() const
+{
+    if (auto* documentLoader = loader().documentLoader())
+        return documentLoader->colorSchemePreference();
+    return ColorSchemePreference::NoPreference;
+}
+
 SandboxFlags LocalFrame::effectiveSandboxFlags() const
 {
     auto effectiveSandboxFlags = m_sandboxFlags;
@@ -1549,7 +1568,7 @@ void LocalFrame::showResourceMonitoringError()
         page->diagnosticLoggingClient().logDiagnosticMessageWithValueDictionary(DiagnosticLoggingKeys::iframeResourceMonitoringKey(), "IFrame ResourceMonitoring Unloaded"_s, valueDictionaryForResult(true), ShouldSample::No);
     }
 
-    FRAME_RELEASE_LOG(ResourceMonitoring, "Detected excessive network usage in frame at %" SENSITIVE_LOG_STRING " and main frame at %" SENSITIVE_LOG_STRING ": unloading", url.isValid() ? url.string().utf8().data() : "invalid", mainFrameURL.isValid() ? mainFrameURL.string().utf8().data() : "invalid");
+    FRAME_RELEASE_LOG(ResourceMonitoring, "Detected excessive network usage in frame at %" SENSITIVE_LOG_STRING " and main frame at %" SENSITIVE_LOG_STRING ": unloading", url.isValid() ? url.string().utf8().legacyCStringPointer() : "invalid", mainFrameURL.isValid() ? mainFrameURL.string().utf8().legacyCStringPointer() : "invalid");
 
     document->addConsoleMessage(MessageSource::ContentBlocker, MessageLevel::Error, makeString("Frame was unloaded because its network usage exceeded the limit: "_s, ResourceMonitorChecker::singleton().networkUsageThreshold(), " bytes, url="_s, url.string()));
 
@@ -1580,7 +1599,7 @@ void LocalFrame::reportResourceMonitoringWarning()
         page->diagnosticLoggingClient().logDiagnosticMessageWithValueDictionary(DiagnosticLoggingKeys::iframeResourceMonitoringKey(), "IFrame ResourceMonitoring Throttled"_s, valueDictionaryForResult(false), ShouldSample::No);
     }
 
-    FRAME_RELEASE_LOG(ResourceMonitoring, "Detected excessive network usage in frame at %" SENSITIVE_LOG_STRING " and main frame at %" SENSITIVE_LOG_STRING ": not unloading due to global limits", url.isValid() ? url.string().utf8().data() : "invalid", mainFrameURL.isValid() ? mainFrameURL.string().utf8().data() : "invalid");
+    FRAME_RELEASE_LOG(ResourceMonitoring, "Detected excessive network usage in frame at %" SENSITIVE_LOG_STRING " and main frame at %" SENSITIVE_LOG_STRING ": not unloading due to global limits", url.isValid() ? url.string().utf8().legacyCStringPointer() : "invalid", mainFrameURL.isValid() ? mainFrameURL.string().utf8().legacyCStringPointer() : "invalid");
 
     if (RefPtr document = this->document())
         document->addConsoleMessage(MessageSource::ContentBlocker, MessageLevel::Warning, "Frame's network usage exceeded the limit."_s);

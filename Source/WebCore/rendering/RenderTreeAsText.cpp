@@ -65,7 +65,7 @@
 #include "RenderLayerScrollableArea.h"
 #include "RenderLineBreak.h"
 #include "RenderListItem.h"
-#include "RenderListMarker.h"
+#include "RenderListOutsideMarker.h"
 #include "RenderObjectInlines.h"
 #include "RenderQuote.h"
 #include "RenderSVGContainer.h"
@@ -364,8 +364,9 @@ void RenderTreeAsText::writeRenderObject(TextStream& ts, const RenderObject& o, 
     if (auto* cell = dynamicDowncast<RenderTableCell>(o))
         ts << " [r="_s << cell->rowIndex() << " c="_s << cell->col() << " rs="_s << cell->rowSpan() << " cs="_s << cell->colSpan() << ']';
 
-    if (auto* listMarker = dynamicDowncast<RenderListMarker>(o)) {
-        auto text = listMarker->textWithoutSuffix();
+    if (auto* listMarker = dynamicDowncast<RenderListOutsideMarker>(o)) {
+        CheckedPtr listItem = listMarker->listItem();
+        auto text = listItem ? listItem->markerText(ListMarkerIncludeSuffix::No) : String();
         if (!text.isEmpty()) {
             if (text.length() != 1)
                 text = quoteAndEscapeNonPrintables(text);
@@ -549,6 +550,9 @@ void write(TextStream& ts, const RenderObject& renderer, OptionSet<RenderAsTextF
         return;
     }
 
+    if (is<RenderListOutsideMarker>(renderer))
+        return;
+
     for (auto& child : childrenOfType<RenderObject>(downcast<RenderElement>(renderer))) {
         if (child.hasLayer())
             continue;
@@ -683,8 +687,7 @@ static void writeLayers(TextStream& ts, const RenderLayer& rootLayer, RenderLaye
     // chain, so it sits in a different space than the damage rect and on-screen layers get wrongly
     // culled. Empty SVG layers keep the normal cull so they stay out of the dump.
     bool isNonEmptySVGLayer = layer.renderer().isSVGLayerAwareRenderer() && !rects.layerBounds().isEmpty();
-    bool shouldPaint = (behavior.contains(RenderAsTextFlag::ShowAllLayers) || isNonEmptySVGLayer)
-        ? true : layer.intersectsDamageRect(rects.layerBounds(), rects.dirtyBackgroundRect().rect(), &rootLayer, layer.offsetFromAncestor(&rootLayer));
+    bool shouldPaint = behavior.contains(RenderAsTextFlag::ShowAllLayers) || isNonEmptySVGLayer || layer.intersectsDamageRect(rects.layerBounds(), rects.dirtyBackgroundRect().rect(), &rootLayer, layer.offsetFromAncestor(&rootLayer));
     auto negativeZOrderLayers = layer.negativeZOrderLayers();
     bool paintsBackgroundSeparately = negativeZOrderLayers.size() > 0;
     if (shouldPaint && paintsBackgroundSeparately) {
@@ -919,7 +922,7 @@ String markerTextForListItem(Element* element)
     auto* renderer = dynamicDowncast<RenderListItem>(element->renderer());
     if (!renderer)
         return String();
-    return renderer->markerTextWithoutSuffix();
+    return renderer->markerText(ListMarkerIncludeSuffix::No);
 }
 
 } // namespace WebCore

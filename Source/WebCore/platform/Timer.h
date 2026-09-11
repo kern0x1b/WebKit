@@ -146,7 +146,7 @@ public:
     }
 
     template<typename TimerFiredClass, typename TimerFiredBaseClass>
-    requires (WTF::HasRefPtrMemberFunctions<TimerFiredClass>::value && WTF::HasThreadSafeWeakPtrFunctions<TimerFiredClass>::value)
+    requires (WTF::HasRefPtrMemberFunctions<TimerFiredClass> && WTF::HasThreadSafeWeakPtrFunctions<TimerFiredClass>)
     Timer(TimerFiredClass& object, void (TimerFiredBaseClass::*function)())
         : m_function([weakObject = ThreadSafeWeakPtr { object }, function] {
             if (RefPtr protectedObject = weakObject.get())
@@ -156,7 +156,7 @@ public:
     }
 
     template<typename TimerFiredClass, typename TimerFiredBaseClass>
-    requires (WTF::HasRefPtrMemberFunctions<TimerFiredClass>::value && !WTF::HasThreadSafeWeakPtrFunctions<TimerFiredClass>::value && WTF::HasWeakPtrFunctions<TimerFiredClass>::value)
+    requires (WTF::HasRefPtrMemberFunctions<TimerFiredClass> && !WTF::HasThreadSafeWeakPtrFunctions<TimerFiredClass> && WTF::HasWeakPtrFunctions<TimerFiredClass>)
     Timer(TimerFiredClass& object, void (TimerFiredBaseClass::*function)())
         : m_function([weakObject = WeakPtr { object }, function] {
             if (RefPtr protectedObject = weakObject.get())
@@ -166,7 +166,7 @@ public:
     }
 
     template<typename TimerFiredClass, typename TimerFiredBaseClass>
-    requires (WTF::HasCheckedPtrMemberFunctions<TimerFiredClass>::value && (!WTF::HasRefPtrMemberFunctions<TimerFiredClass>::value || (!WTF::HasWeakPtrFunctions<TimerFiredClass>::value && !WTF::HasThreadSafeWeakPtrFunctions<TimerFiredClass>::value)))
+    requires (WTF::HasCheckedPtrMemberFunctions<TimerFiredClass> && (!WTF::HasRefPtrMemberFunctions<TimerFiredClass> || (!WTF::HasWeakPtrFunctions<TimerFiredClass> && !WTF::HasThreadSafeWeakPtrFunctions<TimerFiredClass>)))
     Timer(TimerFiredClass& object, void (TimerFiredBaseClass::*function)())
         : m_function([checkedObject = CheckedRef { object }, function] {
             (checkedObject.ptr()->*function)();

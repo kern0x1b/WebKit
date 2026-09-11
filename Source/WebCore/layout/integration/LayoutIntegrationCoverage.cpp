@@ -33,10 +33,11 @@
 #include "RenderImage.h"
 #include "RenderInline.h"
 #include "RenderLineBreak.h"
-#include "RenderListMarker.h"
+#include "RenderListOutsideMarker.h"
 #include "RenderObjectInlines.h"
 #include "RenderSVGBlock.h"
 #include "RenderSVGForeignObject.h"
+#include "RenderText.h"
 #include "Settings.h"
 #include "StyleComputedStyle+GettersInlines.h"
 #include "StyleComputedStyle+InitialInlines.h"
@@ -58,11 +59,14 @@ bool canUseForIntrinsicWidthComputation(const RenderBlockFlow& blockContainer)
         if (!renderer.isInFlow())
             return false;
 
-        auto isFullySupportedInFlowRenderer = isAnyOf<RenderText, RenderLineBreak, RenderInline, RenderListMarker>(renderer);
+        auto isFullySupportedInFlowRenderer = isAnyOf<RenderText, RenderLineBreak, RenderInline, RenderListOutsideMarker>(renderer);
         if (isFullySupportedInFlowRenderer)
             continue;
 
-        if (auto* renderBlock = dynamicDowncast<RenderBlock>(renderer); renderBlock && renderBlock->isAtomicInlineLevelBox() && !renderBlock->firstChild()) {
+        if (CheckedPtr renderBlock = dynamicDowncast<RenderBlock>(renderer.get()); renderBlock && renderBlock->isBlockLevelBox())
+            continue;
+
+        if (CheckedPtr renderBlock = dynamicDowncast<RenderBlock>(renderer.get()); renderBlock && renderBlock->isAtomicInlineLevelBox() && !renderBlock->firstChild()) {
             if (renderBlock->style().usedAppearance() != StyleAppearance::None || (renderBlock->element() && renderBlock->element()->firstChild())) {
                 // FIXME: Various widgets with or without appearance.
                 // Dynamic content change (e.g. adding/removing select options) needs to dirty inlineContentCache.

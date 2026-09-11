@@ -32,11 +32,9 @@
 #include <WebCore/SharedBuffer.h>
 #include <wtf/CryptographicallyRandomNumber.h>
 #include <wtf/FileSystem.h>
-#include <wtf/HexNumber.h>
 #include <wtf/RunLoop.h>
 #include <wtf/StdLibExtras.h>
 #include <wtf/text/MakeString.h>
-#include <wtf/text/StringBuilder.h>
 #include <wtf/text/StringHash.h>
 
 namespace WebKit {
@@ -129,14 +127,14 @@ void DeviceIdHashSaltStorage::loadStorageFromDisk(CompletionHandler<void(HashMap
             }
 
             if (!FileSystem::fileSize(originPath)) {
-                RELEASE_LOG_ERROR(DiskPersistency, "DeviceIdHashSaltStorage: Impossible to get the file size of: '%s'", originPath.utf8().data());
+                RELEASE_LOG_ERROR(DiskPersistency, "DeviceIdHashSaltStorage: Impossible to get the file size of: '%s'", originPath.utf8().legacyCStringPointer());
                 continue;
             }
 
             auto decoder = createForFile(originPath);
 
             if (!decoder) {
-                RELEASE_LOG_ERROR(DiskPersistency, "DeviceIdHashSaltStorage: Impossible to access the file to restore the hash salt: '%s'", originPath.utf8().data());
+                RELEASE_LOG_ERROR(DiskPersistency, "DeviceIdHashSaltStorage: Impossible to access the file to restore the hash salt: '%s'", originPath.utf8().legacyCStringPointer());
                 continue;
             }
 
@@ -148,7 +146,7 @@ void DeviceIdHashSaltStorage::loadStorageFromDisk(CompletionHandler<void(HashMap
             auto deviceIdHashSaltForOrigin = deviceIdHashSaltForOrigins.add(origins, WTF::move(hashSaltForOrigin));
 
             if (!deviceIdHashSaltForOrigin.isNewEntry)
-                RELEASE_LOG_ERROR(DiskPersistency, "DeviceIdHashSaltStorage: There are two files with different hash salts for the same origin: '%s'", originPath.utf8().data());
+                RELEASE_LOG_ERROR(DiskPersistency, "DeviceIdHashSaltStorage: There are two files with different hash salts for the same origin: '%s'", originPath.utf8().legacyCStringPointer());
         }
 
         RunLoop::mainSingleton().dispatch([deviceIdHashSaltForOrigins = WTF::move(deviceIdHashSaltForOrigins), completionHandler = WTF::move(completionHandler)]() mutable {
@@ -161,19 +159,19 @@ std::unique_ptr<DeviceIdHashSaltStorage::HashSaltForOrigin> DeviceIdHashSaltStor
 {
     auto securityOriginData = getSecurityOriginData("origin"_s, decoder);
     if (!securityOriginData) {
-        RELEASE_LOG_ERROR(DiskPersistency, "DeviceIdHashSaltStorage: The security origin data in the file is not correct: '%s'", deviceIdHashSalt.utf8().data());
+        RELEASE_LOG_ERROR(DiskPersistency, "DeviceIdHashSaltStorage: The security origin data in the file is not correct: '%s'", deviceIdHashSalt.utf8().legacyCStringPointer());
         return nullptr;
     }
 
     auto parentSecurityOriginData = getSecurityOriginData("parentOrigin"_s, decoder);
     if (!parentSecurityOriginData) {
-        RELEASE_LOG_ERROR(DiskPersistency, "DeviceIdHashSaltStorage: The parent security origin data in the file is not correct: '%s'", deviceIdHashSalt.utf8().data());
+        RELEASE_LOG_ERROR(DiskPersistency, "DeviceIdHashSaltStorage: The parent security origin data in the file is not correct: '%s'", deviceIdHashSalt.utf8().legacyCStringPointer());
         return nullptr;
     }
 
     double lastTimeUsed;
     if (!decoder->decodeDouble("lastTimeUsed"_s, lastTimeUsed)) {
-        RELEASE_LOG_ERROR(DiskPersistency, "DeviceIdHashSaltStorage: The last time used was not correctly restored for: '%s'", deviceIdHashSalt.utf8().data());
+        RELEASE_LOG_ERROR(DiskPersistency, "DeviceIdHashSaltStorage: The last time used was not correctly restored for: '%s'", deviceIdHashSalt.utf8().legacyCStringPointer());
         return nullptr;
     }
 
@@ -211,12 +209,7 @@ void DeviceIdHashSaltStorage::completeDeviceIdHashSaltForOriginCall(SecurityOrig
         std::array<uint64_t, randomDataSize> randomData;
         cryptographicallyRandomValues(asWritableBytes(std::span<uint64_t> { randomData }));
 
-        StringBuilder builder;
-        builder.reserveCapacity(hashSaltSize);
-        for (uint64_t number : randomData)
-            builder.append(hex(number));
-
-        String deviceIdHashSalt = builder.toString();
+        String deviceIdHashSalt = createDeviceIdHashSaltString(randomData);
 
         auto newHashSaltForOrigin = makeUnique<HashSaltForOrigin>(WTF::move(documentOrigin), WTF::move(parentOrigin), WTF::move(deviceIdHashSalt));
 

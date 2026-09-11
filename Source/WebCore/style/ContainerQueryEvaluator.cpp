@@ -36,6 +36,7 @@
 #include "NodeDocument.h"
 #include "NodeRenderStyle.h"
 #include "RenderView.h"
+#include "StyleBuilderState.h"
 #include "StyleComputedStyle+GettersInlines.h"
 #include "StyleRule.h"
 #include "StyleScope.h"
@@ -51,16 +52,23 @@ ContainerQueryEvaluator::ContainerQueryEvaluator(const Element& element, Selecti
 {
 }
 
+ContainerQueryEvaluator::~ContainerQueryEvaluator() = default;
+
 bool ContainerQueryEvaluator::evaluate(const CQ::ContainerQuery& containerQuery) const
 {
-    auto context = featureEvaluationContextForQuery(containerQuery);
-    if (!context)
-        return false;
+    for (const auto& condition : containerQuery) {
+        auto context = featureEvaluationContextForCondition(condition);
+        if (!context)
+            continue;
 
-    if (containerQuery.condition.queries.isEmpty() && !containerQuery.name.isEmpty())
-        return true;
+        if (condition.condition.queries.isEmpty() && !condition.name.isEmpty())
+            return true;
 
-    return evaluateCondition(containerQuery.condition, *context) == MQ::EvaluationResult::True;
+        if (evaluateCondition(condition.condition, *context) == MQ::EvaluationResult::True)
+            return true;
+    };
+
+    return false;
 }
 
 static const Style::ComputedStyle* styleForContainer(const Element& container, CQ::ContainerRequirements requirements, const ContainerQueryEvaluationState* evaluationState)
@@ -74,7 +82,7 @@ static const Style::ComputedStyle* styleForContainer(const Element& container, C
     return container.existingComputedStyle();
 }
 
-auto ContainerQueryEvaluator::featureEvaluationContextForQuery(const CQ::ContainerQuery& containerQuery) const -> std::optional<MQ::FeatureEvaluationContext>
+auto ContainerQueryEvaluator::featureEvaluationContextForCondition(const CQ::ContainerCondition& condition) const -> std::optional<MQ::FeatureEvaluationContext>
 {
     // "For each element, the query container to be queried is selected from among the element’s
     // ancestor query containers that have a valid container-type for all the container features
@@ -83,28 +91,44 @@ auto ContainerQueryEvaluator::featureEvaluationContextForQuery(const CQ::Contain
     // https://drafts.csswg.org/css-contain-3/#container-rule
 
     // "If the <container-query> contains unknown or unsupported container features, no query container will be selected."
-    if (containerQuery.containsUnknownFeature == CQ::ContainsUnknownFeature::Yes)
+    if (condition.containsUnknownFeature == CQ::ContainsUnknownFeature::Yes)
         return { };
 
     Ref element = m_element;
-    RefPtr container = selectContainer(containerQuery.requirements, containerQuery.name, element.get(), m_selectionMode, m_scopeOrdinal, m_evaluationState);
+    RefPtr container = selectContainer(condition.requirements, condition.name, element.get(), m_selectionMode, m_scopeOrdinal, m_evaluationState);
     if (!container)
         return { };
 
-    CheckedPtr containerStyle = styleForContainer(*container.get(), containerQuery.requirements, m_evaluationState);
+    CheckedPtr containerStyle = styleForContainer(*container.get(), condition.requirements, m_evaluationState);
     if (!containerStyle)
         return { };
 
     RefPtr containerParent = container->parentElementInComposedTree();
-    CheckedPtr containerParentStyle = containerParent ? CheckedPtr { styleForContainer(*containerParent, containerQuery.requirements, m_evaluationState) } : containerStyle;
+    CheckedPtr containerParentStyle = containerParent ? CheckedPtr { styleForContainer(*containerParent, condition.requirements, m_evaluationState) } : containerStyle;
 
     Ref document = element->document();
-    CheckedPtr rootStyle = document->documentElement()->renderStyle();
+
+    CheckedPtr rootStyle = [&] () -> const Style::ComputedStyle* {
+        RefPtr rootElement = document->documentElement();
+        if (!rootElement)
+            return nullptr;
+
+        return styleForContainer(*rootElement, condition.requirements, m_evaluationState);
+    }();
+
+    // Give the condition an element context, which is what the functions that resolve against the
+    // query container need.
+    m_builderState = BuilderState::create(const_cast<ComputedStyle&>(*containerStyle), BuilderContext {
+        .document = document.get(),
+        .parentStyle = containerParentStyle.get(),
+        .rootElementStyle = rootStyle.get(),
+        .element = container.get(),
+    }).moveToUniquePtr();
 
     return MQ::FeatureEvaluationContext {
-        document.get(),
-        CSSToLengthConversionData { *containerStyle, rootStyle.get(), containerParentStyle.get(), document->renderView(), container.get() },
-        container->renderer()
+        .document = document.get(),
+        .conversionData = m_builderState->cssToLengthConversionData(),
+        .renderer = container->renderer(),
     };
 }
 
@@ -172,7 +196,7 @@ RefPtr<const Element> ContainerQueryEvaluator::selectContainer(CQ::ContainerRequ
 
         // ::part() selectors query the composed tree
         if (selectionMode == SelectionMode::PartPseudoElement)
-            return element.assignedSlot();
+            return element;
 
         // ::slotted() selectors can query containers inside the shadow tree, including the slot itself.
         if (scopeOrdinal >= ScopeOrdinal::FirstSlot && scopeOrdinal <= ScopeOrdinal::SlotLimit)

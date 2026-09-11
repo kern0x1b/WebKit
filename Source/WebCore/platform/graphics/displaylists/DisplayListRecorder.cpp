@@ -45,8 +45,9 @@ namespace DisplayList {
 
 WTF_MAKE_TZONE_ALLOCATED_IMPL(Recorder);
 
-Recorder::Recorder(IsDeferred isDeferred, const GraphicsContextState& state, const FloatRect& initialClip, const AffineTransform& initialCTM, const DestinationColorSpace& colorSpace, DrawGlyphsMode drawGlyphsMode)
+Recorder::Recorder(IsDeferred isDeferred, const GraphicsContextState& state, const FloatRect& initialClip, const AffineTransform& initialCTM, const ColorSpace& colorSpace, DrawGlyphsMode drawGlyphsMode)
     : GraphicsContext(isDeferred, state)
+    , m_committedState(state)
     , m_colorSpace(colorSpace)
     , m_initialClip(initialCTM.mapRect(initialClip))
     , m_drawGlyphsMode(drawGlyphsMode)
@@ -55,7 +56,7 @@ Recorder::Recorder(IsDeferred isDeferred, const GraphicsContextState& state, con
 #endif
 {
     ASSERT(!state.changes());
-    m_stateStack.append({ state, initialCTM, initialCTM.mapRect(initialClip) });
+    m_stateStack.append({ initialCTM, initialCTM.mapRect(initialClip), { } });
 }
 
 Recorder::~Recorder()
@@ -68,22 +69,8 @@ void Recorder::appendDisplayList(const DisplayList& displayList)
     GraphicsContext::drawDisplayList(displayList, Ref { ControlFactory::singleton() });
 }
 
-const GraphicsContextState& Recorder::state() const
+void Recorder::didUpdateState(GraphicsContextState&)
 {
-    return currentState().state;
-}
-
-void Recorder::didUpdateState(GraphicsContextState& state)
-{
-    currentState().state.mergeLastChanges(state, currentState().lastDrawingState);
-    state.didApplyChanges();
-}
-
-void Recorder::didUpdateSingleState(GraphicsContextState& state, GraphicsContextState::ChangeIndex changeIndex)
-{
-    ASSERT(state.changes() - changeIndex.toChange() == GraphicsContextState::ChangeFlags { });
-    currentState().state.mergeSingleChange(state, changeIndex, currentState().lastDrawingState);
-    state.didApplyChanges();
 }
 
 bool Recorder::decomposeDrawGlyphsIfNeeded(const Font& font, std::span<const GlyphBufferGlyph> glyphs, std::span<const GlyphBufferAdvance> advances, const FloatPoint& localAnchor, FontSmoothingMode smoothingMode)
@@ -119,7 +106,7 @@ void Recorder::updateStateForSave(GraphicsContextState::Purpose purpose)
     ASSERT(purpose == GraphicsContextState::Purpose::SaveRestore);
     appendStateChangeItemIfNecessary();
     GraphicsContext::save(purpose);
-    m_stateStack.append(m_stateStack.last());
+    m_stateStack.append(ContextState { currentState().ctm, currentState().clipBounds, { } });
 }
 
 bool Recorder::updateStateForRestore(GraphicsContextState::Purpose purpose)
@@ -129,10 +116,28 @@ bool Recorder::updateStateForRestore(GraphicsContextState::Purpose purpose)
 
     ASSERT(purpose == GraphicsContextState::Purpose::SaveRestore);
     appendStateChangeItemIfNecessary();
+    auto committedChanges = currentState().committedChanges;
     GraphicsContext::restore(purpose);
-
     m_stateStack.removeLast();
+    m_committedState.copyPropertiesFrom(m_state, committedChanges);
+    ASSERT(m_state.propertiesEqualIgnoring(m_committedState, m_state.indeterminateProperties()));
     return true;
+}
+
+GraphicsContextState::ChangeFlags Recorder::computeStateChanges()
+{
+    m_state.filterLastChangesForMatching(m_committedState);
+    return m_state.changes();
+}
+
+void Recorder::commitStateChanges(GraphicsContextState::ChangeFlags changes)
+{
+    m_committedState.copyPropertiesFrom(m_state, changes);
+    currentState().committedChanges.add(changes);
+    // These properties have now been written out, so their value in the target is known until the
+    // enclosing save() is restored.
+    m_state.markDeterminate(changes);
+    m_state.didApplyChanges();
 }
 
 bool Recorder::updateStateForTranslate(float x, float y)
@@ -183,7 +188,7 @@ void Recorder::updateStateForBeginTransparencyLayer(float opacity)
     GraphicsContext::beginTransparencyLayer(opacity);
     appendStateChangeItemIfNecessary();
     GraphicsContext::save(GraphicsContextState::Purpose::TransparencyLayer);
-    m_stateStack.append(m_stateStack.last().cloneForTransparencyLayer());
+    pushStateForTransparencyLayer();
 }
 
 void Recorder::updateStateForBeginTransparencyLayer(CompositeOperator compositeOperator, BlendMode blendMode)
@@ -191,7 +196,17 @@ void Recorder::updateStateForBeginTransparencyLayer(CompositeOperator compositeO
     GraphicsContext::beginTransparencyLayer(compositeOperator, blendMode);
     appendStateChangeItemIfNecessary();
     GraphicsContext::save(GraphicsContextState::Purpose::TransparencyLayer);
-    m_stateStack.append(m_stateStack.last().cloneForTransparencyLayer());
+    pushStateForTransparencyLayer();
+}
+
+void Recorder::pushStateForTransparencyLayer()
+{
+    // Beginning a transparency layer resets part of the state in the underlying context, the same
+    // properties GraphicsContextState::repurpose() has just reset in m_state, so resynchronise
+    // m_committedState with m_state wholesale rather than assuming the two resets agree. Mark the whole
+    // state as pushed by this level so that ending the layer rolls all of it back.
+    m_committedState.copyPropertiesFrom(m_state, GraphicsContextState::ChangeFlags::all());
+    m_stateStack.append(ContextState { currentState().ctm, currentState().clipBounds, GraphicsContextState::ChangeFlags::all() });
 }
 
 bool Recorder::updateStateForEndTransparencyLayer()
@@ -200,8 +215,11 @@ bool Recorder::updateStateForEndTransparencyLayer()
         return false;
     GraphicsContext::endTransparencyLayer();
     appendStateChangeItemIfNecessary();
+    auto committedChanges = currentState().committedChanges;
     m_stateStack.removeLast();
     GraphicsContext::restore(GraphicsContextState::Purpose::TransparencyLayer);
+    m_committedState.copyPropertiesFrom(m_state, committedChanges);
+    ASSERT(m_state.propertiesEqualIgnoring(m_committedState, m_state.indeterminateProperties()));
     return true;
 }
 

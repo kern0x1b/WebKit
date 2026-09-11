@@ -17,6 +17,31 @@ symbols = [
     "kCMTextMarkupAttribute_PreventLineWrapping",
 ]
 
+[[temporary-usage]]
+request = "rdar://185191711"
+cleanup = "rdar://185191934"
+symbols = [
+    "CGImageBlockCreate",
+    "CGImageBlockRelease",
+    "CGImageBlockSetCreate",
+    "CGImageCreateWithImageProvider",
+    "CGImageProviderCreate",
+    "CGImageProviderGetSize",
+    "kCGImageBlockMarkAsReadOnlyRequest",
+    "kCGImageBlockSingletonRequest",
+    "kCGImagePropertyIOSurface",
+    "kCGImageProviderBitmapInfo",
+]
+
+[[temporary-usage]]
+request = "rdar://186571377"
+cleanup = "rdar://186571467"
+symbols = [
+    "kIOSurfaceAlphaChannelMode",
+    "kIOSurfaceAlphaChannelMode_PremultipliedAlpha",
+    "kIOSurfaceAlphaChannelMode_StraightAlpha",
+]
+
 [[not-web-essential]]
 request = "rdar://157890384"
 classes = ["MTMaterialLayer"]
@@ -172,22 +197,4 @@ request = "rdar://168960112"
 cleanup = "rdar://170480216"
 symbols = [
     "CTFontHasComplexColorFormatForGlyph",
-]
-
-[[staging]]
-request = "rdar://160159492"
-classes = [
-    "AVInterfaceMediaSelectionOptionSource",
-    "AVInterfaceMetadata",
-    "AVInterfaceTimelineSegment",
-]
-requires-sdk = ["iOS < 27.0"]
-
-[[temporary-usage]]
-request = "rdar://182597756"
-cleanup = "rdar://182597920"
-requires-sdk = ["iOS >= 27"]
-allow-unused = true
-swift-decls = [
-    { name = "Foundation.ContiguousBytes.withBytes(_:)", type_kinds = { "ContiguousBytes" = "protocol" } },
 ]

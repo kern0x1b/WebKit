@@ -57,6 +57,8 @@ list(APPEND WebCore_SOURCES
 
     platform/graphics/angle/PlatformDisplayANGLE.cpp
 
+    platform/graphics/egl/BitmapTexture.cpp
+    platform/graphics/egl/BitmapTexturePool.cpp
     platform/graphics/egl/GLContext.cpp
     platform/graphics/egl/GLContextWrapper.cpp
     platform/graphics/egl/GLDisplay.cpp
@@ -101,6 +103,7 @@ list(APPEND WebCore_SOURCES
     platform/win/MainThreadSharedTimerWin.cpp
     platform/win/PasteboardWin.cpp
     platform/win/PlatformMouseEventWin.cpp
+    platform/win/PlatformPasteboardWin.cpp
     platform/win/PlatformScreenWin.cpp
     platform/win/SearchPopupMenuDB.cpp
     platform/win/SharedMemoryWin.cpp

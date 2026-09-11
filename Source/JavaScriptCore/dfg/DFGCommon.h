@@ -115,15 +115,6 @@ struct PipelineTuning {
 const PipelineTuning& pipelineTuning();
 #endif
 
-inline bool constexpr enableInt52()
-{
-#if USE(JSVALUE64)
-    return true;
-#else
-    return false;
-#endif
-}
-
 // The prediction propagator effectively does four passes, with the last pass
 // being done by the separate FixuPhase.
 enum PredictionPass {

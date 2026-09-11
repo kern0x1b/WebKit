@@ -43,7 +43,6 @@
 #import <pal/spi/cocoa/CoreServicesSPI.h>
 #import <pal/spi/cocoa/LaunchServicesSPI.h>
 #import <pal/spi/mac/QuarantineSPI.h>
-#import <pwd.h>
 #import <stdlib.h>
 #import <sys/sysctl.h>
 #import <sysexits.h>
@@ -253,19 +252,7 @@ static std::optional<CString> setAndSerializeSandboxParameters(const SandboxInit
 
 static String sandboxDataVaultParentDirectory()
 {
-    char temp[PATH_MAX];
-    size_t length = confstr(_CS_DARWIN_USER_CACHE_DIR, temp, sizeof(temp));
-    if (!length) {
-        WTFLogAlways("%s: Could not retrieve user temporary directory path: %s\n", getprogname(), safeStrerror(errno).data());
-        exitProcess(EX_NOPERM);
-    }
-    RELEASE_ASSERT(length <= sizeof(temp));
-    char resolvedPath[PATH_MAX];
-    if (!realpath(temp, resolvedPath)) {
-        WTFLogAlways("%s: Could not canonicalize user temporary directory path: %s\n", getprogname(), safeStrerror(errno).data());
-        exitProcess(EX_NOPERM);
-    }
-    return String::fromUTF8(resolvedPath);
+    return WTF::FileSystemImpl::darwinCacheDirectory();
 }
 
 static String sandboxDirectory(WTF::AuxiliaryProcessType processType, const String& parentDirectory)
@@ -527,7 +514,7 @@ static void getSandboxProfileOrProfilePath(const SandboxInitializationParameters
 {
     switch (parameters.mode()) {
     case SandboxInitializationParameters::ProfileSelectionMode::UseDefaultSandboxProfilePath:
-        profileOrProfilePath = [webKit2BundleSingleton() pathForResource:[[NSBundle mainBundle] bundleIdentifier] ofType:@"sb"];
+        profileOrProfilePath = [webKit2BundleSingleton() pathForResource:protect([[NSBundle mainBundle] bundleIdentifier]).get() ofType:@"sb"];
         isProfilePath = true;
         return;
     case SandboxInitializationParameters::ProfileSelectionMode::UseOverrideSandboxProfilePath:
@@ -632,24 +619,10 @@ static String getUserDirectorySuffix(const AuxiliaryProcessInitializationParamet
         return suffix.left(suffix.find('/'));
     }
 
-    String clientIdentifier = codeSigningIdentifier(parameters.connectionIdentifier.xpcConnection.get());
+    String clientIdentifier = codeSigningIdentifier(OSObjectPtr { parameters.connectionIdentifier.xpcConnection }.get());
     if (clientIdentifier.isNull())
         clientIdentifier = parameters.clientIdentifier;
-    return makeString([[NSBundle mainBundle] bundleIdentifier], '+', clientIdentifier);
-}
-
-String AuxiliaryProcess::getHomeDirectory()
-{
-    // According to the man page for getpwuid_r, we should use sysconf(_SC_GETPW_R_SIZE_MAX) to determine the size of the buffer.
-    // However, a buffer size of 4096 should be sufficient, since PATH_MAX is 1024.
-    char buffer[4096];
-    passwd pwd;
-    passwd* result = nullptr;
-    if (getpwuid_r(getuid(), &pwd, buffer, sizeof(buffer), &result) || !result) {
-        WTFLogAlways("%s: Couldn't find home directory", getprogname());
-        RELEASE_ASSERT_NOT_REACHED();
-    }
-    return String::fromUTF8(pwd.pw_dir);
+    return makeString(protect([[NSBundle mainBundle] bundleIdentifier]).get(), '+', clientIdentifier);
 }
 
 static void closeOpenDirectoryConnections()
@@ -676,17 +649,25 @@ static void populateSandboxInitializationParameters(SandboxInitializationParamet
     }
 
     String bundlePath = webKit2BundleSingleton().bundlePath;
-    if (!bundlePath.startsWith("/System/Library/Frameworks"_s))
+    // A WebKit framework installed outside /System/Library/Frameworks (e.g. relocated into an
+    // app bundle by a spade Performance build, or a development install) is not covered by the
+    // system-framework or Cryptex file-map-executable sandbox grants, so the soft-linked
+    // libWebKitSwift.dylib cannot be mapped. Signal this relocated case to the sandbox so it can
+    // allow mapping that one dylib; shipping root and Cryptex installs are unaffected.
+    bool isRelocatedFramework = !bundlePath.startsWith("/System/Library/Frameworks"_s);
+    if (isRelocatedFramework)
         bundlePath = webKit2BundleSingleton().bundlePath.stringByDeletingLastPathComponent;
 
-    sandboxParameters.addPathParameter("WEBKIT2_FRAMEWORK_DIR"_s, bundlePath.utf8().data());
+    sandboxParameters.addPathParameter("WEBKIT2_FRAMEWORK_DIR"_s, bundlePath.utf8().legacyCStringPointer());
+    sandboxParameters.addParameter("WK_FRAMEWORKS_ARE_RELOCATED"_s, isRelocatedFramework ? "YES"_span : "NO"_span);
     sandboxParameters.addConfDirectoryParameter("DARWIN_USER_TEMP_DIR"_s, _CS_DARWIN_USER_TEMP_DIR);
     sandboxParameters.addConfDirectoryParameter("DARWIN_USER_CACHE_DIR"_s, _CS_DARWIN_USER_CACHE_DIR);
 
-    auto homeDirectory = AuxiliaryProcess::getHomeDirectory();
+    std::optional<String> homeDirectory = FileSystem::homeDirectory();
+    RELEASE_ASSERT(homeDirectory);
     
-    sandboxParameters.addPathParameter("HOME_DIR"_s, homeDirectory.utf8().data());
-    String path = FileSystem::pathByAppendingComponents(homeDirectory, std::initializer_list<StringView>({ "Library"_s, "Preferences"_s }));
+    sandboxParameters.addPathParameter("HOME_DIR"_s, homeDirectory->utf8().legacyCStringPointer());
+    String path = FileSystem::pathByAppendingComponents(*homeDirectory, std::initializer_list<StringView>({ "Library"_s, "Preferences"_s }));
     sandboxParameters.addPathParameter("HOME_LIBRARY_PREFERENCES_DIR"_s, FileSystem::fileSystemRepresentation(path).data());
 
 #if CPU(X86_64)
@@ -795,7 +776,7 @@ void AuxiliaryProcess::openDirectoryCacheInvalidated(SandboxExtension::Handle&& 
 
     sandboxExtension->consume();
 
-    getHomeDirectory();
+    FileSystem::homeDirectory();
 
     closeOpenDirectoryConnections();
 

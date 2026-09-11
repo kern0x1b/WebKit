@@ -99,6 +99,7 @@ public:
     bool enableMetalShaderValidation() const { return boolTestRunnerFeatureValue("enableMetalShaderValidation"); }
     bool pageTopColorSamplingEnabled() const { return boolTestRunnerFeatureValue("pageTopColorSamplingEnabled"); }
     bool enhancedSecurityEnabled() const { return boolTestRunnerFeatureValue("enhancedSecurityEnabled"); }
+    bool globalPrivacyControl() const { return boolTestRunnerFeatureValue("globalPrivacyControl"); }
     bool shouldDumpResourceLoadCallbacks() const { return boolTestRunnerFeatureValue("dumpResourceLoadCallbacks"); }
     std::string resourceResponseMIMETypesToDump() const { return stringTestRunnerFeatureValue("dumpResourceResponseMIMETypes"); }
 
@@ -112,10 +113,13 @@ public:
     uint16_t insecureUpgradePort() const { return uint16TestRunnerFeatureValue("insecureUpgradePort"); };
     uint16_t secureUpgradePort() const { return uint16TestRunnerFeatureValue("secureUpgradePort"); };
     std::string additionalSupportedImageTypes() const { return stringTestRunnerFeatureValue("additionalSupportedImageTypes"); }
+    // Drives the fake _WKTranslationDelegate in TestRunnerWKWebView. See its announcementTranslationMode.
+    std::string announcementTranslationMode() const { return stringTestRunnerFeatureValue("announcementTranslationMode"); }
     std::string applicationBundleIdentifier() const { return stringTestRunnerFeatureValue("applicationBundleIdentifier"); }
     std::string applicationManifest() const { return stringTestRunnerFeatureValue("applicationManifest"); }
     std::string contentMode() const { return stringTestRunnerFeatureValue("contentMode"); }
     std::string contentSecurityPolicyExtensionMode() const { return stringTestRunnerFeatureValue("contentSecurityPolicyExtensionMode"); }
+    std::string displayedTranslationLocale() const { return stringTestRunnerFeatureValue("displayedTranslationLocale"); }
     std::string dragInteractionPolicy() const { return stringTestRunnerFeatureValue("dragInteractionPolicy"); }
     std::string focusStartsInputSessionPolicy() const { return stringTestRunnerFeatureValue("focusStartsInputSessionPolicy"); }
     std::string jscOptions() const { return stringTestRunnerFeatureValue("jscOptions"); }

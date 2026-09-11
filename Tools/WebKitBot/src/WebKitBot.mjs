@@ -23,7 +23,7 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-import {stat} from "fs";
+import {stat, unlink} from "fs";
 import path from "path";
 import util from "util";
 import which from "which";
@@ -32,6 +32,8 @@ import { HttpsProxyAgent } from 'https-proxy-agent';
 import LogLevel from "@slack/rtm-api";
 import SlackRTMAPI from "@slack/rtm-api";
 import AsyncTaskQueue from "./AsyncTaskQueue.mjs";
+import {buildGitWebkitRevertCommand, extractCommandAndArgs, extractRevisionsAndReason,
+    extractTextIfMentioned, parseBugId, parsePRUrl} from "./CommandParser.mjs";
 import {dataLogLn, escapeForSlackText, isASCII, rootDirectoryOfWebKit} from "./Utility.mjs";
 
 const defaultTaskLimit = 10;
@@ -40,127 +42,7 @@ const defaultTimeoutForRevert = 60 * 1000 * 10;
 
 const execFileAsync = util.promisify(execFile);
 const statAsync = util.promisify(stat);
-
-function parseBugId(string)
-{
-    if (!string)
-        return null;
-
-    let match = string.match(/^https?:\/\/webkit\.org\/b\/(\d+)$/m);
-    if (match)
-        return match[1];
-
-    match = string.match(/^https?:\/\/bugs\.webkit\.org\/show_bug\.cgi\?id=(\d+)(?:&ctype=xml|&excludefield=attachmentdata)*$/m);
-    if (match)
-        return match[1];
-
-    return null;
-}
-
-export function parsePRUrl(string)
-{
-    if (!string)
-        return null;
-
-    let match = string.match(/https:\/\/github\.com\/WebKit\/WebKit\/pull\/\d+/im);
-    return match ? match[0] : null;
-}
-
-function extractRevision(text)
-{
-    let revisions = [];
-    for (let candidate of text.split(",")) {
-        candidate = candidate.trim();
-        if (!candidate)
-            continue;
-
-        let match = candidate.match(/^r?(\d{5,6}|\d+\@[^:\s]+|[0-9a-f]{6,40}):?$/);
-        if (!match)
-            return null;
-
-        revisions.push(match[1]);
-    }
-    return revisions;
-}
-
-export function buildGitWebkitRevertCommand(gitWebkitPath, revisions, reason, issueUrl)
-{
-    let args = [
-        gitWebkitPath,
-        "revert",
-        ...revisions,
-        "--pr",
-        "--defaults",
-        "--no-checks",
-    ];
-
-    if (issueUrl)
-        args.push("--issue", issueUrl);
-    else
-        args.push("--reason", reason);
-
-    return args;
-}
-
-export function extractRevisionsAndReason(args)
-{
-    let revisions = [];
-    let reason = "";
-    for (let i = 0; i < args.length; ++i) {
-        let arg = args[i];
-        let extracted = extractRevision(arg);
-        if (!extracted) {
-            let reasons = [];
-            for (; i < args.length; ++i)
-                reasons.push(args[i]);
-            reason = reasons.join(" ").trim();
-            break;
-        }
-        revisions.push(...extracted);
-    }
-
-    // If reason starts with quote and ends with the same quote, remove them once.
-    if (reason.length >= 2) {
-        let firstCharacterOfReason = reason.charAt(0);
-        if (firstCharacterOfReason === "'" || firstCharacterOfReason === "\"" || firstCharacterOfReason === "`") {
-            if (reason.charAt(reason.length - 1) === firstCharacterOfReason)
-                reason = reason.slice(1, reason.length - 1);
-        }
-    }
-
-    return {revisions, reason};
-}
-
-export function extractCommandAndArgs(text)
-{
-    let args = text.trim().split(/\s+/);
-    let command = args.shift().toLowerCase();
-    return {command, args};
-}
-
-export function extractTextIfMentioned(text, id)
-{
-    let regexp = new RegExp(`<@${id}>`);
-    let globalRegexp = new RegExp(`<@${id}>`, "g");
-    let matched = text.match(regexp);
-    if (!matched)
-        return null;
-
-    text = text.replace(globalRegexp, "");
-
-    // Preprocessing for the text.
-    // 1. Convert smart quotes to normal ASCII quotes because webkit-patch cannot accept non-ASCII text and slack may convert normal quotes to smart quotes.
-    text = text.replace(/[\u2018\u2019]/g, "'");
-    text = text.replace(/[\u201C\u201D]/g, "\"");
-
-    // 2. Convert line-terminators to spaces. It is unlikely that we want to have line-terminators in webkitbot commands.
-    text = text.replace(/(\r\n|\n|\r|\u2028|\u2029)/g, " ");
-
-    // 3. Strip Slack's auto-linked URLs: <https://url> → https://url, <https://url|label> → https://url
-    text = text.replace(/<(https?:\/\/[^|>]+)(?:\|[^>]*)?>/g, "$1");
-
-    return text;
-}
+const unlinkAsync = util.promisify(unlink);
 
 export default class WebKitBot {
     postMessage(options)
@@ -353,6 +235,17 @@ export default class WebKitBot {
                         });
                         return;
                     }
+                    if (usingGitWebkit) {
+                        let match = stderr.match(/Could not find "([^"]*)"(?::\s*(.*))?/);
+                        if (match) {
+                            let detail = match[2] ? ` ${escapeForSlackText(match[2].trim())}` : "";
+                            await this.postMessage({
+                                channel: event.channel,
+                                text: `<@${event.user}> Could not find commit \`${escapeForSlackText(match[1])}\`.${detail}`,
+                            });
+                            return;
+                        }
+                    }
                     // webkit-patch: merge conflict
                     {
                         let index = stderr.indexOf("Failed to apply reverse diff for revision");
@@ -403,9 +296,10 @@ ${escapeForSlackText(stderr)}\`\`\`` : ""),
             return;
         }
 
+        dataLogLn("Failed to parse revision and reason from: ", args);
         await this.postMessage({
             channel: event.channel,
-            text: `<@${event.user}> Failed to parse revision and reason`,
+            text: `<@${event.user}> Failed to parse revision and reason: \`${escapeForSlackText(args.join(" "))}\``,
         });
     }
 
@@ -567,8 +461,32 @@ Type \`help COMMAND\` for help on my individual commands.`,
         });
     }
 
+    // Remove orphaned *.lock files from a crashed git process; safe because the AsyncTaskQueue guarantees no git process is running here.
+    async clearStaleGitLocks()
+    {
+        const gitDir = path.join(process.env.webkitWorkingDirectory, ".git");
+        const lockPaths = [
+            path.join(gitDir, "index.lock"),
+            path.join(gitDir, "HEAD.lock"),
+            path.join(gitDir, "config.lock"),
+            path.join(gitDir, "packed-refs.lock"),
+            path.join(gitDir, "refs", "heads", "main.lock"),
+        ];
+        for (let lockPath of lockPaths) {
+            try {
+                await unlinkAsync(lockPath);
+                dataLogLn("Removed stale git lock: " + lockPath);
+            } catch (error) {
+                if (error.code !== "ENOENT")
+                    dataLogLn("Warning: could not remove git lock " + lockPath + ": " + error.message);
+            }
+        }
+    }
+
     async cleanUpWorkingCopy()
     {
+        await this.clearStaleGitLocks();
+
         dataLogLn("1. Resetting");
         await this.execInWebKitDirectorySimple("git", ["reset", "--hard"]);
 

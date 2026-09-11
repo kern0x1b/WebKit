@@ -52,14 +52,13 @@ class Factory(factory.BuildFactory):
         self.addStep(SetCredentialHelper())
         self.addStep(CheckOutSource())
         self.addStep(FetchBranches())
-        # CheckOutSource step pulls the latest revision, since we use alwaysUseLatest=True. Without alwaysUseLatest Buildbot will
-        # automatically apply the patch to the repo, and that doesn't handle ChangeLogs well. See https://webkit.org/b/193138
+        # CheckOutSource step pulls the latest revision, since we use alwaysUseLatest=True.
         # Therefore we add CheckOutSpecificRevision step to checkout required revision.
         self.addStep(CheckOutSpecificRevision())
         if self.findModifiedLayoutTests:
             self.addStep(GetTestExpectationsBaseline())
         self.addStep(ShowIdentifier())
-        self.addStep(ApplyPatch())
+        self.addStep(ShowWebKitVersion())
         self.addStep(CheckOutPullRequest())
         self.addStep(ValidateChangeContent())
         if self.requiresUserValidation:
@@ -81,7 +80,7 @@ class StyleFactory(factory.BuildFactory):
         self.addStep(FetchBranches())
         self.addStep(UpdateWorkingDirectory())
         self.addStep(ShowIdentifier())
-        self.addStep(ApplyPatch())
+        self.addStep(ShowWebKitVersion())
         self.addStep(CheckOutPullRequest())
         self.addStep(ValidateChangeContent())
         self.addStep(CheckStyle())
@@ -103,6 +102,7 @@ class SaferCPPStaticAnalyzerFactory(factory.BuildFactory):
         self.addStep(CheckOutSource())
         self.addStep(FetchBranches())
         self.addStep(ShowIdentifier())
+        self.addStep(ShowWebKitVersion())
         self.addStep(CheckOutPullRequest())
         self.addStep(ValidateChangeContent())
         self.addStep(KillOldProcesses())
@@ -356,7 +356,7 @@ class WPEBuildFactory(BuildFactory):
     branches = [r'main', r'webkit.+']
 
 
-class GTK3LibWebRTCBuildFactory(GTKBuildFactory):
+class GTK3GCCBuildFactory(GTKBuildFactory):
     skipUpload = True
 
 
@@ -377,40 +377,6 @@ class ServicesFactory(Factory):
         self.addStep(RunResultsdbpyTests())
 
 
-class CommitQueueFactory(factory.BuildFactory):
-    def __init__(self, platform, configuration=None, architectures=None, additionalArguments=None, deployment_target=None, **kwargs):
-        factory.BuildFactory.__init__(self)
-        self.addStep(ConfigureBuild(platform=platform, configuration=configuration, architectures=architectures, buildOnly=False, triggers=None, remotes=None, additionalArguments=additionalArguments, deployment_target=deployment_target))
-        self.addStep(ValidateChange(verifycqplus=True))
-        self.addStep(ValidateCommitterAndReviewer())
-        self.addStep(PrintConfiguration())
-        self.addStep(CleanGitRepo())
-        self.addStep(SetCredentialHelper())
-        self.addStep(CheckOutSource())
-        self.addStep(FetchBranches())
-        self.addStep(UpdateWorkingDirectory())
-        self.addStep(ShowIdentifier())
-        self.addStep(InstallHooks())
-        self.addStep(ApplyPatch())
-
-        self.addStep(ValidateSquashed())
-        self.addStep(AddReviewerToCommitMessage())
-        self.addStep(ValidateCommitMessage())
-
-        self.addStep(KillOldProcesses())
-        self.addStep(CompileWebKit(skipUpload=True))
-        self.addStep(KillOldProcesses())
-
-        self.addStep(ValidateChange(addURLs=False, verifycqplus=True))
-        self.addStep(CheckStatusOnEWSQueues())
-        self.addStep(RunWebKitTests())
-        self.addStep(ValidateChange(addURLs=False, verifycqplus=True))
-
-        self.addStep(Canonicalize())
-        self.addStep(PushCommitToWebKitRepo())
-        self.addStep(SetBuildSummary())
-
-
 class MergeQueueFactoryBase(factory.BuildFactory):
     def __init__(self, platform, configuration=None, architectures=None, additionalArguments=None, deployment_target=None, **kwargs):
         super(MergeQueueFactoryBase, self).__init__()
@@ -427,6 +393,7 @@ class MergeQueueFactoryBase(factory.BuildFactory):
         self.addStep(MapBranchAlias())
         self.addStep(UpdateWorkingDirectory())
         self.addStep(ShowIdentifier())
+        self.addStep(ShowWebKitVersion())
         self.addStep(InstallHooks())
         self.addStep(CheckOutPullRequest())
         self.addStep(ValidateChangeContent(block_pr_on_failure=True))

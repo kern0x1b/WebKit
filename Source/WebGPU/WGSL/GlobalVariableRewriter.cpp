@@ -142,6 +142,8 @@ private:
     Packing getPacking(AST::IdentityExpression&);
     Packing packingForType(const Type*);
 
+    void addOverrideValidation(ShaderModule::OverrideValidator&&);
+
     AST::IdentifierExpression& getBase(AST::Expression&, unsigned&);
 
     ShaderModule& m_shaderModule;
@@ -172,7 +174,7 @@ private:
     HashSet<AST::Expression*> m_doNotUnpack;
     CheckedUint32 m_combinedFunctionVariablesSize;
     bool m_isTopLevelExpression { true };
-    bool m_suppressOverrideValidation { false };
+    Vector<AST::BinaryExpression*> m_shortCircuitedOperators;
 };
 
 std::optional<Error> RewriteGlobalVariables::run()
@@ -432,10 +434,37 @@ void RewriteGlobalVariables::visit(AST::Expression& expression)
     pack(Packing::Unpacked, expression);
 }
 
+static bool skipsRightHandSide(const ShaderModule& shaderModule, const AST::BinaryExpression& expression, const HashMap<String, ConstantValue>& overrideValues)
+{
+    ASSERT(expression.operation() == AST::BinaryOperation::ShortCircuitAnd || expression.operation() == AST::BinaryOperation::ShortCircuitOr);
+
+    auto value = evaluate(shaderModule, expression.leftExpression(), overrideValues);
+    if (!value || !std::holds_alternative<bool>(*value))
+        return false;
+
+    return std::get<bool>(*value) == (expression.operation() == AST::BinaryOperation::ShortCircuitOr);
+}
+
+void RewriteGlobalVariables::addOverrideValidation(ShaderModule::OverrideValidator&& validator)
+{
+    if (m_shortCircuitedOperators.isEmpty()) {
+        m_shaderModule.addOverrideValidation(WTF::move(validator));
+        return;
+    }
+
+    m_shaderModule.addOverrideValidation([&shaderModule = m_shaderModule, operators = m_shortCircuitedOperators, validator = WTF::move(validator)](const auto& overrideValues) -> std::optional<Error> {
+        for (auto* operation : operators) {
+            if (skipsRightHandSide(shaderModule, *operation, overrideValues))
+                return std::nullopt;
+        }
+        return validator(overrideValues);
+    });
+}
+
 Packing RewriteGlobalVariables::pack(Packing expectedPacking, AST::Expression& expression)
 {
     if (m_isTopLevelExpression && expression.maybeEvaluation().value_or(Evaluation::Runtime) == Evaluation::Override) {
-        m_shaderModule.addOverrideValidation([&shaderModule = m_shaderModule, &expression](auto& overrideValues) -> std::optional<Error> {
+        addOverrideValidation([&shaderModule = m_shaderModule, &expression](const auto& overrideValues) -> std::optional<Error> {
             auto maybeValue = shaderModule.ensureOverrideValue(expression, overrideValues);
             if (!maybeValue)
                 return maybeValue.error();
@@ -594,8 +623,14 @@ Packing RewriteGlobalVariables::getPacking(AST::IndexAccessExpression& expressio
         baseType = pointerType->element;
     if (std::holds_alternative<Types::Vector>(*baseType))
         return Packing::Unpacked;
-    if (std::holds_alternative<Types::Matrix>(*baseType))
+    if (auto* matrixType = std::get_if<Types::Matrix>(baseType)) {
+        // Indexing a packed matrix (rows == 3) yields a PackedVec3 column,
+        // which still needs to be unpacked before it can be swizzled or used
+        // as a vec3. See Type::packing().
+        if (matrixType->rows == 3)
+            return Packing::PackedVec3;
         return Packing::Unpacked;
+    }
     ASSERT(std::holds_alternative<Types::Array>(*baseType));
     auto& arrayType = std::get<Types::Array>(*baseType);
     return packingForType(arrayType.element);
@@ -607,17 +642,15 @@ Packing RewriteGlobalVariables::getPacking(AST::BinaryExpression& expression)
 
     if (expression.operation() == AST::BinaryOperation::ShortCircuitAnd || expression.operation() == AST::BinaryOperation::ShortCircuitOr) {
         auto leftEval = expression.leftExpression().maybeEvaluation().value_or(Evaluation::Runtime);
-        if (leftEval == Evaluation::Override) {
-            SetForScope suppressScope(m_suppressOverrideValidation, true);
+        if (leftEval < Evaluation::Runtime) {
+            m_shortCircuitedOperators.append(&expression);
             pack(Packing::Unpacked, expression.rightExpression());
+            m_shortCircuitedOperators.removeLast();
             return Packing::Unpacked;
         }
     }
 
     pack(Packing::Unpacked, expression.rightExpression());
-
-    if (m_suppressOverrideValidation)
-        return Packing::Unpacked;
 
     auto operation = toASCIILiteral(expression.operation());
     if (auto* overload = m_shaderModule.lookupOverload(operation)) {
@@ -625,7 +658,7 @@ Packing RewriteGlobalVariables::getPacking(AST::BinaryExpression& expression)
             auto leftEval = expression.leftExpression().maybeEvaluation().value_or(Evaluation::Runtime);
             auto rightEval = expression.rightExpression().maybeEvaluation().value_or(Evaluation::Runtime);
             if (leftEval == Evaluation::Override || rightEval == Evaluation::Override) {
-                m_shaderModule.addOverrideValidation([&shaderModule = m_shaderModule, &expression, validate](auto& overrideValues) -> std::optional<Error> {
+                addOverrideValidation([&shaderModule = m_shaderModule, &expression, validate](const auto& overrideValues) -> std::optional<Error> {
                     FixedVector<std::optional<ConstantValue>> validationArguments(2);
                     if (auto value = evaluate(shaderModule, expression.leftExpression(), overrideValues))
                         validationArguments[0] = { *value };
@@ -744,26 +777,24 @@ Packing RewriteGlobalVariables::getPacking(AST::CallExpression& call)
     for (auto& argument : call.arguments())
         pack(Packing::Unpacked, argument);
 
-    if (!m_suppressOverrideValidation) {
-        if (auto validate = call.validationFunction()) {
-            m_shaderModule.addOverrideValidation([&shaderModule = m_shaderModule, &call, validate](auto& overrideValues) -> std::optional<Error> {
-                unsigned argumentCount = call.arguments().size();
-                FixedVector<std::optional<ConstantValue>> validationArguments(argumentCount);
-                for (unsigned i = 0; i < argumentCount; ++i) {
-                    if (auto value = evaluate(shaderModule, call.arguments()[i], overrideValues))
-                        validationArguments[i] = { *value };
-                }
+    if (auto validate = call.validationFunction()) {
+        addOverrideValidation([&shaderModule = m_shaderModule, &call, validate](const auto& overrideValues) -> std::optional<Error> {
+            unsigned argumentCount = call.arguments().size();
+            FixedVector<std::optional<ConstantValue>> validationArguments(argumentCount);
+            for (unsigned i = 0; i < argumentCount; ++i) {
+                if (auto value = evaluate(shaderModule, call.arguments()[i], overrideValues))
+                    validationArguments[i] = { *value };
+            }
 
-                FixedVector<const Type*> paramTypes(argumentCount);
-                for (unsigned i = 0; i < argumentCount; ++i)
-                    paramTypes[i] = call.arguments()[i].inferredType();
+            FixedVector<const Type*> paramTypes(argumentCount);
+            for (unsigned i = 0; i < argumentCount; ++i)
+                paramTypes[i] = call.arguments()[i].inferredType();
 
-                if (auto error = validate(WTF::move(validationArguments), paramTypes))
-                    return Error(*error, call.span());
+            if (auto error = validate(WTF::move(validationArguments), paramTypes))
+                return Error(*error, call.span());
 
-                return std::nullopt;
-            });
-        }
+            return std::nullopt;
+        });
     }
 
     return Packing::Unpacked;
@@ -967,15 +998,19 @@ void RewriteGlobalVariables::packArrayResource(AST::Variable& global, const Type
     );
     packedType.m_inferredType = packedElementType;
 
-    auto& arrayTypeName = downcast<AST::ArrayTypeExpression>(*global.maybeTypeName());
+    auto& typeName = *global.maybeTypeName();
+    auto* maybeArrayTypeName = dynamicDowncast<AST::ArrayTypeExpression>(typeName);
     auto& packedArrayTypeName = m_shaderModule.astBuilder().construct<AST::ArrayTypeExpression>(
-        arrayTypeName.span(),
+        typeName.span(),
         &packedType,
-        arrayTypeName.maybeElementCount()
+        maybeArrayTypeName ? maybeArrayTypeName->maybeElementCount() : nullptr
     );
     packedArrayTypeName.m_inferredType = packedArrayType;
 
-    m_shaderModule.replace(arrayTypeName, packedArrayTypeName);
+    if (maybeArrayTypeName)
+        m_shaderModule.replace(*maybeArrayTypeName, packedArrayTypeName);
+    else
+        m_shaderModule.replace(downcast<AST::IdentifierExpression>(typeName), packedArrayTypeName);
     updateReference(global, packedArrayTypeName);
     m_shaderModule.replace(&global.role(), AST::VariableRole::PackedResource);
 }
@@ -2002,7 +2037,7 @@ static ASCIILiteral nameForPrimitiveKind(Types::Primitive::Kind primitiveKind)
     case Types::Primitive::Sampler:
         return "sampler"_s;
     case Types::Primitive::SamplerComparison:
-        return "sampler_comparion"_s;
+        return "sampler_comparison"_s;
     case Types::Primitive::TextureExternal:
         return "texture_external"_s;
     case Types::Primitive::AccessMode:

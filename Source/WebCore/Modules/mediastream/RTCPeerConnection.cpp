@@ -72,8 +72,10 @@
 #include <JavaScriptCore/StrongInlines.h>
 #include <JavaScriptCore/Uint8Array.h>
 #include <algorithm>
+#include <wtf/CheckedArithmetic.h>
 #include <wtf/MainThread.h>
 #include <wtf/TZoneMallocInlines.h>
+#include <wtf/URLParser.h>
 #include <wtf/UUID.h>
 #include <wtf/text/Base64.h>
 
@@ -128,7 +130,6 @@ RTCPeerConnection::RTCPeerConnection(Document& document)
 #endif
 {
     ALWAYS_LOG(LOGIDENTIFIER);
-    relaxAdoptionRequirement();
 }
 
 RTCPeerConnection::~RTCPeerConnection()
@@ -349,6 +350,7 @@ void RTCPeerConnection::createOffer(RTCOfferOptions&& options, Ref<DeferredPromi
             }
             // https://w3c.github.io/webrtc-pc/#dfn-final-steps-to-create-an-offer steps 4,5 and 6.
             m_lastCreatedOffer = result.returnValue().sdp;
+            m_isLastCreatedOfferFresh = true;
             promise.resolve(result.releaseReturnValue());
         });
     });
@@ -376,26 +378,51 @@ void RTCPeerConnection::createAnswer(RTCAnswerOptions&& options, Ref<DeferredPro
             }
             // https://w3c.github.io/webrtc-pc/#dfn-final-steps-to-create-an-answer steps 4,5 and 6.
             m_lastCreatedAnswer = result.returnValue().sdp;
+            m_isLastCreatedAnswerFresh = true;
             promise.resolve(result.releaseReturnValue());
         });
     });
 }
 
-static RTCSdpType NODELETE typeForSetLocalDescription(const std::optional<RTCLocalSessionDescriptionInit>& description, RTCSignalingState signalingState)
+static RTCSdpType NODELETE typeForSetLocalDescription(std::optional<RTCSdpType> descriptionType, RTCSignalingState signalingState)
 {
-    std::optional<RTCSdpType> type;
-    if (description)
-        type = description->type;
-
     // https://w3c.github.io/webrtc-pc/#dom-peerconnection-setlocaldescription step 4.1.
-    if (!type) {
+    if (!descriptionType) {
         bool shouldBeOffer = signalingState == RTCSignalingState::Stable || signalingState == RTCSignalingState::HaveLocalOffer || signalingState == RTCSignalingState::HaveRemotePranswer;
         return shouldBeOffer ? RTCSdpType::Offer : RTCSdpType::Answer;
     }
-    return *type;
+    return *descriptionType;
 }
 
-void RTCPeerConnection::setLocalDescription(std::optional<RTCLocalSessionDescriptionInit>&& localDescription, Ref<DeferredPromise>&& promise)
+static bool isSdpFingerprintValid(const String& oldSdp, const String& newSdp)
+{
+    auto newFingerprintPosition = newSdp.find("\na=fingerprint:"_s);
+    if (newFingerprintPosition == notFound) {
+        // Some applications may generate SDP without a fingerprint.
+        return true;
+    }
+
+    auto oldFingerprintPosition = oldSdp.find("\na=fingerprint:"_s);
+    if (oldFingerprintPosition == notFound)
+        return false;
+
+    auto computeFingerprintLength = [](auto& sdp, size_t position) {
+        auto end = sdp.find("\r\n"_s, position + 1);
+        if (end != notFound)
+            return end - position;
+        end = sdp.find('\n', position + 1);
+        if (end != notFound)
+            return end - position;
+        return sdp.length() - position;
+    };
+
+    auto oldLength = computeFingerprintLength(oldSdp, oldFingerprintPosition);
+    auto newLength = computeFingerprintLength(newSdp, newFingerprintPosition);
+
+    return StringView(oldSdp).substring(oldFingerprintPosition, oldLength) == StringView(newSdp).substring(newFingerprintPosition, newLength);
+}
+
+void RTCPeerConnection::setLocalDescription(RTCLocalSessionDescriptionInit&& localDescription, Ref<DeferredPromise>&& promise)
 {
     if (isClosed()) {
         promise->reject(ExceptionCode::InvalidStateError);
@@ -403,20 +430,36 @@ void RTCPeerConnection::setLocalDescription(std::optional<RTCLocalSessionDescrip
     }
 
 #if !RELEASE_LOG_DISABLED
-    String sdp = localDescription.value_or(RTCLocalSessionDescriptionInit { }).sdp;
-    logger().toObservers(LogWebRTC, WTFLogLevel::Always, { }, LOGIDENTIFIER, "Setting local description to:\n", sdp);
-    RELEASE_LOG_FORWARDABLE(WebRTC, RtcPeerConnectionSetLocalDescription, logIdentifier(), sdp.utf8());
+    logger().toObservers(LogWebRTC, WTFLogLevel::Always, { }, LOGIDENTIFIER, "Setting local description to:\n", localDescription.sdp);
+    RELEASE_LOG_FORWARDABLE(WebRTC, RtcPeerConnectionSetLocalDescription, logIdentifier(), localDescription.sdp.utf8());
 #endif
 
     chainOperation(WTF::move(promise), [this, localDescription = WTF::move(localDescription)](Ref<DeferredPromise>&& promise) mutable {
-        auto type = typeForSetLocalDescription(localDescription, m_signalingState);
-        String sdp;
-        if (localDescription)
-            sdp = localDescription->sdp;
-        if (type == RTCSdpType::Offer && sdp.isEmpty())
-            sdp = m_lastCreatedOffer;
-        else if (type == RTCSdpType::Answer && sdp.isEmpty())
-            sdp = m_lastCreatedAnswer;
+        auto type = typeForSetLocalDescription(localDescription.type, m_signalingState);
+        String sdp = localDescription.sdp;
+        if (localDescription.type) {
+            if (type == RTCSdpType::Offer && sdp.isEmpty())
+                sdp = m_lastCreatedOffer;
+            else if (type == RTCSdpType::Answer && sdp.isEmpty())
+                sdp = m_lastCreatedAnswer;
+
+            if (type == RTCSdpType::Offer && sdp != m_lastCreatedOffer && !isSdpFingerprintValid(m_lastCreatedOffer, sdp)) {
+                promise->reject(ExceptionCode::InvalidModificationError, "Local description does not match the last created offer"_s);
+                return;
+            }
+            if ((type == RTCSdpType::Answer || type == RTCSdpType::Pranswer) && sdp != m_lastCreatedAnswer && !isSdpFingerprintValid(m_lastCreatedAnswer, sdp)) {
+                promise->reject(ExceptionCode::InvalidModificationError, "Local description does not match the last created answer"_s);
+                return;
+            }
+        } else {
+            // Parameterless setLocalDescription: reuse the cached last created offer/answer
+            // only when it still represents the current system state, per
+            // https://w3c.github.io/webrtc-pc/#dom-peerconnection-setlocaldescription.
+            if (type == RTCSdpType::Offer && m_isLastCreatedOfferFresh)
+                sdp = m_lastCreatedOffer;
+            else if (type == RTCSdpType::Answer && m_isLastCreatedAnswerFresh)
+                sdp = m_lastCreatedAnswer;
+        }
 
         RefPtr<RTCSessionDescription> description;
         if (!sdp.isEmpty() || (type != RTCSdpType::Offer && type != RTCSdpType::Answer))
@@ -555,8 +598,11 @@ ExceptionOr<Vector<MediaEndpointConfiguration::IceServerInfo>> RTCPeerConnection
             if (!serverURL.hasOpaquePath())
                 return Exception { ExceptionCode::SyntaxError, "STUN/TURN URL should be opaque-path"_s };
             if (serverURL.protocolIs("turn"_s) || serverURL.protocolIs("turns"_s)) {
-                if (serverURL.hasQuery() && !!serverURL.query().findIgnoringASCIICase("?transport="_s))
-                    return Exception { ExceptionCode::SyntaxError, "Invalid TURN URL query string"_s };
+                if (serverURL.hasQuery()) {
+                    auto parameters = WTF::URLParser::parseURLEncodedForm(serverURL.query());
+                    if (parameters.size() != 1 || !equalIgnoringASCIICase(parameters[0].key, "transport"_s))
+                        return Exception { ExceptionCode::SyntaxError, "Invalid TURN URL query string"_s };
+                }
                 if (server.credential.isNull() || server.username.isNull())
                     return Exception { ExceptionCode::InvalidAccessError, "TURN/TURNS server requires both username and credential"_s };
                 // https://tools.ietf.org/html/rfc8489#section-14.3
@@ -741,11 +787,6 @@ bool RTCPeerConnection::doClose()
 {
     if (isClosed())
         return false;
-
-#if USE(GSTREAMER_WEBRTC)
-    if (RefPtr backend = m_backend.get())
-        backend->prepareForClose();
-#endif
 
     m_shouldDelayTasks = false;
     m_connectionState = RTCPeerConnectionState::Closed;
@@ -1087,14 +1128,24 @@ static inline ExceptionOr<PeerConnectionBackend::CertificateInformation> certifi
 
         auto result = PeerConnectionBackend::CertificateInformation::RSASSA_PKCS1_v1_5();
         if (parameters.modulusLength && parameters.publicExponent) {
-            int publicExponent = 0;
-            int value = 1;
-            for (unsigned counter = 0; counter < parameters.publicExponent->byteLength(); ++counter) {
-                publicExponent += parameters.publicExponent->typedSpan()[counter] * value;
-                value <<= 8;
-            }
+            // A WebCrypto BigInteger is big endian with arbitrary leading zero padding, so its length says
+            // nothing about its magnitude. Only what is left once the padding is skipped has to fit the
+            // int the certificate generator takes.
+            auto bigInteger = parameters.publicExponent->typedSpan();
+            size_t firstSignificantByte = 0;
+            while (firstSignificantByte < bigInteger.size() && !bigInteger[firstSignificantByte])
+                ++firstSignificantByte;
+            auto significantBytes = bigInteger.subspan(firstSignificantByte);
+            if (significantBytes.size() > sizeof(int32_t))
+                return Exception { ExceptionCode::NotSupportedError, "publicExponent is too large"_s };
 
-            result.rsaParameters = PeerConnectionBackend::CertificateInformation::RSA { *parameters.modulusLength, publicExponent };
+            CheckedInt32 publicExponent = 0;
+            for (uint8_t byte : significantBytes)
+                publicExponent = publicExponent * 256 + static_cast<int32_t>(byte);
+            if (publicExponent.hasOverflowed())
+                return Exception { ExceptionCode::NotSupportedError, "publicExponent is too large"_s };
+
+            result.rsaParameters = PeerConnectionBackend::CertificateInformation::RSA { *parameters.modulusLength, publicExponent.value() };
         }
         result.expires = parameters.expires;
         return result;
@@ -1224,12 +1275,12 @@ void RTCPeerConnection::updateDescriptions(PeerConnectionBackend::DescriptionSta
     updateDescription(m_currentRemoteDescription, states.currentRemoteDescriptionSdpType, WTF::move(states.currentRemoteDescriptionSdp));
     updateDescription(m_pendingRemoteDescription, states.pendingRemoteDescriptionSdpType, WTF::move(states.pendingRemoteDescriptionSdp));
 
-    if (states.signalingState)
+    if (states.signalingState) {
         setSignalingState(*states.signalingState);
 
-    if (!m_pendingRemoteDescription && !m_pendingLocalDescription) {
-        m_lastCreatedOffer = { };
-        m_lastCreatedAnswer = { };
+        // We successfully applied a description, let's not reuse a cached sdp for parameterless setLocalDescription.
+        m_isLastCreatedOfferFresh = false;
+        m_isLastCreatedAnswerFresh = false;
     }
 }
 

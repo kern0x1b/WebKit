@@ -131,9 +131,9 @@ inline TextOrientation ComputedStyleProperties::computedTextOrientation() const
 
 // FIXME: Support font properties.
 
-float ComputedStyleProperties::specifiedFontSize() const
+float ComputedStyleProperties::fontSize() const
 {
-    return fontDescription().specifiedSize();
+    return fontDescription().computedSize();
 }
 
 inline FontFamilies ComputedStyleProperties::fontFamily() const
@@ -266,7 +266,7 @@ inline TextSpacingTrim ComputedStyleProperties::textSpacingTrim() const
 
 inline WebkitLocale ComputedStyleProperties::locale() const
 {
-    return fontDescription().specifiedLocale();
+    return fontDescription().computedLocale();
 }
 
 // MARK: - Custom ColorPropertyTrait function definitions
@@ -285,7 +285,7 @@ inline const Color& ColorPropertyTraits<PropertyNameConstant<CSSPropertyColor>>:
 
 inline const Color& ColorPropertyTraits<PropertyNameConstant<CSSPropertyAccentColor>>::color(const ComputedStyleProperties& style)
 {
-    return style.accentColor().colorOrCurrentColor();
+    return style.accentColor().colorOrDefaultColor();
 }
 
 inline const Color& ColorPropertyTraits<PropertyNameConstant<CSSPropertyCaretColor>>::color(const ComputedStyleProperties& style)

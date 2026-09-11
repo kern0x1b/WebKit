@@ -28,17 +28,22 @@
 #include "ColorTransferFunctions.h"
 
 #include "AlphaPremultiplication.h"
-#include "DestinationColorSpace.h"
+#include "ColorSpace.h"
 #include "IntSize.h"
 #include "Logging.h"
+#include "PixelBuffer.h"
 #include "PixelFormat.h"
 #include <array>
+#include <wtf/CheckedArithmetic.h>
 #include <wtf/StdLibExtras.h>
 #include <wtf/text/ParsingUtilities.h>
 #include <wtf/text/TextStream.h>
 
 #if USE(ACCELERATE) && USE(CG)
 #include <Accelerate/Accelerate.h>
+#if CPU(ARM64)
+#include <arm_neon.h>
+#endif
 #elif USE(SKIA)
 WTF_IGNORE_WARNINGS_IN_THIRD_PARTY_CODE_BEGIN
 #include <skia/core/SkPixmap.h>
@@ -47,38 +52,82 @@ WTF_IGNORE_WARNINGS_IN_THIRD_PARTY_CODE_END
 
 namespace WebCore {
 
+namespace {
+
+enum class AlphaFormat : uint8_t { Opaque, Unpremultiplied, Premultiplied };
+
+// Whether the color components already have the alpha applied to them.
+constexpr bool isAlphaApplied(AlphaFormat alphaFormat)
+{
+    return alphaFormat != AlphaFormat::Unpremultiplied;
+}
+
+constexpr AlphaFormat toAlphaFormat(AlphaPremultiplication alphaFormat, PixelFormat pixelFormat)
+{
+    if (pixelFormatIsOpaque(pixelFormat))
+        return AlphaFormat::Opaque;
+    if (alphaFormat == AlphaPremultiplication::Premultiplied)
+        return AlphaFormat::Premultiplied;
+    return AlphaFormat::Unpremultiplied;
+}
+
+}
+
+static bool NODELETE isSupportedConversionFormat(PixelFormat pixelFormat)
+{
+    switch (pixelFormat) {
+    case PixelFormat::RGBX8:
+    case PixelFormat::RGBA8:
+    case PixelFormat::BGRX8:
+    case PixelFormat::BGRA8:
+#if ENABLE(PIXEL_FORMAT_RGBA16F)
+    case PixelFormat::RGBA16F:
+#endif
+        return true;
+    default:
+        return false;
+    }
+}
+
 #if USE(ACCELERATE) && USE(CG)
 
 static inline vImage_CGImageFormat makeVImageCGImageFormat(const PixelBufferFormat& format)
 {
-    auto [bitsPerComponent, bitsPerPixel, bitmapInfo] = [] (const PixelBufferFormat& format) -> std::tuple<unsigned, unsigned, CGBitmapInfo> {
+    auto [bitsPerComponent, bitsPerPixel, bitmapInfo] = [] (const PixelBufferFormat& format) -> std::tuple<decltype(vImage_CGImageFormat::bitsPerComponent), decltype(vImage_CGImageFormat::bitsPerPixel), CGBitmapInfo> {
         switch (format.pixelFormat) {
+        case PixelFormat::RGBX8:
+            return std::make_tuple(8u, 32u, static_cast<CGBitmapInfo>(kCGBitmapByteOrder32Big) | static_cast<CGBitmapInfo>(kCGImageAlphaNoneSkipLast));
+
         case PixelFormat::RGBA8:
             if (format.alphaFormat == AlphaPremultiplication::Premultiplied)
                 return std::make_tuple(8u, 32u, static_cast<CGBitmapInfo>(kCGBitmapByteOrder32Big) | static_cast<CGBitmapInfo>(kCGImageAlphaPremultipliedLast));
-            else
-                return std::make_tuple(8u, 32u, static_cast<CGBitmapInfo>(kCGBitmapByteOrder32Big) | static_cast<CGBitmapInfo>(kCGImageAlphaLast));
+            return std::make_tuple(8u, 32u, static_cast<CGBitmapInfo>(kCGBitmapByteOrder32Big) | static_cast<CGBitmapInfo>(kCGImageAlphaLast));
+
+        case PixelFormat::BGRX8:
+            return std::make_tuple(8u, 32u, static_cast<CGBitmapInfo>(kCGBitmapByteOrder32Little) | static_cast<CGBitmapInfo>(kCGImageAlphaNoneSkipFirst));
 
         case PixelFormat::BGRA8:
             if (format.alphaFormat == AlphaPremultiplication::Premultiplied)
                 return std::make_tuple(8u, 32u, static_cast<CGBitmapInfo>(kCGBitmapByteOrder32Little) | static_cast<CGBitmapInfo>(kCGImageAlphaPremultipliedFirst));
-            else
-                return std::make_tuple(8u, 32u, static_cast<CGBitmapInfo>(kCGBitmapByteOrder32Little) | static_cast<CGBitmapInfo>(kCGImageAlphaFirst));
+            return std::make_tuple(8u, 32u, static_cast<CGBitmapInfo>(kCGBitmapByteOrder32Little) | static_cast<CGBitmapInfo>(kCGImageAlphaFirst));
 
-        case PixelFormat::BGRX8:
 #if ENABLE(PIXEL_FORMAT_RGB10)
         case PixelFormat::RGB10:
 #endif
 #if ENABLE(PIXEL_FORMAT_RGB10A8)
         case PixelFormat::RGB10A8:
 #endif
+            break;
+
 #if ENABLE(PIXEL_FORMAT_RGBA16F)
         case PixelFormat::RGBA16F:
+            if (format.alphaFormat == AlphaPremultiplication::Premultiplied)
+                return std::make_tuple(16u, 64u, static_cast<CGBitmapInfo>(kCGBitmapByteOrder16Host) | static_cast<CGBitmapInfo>(kCGBitmapFloatComponents) | static_cast<CGBitmapInfo>(kCGImageAlphaPremultipliedLast));
+            return std::make_tuple(16u, 64u, static_cast<CGBitmapInfo>(kCGBitmapByteOrder16Host) | static_cast<CGBitmapInfo>(kCGBitmapFloatComponents) | static_cast<CGBitmapInfo>(kCGImageAlphaLast));
 #endif
-            break;
         }
 
-        // We currently only support 8 bit pixel formats with alpha for these conversions.
+        // We do not support conversions to or from the 10-bit-per-component formats.
 
         ASSERT_NOT_REACHED();
         return std::make_tuple(8u, 32u, static_cast<CGBitmapInfo>(kCGBitmapByteOrder32Little) | static_cast<CGBitmapInfo>(kCGImageAlphaFirst));
@@ -97,7 +146,8 @@ static inline vImage_CGImageFormat makeVImageCGImageFormat(const PixelBufferForm
     return result;
 }
 
-template<typename View> static vImage_Buffer NODELETE makeVImageBuffer(const View& view, const IntSize& size)
+template<typename View>
+static vImage_Buffer NODELETE makeVImageBuffer(const View& view, const IntSize& size)
 {
     vImage_Buffer result;
 
@@ -109,64 +159,162 @@ template<typename View> static vImage_Buffer NODELETE makeVImageBuffer(const Vie
     return result;
 }
 
-static void convertImagePixelsAccelerated(const ConstPixelBufferConversionView& source, const PixelBufferConversionView& destination, const IntSize& destinationSize)
+static bool convertImagePixelsAcceleratedAnyToAny(const ConstPixelBufferConversionView& source, const PixelBufferConversionView& destination, const IntSize& destinationSize)
 {
+    // FIXME: Consider using vImageConvert_AnyToAny for all conversions, not just ones that need a color space
+    // or component size conversion, after judiciously performance testing them against each other.
+
+    auto sourceCGImageFormat = makeVImageCGImageFormat(source.format);
+    auto destinationCGImageFormat = makeVImageCGImageFormat(destination.format);
+
+    vImage_Error converterCreateError = kvImageNoError;
+    RetainPtr converter = adoptCF(vImageConverter_CreateWithCGImageFormat(&sourceCGImageFormat, &destinationCGImageFormat, nullptr, kvImageNoFlags, &converterCreateError));
+    if (converterCreateError != kvImageNoError) {
+        RELEASE_LOG_ERROR(Images, "%s: vImageConverter_CreateWithCGImageFormat() failed with error: %zd", __FUNCTION__, converterCreateError);
+        return false;
+    }
+
     auto sourceVImageBuffer = makeVImageBuffer(source, destinationSize);
     auto destinationVImageBuffer = makeVImageBuffer(destination, destinationSize);
 
-    auto zeroFillDestination = [&] {
-        size_t rowFillBytes = static_cast<size_t>(destinationSize.width()) * 4;
-        for (int y = 0; y < destinationSize.height(); ++y)
-            zeroSpan(destination.rows.subspan(static_cast<size_t>(y) * destination.bytesPerRow, rowFillBytes));
-    };
-
-    if (source.format.colorSpace != destination.format.colorSpace) {
-        // FIXME: Consider using vImageConvert_AnyToAny for all conversions, not just ones that need a color space conversion,
-        // after judiciously performance testing them against each other.
-
-        auto sourceCGImageFormat = makeVImageCGImageFormat(source.format);
-        auto destinationCGImageFormat = makeVImageCGImageFormat(destination.format);
-
-        vImage_Error converterCreateError = kvImageNoError;
-        auto converter = adoptCF(vImageConverter_CreateWithCGImageFormat(&sourceCGImageFormat, &destinationCGImageFormat, nullptr, kvImageNoFlags, &converterCreateError));
-        if (converterCreateError != kvImageNoError) {
-            RELEASE_LOG_ERROR(Images, "%s: vImageConverter_CreateWithCGImageFormat() failed with error: %zd", __FUNCTION__, converterCreateError);
-            // The destination may be uninitialized; ensure no stale heap is exposed to callers.
-            zeroFillDestination();
-            return;
-        }
-
-        vImage_Error converterConvertError = vImageConvert_AnyToAny(converter.get(), &sourceVImageBuffer, &destinationVImageBuffer, nullptr, kvImageNoFlags);
-        if (converterConvertError != kvImageNoError) {
-            RELEASE_LOG_ERROR(Images, "%s: vImageConvert_AnyToAny() failed with error: %zd", __FUNCTION__, converterConvertError);
-            // The destination may be uninitialized; ensure no stale heap is exposed to callers.
-            zeroFillDestination();
-        }
-
-        return;
+    vImage_Error converterConvertError = vImageConvert_AnyToAny(converter.get(), &sourceVImageBuffer, &destinationVImageBuffer, nullptr, kvImageNoFlags);
+    if (converterConvertError != kvImageNoError) {
+        RELEASE_LOG_ERROR(Images, "%s: vImageConvert_AnyToAny() failed with error: %zd", __FUNCTION__, converterConvertError);
+        return false;
     }
 
-    if (source.format.alphaFormat != destination.format.alphaFormat) {
-        if (destination.format.alphaFormat == AlphaPremultiplication::Unpremultiplied) {
-            if (source.format.pixelFormat == PixelFormat::RGBA8)
-                vImageUnpremultiplyData_RGBA8888(&sourceVImageBuffer, &destinationVImageBuffer, kvImageNoFlags);
-            else
-                vImageUnpremultiplyData_BGRA8888(&sourceVImageBuffer, &destinationVImageBuffer, kvImageNoFlags);
-        } else {
-            if (source.format.pixelFormat == PixelFormat::RGBA8)
-                vImagePremultiplyData_RGBA8888(&sourceVImageBuffer, &destinationVImageBuffer, kvImageNoFlags);
-            else
-                vImagePremultiplyData_BGRA8888(&sourceVImageBuffer, &destinationVImageBuffer, kvImageNoFlags);
+    return true;
+}
+
+#if CPU(ARM64)
+template<bool shouldUnpremultiply>
+static bool convertSmallImageAlpha(const ConstPixelBufferConversionView& source, const PixelBufferConversionView& destination, const IntSize& size)
+{
+    if (size.width() <= 0 || size.height() <= 0)
+        return false;
+    auto pixelCount = static_cast<uint64_t>(size.width()) * size.height();
+    if (pixelCount > 16384 || static_cast<uint64_t>(size.width()) * 4 != source.bytesPerRow || source.bytesPerRow != destination.bytesPerRow)
+        return false;
+
+    auto sourceBytes = source.rows.first(pixelCount * 4);
+    auto destinationBytes = destination.rows.first(pixelCount * 4);
+    size_t offset = 0;
+    if constexpr (!shouldUnpremultiply) {
+        for (; offset + 32 <= sourceBytes.size(); offset += 32) {
+            auto pixels = vld4_u8(sourceBytes.subspan(offset).data());
+            auto premultiply = [&](uint8x8_t channel) {
+                // This produces exactly the same results as (channel * alpha + 127) / 255 in vImagePremultiplyData_ARGB8888().
+                auto product = vmlal_u8(vdupq_n_u16(128), channel, pixels.val[3]);
+                return vshrn_n_u16(vaddq_u16(product, vshrq_n_u16(product, 8)), 8);
+            };
+            pixels.val[0] = premultiply(pixels.val[0]);
+            pixels.val[1] = premultiply(pixels.val[1]);
+            pixels.val[2] = premultiply(pixels.val[2]);
+            vst4_u8(destinationBytes.subspan(offset).data(), pixels);
+        }
+        for (; offset < sourceBytes.size(); offset += 4) {
+            unsigned alpha = sourceBytes[offset + 3];
+            for (unsigned channel = 0; channel < 3; ++channel)
+                destinationBytes[offset + channel] = (sourceBytes[offset + channel] * alpha + 127) / 255;
+            destinationBytes[offset + 3] = alpha;
+        }
+    } else {
+        for (; offset + 64 <= sourceBytes.size(); offset += 64) {
+            auto pixels = vld4q_u8(sourceBytes.subspan(offset).data());
+            auto alpha = pixels.val[3];
+            auto binaryAlpha = vorrq_u8(vceqq_u8(alpha, vdupq_n_u8(0)), vceqq_u8(alpha, vdupq_n_u8(255)));
+            if (vminvq_u8(binaryAlpha) != 255)
+                break;
+            pixels.val[0] = vandq_u8(pixels.val[0], alpha);
+            pixels.val[1] = vandq_u8(pixels.val[1], alpha);
+            pixels.val[2] = vandq_u8(pixels.val[2], alpha);
+            vst4q_u8(destinationBytes.subspan(offset).data(), pixels);
+        }
+        if (offset != sourceBytes.size()) {
+            auto remainingBytes = sourceBytes.size() - offset;
+            vImage_Buffer sourceBuffer { const_cast<uint8_t*>(sourceBytes.subspan(offset).data()), 1, remainingBytes / 4, remainingBytes };
+            vImage_Buffer destinationBuffer { destinationBytes.subspan(offset).data(), 1, remainingBytes / 4, remainingBytes };
+            vImageUnpremultiplyData_RGBA8888(&sourceBuffer, &destinationBuffer, kvImageNoFlags);
+        }
+    }
+    return true;
+}
+#endif
+
+static bool convertImagePixelsAcceleratedMatchingSize(const ConstPixelBufferConversionView& sourceView, const PixelBufferConversionView& destinationView, const IntSize& destinationSize)
+{
+    auto sourceVImageBuffer = makeVImageBuffer(sourceView, destinationSize);
+    auto destinationVImageBuffer = makeVImageBuffer(destinationView, destinationSize);
+
+    bool swapComponentOrder = pixelComponentOrder(sourceView.format.pixelFormat) != pixelComponentOrder(destinationView.format.pixelFormat);
+    auto sourceAlphaFormat = toAlphaFormat(sourceView.format.alphaFormat, sourceView.format.pixelFormat);
+    auto destinationAlphaFormat = toAlphaFormat(destinationView.format.alphaFormat, destinationView.format.pixelFormat);
+
+    if (sourceAlphaFormat == AlphaFormat::Opaque) {
+        // The component an opaque source has in place of alpha holds no meaningful value, so it must
+        // not be carried over. Insert an opaque alpha and possibly reorder.
+        constexpr std::array<uint8_t, 4> identityMap { 0, 1, 2, 3 };
+        constexpr std::array<uint8_t, 4> swappedMap { 2, 1, 0, 3 };
+        constexpr uint8_t lastChannelMask = 0x1; // 0x8 is the first of the four channels, 0x1 the last.
+        constexpr std::array<uint8_t, 4> opaqueAlpha { 0, 0, 0, 255 };
+        vImagePermuteChannelsWithMaskedInsert_ARGB8888(&sourceVImageBuffer, &destinationVImageBuffer, swapComponentOrder ? swappedMap.data() : identityMap.data(), lastChannelMask, opaqueAlpha.data(), kvImageNoFlags);
+        return true;
+    }
+
+    if (isAlphaApplied(sourceAlphaFormat) != isAlphaApplied(destinationAlphaFormat)) {
+        bool shouldUnpremultiply = !isAlphaApplied(destinationAlphaFormat);
+        bool converted = false;
+#if CPU(ARM64)
+        if (PixelBuffer::bytesPerPixelComponent(sourceView.format.pixelFormat) == 1) {
+            converted = shouldUnpremultiply
+                ? convertSmallImageAlpha<true>(sourceView, destinationView, destinationSize)
+                : convertSmallImageAlpha<false>(sourceView, destinationView, destinationSize);
+        }
+#endif
+        if (!converted) {
+            switch (sourceView.format.pixelFormat) {
+#if ENABLE(PIXEL_FORMAT_RGBA16F)
+            case PixelFormat::RGBA16F:
+                if (shouldUnpremultiply)
+                    vImageUnpremultiplyData_RGBA16F(&sourceVImageBuffer, &destinationVImageBuffer, kvImageNoFlags);
+                else
+                    vImagePremultiplyData_RGBA16F(&sourceVImageBuffer, &destinationVImageBuffer, kvImageNoFlags);
+                break;
+#endif
+            case PixelFormat::RGBA8:
+                if (shouldUnpremultiply)
+                    vImageUnpremultiplyData_RGBA8888(&sourceVImageBuffer, &destinationVImageBuffer, kvImageNoFlags);
+                else
+                    vImagePremultiplyData_RGBA8888(&sourceVImageBuffer, &destinationVImageBuffer, kvImageNoFlags);
+                break;
+            default:
+                ASSERT(sourceView.format.pixelFormat == PixelFormat::BGRA8);
+                if (shouldUnpremultiply)
+                    vImageUnpremultiplyData_BGRA8888(&sourceVImageBuffer, &destinationVImageBuffer, kvImageNoFlags);
+                else
+                    vImagePremultiplyData_BGRA8888(&sourceVImageBuffer, &destinationVImageBuffer, kvImageNoFlags);
+                break;
+            }
         }
 
         sourceVImageBuffer = destinationVImageBuffer;
     }
 
-    if (source.format.pixelFormat != destination.format.pixelFormat) {
-        // Swap pixel channels BGRA <-> RGBA.
+    if (swapComponentOrder) {
         constexpr std::array<uint8_t, 4> map { 2, 1, 0, 3 };
         vImagePermuteChannels_ARGB8888(&sourceVImageBuffer, &destinationVImageBuffer, map.data(), kvImageNoFlags);
     }
+
+    return true;
+}
+
+static bool platformConvertImagePixels(const ConstPixelBufferConversionView& source, const PixelBufferConversionView& destination, const IntSize& destinationSize)
+{
+    if (source.format.colorSpace == destination.format.colorSpace
+        && PixelBuffer::bytesPerPixelComponent(source.format.pixelFormat) == PixelBuffer::bytesPerPixelComponent(destination.format.pixelFormat))
+        return convertImagePixelsAcceleratedMatchingSize(source, destination, destinationSize);
+
+    return convertImagePixelsAcceleratedAnyToAny(source, destination, destinationSize);
 }
 
 #elif USE(SKIA)
@@ -221,147 +369,33 @@ static bool convertImagePixelsSkia(const ConstPixelBufferConversionView& source,
     return true;
 }
 
-#endif
-
-enum class PixelFormatConversion { None, Permute };
-
-template<PixelFormatConversion pixelFormatConversion>
-static void NODELETE convertSinglePixelPremultipliedToPremultiplied(std::span<const uint8_t, 4> sourcePixel, std::span<uint8_t, 4> destinationPixel)
-{
-    uint8_t alpha = sourcePixel[3];
-    if (!alpha) {
-        reinterpretCastSpanStartTo<uint32_t>(destinationPixel) = 0;
-        return;
-    }
-
-    if constexpr (pixelFormatConversion == PixelFormatConversion::None)
-        reinterpretCastSpanStartTo<uint32_t>(destinationPixel) = reinterpretCastSpanStartTo<const uint32_t>(sourcePixel);
-    else {
-        // Swap pixel channels BGRA <-> RGBA.
-        destinationPixel[0] = sourcePixel[2];
-        destinationPixel[1] = sourcePixel[1];
-        destinationPixel[2] = sourcePixel[0];
-        destinationPixel[3] = sourcePixel[3];
-    }
-}
-
-template<PixelFormatConversion pixelFormatConversion>
-static void convertSinglePixelPremultipliedToUnpremultiplied(std::span<const uint8_t, 4> sourcePixel, std::span<uint8_t, 4> destinationPixel)
-{
-    uint8_t alpha = sourcePixel[3];
-    if (!alpha || alpha == 255) {
-        convertSinglePixelPremultipliedToPremultiplied<pixelFormatConversion>(sourcePixel, destinationPixel);
-        return;
-    }
-
-    if constexpr (pixelFormatConversion == PixelFormatConversion::None) {
-        destinationPixel[0] = (sourcePixel[0] * 255) / alpha;
-        destinationPixel[1] = (sourcePixel[1] * 255) / alpha;
-        destinationPixel[2] = (sourcePixel[2] * 255) / alpha;
-        destinationPixel[3] = alpha;
-    } else {
-        // Swap pixel channels BGRA <-> RGBA.
-        destinationPixel[0] = (sourcePixel[2] * 255) / alpha;
-        destinationPixel[1] = (sourcePixel[1] * 255) / alpha;
-        destinationPixel[2] = (sourcePixel[0] * 255) / alpha;
-        destinationPixel[3] = alpha;
-    }
-}
-
-template<PixelFormatConversion pixelFormatConversion>
-static void convertSinglePixelUnpremultipliedToPremultiplied(std::span<const uint8_t, 4> sourcePixel, std::span<uint8_t, 4> destinationPixel)
-{
-    uint8_t alpha = sourcePixel[3];
-    if (!alpha || alpha == 255) {
-        convertSinglePixelPremultipliedToPremultiplied<pixelFormatConversion>(sourcePixel, destinationPixel);
-        return;
-    }
-
-    if constexpr (pixelFormatConversion == PixelFormatConversion::None) {
-        destinationPixel[0] = (sourcePixel[0] * alpha + 254) / 255;
-        destinationPixel[1] = (sourcePixel[1] * alpha + 254) / 255;
-        destinationPixel[2] = (sourcePixel[2] * alpha + 254) / 255;
-        destinationPixel[3] = alpha;
-    } else {
-        // Swap pixel channels BGRA <-> RGBA.
-        destinationPixel[0] = (sourcePixel[2] * alpha + 254) / 255;
-        destinationPixel[1] = (sourcePixel[1] * alpha + 254) / 255;
-        destinationPixel[2] = (sourcePixel[0] * alpha + 254) / 255;
-        destinationPixel[3] = alpha;
-    }
-}
-
-template<PixelFormatConversion pixelFormatConversion>
-static void NODELETE convertSinglePixelUnpremultipliedToUnpremultiplied(std::span<const uint8_t, 4> sourcePixel, std::span<uint8_t, 4> destinationPixel)
-{
-    if constexpr (pixelFormatConversion == PixelFormatConversion::None)
-        reinterpretCastSpanStartTo<uint32_t>(destinationPixel) = reinterpretCastSpanStartTo<const uint32_t>(sourcePixel);
-    else {
-        // Swap pixel channels BGRA <-> RGBA.
-        destinationPixel[0] = sourcePixel[2];
-        destinationPixel[1] = sourcePixel[1];
-        destinationPixel[2] = sourcePixel[0];
-        destinationPixel[3] = sourcePixel[3];
-    }
-}
-
-template<void (*convertFunctor)(std::span<const uint8_t, 4>, std::span<uint8_t, 4>)>
-static void NODELETE convertImagePixelsUnaccelerated(const ConstPixelBufferConversionView& source, const PixelBufferConversionView& destination, const IntSize& destinationSize)
-{
-    size_t bytesPerRow = destinationSize.width() * 4;
-    for (int y = 0; y < destinationSize.height(); ++y) {
-        auto sourceRow = source.rows.subspan(source.bytesPerRow * y);
-        auto destinationRow = destination.rows.subspan(destination.bytesPerRow * y);
-        for (size_t x = 0; x < bytesPerRow; x += 4)
-            convertFunctor(sourceRow.subspan(x).subspan<0, 4>(), destinationRow.subspan(x).subspan<0, 4>());
-    }
-}
+#endif // USE(SKIA)
 
 #if !(USE(ACCELERATE) && USE(CG))
-static void copyImagePixels(const ConstPixelBufferConversionView& source, const PixelBufferConversionView& destination, const IntSize& destinationSize)
-{
-    size_t bytesPerRow = destinationSize.width() * 4;
-
-    if (bytesPerRow == source.bytesPerRow && bytesPerRow == destination.bytesPerRow) {
-        memcpySpan(destination.rows, source.rows.first(bytesPerRow * destinationSize.height()));
-        return;
-    }
-
-    for (int y = 0; y < destinationSize.height(); ++y) {
-        auto sourceRow = source.rows.subspan(source.bytesPerRow * y);
-        auto destinationRow = destination.rows.subspan(destination.bytesPerRow * y);
-        memcpySpan(destinationRow, sourceRow.first(bytesPerRow));
-    }
-}
-#endif
 
 #if ENABLE(PIXEL_FORMAT_RGBA16F)
-static Float16 NODELETE readFloat16(const std::span<const uint8_t>& span8, size_t offset)
+#error "PixelFormat::RGBA16F unimplemented."
+#endif
+
+static constexpr uint8_t NODELETE premultiply(uint8_t unpremultiplied, uint8_t alpha)
 {
-    union {
-        Float16 float16 { };
-        std::array<uint8_t, sizeof(Float16)> bytes;
-    } float16OrBytesUnion;
-    for (size_t i = 0; i < sizeof(Float16); ++i)
-        float16OrBytesUnion.bytes[i] = span8[offset + i];
-    return float16OrBytesUnion.float16;
+    // Same as vImagePremultiplyData_ARGB8888: (src * alpha + 127) / 255
+    return (unpremultiplied * alpha + 127) / 255;
 }
 
-static void writeFloat16(Float16 f16, const std::span<uint8_t>& spanFloat16, size_t offset)
+static constexpr uint8_t NODELETE unpremultiply(uint8_t premultiplied, uint8_t alpha)
 {
-    union {
-        Float16 float16 { };
-        std::array<uint8_t, sizeof(Float16)> bytes;
-    } float16OrBytesUnion(f16);
-    for (size_t i = 0; i < sizeof(Float16); ++i)
-        spanFloat16[offset + i] = float16OrBytesUnion.bytes[i];
+    // Same as vImageUnpremultiplyData_RGBA8888: (MIN(src_color, alpha) * 255 + alpha/2) / alpha
+    return (std::min(premultiplied, alpha) * 255 + alpha / 2) / alpha;
 }
 
-static void convertImagePixelsFromFloat16ToFloat16(const ConstPixelBufferConversionView& source, const PixelBufferConversionView& destination, const IntSize& destinationSize)
+template <AlphaFormat sourceAlphaFormat, AlphaFormat destinationAlphaFormat, bool swapComponentOrder>
+static bool NODELETE convertImagePixelsUnacceleratedFunction(const ConstPixelBufferConversionView& sourceView, const PixelBufferConversionView& destinationView, const IntSize& destinationSize)
 {
-    // FIXME: Float16-to-Float16 color-space conversion is unimplemented; fall through and copy
-    // verbatim. Do not early-return on a color-space mismatch: the destination is allocated
-    // uninitialized, so skipping the write would leak heap bytes through getPixelBuffer().
+    // The caller has established that both formats are 8 bits per component, 4 bytes per pixel, with
+    // the alpha (or the ignored component that takes its place) in the last byte.
+    constexpr bool sourceAlphaApplied = isAlphaApplied(sourceAlphaFormat);
+    constexpr bool destinationAlphaApplied = isAlphaApplied(destinationAlphaFormat);
 
     struct Pixel16 {
         Float16 r;
@@ -417,66 +451,188 @@ static void convertImagePixelsFromFloat16ToFloat16(const ConstPixelBufferConvers
         }
         sourceRowStart += source.bytesPerRow;
         destinationRowStart += destination.bytesPerRow;
+    size_t bytesPerRow = destinationSize.width() * 4;
+    for (int y = 0; y < destinationSize.height(); ++y) {
+        auto sourceRow = sourceView.rows.subspan(sourceView.bytesPerRow * y);
+        auto destinationRow = destinationView.rows.subspan(destinationView.bytesPerRow * y);
+        for (size_t x = 0; x < bytesPerRow; x += 4) {
+            uint8_t alpha;
+            if constexpr (sourceAlphaFormat == AlphaFormat::Opaque)
+                alpha = 255;
+            else
+                alpha = sourceRow[x + 3];
+
+            uint8_t c0, c1, c2;
+            if constexpr (!sourceAlphaApplied && !destinationAlphaApplied) {
+                c0 = sourceRow[x + 0];
+                c1 = sourceRow[x + 1];
+                c2 = sourceRow[x + 2];
+            } else if constexpr (sourceAlphaApplied && destinationAlphaApplied) {
+                if (!alpha) {
+                    c0 = 0;
+                    c1 = 0;
+                    c2 = 0;
+                } else {
+                    c0 = sourceRow[x + 0];
+                    c1 = sourceRow[x + 1];
+                    c2 = sourceRow[x + 2];
+                }
+            } else if constexpr (sourceAlphaApplied && !destinationAlphaApplied) {
+                if (!alpha) {
+                    c0 = 0;
+                    c1 = 0;
+                    c2 = 0;
+                } else if (alpha == 255) {
+                    c0 = sourceRow[x + 0];
+                    c1 = sourceRow[x + 1];
+                    c2 = sourceRow[x + 2];
+                } else {
+                    c0 = unpremultiply(sourceRow[x + 0], alpha);
+                    c1 = unpremultiply(sourceRow[x + 1], alpha);
+                    c2 = unpremultiply(sourceRow[x + 2], alpha);
+                }
+            } else {
+                static_assert(!sourceAlphaApplied && destinationAlphaApplied);
+                if (!alpha) {
+                    c0 = 0;
+                    c1 = 0;
+                    c2 = 0;
+                } else if (alpha == 255) {
+                    c0 = sourceRow[x + 0];
+                    c1 = sourceRow[x + 1];
+                    c2 = sourceRow[x + 2];
+                } else {
+                    c0 = premultiply(sourceRow[x + 0], alpha);
+                    c1 = premultiply(sourceRow[x + 1], alpha);
+                    c2 = premultiply(sourceRow[x + 2], alpha);
+                }
+            }
+
+            if constexpr (!swapComponentOrder) {
+                destinationRow[x + 0] = c0;
+                destinationRow[x + 1] = c1;
+                destinationRow[x + 2] = c2;
+            } else {
+                destinationRow[x + 0] = c2;
+                destinationRow[x + 1] = c1;
+                destinationRow[x + 2] = c0;
+            }
+
+            if constexpr (destinationAlphaFormat != AlphaFormat::Opaque)
+                destinationRow[x + 3] = alpha;
+            else
+                destinationRow[x + 3] = 255; // Not strictly necessary, but this prevent exposing uninitialized memory.
+        }
     }
+
+    return true;
 }
 
-static void convertImagePixelsFromFloat16(const ConstPixelBufferConversionView& source, const PixelBufferConversionView& destination, const IntSize& destinationSize)
+template <bool swapComponentOrder>
+static bool convertImagePixelsUnacceleratedSelectAlphaFormats(AlphaFormat sourceAlphaFormat, AlphaFormat destinationAlphaFormat, const ConstPixelBufferConversionView& source, const PixelBufferConversionView& destination, const IntSize& destinationSize)
 {
-    auto pixelComponents = source.rows.size_bytes() / sizeof(Float16);
+    using enum AlphaFormat;
 
-    Vector<uint8_t> rgba8;
-    rgba8.reserveInitialCapacity(pixelComponents);
-
-    for (size_t i = 0; i < pixelComponents; ++i) {
-        auto f16 = readFloat16(source.rows, i * sizeof(Float16));
-        float f = float(f16);
-        auto u8 = (f <= 0.f) ? uint8_t(0) : ((f >= 1.f) ? uint8_t(255) : uint8_t(f * 255.f + 0.5f));
-        rgba8.append(u8);
+    switch (sourceAlphaFormat) {
+    case Opaque:
+        switch (destinationAlphaFormat) {
+        case Opaque:
+            return convertImagePixelsUnacceleratedFunction<Opaque, Opaque, swapComponentOrder>(source, destination, destinationSize);
+        case Unpremultiplied:
+            return convertImagePixelsUnacceleratedFunction<Opaque, Unpremultiplied, swapComponentOrder>(source, destination, destinationSize);
+        case Premultiplied:
+            return convertImagePixelsUnacceleratedFunction<Opaque, Premultiplied, swapComponentOrder>(source, destination, destinationSize);
+        }
+        break;
+    case Unpremultiplied:
+        switch (destinationAlphaFormat) {
+        case Opaque:
+            return convertImagePixelsUnacceleratedFunction<Unpremultiplied, Opaque, swapComponentOrder>(source, destination, destinationSize);
+        case Unpremultiplied:
+            return convertImagePixelsUnacceleratedFunction<Unpremultiplied, Unpremultiplied, swapComponentOrder>(source, destination, destinationSize);
+        case Premultiplied:
+            return convertImagePixelsUnacceleratedFunction<Unpremultiplied, Premultiplied, swapComponentOrder>(source, destination, destinationSize);
+        }
+        break;
+    case Premultiplied:
+        switch (destinationAlphaFormat) {
+        case Opaque:
+            return convertImagePixelsUnacceleratedFunction<Premultiplied, Opaque, swapComponentOrder>(source, destination, destinationSize);
+        case Unpremultiplied:
+            return convertImagePixelsUnacceleratedFunction<Premultiplied, Unpremultiplied, swapComponentOrder>(source, destination, destinationSize);
+        case Premultiplied:
+            return convertImagePixelsUnacceleratedFunction<Premultiplied, Premultiplied, swapComponentOrder>(source, destination, destinationSize);
+        }
+        break;
     }
 
-    ConstPixelBufferConversionView rgba8ConversionView {
-        .format = PixelBufferFormat {
-            .alphaFormat = source.format.alphaFormat,
-            .pixelFormat = PixelFormat::RGBA8,
-            .colorSpace = source.format.colorSpace
-        },
-        .bytesPerRow = source.bytesPerRow / unsigned(sizeof(Float16)),
-        .rows = rgba8.span()
-    };
-
-    convertImagePixels(rgba8ConversionView, destination, destinationSize);
+    ASSERT_NOT_REACHED();
+    return false;
 }
 
-// [[noreturn]]
-static void convertImagePixelsToFloat16(const ConstPixelBufferConversionView& source, const PixelBufferConversionView& destination, const IntSize& destinationSize)
+static bool platformConvertImagePixels(const ConstPixelBufferConversionView& source, const PixelBufferConversionView& destination, const IntSize& destinationSize)
 {
-    auto pixelComponents = destination.rows.size_bytes() / sizeof(Float16);
+#if USE(SKIA)
+    if (convertImagePixelsSkia(source, destination, destinationSize))
+        return true;
+#endif
 
-    Vector<uint8_t> rgba8;
-    rgba8.reserveInitialCapacity(pixelComponents);
-    rgba8.fill(uint8_t(0), pixelComponents);
+    // FIXME: We don't currently support converting pixel data between different color spaces in the non-accelerated path.
+    // This could be added using conversion functions from ColorConversion.h.
+    if (source.format.colorSpace != destination.format.colorSpace)
+        return false;
 
-    PixelBufferConversionView rgba8ConversionView {
-        .format = PixelBufferFormat {
-            .alphaFormat = destination.format.alphaFormat,
-            .pixelFormat = PixelFormat::RGBA8,
-            .colorSpace = destination.format.colorSpace
-        },
-        .bytesPerRow = destination.bytesPerRow / unsigned(sizeof(Float16)),
-        .rows = rgba8.mutableSpan()
-    };
+    // Without ACCELERATE and CG there are no 16-bits-per-component formats, so every supported format
+    // is 8 bits per component and 4 bytes per pixel, which is what the conversion loop assumes.
+    ASSERT(PixelBuffer::bytesPerPixel(source.format.pixelFormat) == 4);
+    ASSERT(PixelBuffer::bytesPerPixel(destination.format.pixelFormat) == 4);
 
-    convertImagePixels(source, rgba8ConversionView, destinationSize);
-
-    for (size_t i = 0; i < pixelComponents; ++i) {
-        auto u8 = rgba8[i];
-        float f = float(u8) / 255.f;
-        Float16 f16 = f;
-        writeFloat16(f16, destination.rows, i * 2);
-    }
-
+    auto sourceAlphaFormat = toAlphaFormat(source.format.alphaFormat, source.format.pixelFormat);
+    auto destinationAlphaFormat = toAlphaFormat(destination.format.alphaFormat, destination.format.pixelFormat);
+    if (pixelComponentOrder(source.format.pixelFormat) != pixelComponentOrder(destination.format.pixelFormat))
+        return convertImagePixelsUnacceleratedSelectAlphaFormats<true>(sourceAlphaFormat, destinationAlphaFormat, source, destination, destinationSize);
+    return convertImagePixelsUnacceleratedSelectAlphaFormats<false>(sourceAlphaFormat, destinationAlphaFormat, source, destination, destinationSize);
 }
-#endif // ENABLE(PIXEL_FORMAT_RGBA16F)
+#endif // !(USE(ACCELERATE) && USE(CG))
+
+// The rows the conversion reads and writes have to be inside the buffer the view describes.
+template<typename View>
+static bool NODELETE hasEnoughBytesForConversion(const View& view, const IntSize& destinationSize)
+{
+    if (destinationSize.width() <= 0 || destinationSize.height() <= 0)
+        return true;
+
+    CheckedSize requiredBytes = CheckedSize { static_cast<size_t>(destinationSize.height() - 1) } * view.bytesPerRow;
+    requiredBytes += CheckedSize { static_cast<size_t>(destinationSize.width()) } * PixelBuffer::bytesPerPixel(view.format.pixelFormat);
+    return !requiredBytes.hasOverflowed() && view.rows.size_bytes() >= requiredBytes.value();
+}
+
+static void zeroImagePixels(const PixelBufferConversionView& destination, const IntSize& destinationSize)
+{
+    size_t rowFillBytes = static_cast<size_t>(destinationSize.width()) * PixelBuffer::bytesPerPixel(destination.format.pixelFormat);
+    for (int y = 0; y < destinationSize.height(); ++y)
+        zeroSpan(destination.rows.subspan(static_cast<size_t>(y) * destination.bytesPerRow, rowFillBytes));
+}
+
+// Whether the contents can be copied verbatim, i.e. the two formats store the same components at
+// the same offsets, and the components already relate to the alpha the way the destination
+// describes. An opaque destination drops the alpha of the source, which gives the right color only
+// if the source has applied it to its color components already.
+static bool canCopyPixels(const PixelBufferFormat& sourceFormat, const PixelBufferFormat& destinationFormat)
+{
+    auto sourceAlphaFormat = toAlphaFormat(sourceFormat.alphaFormat, sourceFormat.pixelFormat);
+    auto destinationAlphaFormat = toAlphaFormat(destinationFormat.alphaFormat, destinationFormat.pixelFormat);
+#if USE(SKIA)
+    // Skia has no native BGRX color type, so the component a BGRX8 destination has in place of
+    // alpha is not ignored. Only contents that are opaque themselves can be copied into it.
+    if (destinationFormat.pixelFormat == PixelFormat::BGRX8 && sourceAlphaFormat != AlphaFormat::Opaque)
+        return false;
+#endif
+    return sourceFormat.colorSpace == destinationFormat.colorSpace
+        && PixelBuffer::bytesPerPixelComponent(sourceFormat.pixelFormat) == PixelBuffer::bytesPerPixelComponent(destinationFormat.pixelFormat)
+        && pixelComponentOrder(sourceFormat.pixelFormat) == pixelComponentOrder(destinationFormat.pixelFormat)
+        && (sourceAlphaFormat == destinationAlphaFormat || (sourceAlphaFormat == AlphaFormat::Premultiplied && destinationAlphaFormat == AlphaFormat::Opaque));
+}
 
 #if defined(WEBKIT_IOS6)
 static const std::array<uint8_t, 256>& transferTable(bool toLinear)
@@ -584,61 +740,24 @@ void convertImagePixels(const ConstPixelBufferConversionView& source, const Pixe
     if (isDestinationFloat)
         return convertImagePixelsToFloat16(source, destination, destinationSize);
 #endif // ENABLE(PIXEL_FORMAT_RGBA16F)
+    // We currently only support converting between RGBA8, BGRA8, RGBX8, BGRX8, and (where enabled) RGBA16F.
+    ASSERT(isSupportedConversionFormat(source.format.pixelFormat));
+    ASSERT(isSupportedConversionFormat(destination.format.pixelFormat));
 
-    // We currently only support converting between RGBA8, BGRA8, and BGRX8; and on some platforms RGBA16F (see above).
-    ASSERT(source.format.pixelFormat == PixelFormat::RGBA8 || source.format.pixelFormat == PixelFormat::BGRA8 || source.format.pixelFormat == PixelFormat::BGRX8);
-    ASSERT(destination.format.pixelFormat == PixelFormat::RGBA8 || destination.format.pixelFormat == PixelFormat::BGRA8 || destination.format.pixelFormat == PixelFormat::BGRX8);
+    RELEASE_ASSERT(hasEnoughBytesForConversion(source, destinationSize), "Source buffer is too small for the requested conversion");
+    RELEASE_ASSERT(hasEnoughBytesForConversion(destination, destinationSize), "Destination buffer is too small for the requested conversion");
 
-#if USE(ACCELERATE) && USE(CG)
-    if (source.format.alphaFormat == destination.format.alphaFormat && source.format.pixelFormat == destination.format.pixelFormat && source.format.colorSpace == destination.format.colorSpace) {
-        // FIXME: Can thes both just use per-row memcpy?
-        if (source.format.alphaFormat == AlphaPremultiplication::Premultiplied)
-            convertImagePixelsUnaccelerated<convertSinglePixelPremultipliedToPremultiplied<PixelFormatConversion::None>>(source, destination, destinationSize);
-        else
-            convertImagePixelsUnaccelerated<convertSinglePixelUnpremultipliedToUnpremultiplied<PixelFormatConversion::None>>(source, destination, destinationSize);
-    } else
-        convertImagePixelsAccelerated(source, destination, destinationSize);
-#else
-    if (source.format.alphaFormat == destination.format.alphaFormat && source.format.pixelFormat == destination.format.pixelFormat && source.format.colorSpace == destination.format.colorSpace) {
-        copyImagePixels(source, destination, destinationSize);
-        return;
-    }
-#if USE(SKIA)
-    if (convertImagePixelsSkia(source, destination, destinationSize))
-        return;
-#endif
-    // FIXME: We don't currently support converting pixel data between different color spaces in the non-accelerated path.
-    // This could be added using conversion functions from ColorConversion.h.
-    ASSERT(source.format.colorSpace == destination.format.colorSpace);
-
-    // FIXME: In Linux platform the following paths could be optimized with ORC.
-
-    if (source.format.alphaFormat == destination.format.alphaFormat) {
-        if (source.format.pixelFormat == destination.format.pixelFormat) {
-            if (source.format.alphaFormat == AlphaPremultiplication::Premultiplied)
-                convertImagePixelsUnaccelerated<convertSinglePixelPremultipliedToPremultiplied<PixelFormatConversion::None>>(source, destination, destinationSize);
-            else
-                convertImagePixelsUnaccelerated<convertSinglePixelUnpremultipliedToUnpremultiplied<PixelFormatConversion::None>>(source, destination, destinationSize);
-        } else {
-            if (destination.format.alphaFormat == AlphaPremultiplication::Premultiplied)
-                convertImagePixelsUnaccelerated<convertSinglePixelPremultipliedToPremultiplied<PixelFormatConversion::Permute>>(source, destination, destinationSize);
-            else
-                convertImagePixelsUnaccelerated<convertSinglePixelUnpremultipliedToUnpremultiplied<PixelFormatConversion::Permute>>(source, destination, destinationSize);
+    if (isSupportedConversionFormat(source.format.pixelFormat) && isSupportedConversionFormat(destination.format.pixelFormat)) {
+        if (canCopyPixels(source.format, destination.format)) {
+            copyRowsInternal(source.bytesPerRow, source.rows, destination.bytesPerRow, destination.rows, destinationSize.height(), destinationSize.width() * PixelBuffer::bytesPerPixel(destination.format.pixelFormat));
+            return;
         }
-    } else {
-        if (source.format.pixelFormat == destination.format.pixelFormat) {
-            if (source.format.alphaFormat == AlphaPremultiplication::Premultiplied)
-                convertImagePixelsUnaccelerated<convertSinglePixelPremultipliedToUnpremultiplied<PixelFormatConversion::None>>(source, destination, destinationSize);
-            else
-                convertImagePixelsUnaccelerated<convertSinglePixelUnpremultipliedToPremultiplied<PixelFormatConversion::None>>(source, destination, destinationSize);
-        } else {
-            if (destination.format.alphaFormat == AlphaPremultiplication::Premultiplied)
-                convertImagePixelsUnaccelerated<convertSinglePixelUnpremultipliedToPremultiplied<PixelFormatConversion::Permute>>(source, destination, destinationSize);
-            else
-                convertImagePixelsUnaccelerated<convertSinglePixelPremultipliedToUnpremultiplied<PixelFormatConversion::Permute>>(source, destination, destinationSize);
-        }
+
+        if (platformConvertImagePixels(source, destination, destinationSize))
+            return;
     }
-#endif
+
+    zeroImagePixels(destination, destinationSize);
 }
 
 void copyRowsInternal(unsigned sourceBytesPerRow, std::span<const uint8_t> source, unsigned destinationBytesPerRow, std::span<uint8_t> destination, unsigned rows, unsigned copyBytesPerRow)

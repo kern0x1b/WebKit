@@ -75,12 +75,6 @@ union VariableRepresentation {
 
     MacroAssembler::RegisterID gpr;
     MacroAssembler::FPRegisterID fpr;
-#if USE(JSVALUE32_64)
-    struct {
-        MacroAssembler::RegisterID tagGPR;
-        MacroAssembler::RegisterID payloadGPR;
-    } pair;
-#endif
     Operand operand;
 };
 
@@ -102,61 +96,30 @@ public:
     {
         ASSERT(kind == BirthToFill || kind == Fill);
         ASSERT(dataFormat != DataFormatDouble);
-#if USE(JSVALUE32_64)
-        ASSERT(!(dataFormat & DataFormatJS));
-#endif
         VariableEvent event;
-        WhichType which;
-        which.id = id.bits();
-        VariableRepresentation representation;
-        representation.gpr = gpr;
         event.m_kind = kind;
         event.m_dataFormat = dataFormat;
-        event.m_which = WTF::move(which);
-        event.m_representation = WTF::move(representation);
+        event.m_which.id = id.bits();
+        event.m_representation.gpr = gpr;
         return event;
     }
-    
-#if USE(JSVALUE32_64)
-    static VariableEvent fillPair(VariableEventKind kind, MinifiedID id, MacroAssembler::RegisterID tagGPR, MacroAssembler::RegisterID payloadGPR)
-    {
-        ASSERT(kind == BirthToFill || kind == Fill);
-        VariableEvent event;
-        WhichType which;
-        which.id = id.bits();
-        VariableRepresentation representation;
-        representation.pair.tagGPR = tagGPR;
-        representation.pair.payloadGPR = payloadGPR;
-        event.m_kind = kind;
-        event.m_dataFormat = DataFormatJS;
-        event.m_which = WTF::move(which);
-        event.m_representation = WTF::move(representation);
-        return event;
-    }
-#endif // USE(JSVALUE32_64)
-    
+
     static VariableEvent fillFPR(VariableEventKind kind, MinifiedID id, MacroAssembler::FPRegisterID fpr)
     {
         ASSERT(kind == BirthToFill || kind == Fill);
         VariableEvent event;
-        WhichType which;
-        which.id = id.bits();
-        VariableRepresentation representation;
-        representation.fpr = fpr;
         event.m_kind = kind;
         event.m_dataFormat = DataFormatDouble;
-        event.m_which = WTF::move(which);
-        event.m_representation = WTF::move(representation);
+        event.m_which.id = id.bits();
+        event.m_representation.fpr = fpr;
         return event;
     }
     
     static VariableEvent birth(MinifiedID id)
     {
         VariableEvent event;
-        WhichType which;
-        which.id = id.bits();
         event.m_kind = Birth;
-        event.m_which = WTF::move(which);
+        event.m_which.id = id.bits();
         return event;
     }
     
@@ -164,24 +127,18 @@ public:
     {
         ASSERT(kind == BirthToSpill || kind == Spill);
         VariableEvent event;
-        WhichType which;
-        which.id = id.bits();
-        VariableRepresentation representation;
-        representation.operand = virtualRegister;
         event.m_kind = kind;
         event.m_dataFormat = format;
-        event.m_which = WTF::move(which);
-        event.m_representation = WTF::move(representation);
+        event.m_which.id = id.bits();
+        event.m_representation.operand = virtualRegister;
         return event;
     }
     
     static VariableEvent death(MinifiedID id)
     {
         VariableEvent event;
-        WhichType which;
-        which.id = id.bits();
         event.m_kind = Death;
-        event.m_which = WTF::move(which);
+        event.m_which.id = id.bits();
         return event;
     }
     
@@ -189,27 +146,19 @@ public:
         Operand bytecodeOperand, VirtualRegister machineReg, DataFormat format)
     {
         VariableEvent event;
-        WhichType which;
-        which.virtualReg = machineReg.offset();
-        VariableRepresentation representation;
-        representation.operand = bytecodeOperand;
         event.m_kind = SetLocalEvent;
         event.m_dataFormat = format;
-        event.m_which = WTF::move(which);
-        event.m_representation = WTF::move(representation);
+        event.m_which.virtualReg = machineReg.offset();
+        event.m_representation.operand = bytecodeOperand;
         return event;
     }
     
     static VariableEvent movHint(MinifiedID id, Operand bytecodeReg)
     {
         VariableEvent event;
-        WhichType which;
-        which.id = id.bits();
-        VariableRepresentation representation;
-        representation.operand = bytecodeReg;
         event.m_kind = MovHintEvent;
-        event.m_which = WTF::move(which);
-        event.m_representation = WTF::move(representation);
+        event.m_which.id = id.bits();
+        event.m_representation.operand = bytecodeReg;
         return event;
     }
     
@@ -223,7 +172,7 @@ public:
         ASSERT(
             m_kind == BirthToFill || m_kind == Fill || m_kind == BirthToSpill || m_kind == Spill
             || m_kind == Death || m_kind == MovHintEvent || m_kind == Birth);
-        return MinifiedID::fromBits(m_which.get().id);
+        return MinifiedID::fromBits(m_which.id);
     }
     
     DataFormat dataFormat() const
@@ -239,53 +188,35 @@ public:
         ASSERT(m_kind == BirthToFill || m_kind == Fill);
         ASSERT(m_dataFormat);
         ASSERT(m_dataFormat != DataFormatDouble);
-#if USE(JSVALUE32_64)
-        ASSERT(!(m_dataFormat & DataFormatJS));
-#endif
-        return m_representation.get().gpr;
+        return m_representation.gpr;
     }
-    
-#if USE(JSVALUE32_64)
-    MacroAssembler::RegisterID tagGPR() const
-    {
-        ASSERT(m_kind == BirthToFill || m_kind == Fill);
-        ASSERT(m_dataFormat & DataFormatJS);
-        return m_representation.get().pair.tagGPR;
-    }
-    MacroAssembler::RegisterID payloadGPR() const
-    {
-        ASSERT(m_kind == BirthToFill || m_kind == Fill);
-        ASSERT(m_dataFormat & DataFormatJS);
-        return m_representation.get().pair.payloadGPR;
-    }
-#endif // USE(JSVALUE32_64)
-    
+
     MacroAssembler::FPRegisterID fpr() const
     {
         ASSERT(m_kind == BirthToFill || m_kind == Fill);
         ASSERT(m_dataFormat == DataFormatDouble);
-        return m_representation.get().fpr;
+        return m_representation.fpr;
     }
     
     VirtualRegister spillRegister() const
     {
         ASSERT(m_kind == BirthToSpill || m_kind == Spill);
-        return m_representation.get().operand.virtualRegister();
+        return m_representation.operand.virtualRegister();
     }
 
     Operand operand() const
     {
         ASSERT(m_kind == SetLocalEvent || m_kind == MovHintEvent);
-        return m_representation.get().operand;
+        return m_representation.operand;
     }
     
     VirtualRegister machineRegister() const
     {
         ASSERT(m_kind == SetLocalEvent);
-        return VirtualRegister(m_which.get().virtualReg);
+        return VirtualRegister(m_which.virtualReg);
     }
     
-    VariableRepresentation variableRepresentation() const { return m_representation.get(); }
+    VariableRepresentation variableRepresentation() const { return m_representation; }
     
     void dump(PrintStream&) const;
     
@@ -297,17 +228,17 @@ private:
         int virtualReg;
         unsigned id;
     };
-    Packed<WhichType> m_which;
+    WhichType m_which { };
     
     // For BirthToFill, Fill:
-    //   - The GPR or FPR, or a GPR pair.
+    //   - The GPR or FPR.
     // For BirthToSpill, Spill:
     //   - The virtual register.
     // For MovHintEvent, SetLocalEvent:
     //   - The bytecode operand.
     // For Death:
     //   - Unused.
-    Packed<VariableRepresentation> m_representation;
+    VariableRepresentation m_representation;
     
     VariableEventKind m_kind;
     DataFormat m_dataFormat { DataFormatNone };

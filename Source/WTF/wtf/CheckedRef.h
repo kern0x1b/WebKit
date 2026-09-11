@@ -287,7 +287,7 @@ inline const CheckedPtr<match_constness_t<ArgType, ExpectedType>> dynamicDowncas
 }
 
 template<typename T, typename PtrTraits = RawPtrTraits<T>>
-    requires (HasCheckedPtrMemberFunctions<T>::value && !HasRefPtrMemberFunctions<T>::value)
+    requires (HasCheckedPtrMemberFunctions<T> && !HasRefPtrMemberFunctions<T>)
 ALWAYS_INLINE CLANG_POINTER_CONVERSION CheckedRef<T, PtrTraits> protect(T& reference)
 {
     return CheckedRef<T, PtrTraits>(reference);
@@ -306,7 +306,7 @@ CheckedRef<T, PtrTraits> protect(CheckedRef<T, PtrTraits>&&)
 }
 
 template<typename T, typename PtrTraits = RawPtrTraits<T>>
-    requires (HasCheckedPtrMemberFunctions<T>::value && !HasRefPtrMemberFunctions<T>::value)
+    requires (HasCheckedPtrMemberFunctions<T> && !HasRefPtrMemberFunctions<T>)
 ALWAYS_INLINE CLANG_POINTER_CONVERSION CheckedRef<T, PtrTraits> protect(const UniqueRef<T>& reference)
 {
     return CheckedRef<T, PtrTraits>(reference.get());
@@ -366,15 +366,15 @@ public:
         ASSERT_WITH_SECURITY_IMPLICATION(m_didBeginDeletion || deleteException == CheckedPtrDeleteCheckException::Yes);
     }
 
-    PtrCounterType checkedPtrCount() const { return m_checkedPtrCount; }
-    void incrementCheckedPtrCount() const
+    PtrCounterType NODELETE checkedPtrCount() const { return m_checkedPtrCount; }
+    void NODELETE incrementCheckedPtrCount() const
     {
         if constexpr (AtomicLike<StorageType>)
             m_checkedPtrCount.fetch_add(1, std::memory_order_relaxed);
         else
             ++m_checkedPtrCount;
     }
-    ALWAYS_INLINE void decrementCheckedPtrCount() const
+    SUPPRESS_NODELETE ALWAYS_INLINE void NODELETE decrementCheckedPtrCount() const
     {
         // In normal execution, a CheckedPtr always points to an object with a non-zero checkedPtrCount().
         // When it detects a dangling pointer, WTF_OVERRIDE_DELETE_FOR_CHECKED_PTR scribbles an object with zeroes and then leaks it.

@@ -68,7 +68,6 @@
 #import <WebCore/FontCacheCoreText.h>
 #import <WebCore/LocalizedDeviceModel.h>
 #import <WebCore/LowPowerModeNotifier.h>
-#import <WebCore/NetworkStorageSession.h>
 #import <WebCore/NotImplemented.h>
 #import <WebCore/PictureInPictureSupport.h>
 #import <WebCore/PlatformPasteboard.h>
@@ -290,24 +289,25 @@ static AccessibilityPreferences accessibilityPreferences()
 #if HAVE(MEDIA_ACCESSIBILITY_FRAMEWORK)
 void WebProcessPool::setMediaAccessibilityPreferences(WebProcessProxy& process)
 {
-    static NeverDestroyed<OSObjectPtr<dispatch_queue_t>> mediaAccessibilityQueue = adoptOSObject(dispatch_queue_create("MediaAccessibility queue", DISPATCH_QUEUE_SERIAL));
+    static NeverDestroyed<OSObjectPtr<dispatch_queue_t>> mediaAccessibilityQueue = adoptOSObject(dispatch_queue_create("MediaAccessibility queue", serialQueueWithAutoreleasePoolAttrSingleton()));
 
     dispatch_async(mediaAccessibilityQueue.get().get(), [weakThis = WeakPtr { *this }, weakProcess = WeakPtr { process }] mutable {
         auto captionDisplayMode = WebCore::CaptionUserPreferencesMediaAF::platformCaptionDisplayMode();
         auto preferredLanguages = WebCore::CaptionUserPreferencesMediaAF::platformPreferredLanguages();
-        callOnMainRunLoop([weakThis = WTF::move(weakThis), weakProcess, captionDisplayMode, preferredLanguages = crossThreadCopy(WTF::move(preferredLanguages))] {
+        callOnMainRunLoop([weakThis = WTF::move(weakThis), weakProcess = WTF::move(weakProcess), captionDisplayMode, preferredLanguages = crossThreadCopy(WTF::move(preferredLanguages))] {
             RefPtr protectedThis = weakThis.get();
-            if (!protectedThis || !weakProcess)
+            RefPtr process = weakProcess;
+            if (!protectedThis || !process)
                 return;
 
             if (captionDisplayMode != protectedThis->m_captionDisplayMode) {
                 protectedThis->m_captionDisplayMode = captionDisplayMode;
-                weakProcess->send(Messages::WebProcess::SetMediaAccessibilityPreferredCaptionDisplayMode(captionDisplayMode), 0);
+                process->send(Messages::WebProcess::SetMediaAccessibilityPreferredCaptionDisplayMode(captionDisplayMode), 0);
             }
 
             if (preferredLanguages != protectedThis->m_preferredLanguages) {
                 protectedThis->m_preferredLanguages = preferredLanguages;
-                weakProcess->send(Messages::WebProcess::SetMediaAccessibilityPreferredLanguages(preferredLanguages), 0);
+                process->send(Messages::WebProcess::SetMediaAccessibilityPreferredLanguages(preferredLanguages), 0);
             }
         });
     });
@@ -335,7 +335,7 @@ static void logProcessPoolState(const WebProcessPool& pool)
             }
         }
 
-        RELEASE_LOG(Process, "WebProcessProxy %p - %" PUBLIC_LOG_STRING ", domain: %" PRIVATE_LOG_STRING ", pageURLs: %" SENSITIVE_LOG_STRING, process.ptr(), processDescription.release().utf8().data(), domainString.utf8().data(), pageURLs.release().utf8().data());
+        RELEASE_LOG(Process, "WebProcessProxy %p - %" PUBLIC_LOG_STRING ", domain: %" PRIVATE_LOG_STRING ", pageURLs: %" SENSITIVE_LOG_STRING, process.ptr(), processDescription.release().utf8().legacyCStringPointer(), domainString.utf8().legacyCStringPointer(), pageURLs.release().utf8().legacyCStringPointer());
     }
 }
 
@@ -458,10 +458,11 @@ ALLOW_DEPRECATED_DECLARATIONS_END
     parameters.shouldLogUserInteraction = [defaults boolForKey:WebKitLogCookieInformationDefaultsKey];
 #endif
 
-    auto screenProperties = WebCore::collectScreenProperties();
-    parameters.screenProperties = WTF::move(screenProperties);
 #if PLATFORM(MAC)
+    parameters.screenProperties = cachedScreenProperties();
     parameters.useOverlayScrollbars = ([NSScroller preferredScrollerStyle] == NSScrollerStyleOverlay);
+#else
+    parameters.screenProperties = WebCore::collectScreenProperties();
 #endif
 
 #if PLATFORM(VISION)
@@ -845,8 +846,8 @@ void WebProcessPool::registerNotificationObservers()
 
 #if !PLATFORM(IOS_FAMILY)
     m_powerObserver = makeUnique<WebCore::PowerObserver>([weakThis = WeakPtr { *this }] {
-        if (weakThis)
-            weakThis->sendToAllProcesses(Messages::WebProcess::SystemWillPowerOn());
+        if (RefPtr protectedThis = weakThis)
+            protectedThis->sendToAllProcesses(Messages::WebProcess::SystemWillPowerOn());
     });
     m_systemSleepListener = PAL::SystemSleepListener::create(*this);
     // Listen for enhanced accessibility changes and propagate them to the WebProcess.
@@ -1301,16 +1302,32 @@ void WebProcessPool::screenPropertiesUpdateTimerFired()
 {
     m_lastScreenPropertiesUpdateTime = ApproximateTime::now();
 
-    auto screenProperties = WebCore::collectScreenProperties();
-#if HAVE(SUPPORT_HDR_DISPLAY)
-    if (m_suppressEDR) {
-        for (auto& properties : screenProperties.screenDataMap.values()) {
-            constexpr auto maxSuppressedHeadroom = 1.6f;
-            auto suppressedHeadroom = std::min(maxSuppressedHeadroom, properties.currentEDRHeadroom);
-            properties.currentEDRHeadroom = suppressedHeadroom;
-            properties.suppressEDR = true;
-        }
+    if (m_screenPropertiesState != ScreenPropertiesState::Idle) {
+        m_screenPropertiesState = ScreenPropertiesState::CollectingWithUpdatePending;
+        return;
     }
+
+    m_screenPropertiesState = ScreenPropertiesState::Collecting;
+    WebCore::collectScreenPropertiesAsync([weakThis = WeakPtr { *this }](WebCore::ScreenProperties&& screenProperties) {
+        if (RefPtr protectedThis = weakThis.get())
+            protectedThis->didCollectScreenProperties(WTF::move(screenProperties));
+    });
+}
+
+void WebProcessPool::didCollectScreenProperties(WebCore::ScreenProperties&& screenProperties)
+{
+    ASSERT(m_screenPropertiesState != ScreenPropertiesState::Idle);
+
+    // If we got a screen change notification while collecting screen properties, then we need to
+    // schedule another screen properties update to reflect the most recent state.
+    bool needsUpdate = m_screenPropertiesState == ScreenPropertiesState::CollectingWithUpdatePending;
+
+    m_screenPropertiesState = ScreenPropertiesState::Idle;
+
+    applyEDRSuppressionIfNeeded(screenProperties);
+
+#if PLATFORM(MAC)
+    m_cachedScreenProperties = screenProperties;
 #endif
 
     sendToAllProcesses(Messages::WebProcess::SetScreenProperties(screenProperties));
@@ -1319,7 +1336,39 @@ void WebProcessPool::screenPropertiesUpdateTimerFired()
     if (RefPtr gpuProcess = this->gpuProcess())
         gpuProcess->setScreenProperties(screenProperties);
 #endif
+
+    if (needsUpdate)
+        screenPropertiesChanged();
 }
+
+void WebProcessPool::applyEDRSuppressionIfNeeded(WebCore::ScreenProperties& screenProperties)
+{
+#if HAVE(SUPPORT_HDR_DISPLAY)
+    if (!m_suppressEDR)
+        return;
+
+    for (auto& properties : screenProperties.screenDataMap.values()) {
+        constexpr auto maxSuppressedHeadroom = 1.6f;
+        properties.currentEDRHeadroom = std::min(maxSuppressedHeadroom, properties.currentEDRHeadroom);
+        properties.suppressEDR = true;
+    }
+#else
+    UNUSED_PARAM(screenProperties);
+#endif
+}
+
+#if PLATFORM(MAC)
+const WebCore::ScreenProperties& WebProcessPool::cachedScreenProperties()
+{
+    if (!m_cachedScreenProperties) {
+        auto screenProperties = WebCore::collectScreenProperties();
+        applyEDRSuppressionIfNeeded(screenProperties);
+        m_cachedScreenProperties = WTF::move(screenProperties);
+    }
+
+    return *m_cachedScreenProperties;
+}
+#endif
 
 void WebProcessPool::screenPropertiesChanged()
 {
@@ -1677,12 +1726,12 @@ void WebProcessPool::registerAssetFonts(WebProcessProxy& process)
                 protectedThis->m_assetFontURLs = Vector<URL> { };
                 for (auto& fontName : assetFonts) {
                     URL fontURL = fontURLFromName(fontName);
-                    RELEASE_LOG(Process, "Registering font name %s with url %s", fontName.characters(), fontURL.string().utf8().data());
+                    RELEASE_LOG(Process, "Registering font name %s with url %s", fontName.characters(), fontURL.string().utf8().legacyCStringPointer());
                     protectedThis->m_assetFontURLs->append(WTF::move(fontURL));
                 }
             }
-            if (weakProcess)
-                weakProcess->send(Messages::WebProcess::RegisterAdditionalFonts(AdditionalFonts::additionalFonts({ *protectedThis->m_assetFontURLs }, weakProcess->auditToken())), 0);
+            if (RefPtr process = weakProcess)
+                process->send(Messages::WebProcess::RegisterAdditionalFonts(AdditionalFonts::additionalFonts({ *protectedThis->m_assetFontURLs }, process->auditToken())), 0);
         });
         return true;
     });

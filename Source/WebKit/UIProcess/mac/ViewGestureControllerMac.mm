@@ -45,6 +45,8 @@
 #import "ViewGestureGeometryCollectorMessages.h"
 #import "ViewSnapshotStore.h"
 #import "WebBackForwardList.h"
+#import "WebEventFactory.h"
+#import "WebEventPhase.h"
 #import "WebPageGroup.h"
 #import "WebPageMessages.h"
 #import "WebPageProxy.h"
@@ -126,17 +128,13 @@ double ViewGestureController::resistanceForDelta(double deltaScale, double curre
     return resistance;
 }
 
-void ViewGestureController::gestureEventWasNotHandledByWebCore(NSEvent *event, FloatPoint origin)
-{
-    if (event.type == NSEventTypeMagnify)
-        handleMagnificationGestureEvent(event, origin);
-}
-
-void ViewGestureController::handleMagnificationGestureEvent(NSEvent *event, FloatPoint origin)
+void ViewGestureController::handleMagnificationGesture(double scale, WebEventPhase phase, FloatPoint origin, WebEventInputSource inputSource)
 {
     RefPtr page = m_webPageProxy.get();
     if (!page)
         return;
+
+    m_magnificationGestureInputSource = inputSource;
 
     auto obscuredContentInsets = page->obscuredContentInsets();
     origin.move(-obscuredContentInsets.left(), -obscuredContentInsets.top());
@@ -144,7 +142,7 @@ void ViewGestureController::handleMagnificationGestureEvent(NSEvent *event, Floa
     ASSERT(m_activeGestureType == ViewGestureType::None || m_activeGestureType == ViewGestureType::Magnification);
 
     if (m_activeGestureType == ViewGestureType::None) {
-        if (event.phase != NSEventPhaseBegan)
+        if (phase != WebEventPhase::Began)
             return;
 
         // FIXME: We drop the first frame of the gesture on the floor, because we don't have the visible content bounds yet.
@@ -162,7 +160,6 @@ void ViewGestureController::handleMagnificationGestureEvent(NSEvent *event, Floa
     auto minMagnification = page->minPageZoomFactor();
     auto maxMagnification = page->maxPageZoomFactor();
 
-    double scale = event.magnification;
     double scaleWithResistance = resistanceForDelta(scale, m_magnification, minMagnification, maxMagnification) * scale;
 
     auto minElasticMagnification = minMagnification * 0.75;
@@ -171,13 +168,13 @@ void ViewGestureController::handleMagnificationGestureEvent(NSEvent *event, Floa
     m_magnification += m_magnification * scaleWithResistance;
     m_magnification = std::min(std::max(m_magnification, minElasticMagnification), maxElasticMagnification);
 
-    LOG_WITH_STREAM(ViewGestures, stream << "ViewGestureController::handleMagnificationGestureEvent - gesture scale " << scale << " with resistance " << scaleWithResistance << " clamped to " << m_magnification << " origin in view coords " << origin);
+    LOG_WITH_STREAM(ViewGestures, stream << "ViewGestureController::handleMagnificationGesture - gesture scale " << scale << " with resistance " << scaleWithResistance << " clamped to " << m_magnification << " origin in view coords " << origin);
 
     m_magnificationOrigin = origin;
 
     applyMagnification();
 
-    if (event.phase == NSEventPhaseEnded || event.phase == NSEventPhaseCancelled)
+    if (phase == WebEventPhase::Ended || phase == WebEventPhase::Cancelled)
         endMagnificationGesture();
 }
 
@@ -269,17 +266,17 @@ void ViewGestureController::didCollectGeometryForSmartMagnificationGesture(Float
     m_lastMagnificationGestureWasSmartMagnification = true;
 }
 
-bool ViewGestureController::PendingSwipeTracker::scrollEventCanStartSwipe(NativeWebWheelEvent event)
+bool ViewGestureController::PendingSwipeTracker::scrollEventCanStartSwipe(const NativeWebWheelEvent& event)
 {
     return event.phase() == WebWheelEvent::Phase::Began;
 }
 
-bool ViewGestureController::PendingSwipeTracker::scrollEventCanEndSwipe(NativeWebWheelEvent event)
+bool ViewGestureController::PendingSwipeTracker::scrollEventCanEndSwipe(const NativeWebWheelEvent& event)
 {
     return event.phase() == WebWheelEvent::Phase::Ended;
 }
 
-bool ViewGestureController::PendingSwipeTracker::scrollEventCanInfluenceSwipe(NativeWebWheelEvent event)
+bool ViewGestureController::PendingSwipeTracker::scrollEventCanInfluenceSwipe(const NativeWebWheelEvent& event)
 {
     if (!event.hasPreciseScrollingDeltas())
         return false;
@@ -290,12 +287,12 @@ bool ViewGestureController::PendingSwipeTracker::scrollEventCanInfluenceSwipe(Na
 #endif
 }
 
-FloatSize ViewGestureController::PendingSwipeTracker::scrollEventGetScrollingDeltas(NativeWebWheelEvent event)
+FloatSize ViewGestureController::PendingSwipeTracker::scrollEventGetScrollingDeltas(const NativeWebWheelEvent& event)
 {
     return event.delta();
 }
 
-bool ViewGestureController::handleScrollWheelEvent(NativeWebWheelEvent event)
+bool ViewGestureController::handleScrollWheelEvent(const NativeWebWheelEvent& event)
 {
     if (m_swipeProgressTracker && protect(*m_swipeProgressTracker)->handleEvent(event))
         return true;

@@ -39,7 +39,7 @@ public:
     auto begin() LIFETIME_BOUND { return std::to_address(tokenArray().begin()); }
     auto end() LIFETIME_BOUND { return std::to_address(tokenArray().end()); }
 
-    ALWAYS_INLINE bool contains(const AtomString& string)
+    bool contains(const AtomString& string) const
     {
         auto tokens = tokenArray();
         unsigned size = m_size;
@@ -52,7 +52,7 @@ public:
         return false;
     }
 
-    bool NODELETE containsAll(SpaceSplitStringData&);
+    bool NODELETE containsAll(const SpaceSplitStringData&) const;
 
     unsigned size() const { return m_size; }
     static constexpr ptrdiff_t sizeMemoryOffset() { return OBJECT_OFFSETOF(SpaceSplitStringData, m_size); }

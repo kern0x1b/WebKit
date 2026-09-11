@@ -40,6 +40,7 @@
 #include "CSSBorderImageSourceValue.h"
 #include "CSSBorderImageWidthValue.h"
 #include "CSSBoxShadowPropertyValue.h"
+#include "CSSCalcSizeValue.h"
 #include "CSSCanvasValue.h"
 #include "CSSClipValue.h"
 #include "CSSColorImageValue.h"
@@ -54,9 +55,11 @@
 #include "CSSEasingFunctionValue.h"
 #include "CSSFilterImageValue.h"
 #include "CSSFilterValue.h"
+#include "CSSFlexWrapValue.h"
 #include "CSSFontFaceSrcValue.h"
 #include "CSSFontFamilyNameValue.h"
 #include "CSSFontFeatureValue.h"
+#include "CSSFontPaletteValue.h"
 #include "CSSFontStyleRangeValue.h"
 #include "CSSFontStyleWithAngleValue.h"
 #include "CSSFontValue.h"
@@ -81,6 +84,7 @@
 #include "CSSNamedImageValue.h"
 #include "CSSOffsetRotateValue.h"
 #include "CSSPaintImageValue.h"
+#include "CSSParamValue.h"
 #include "CSSPathValue.h"
 #include "CSSPositionValue.h"
 #include "CSSPrimitiveValue.h"
@@ -106,6 +110,10 @@
 #include "DeprecatedCSSOMCustomValue.h"
 #include "EventTarget.h"
 #include <wtf/Hasher.h>
+
+#if ENABLE(SPATIAL_PORTAL)
+#include "CSSPinnedAnchorNameValue.h"
+#endif
 
 namespace WebCore {
 
@@ -144,6 +152,8 @@ template<typename Visitor> constexpr decltype(auto) CSSValue::visitDerived(Visit
         return std::invoke(std::forward<Visitor>(visitor), uncheckedDowncast<CSSBoxShadowPropertyValue>(*this));
     case Canvas:
         return std::invoke(std::forward<Visitor>(visitor), uncheckedDowncast<CSSCanvasValue>(*this));
+    case CalcSize:
+        return std::invoke(std::forward<Visitor>(visitor), uncheckedDowncast<CSSCalcSizeValue>(*this));
     case Clip:
         return std::invoke(std::forward<Visitor>(visitor), uncheckedDowncast<CSSClipValue>(*this));
     case Color:
@@ -170,6 +180,8 @@ template<typename Visitor> constexpr decltype(auto) CSSValue::visitDerived(Visit
         return std::invoke(std::forward<Visitor>(visitor), uncheckedDowncast<CSSFilterImageValue>(*this));
     case Filter:
         return std::invoke(std::forward<Visitor>(visitor), uncheckedDowncast<CSSFilterValue>(*this));
+    case FlexWrap:
+        return std::invoke(std::forward<Visitor>(visitor), uncheckedDowncast<CSSFlexWrapValue>(*this));
     case Font:
         return std::invoke(std::forward<Visitor>(visitor), uncheckedDowncast<CSSFontValue>(*this));
     case FontFaceSrcLocal:
@@ -180,6 +192,8 @@ template<typename Visitor> constexpr decltype(auto) CSSValue::visitDerived(Visit
         return std::invoke(std::forward<Visitor>(visitor), uncheckedDowncast<CSSFontFamilyNameValue>(*this));
     case FontFeature:
         return std::invoke(std::forward<Visitor>(visitor), uncheckedDowncast<CSSFontFeatureValue>(*this));
+    case FontPalette:
+        return std::invoke(std::forward<Visitor>(visitor), uncheckedDowncast<CSSFontPaletteValue>(*this));
     case FontStyleWithAngle:
         return std::invoke(std::forward<Visitor>(visitor), uncheckedDowncast<CSSFontStyleWithAngleValue>(*this));
     case FontStyleRange:
@@ -228,10 +242,16 @@ template<typename Visitor> constexpr decltype(auto) CSSValue::visitDerived(Visit
         return std::invoke(std::forward<Visitor>(visitor), uncheckedDowncast<CSSOffsetRotateValue>(*this));
     case PaintImage:
         return std::invoke(std::forward<Visitor>(visitor), uncheckedDowncast<CSSPaintImageValue>(*this));
+    case Param:
+        return std::invoke(std::forward<Visitor>(visitor), uncheckedDowncast<CSSParamValue>(*this));
     case Path:
         return std::invoke(std::forward<Visitor>(visitor), uncheckedDowncast<CSSPathValue>(*this));
     case ShorthandSubstitution:
         return std::invoke(std::forward<Visitor>(visitor), uncheckedDowncast<CSSShorthandSubstitutionValue>(*this));
+#if ENABLE(SPATIAL_PORTAL)
+    case PinnedAnchorName:
+        return std::invoke(std::forward<Visitor>(visitor), uncheckedDowncast<CSSPinnedAnchorNameValue>(*this));
+#endif
     case Position:
         return std::invoke(std::forward<Visitor>(visitor), uncheckedDowncast<CSSPositionValue>(*this));
     case PositionX:
@@ -333,11 +353,10 @@ void CSSValue::collectComputedStyleDependencies(ComputedStyleDependencies& depen
     default:
         break;
     }
-}
-
-bool CSSValue::canResolveDependenciesWithConversionData(const CSSToLengthConversionData& conversionData) const
-{
-    return computedStyleDependencies().canResolveDependenciesWithConversionData(conversionData);
+    if (auto* asPrimitiveValue = dynamicDowncast<CSSPrimitiveValue>(*this))
+        asPrimitiveValue->collectComputedStyleDependencies(dependencies);
+    if (auto* asCalcSizeValue = dynamicDowncast<CSSCalcSizeValue>(*this))
+        asCalcSizeValue->collectComputedStyleDependencies(dependencies);
 }
 
 bool CSSValue::equals(const CSSValue& other) const
@@ -389,11 +408,11 @@ String CSSValue::cssText(const CSS::SerializationContext& context) const
 ASCIILiteral CSSValue::separatorCSSText(ValueSeparator separator)
 {
     switch (separator) {
-    case SpaceSeparator:
+        case ValueSeparator::Space:
         return " "_s;
-    case CommaSeparator:
+        case ValueSeparator::Comma:
         return ", "_s;
-    case SlashSeparator:
+        case ValueSeparator::Slash:
         return " / "_s;
     }
     ASSERT_NOT_REACHED();

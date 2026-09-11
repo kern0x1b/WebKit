@@ -53,16 +53,15 @@ auto IfConditionEvaluator::evaluate(CSSParserTokenRange branchCondition) -> Resu
     // https://drafts.csswg.org/css-values-5/#typedef-if-condition
 
     // Unsupported features (like size queries) evaluate to Unknown.
-    auto parserContext = MediaQueryParserContext { m_context };
-    auto condition = CQ::ContainerQueryParser::consumeCondition(branchCondition, parserContext);
+    auto condition = CQ::ContainerQueryParser::consumeCondition(branchCondition, m_context);
     if (!condition || !branchCondition.atEnd())
         return Result::Invalid;
 
     auto& state = m_styleBuilder.state();
     MQ::FeatureEvaluationContext evaluationContext {
-        state.document(),
-        state.cssToLengthConversionData(),
-        nullptr
+        .document = state.document(),
+        .conversionData = state.cssToLengthConversionData(),
+        .renderer = nullptr
     };
 
     return evaluateCondition(*condition, evaluationContext) == MQ::EvaluationResult::True ? Result::True : Result::False;

@@ -61,6 +61,7 @@
 #include "SVGLengthContext.h"
 #include "StyleComputedStyle+GettersInlines.h"
 #include "StyleComputedStyle+InitialInlines.h"
+#include "StyleFontPaletteInlines.h"
 #include "StyleExtractorState.h"
 #include "StyleInterpolation.h"
 #include "StyleKeyword+CSSValueConversion.h"
@@ -284,9 +285,9 @@ public:
     static void extractMarkerShorthandSerialization(ExtractorState&, StringBuilder&, const CSS::SerializationContext&);
 };
 
-template<typename T> Length<CSS::AllUnzoomed> unzoomedLengthIfEvaluationTimeZoomEnabled(ExtractorState& state, T value)
+template<typename T, typename U> auto unzoomed(ExtractorState& state, U value) -> T
 {
-    return Length<CSS::AllUnzoomed> { value / state.style.usedZoomForLength().value };
+    return T { value / state.style.usedZoomForLength().value };
 }
 
 // MARK: - Shared Adaptor
@@ -327,7 +328,7 @@ template<CSSPropertyID propertyID> struct InsetEdgeSharedAdaptor {
                         containingBlockSize = box->containingBlockLogicalWidthForContent();
                 }
             }
-            return functor(unzoomedLengthIfEvaluationTimeZoomEnabled(state, evaluate<LayoutUnit>(value, containingBlockSize, state.style.usedZoomForLength())));
+            return functor(unzoomed<Length<>>(state, evaluate<LayoutUnit>(value, containingBlockSize, state.style.usedZoomForLength())));
         }
 
         // Return a "computed value" length.
@@ -360,7 +361,7 @@ template<CSSPropertyID propertyID> struct InsetEdgeSharedAdaptor {
 
         // The property won't be over-constrained if its computed value is "auto", so the "used value" can be returned.
         if (box->isRelativelyPositioned())
-            return functor(unzoomedLengthIfEvaluationTimeZoomEnabled(state, insetUsedStyleRelative(*box)));
+            return functor(unzoomed<Length<>>(state, insetUsedStyleRelative(*box)));
 
         auto insetUsedStyleOutOfFlowPositioned = [&](auto& container, auto& box) {
             // For out-of-flow positioned boxes, the inset is how far an box's margin
@@ -402,7 +403,7 @@ template<CSSPropertyID propertyID> struct InsetEdgeSharedAdaptor {
         };
 
         if (containingBlock && box->isOutOfFlowPositioned())
-            return functor(unzoomedLengthIfEvaluationTimeZoomEnabled(state, insetUsedStyleOutOfFlowPositioned(*containingBlock, *box)));
+            return functor(unzoomed<Length<>>(state, insetUsedStyleOutOfFlowPositioned(*containingBlock, *box)));
 
         return functor(CSS::Keyword::Auto { });
     }
@@ -411,74 +412,6 @@ template<CSSPropertyID propertyID> struct InsetEdgeSharedAdaptor {
 template<CSSPropertyID propertyID> struct MarginEdgeSharedAdaptor {
     template<typename F> decltype(auto) computedValue(ExtractorState& state, const MarginEdge& value, F&& functor) const
     {
-        auto rendererCanHaveTrimmedMargin = [](const RenderBox& renderer) {
-            auto marginTrimSide = [] -> MarginTrimSide {
-                if constexpr (propertyID == CSSPropertyMarginTop)
-                    return MarginTrimSide::BlockStart;
-                else if constexpr (propertyID == CSSPropertyMarginRight)
-                    return MarginTrimSide::InlineEnd;
-                else if constexpr (propertyID == CSSPropertyMarginBottom)
-                    return MarginTrimSide::BlockEnd;
-                else if constexpr (propertyID == CSSPropertyMarginLeft)
-                    return MarginTrimSide::InlineStart;
-            };
-
-            // A renderer will have a specific margin marked as trimmed by setting its rare data bit if:
-            // 1.) The layout system the box is in has this logic (setting the rare data bit for this
-            // specific margin) implemented
-            // 2.) The block container/flexbox/grid has this margin specified in its margin-trim style
-            // If marginTrimSide is empty we will check if any of the supported margins are in the style
-            if (renderer.isFlexItem() || renderer.isGridItem())
-                return renderer.parent()->style().marginTrim().contains(marginTrimSide());
-
-            // Even though margin-trim is not inherited, it is possible for nested block level boxes
-            // to get placed at the block-start of an containing block ancestor which does have margin-trim.
-            // In this case it is not enough to simply check the immediate containing block of the child. It is
-            // also probably too expensive to perform an arbitrary walk up the tree to check for the existence
-            // of an ancestor containing block with the property, so we will just return true and let
-            // the rest of the logic in RenderBox::hasTrimmedMargin to determine if the rare data bit
-            // were set at some point during layout
-            if (renderer.isBlockLevelBox()) {
-                auto containingBlock = renderer.containingBlock();
-                return containingBlock && containingBlock->isHorizontalWritingMode();
-            }
-            return false;
-        };
-
-        auto toMarginTrimSide = [](const RenderBox& renderer) -> MarginTrimSide {
-            auto formattingContextRootStyle = [](const RenderBox& renderer) -> const ComputedStyle& {
-                if (auto* ancestorToUse = (renderer.isFlexItem() || renderer.isGridItem()) ? renderer.parent() : renderer.containingBlock())
-                    return ancestorToUse->style();
-                ASSERT_NOT_REACHED();
-                return renderer.style();
-            };
-
-            auto boxSide = [] -> BoxSide {
-                if constexpr (propertyID == CSSPropertyMarginTop)
-                    return BoxSide::Top;
-                else if constexpr (propertyID == CSSPropertyMarginRight)
-                    return BoxSide::Right;
-                else if constexpr (propertyID == CSSPropertyMarginBottom)
-                    return BoxSide::Bottom;
-                else if constexpr (propertyID == CSSPropertyMarginLeft)
-                    return BoxSide::Left;
-            };
-
-            switch (mapSidePhysicalToLogical(formattingContextRootStyle(renderer).writingMode(), boxSide())) {
-            case LogicalBoxSide::BlockStart:
-                return MarginTrimSide::BlockStart;
-            case LogicalBoxSide::BlockEnd:
-                return MarginTrimSide::BlockEnd;
-            case LogicalBoxSide::InlineStart:
-                return MarginTrimSide::InlineStart;
-            case LogicalBoxSide::InlineEnd:
-                return MarginTrimSide::InlineEnd;
-            default:
-                ASSERT_NOT_REACHED();
-                return MarginTrimSide::BlockStart;
-            }
-        };
-
         auto usedValue = [](auto& box) {
             if constexpr (propertyID == CSSPropertyMarginTop)
                 return box.marginTop();
@@ -495,9 +428,6 @@ template<CSSPropertyID propertyID> struct MarginEdgeSharedAdaptor {
             return functor(value);
 
         if constexpr (propertyID == CSSPropertyMarginRight) {
-            if (rendererCanHaveTrimmedMargin(*box) && box->hasTrimmedMargin(toMarginTrimSide(*box)))
-                return functor(unzoomedLengthIfEvaluationTimeZoomEnabled(state, usedValue(*box)));
-
             if (value.isFixed())
                 return functor(value);
 
@@ -505,11 +435,11 @@ template<CSSPropertyID propertyID> struct MarginEdgeSharedAdaptor {
                 // RenderBox gives a marginRight() that is the distance between the right-edge of the child box
                 // and the right-edge of the containing box, when display == DisplayType::BlockFlow. Let's calculate the absolute
                 // value of the specified margin-right % instead of relying on RenderBox's marginRight() value.
-                return functor(unzoomedLengthIfEvaluationTimeZoomEnabled(state, evaluateMinimum<float>(value, box->containingBlockLogicalWidthForContent(), state.style.usedZoomForLength())));
+                return functor(unzoomed<Length<>>(state, evaluateMinimum<float>(value, box->containingBlockLogicalWidthForContent(), state.style.usedZoomForLength())));
             }
         }
 
-        return functor(unzoomedLengthIfEvaluationTimeZoomEnabled(state, usedValue(*box)));
+        return functor(unzoomed<Length<>>(state, usedValue(*box)));
     }
 };
 
@@ -531,7 +461,7 @@ template<CSSPropertyID propertyID> struct PaddingEdgeSharedAdaptor {
                 return box.computedCSSPaddingLeft();
         };
 
-        return functor(unzoomedLengthIfEvaluationTimeZoomEnabled(state, usedValue(*box)));
+        return functor(unzoomed<Length<>>(state, usedValue(*box)));
     }
 };
 
@@ -570,19 +500,10 @@ template<CSSPropertyID propertyID> struct PreferredSizeSharedAdaptor {
                 // happens via SVGLengthContext's non-numeric fallback path.
                 if (RefPtr svgElement = dynamicDowncast<SVGElement>(state.element.get())) {
                     SVGLengthContext lengthContext(svgElement.get());
-                    if (!state.style.evaluationTimeZoomEnabled()) {
-                        // When evaluationTimeZoomEnabled() is false, Length<> will be unconditionally
-                        // divided by usedZoom on serialization so pre-multiply to round-trip the value.
-                        if constexpr (propertyID == CSSPropertyWidth)
-                            return functor(Length<CSS::AllUnzoomed> { lengthContext.valueForLength(state.style.width(), ZoomFactor::none(), SVGLengthMode::Width) * state.style.usedZoom() });
-                        else if constexpr (propertyID == CSSPropertyHeight)
-                            return functor(Length<CSS::AllUnzoomed> { lengthContext.valueForLength(state.style.height(), ZoomFactor::none(), SVGLengthMode::Height) * state.style.usedZoom() });
-                    } else {
-                        if constexpr (propertyID == CSSPropertyWidth)
-                            return functor(Length<CSS::AllUnzoomed> { lengthContext.valueForLength(state.style.width(), ZoomFactor::none(), SVGLengthMode::Width) });
-                        else if constexpr (propertyID == CSSPropertyHeight)
-                            return functor(Length<CSS::AllUnzoomed> { lengthContext.valueForLength(state.style.height(), ZoomFactor::none(), SVGLengthMode::Height) });
-                    }
+                    if constexpr (propertyID == CSSPropertyWidth)
+                        return functor(Length<> { lengthContext.valueForLength(state.style.width(), ZoomFactor::none(), SVGLengthMode::Width) });
+                    else if constexpr (propertyID == CSSPropertyHeight)
+                        return functor(Length<> { lengthContext.valueForLength(state.style.height(), ZoomFactor::none(), SVGLengthMode::Height) });
                 }
             } else if (!state.renderer->isSVGRenderer() || state.renderer->isRenderOrLegacyRenderSVGRoot() || state.renderer->isRenderOrLegacyRenderSVGForeignObject()) {
                 // For non-SVG elements (and SVG root / foreignObject which are proper RenderBox
@@ -590,9 +511,9 @@ template<CSSPropertyID propertyID> struct PreferredSizeSharedAdaptor {
                 // not apply for non-replaced inline elements.
                 if (!isNonReplacedInline(*state.renderer)) {
                     if constexpr (propertyID == CSSPropertyHeight)
-                        return functor(unzoomedLengthIfEvaluationTimeZoomEnabled(state, sizingBox(*state.renderer).height()));
+                        return functor(unzoomed<Length<>>(state, sizingBox(*state.renderer).height()));
                     else if constexpr (propertyID == CSSPropertyWidth)
-                        return functor(unzoomedLengthIfEvaluationTimeZoomEnabled(state, sizingBox(*state.renderer).width()));
+                        return functor(unzoomed<Length<>>(state, sizingBox(*state.renderer).width()));
                 }
             }
         }
@@ -620,7 +541,7 @@ template<CSSPropertyID> struct MinimumSizeSharedAdaptor {
         if (value.isAuto()) {
             if (isFlexOrGridItem(state.renderer))
                 return functor(CSS::Keyword::Auto { });
-            return functor(Length<CSS::AllUnzoomed> { 0 });
+            return functor(Length<> { 0 });
         }
         return functor(value);
     }
@@ -763,30 +684,18 @@ template<> struct PropertyExtractorAdaptor<CSSPropertyWordSpacing> {
 template<> struct PropertyExtractorAdaptor<CSSPropertyLineHeight> {
     template<typename F> decltype(auto) computedValue(ExtractorState& state, F&& functor) const
     {
-        return WTF::switchOn(state.style.lineHeight(),
+        return WTF::switchOn(state.style.textAutosizingAdjustedLineHeight(),
             [&](const CSS::Keyword::Normal& keyword) {
                 return functor(keyword);
             },
-            [&](const LineHeight::Fixed& fixed) {
+            [&](const LineHeight::Length& fixed) {
                 return functor(fixed);
             },
-            [&](const LineHeight::Percentage& percentage) {
-                // CSSValueConversion<LineHeight> will convert a percentage value to a fixed value,
-                // and a number value to a percentage value. To be able to roundtrip a number value, we thus
-                // look for a percent value and convert it back to a number.
+            [&](const LineHeight::Number& number) {
                 if (state.valueType == ExtractorState::PropertyValueType::Computed)
-                    return functor(Number<CSS::Nonnegative> { percentage.value / 100 });
+                    return functor(number);
 
-                // This is imperfect, because it doesn't include the zoom factor and the real computation
-                // for how high to be in pixels does include things like minimum font size and the zoom factor.
-                // On the other hand, since font-size doesn't include the zoom factor, we really can't do
-                // that here either.
-                return functor(Length<CSS::NonnegativeUnzoomed> { percentage.value * state.style.fontDescription().computedSizeForRangeZoomOption(CSS::RangeZoomOptions::Unzoomed) / 100 });
-            },
-            [&](const LineHeight::Calc& calc) {
-                // FIXME: We pass ZoomFactor::none() but it really is not clear why we are even evaluating calc
-                // here. We should probably revisit this and figure out another way to do this.
-                return functor(Length<CSS::NonnegativeUnzoomed> { evaluate<float>(calc, 0.0f, ZoomFactor::none()) });
+                return functor(LineHeight::Length { number.value * state.style.fontDescription().unzoomedUsedSize() });
             }
         );
     }
@@ -805,7 +714,7 @@ template<> struct PropertyExtractorAdaptor<CSSPropertyFontFamily> {
 template<> struct PropertyExtractorAdaptor<CSSPropertyFontSize> {
     template<typename F> decltype(auto) computedValue(ExtractorState& state, F&& functor) const
     {
-        return functor(Length<CSS::NonnegativeUnzoomed> { state.style.fontDescription().computedSizeForRangeZoomOption(CSS::RangeZoomOptions::Unzoomed) });
+        return functor(Length<CSS::Nonnegative> { state.style.fontDescription().unzoomedUsedSize() });
     }
 };
 
@@ -1201,8 +1110,8 @@ template<> struct PropertyExtractorAdaptor<CSSPropertyPerspectiveOrigin> {
             auto box = state.renderer->transformReferenceBoxRect(state.style);
             auto zoom = state.style.usedZoomForLength();
 
-            auto perspectiveOriginX = unzoomedLengthIfEvaluationTimeZoomEnabled(state, evaluate<float>(state.style.perspectiveOriginX(), box.width(), zoom));
-            auto perspectiveOriginY = unzoomedLengthIfEvaluationTimeZoomEnabled(state, evaluate<float>(state.style.perspectiveOriginY(), box.height(), zoom));
+            auto perspectiveOriginX = unzoomed<Length<>>(state, evaluate<float>(state.style.perspectiveOriginX(), box.width(), zoom));
+            auto perspectiveOriginY = unzoomed<Length<>>(state, evaluate<float>(state.style.perspectiveOriginY(), box.height(), zoom));
 
             return functor(SpaceSeparatedTuple { perspectiveOriginX, perspectiveOriginY });
         }
@@ -1288,8 +1197,8 @@ template<> struct PropertyExtractorAdaptor<CSSPropertyTransformOrigin> {
             auto box = state.renderer->transformReferenceBoxRect(state.style);
             auto zoom = state.style.usedZoomForLength();
 
-            auto transformOriginX = unzoomedLengthIfEvaluationTimeZoomEnabled(state, evaluate<float>(state.style.transformOriginX(), box.width(), zoom));
-            auto transformOriginY = unzoomedLengthIfEvaluationTimeZoomEnabled(state, evaluate<float>(state.style.transformOriginY(), box.height(), zoom));
+            auto transformOriginX = unzoomed<Length<>>(state, evaluate<float>(state.style.transformOriginX(), box.width(), zoom));
+            auto transformOriginY = unzoomed<Length<>>(state, evaluate<float>(state.style.transformOriginY(), box.height(), zoom));
 
             if (auto transformOriginZ = state.style.transformOriginZ(); !transformOriginZ.isZero())
                 return functor(SpaceSeparatedTuple { transformOriginX, transformOriginY, transformOriginZ });
@@ -1307,24 +1216,38 @@ template<> struct PropertyExtractorAdaptor<CSSPropertyWhiteSpace> {
     {
         auto whiteSpaceCollapse = state.style.whiteSpaceCollapse();
         auto textWrapMode = state.style.textWrapMode();
+        auto whiteSpaceTrim = state.style.whiteSpaceTrim();
 
-        // Convert to backwards-compatible keywords if possible.
-        if (whiteSpaceCollapse == WhiteSpaceCollapse::Collapse && textWrapMode == TextWrapMode::Wrap)
-            return functor(CSS::Keyword::Normal { });
-        if (whiteSpaceCollapse == WhiteSpaceCollapse::Preserve && textWrapMode == TextWrapMode::NoWrap)
-            return functor(CSS::Keyword::Pre { });
-        if (whiteSpaceCollapse == WhiteSpaceCollapse::Preserve && textWrapMode == TextWrapMode::Wrap)
-            return functor(CSS::Keyword::PreWrap { });
-        if (whiteSpaceCollapse == WhiteSpaceCollapse::PreserveBreaks && textWrapMode == TextWrapMode::Wrap)
-            return functor(CSS::Keyword::PreLine { });
+        if (whiteSpaceTrim.isNone()) {
+            // Convert to backwards-compatible keywords if possible.
+            if (whiteSpaceCollapse == WhiteSpaceCollapse::Collapse && textWrapMode == TextWrapMode::Wrap)
+                return functor(CSS::Keyword::Normal { });
+            if (whiteSpaceCollapse == WhiteSpaceCollapse::Preserve && textWrapMode == TextWrapMode::NoWrap)
+                return functor(CSS::Keyword::Pre { });
+            if (whiteSpaceCollapse == WhiteSpaceCollapse::Preserve && textWrapMode == TextWrapMode::Wrap)
+                return functor(CSS::Keyword::PreWrap { });
+            if (whiteSpaceCollapse == WhiteSpaceCollapse::PreserveBreaks && textWrapMode == TextWrapMode::Wrap)
+                return functor(CSS::Keyword::PreLine { });
 
+            // Omit default longhand values.
+            if (whiteSpaceCollapse == ComputedStyle::initialWhiteSpaceCollapse())
+                return functor(textWrapMode);
+            if (textWrapMode == ComputedStyle::initialTextWrapMode())
+                return functor(whiteSpaceCollapse);
+
+            return functor(SpaceSeparatedTuple { whiteSpaceCollapse, textWrapMode });
+        }
+
+        // white-space-trim has a non-initial value, so the backwards-compatible keywords don't apply.
         // Omit default longhand values.
+        if (whiteSpaceCollapse == ComputedStyle::initialWhiteSpaceCollapse() && textWrapMode == ComputedStyle::initialTextWrapMode())
+            return functor(whiteSpaceTrim);
         if (whiteSpaceCollapse == ComputedStyle::initialWhiteSpaceCollapse())
-            return functor(textWrapMode);
+            return functor(SpaceSeparatedTuple { textWrapMode, whiteSpaceTrim });
         if (textWrapMode == ComputedStyle::initialTextWrapMode())
-            return functor(whiteSpaceCollapse);
+            return functor(SpaceSeparatedTuple { whiteSpaceCollapse, whiteSpaceTrim });
 
-        return functor(SpaceSeparatedTuple { whiteSpaceCollapse, textWrapMode });
+        return functor(SpaceSeparatedTuple { whiteSpaceCollapse, textWrapMode, whiteSpaceTrim });
     }
 };
 
@@ -1456,7 +1379,9 @@ template<GridTrackSizingDirection direction> Ref<CSSValue> extractGridTemplateVa
                 addValuesForNamedGridLinesAtIndex(trackList.value.value, collector, i + offset, false);
 
             trackList.value.value.append(CSS::GridTrackSize { CSS::GridTrackBreadth {
-                toCSS(LengthPercentage<CSS::Nonnegative> { Length<CSS::Nonnegative> { computedTrackSizes[i] } }, state.style)
+                toCSS(LengthPercentage<CSS::Nonnegative> {
+                    unzoomed<Length<CSS::Nonnegative>>(state, computedTrackSizes[i])
+                }, state.style)
             } });
         }
         if (end + offset >= 0)
@@ -2976,7 +2901,7 @@ inline RefPtr<CSSValue> ExtractorCustom::extractFontShorthand(ExtractorState& st
     if (!propertiesResetByShorthandAreExpressible())
         return computedFont;
 
-    computedFont->size = createCSSValue(state.pool, state.style, Length<CSS::AllUnzoomed> { description.computedSizeForRangeZoomOption(CSS::RangeZoomOptions::Unzoomed) });
+    computedFont->size = createCSSValue(state.pool, state.style, Length<> { description.unzoomedUsedSize() });
 
     auto computedLineHeight = ExtractorGenerated::extractValue(state, CSSPropertyLineHeight);
     if (computedLineHeight && !isValueID(*computedLineHeight, CSSValueNormal))

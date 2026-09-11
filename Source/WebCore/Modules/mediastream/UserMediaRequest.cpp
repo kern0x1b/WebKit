@@ -1,7 +1,7 @@
 /*
  * Copyright (C) 2011 Ericsson AB. All rights reserved.
  * Copyright (C) 2012 Google Inc. All rights reserved.
- * Copyright (C) 2013-2018 Apple Inc. All rights reserved.
+ * Copyright (C) 2013-2025 Apple Inc. All rights reserved.
  * Copyright (C) 2013 Nokia Corporation and/or its subsidiary(-ies).
  *
  * Redistribution and use in source and binary forms, with or without
@@ -36,7 +36,6 @@
 
 #if ENABLE(MEDIA_STREAM)
 
-#include "AudioSession.h"
 #include "ContextDestructionObserverInlines.h"
 #include "DocumentPage.h"
 #include "ExceptionCode.h"
@@ -54,11 +53,13 @@
 #include "PlatformMediaSessionManager.h"
 #include "RTCController.h"
 #include "RealtimeMediaSourceCenter.h"
+#include "ScriptExecutionContextInlines.h"
 #include "Settings.h"
 #include "UserMediaController.h"
 #include "WindowEventLoop.h"
 #include <JavaScriptCore/ConsoleTypes.h>
 #include <algorithm>
+#include <wtf/RunLoop.h>
 #include <wtf/Scope.h>
 
 namespace WebCore {
@@ -160,7 +161,7 @@ static inline bool isMediaStreamCorrectlyStarted(const MediaStream& stream)
 
 void UserMediaRequest::allow(CaptureDevice&& audioDevice, CaptureDevice&& videoDevice, MediaDeviceHashSalts&& deviceIdentifierHashSalt, CompletionHandler<void()>&& completionHandler)
 {
-    RELEASE_LOG(MediaStream, "UserMediaRequest::allow %s %s", audioDevice ? audioDevice.persistentId().utf8().data() : "", videoDevice ? videoDevice.persistentId().utf8().data() : "");
+    RELEASE_LOG(MediaStream, "UserMediaRequest::allow %s %s", audioDevice ? audioDevice.persistentId().utf8().legacyCStringPointer() : "", videoDevice ? videoDevice.persistentId().utf8().legacyCStringPointer() : "");
 
     Ref document = downcast<Document>(*scriptExecutionContext());
     RefPtr localWindow = document->window();
@@ -204,9 +205,13 @@ void UserMediaRequest::allow(CaptureDevice&& audioDevice, CaptureDevice&& videoD
                 return;
             }
 
+            RefPtr<GenericPromise> sessionActivated;
             if (RefPtr audioTrack = stream->getFirstAudioTrack()) {
 #if USE(AUDIO_SESSION)
-                AudioSession::singleton().tryToSetActive(true);
+                if (RefPtr page = document.page()) {
+                    if (RefPtr manager = page->mediaSessionManager())
+                        sessionActivated = manager->audioCaptureSourceStateChanged(MediaSessionManagerInterface::IsCaptureStarting::Yes);
+                }
 #endif
                 if (std::holds_alternative<MediaTrackConstraints>(protectedThis->m_audioConstraints))
                     audioTrack->setConstraints(std::get<MediaTrackConstraints>(WTF::move(protectedThis->m_audioConstraints)));
@@ -218,7 +223,18 @@ void UserMediaRequest::allow(CaptureDevice&& audioDevice, CaptureDevice&& videoD
 
             ASSERT(document.isCapturing());
             document.setHasCaptureMediaStreamTrack();
-            protectedThis->m_promise->resolve(WTF::move(stream));
+
+            if (!sessionActivated) {
+                protectedThis->m_promise->resolve(WTF::move(stream));
+                return;
+            }
+
+            // Audio session activation completes asynchronously. Delay resolving the getUserMedia
+            // promise until it has, so callers observe an active session.
+            RefPtr context = protectedThis->scriptExecutionContext();
+            context->enqueueTaskWhenSettled(sessionActivated.releaseNonNull(), TaskSource::UserInteraction, [protectedThis, stream = WTF::move(stream)](auto&&) mutable {
+                protectedThis->m_promise->resolve(WTF::move(stream));
+            });
         };
 
         auto& document = downcast<Document>(*request.scriptExecutionContext());

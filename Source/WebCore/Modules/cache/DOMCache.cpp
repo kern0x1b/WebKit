@@ -195,13 +195,31 @@ public:
             m_callback(WTF::move(m_records));
     }
 
-    const Vector<Record>& NODELETE records() const { return m_records; }
+    bool hasMatchingRecord(const ResourceRequest& request) const
+    {
+        auto iterator = m_recordPositionsByURL.find(request.url().stringWithoutFragmentIdentifier());
+        if (iterator == m_recordPositionsByURL.end())
+            return false;
+
+        CacheQueryOptions options;
+        for (auto position : iterator->value) {
+            auto& record = m_records[position];
+            if (DOMCacheEngine::queryCacheMatch(request, record.request, record.response, options))
+                return true;
+        }
+        return false;
+    }
 
     size_t addRecord(Record&& record)
     {
         ASSERT(!isDone());
+        auto url = record.request.url().stringWithoutFragmentIdentifier();
         m_records.append(WTF::move(record));
-        return m_records.size() - 1;
+        auto position = m_records.size() - 1;
+        m_recordPositionsByURL.ensure(WTF::move(url), [] {
+            return Vector<size_t> { };
+        }).iterator->value.append(position);
+        return position;
     }
 
     void addResponseBody(size_t position, FetchResponse& response, DOMCacheEngine::ResponseBody&& data)
@@ -229,6 +247,7 @@ private:
 
     const Ref<DOMCache> m_domCache;
     Vector<Record> m_records;
+    HashMap<String, Vector<size_t>> m_recordPositionsByURL;
     CompletionHandler<void(ExceptionOr<Vector<Record>>&&)> m_callback;
 };
 
@@ -323,12 +342,9 @@ void DOMCache::addAll(Vector<RequestInfo>&& infos, DOMPromiseDeferred<void>&& pr
                 return;
             }
 
-            CacheQueryOptions options;
-            for (const auto& record : taskHandler->records()) {
-                if (DOMCacheEngine::queryCacheMatch(request->resourceRequest(), record.request, record.response, options)) {
-                    taskHandler->error(Exception { ExceptionCode::InvalidStateError, "addAll cannot store several matching requests"_s });
-                    return;
-                }
+            if (taskHandler->hasMatchingRecord(request->resourceRequest())) {
+                taskHandler->error(Exception { ExceptionCode::InvalidStateError, "addAll cannot store several matching requests"_s });
+                return;
             }
             size_t recordPosition = taskHandler->addRecord(toConnectionRecord(request.get(), response, nullptr));
 
@@ -440,9 +456,13 @@ void DOMCache::remove(RequestInfo&& info, CacheQueryOptions&& options, DOMPromis
     if (!scriptExecutionContext()) [[unlikely]]
         return;
 
-    auto requestOrException = requestFromInfo(WTF::move(info), options.ignoreMethod);
+    bool requestValidationFailed = false;
+    auto requestOrException = requestFromInfo(WTF::move(info), options.ignoreMethod, &requestValidationFailed);
     if (requestOrException.hasException()) {
-        promise.resolve(false);
+        if (requestValidationFailed)
+            promise.resolve(false);
+        else
+            promise.reject(requestOrException.releaseException());
         return;
     }
 
@@ -466,9 +486,13 @@ void DOMCache::keys(std::optional<RequestInfo>&& info, CacheQueryOptions&& optio
 
     ResourceRequest resourceRequest;
     if (info) {
-        auto requestOrException = requestFromInfo(WTF::move(info.value()), options.ignoreMethod);
+        bool requestValidationFailed = false;
+        auto requestOrException = requestFromInfo(WTF::move(info.value()), options.ignoreMethod, &requestValidationFailed);
         if (requestOrException.hasException()) {
-            promise.resolve(Vector<Ref<FetchRequest>> { });
+            if (requestValidationFailed)
+                promise.resolve(Vector<Ref<FetchRequest>> { });
+            else
+                promise.reject(requestOrException.releaseException());
             return;
         }
         resourceRequest = requestOrException.releaseReturnValue()->resourceRequest();
@@ -497,7 +521,7 @@ void DOMCache::queryCache(ResourceRequest&& request, const CacheQueryOptions& op
         return;
     }
 
-    RetrieveRecordsOptions retrieveOptions { WTF::move(request), scriptExecutionContext()->crossOriginEmbedderPolicy(), *scriptExecutionContext()->securityOrigin(), options.ignoreSearch, options.ignoreMethod, options.ignoreVary, shouldRetrieveResponses == ShouldRetrieveResponses::Yes };
+    RetrieveRecordsOptions retrieveOptions { WTF::move(request), context->crossOriginEmbedderPolicy(), *context->securityOrigin(), options.ignoreSearch, options.ignoreMethod, options.ignoreVary, shouldRetrieveResponses == ShouldRetrieveResponses::Yes };
 
     context->enqueueTaskWhenSettled(m_connection->retrieveRecords(m_identifier, WTF::move(retrieveOptions)), TaskSource::DOMManipulation, [pendingActivity = makePendingActivity(*this), callback = WTF::move(callback)] (auto&& result) mutable {
         RefPtr scriptExecutionContext = pendingActivity->object().scriptExecutionContext();

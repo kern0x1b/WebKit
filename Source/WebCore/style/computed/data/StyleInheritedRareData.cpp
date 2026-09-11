@@ -40,6 +40,7 @@ InheritedRareData::InheritedRareData()
     , textStrokeColor(ComputedStyle::initialTextStrokeColor())
     , textFillColor(ComputedStyle::initialTextFillColor())
     , textEmphasisColor(ComputedStyle::initialTextEmphasisColor())
+    , colorForHighlight(Color::currentColor())
     , visitedLinkTextStrokeColor(ComputedStyle::initialTextStrokeColor())
     , visitedLinkTextFillColor(ComputedStyle::initialTextFillColor())
     , visitedLinkTextEmphasisColor(ComputedStyle::initialTextEmphasisColor())
@@ -73,9 +74,7 @@ InheritedRareData::InheritedRareData()
     , lineGrid(ComputedStyle::initialLineGrid())
     , tabSize(ComputedStyle::initialTabSize())
     , strokeMiterLimit(ComputedStyle::initialStrokeMiterLimit())
-#if ENABLE(TEXT_AUTOSIZING)
     , textSizeAdjust(ComputedStyle::initialTextSizeAdjust())
-#endif
     , mathDepth(ComputedStyle::initialMathDepth())
     , textBoxEdge(ComputedStyle::initialTextBoxEdge())
     , lineFitEdge(ComputedStyle::initialLineFitEdge())
@@ -91,7 +90,8 @@ InheritedRareData::InheritedRareData()
     , overflowWrap(static_cast<unsigned>(ComputedStyle::initialOverflowWrap()))
     , nbspMode(static_cast<unsigned>(NBSPMode::Normal))
     , lineBreak(static_cast<unsigned>(LineBreak::Auto))
-    , userSelect(static_cast<unsigned>(ComputedStyle::initialUserSelect()))
+    , webkitUserSelect(static_cast<unsigned>(ComputedStyle::initialWebkitUserSelect()))
+    , usedUserSelect(static_cast<unsigned>(UserSelect::Text))
     , speakAs(ComputedStyle::initialSpeakAs().toRaw())
     , hyphens(static_cast<unsigned>(Hyphens::Manual))
     , textCombine(static_cast<unsigned>(ComputedStyle::initialTextCombine()))
@@ -132,7 +132,6 @@ InheritedRareData::InheritedRareData()
     , autoRevealsWhenFound(false)
     , insideDefaultButton(false)
     , insideSubmitButton(false)
-    , evaluationTimeZoomEnabled(true)
 #if HAVE(CORE_MATERIAL)
     , usedAppleVisualEffectForSubtree(static_cast<unsigned>(AppleVisualEffect::None))
 #endif
@@ -147,6 +146,7 @@ inline InheritedRareData::InheritedRareData(const InheritedRareData& o)
     , textStrokeColor(o.textStrokeColor)
     , textFillColor(o.textFillColor)
     , textEmphasisColor(o.textEmphasisColor)
+    , colorForHighlight(o.colorForHighlight)
     , visitedLinkTextStrokeColor(o.visitedLinkTextStrokeColor)
     , visitedLinkTextFillColor(o.visitedLinkTextFillColor)
     , visitedLinkTextEmphasisColor(o.visitedLinkTextEmphasisColor)
@@ -180,9 +180,7 @@ inline InheritedRareData::InheritedRareData(const InheritedRareData& o)
     , lineGrid(o.lineGrid)
     , tabSize(o.tabSize)
     , strokeMiterLimit(o.strokeMiterLimit)
-#if ENABLE(TEXT_AUTOSIZING)
     , textSizeAdjust(o.textSizeAdjust)
-#endif
     , mathDepth(o.mathDepth)
     , textBoxEdge(o.textBoxEdge)
     , lineFitEdge(o.lineFitEdge)
@@ -198,7 +196,8 @@ inline InheritedRareData::InheritedRareData(const InheritedRareData& o)
     , overflowWrap(o.overflowWrap)
     , nbspMode(o.nbspMode)
     , lineBreak(o.lineBreak)
-    , userSelect(o.userSelect)
+    , webkitUserSelect(o.webkitUserSelect)
+    , usedUserSelect(o.usedUserSelect)
     , speakAs(o.speakAs)
     , hyphens(o.hyphens)
     , textCombine(o.textCombine)
@@ -239,7 +238,6 @@ inline InheritedRareData::InheritedRareData(const InheritedRareData& o)
     , autoRevealsWhenFound(o.autoRevealsWhenFound)
     , insideDefaultButton(o.insideDefaultButton)
     , insideSubmitButton(o.insideSubmitButton)
-    , evaluationTimeZoomEnabled(o.evaluationTimeZoomEnabled)
 #if HAVE(CORE_MATERIAL)
     , usedAppleVisualEffectForSubtree(o.usedAppleVisualEffectForSubtree)
 #endif
@@ -341,6 +339,7 @@ bool InheritedRareData::operator==(const InheritedRareData& o) const
         && textStrokeColor == o.textStrokeColor
         && textFillColor == o.textFillColor
         && textEmphasisColor == o.textEmphasisColor
+        && colorForHighlight == o.colorForHighlight
         && visitedLinkTextStrokeColor == o.visitedLinkTextStrokeColor
         && visitedLinkTextFillColor == o.visitedLinkTextFillColor
         && visitedLinkTextEmphasisColor == o.visitedLinkTextEmphasisColor
@@ -356,12 +355,47 @@ bool InheritedRareData::operator==(const InheritedRareData& o) const
         && textShadow == o.textShadow
         && cursorImages == o.cursorImages
         && textEmphasisStyle == o.textEmphasisStyle
+        && textIndent == o.textIndent
+        && textUnderlineOffset == o.textUnderlineOffset
+        && textBoxEdge == o.textBoxEdge
+        && lineFitEdge == o.lineFitEdge
+        && strokeMiterLimit == o.strokeMiterLimit
+        && widows == o.widows
+        && orphans == o.orphans
+        && textSecurity == o.textSecurity
+        && userModify == o.userModify
+        && wordBreak == o.wordBreak
+        && overflowWrap == o.overflowWrap
+        && nbspMode == o.nbspMode
+        && lineBreak == o.lineBreak
+#if ENABLE(WEBKIT_OVERFLOW_SCROLLING_CSS_PROPERTY)
+        && overflowScrolling == o.overflowScrolling
+#endif
+        && textSizeAdjust == o.textSizeAdjust
+        && webkitUserSelect == o.webkitUserSelect
+        && usedUserSelect == o.usedUserSelect
+        && speakAs == o.speakAs
+        && hyphens == o.hyphens
+        && hyphenateLimitBefore == o.hyphenateLimitBefore
+        && hyphenateLimitAfter == o.hyphenateLimitAfter
+        && hyphenateLimitLines == o.hyphenateLimitLines
+#if ENABLE(DARK_MODE_CSS)
+        && colorScheme == o.colorScheme
+#endif
+        && textCombine == o.textCombine
+        && textEmphasisPosition == o.textEmphasisPosition
+        && lineBoxContain == o.lineBoxContain
+#if ENABLE(WEBKIT_TOUCH_CALLOUT_CSS_PROPERTY)
+        && touchCallout == o.touchCallout
+#endif
+        && hyphenateCharacter == o.hyphenateCharacter
         && quotes == o.quotes
         && hyphenateCharacter == o.hyphenateCharacter
         && lineGrid == o.lineGrid
         && listStyleImage == o.listStyleImage
         && listStyleType == o.listStyleType
-        && blockEllipsis == o.blockEllipsis;
+        && blockEllipsis == o.blockEllipsis
+        && mathDepth == o.mathDepth;
 }
 
 #if !LOG_DISABLED
@@ -379,6 +413,7 @@ void InheritedRareData::dumpDifferences(TextStream& ts, const InheritedRareData&
     LOG_IF_DIFFERENT(textStrokeColor);
     LOG_IF_DIFFERENT(textFillColor);
     LOG_IF_DIFFERENT(textEmphasisColor);
+    LOG_IF_DIFFERENT(colorForHighlight);
 
     LOG_IF_DIFFERENT(visitedLinkTextStrokeColor);
     LOG_IF_DIFFERENT(visitedLinkTextFillColor);
@@ -416,7 +451,8 @@ void InheritedRareData::dumpDifferences(TextStream& ts, const InheritedRareData&
     LOG_IF_DIFFERENT_WITH_CAST(OverflowWrap, overflowWrap);
     LOG_IF_DIFFERENT_WITH_CAST(NBSPMode, nbspMode);
     LOG_IF_DIFFERENT_WITH_CAST(LineBreak, lineBreak);
-    LOG_IF_DIFFERENT_WITH_CAST(UserSelect, userSelect);
+    LOG_IF_DIFFERENT_WITH_CAST(UserSelect, webkitUserSelect);
+    LOG_IF_DIFFERENT_WITH_CAST(UserSelect, usedUserSelect);
 
     LOG_IF_DIFFERENT_WITH_FROM_RAW(SpeakAs, speakAs);
 
@@ -502,17 +538,14 @@ void InheritedRareData::dumpDifferences(TextStream& ts, const InheritedRareData&
     LOG_IF_DIFFERENT(lineGrid);
     LOG_IF_DIFFERENT(tabSize);
 
-#if ENABLE(TEXT_AUTOSIZING)
     LOG_IF_DIFFERENT(textSizeAdjust);
-#endif
+
 #if ENABLE(CSS_TAP_HIGHLIGHT_COLOR)
     LOG_IF_DIFFERENT(tapHighlightColor);
 #endif
 
     LOG_IF_DIFFERENT(listStyleType);
     LOG_IF_DIFFERENT(blockEllipsis);
-
-    LOG_IF_DIFFERENT(evaluationTimeZoomEnabled);
 
     LOG_IF_DIFFERENT(mathDepth);
 }

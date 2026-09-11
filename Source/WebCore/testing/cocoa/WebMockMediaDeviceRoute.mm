@@ -49,6 +49,7 @@ NSErrorDomain const WebMockMediaDeviceRouteErrorDomain = @"WebMockMediaDeviceRou
     RefPtr<WebCore::MockMediaDeviceRouteURLCallback> _urlCallback;
     RefPtr<WebCore::DOMPromise> _urlPromise;
     BOOL _connected;
+    CMTime _lastSeekTolerance;
 }
 
 @synthesize timeRange;
@@ -78,8 +79,25 @@ NSErrorDomain const WebMockMediaDeviceRouteErrorDomain = @"WebMockMediaDeviceRou
 @synthesize routeDisplayName;
 @synthesize protocolType;
 
+- (instancetype)init
+{
+    if (!(self = [super init]))
+        return nil;
+
+    timeRange = CMTimeRangeMake(kCMTimeZero, CMTimeMakeWithSeconds(60, 1000));
+    _lastSeekTolerance = kCMTimeInvalid;
+
+    return self;
+}
+
+- (CMTime)lastSeekTolerance
+{
+    return _lastSeekTolerance;
+}
+
 - (void)seekToPosition:(CMTime)position tolerance:(CMTime)tolerance
 {
+    _lastSeekTolerance = tolerance;
     RetainPtr playbackPosition = adoptNS([allocAVPlaybackUserInterfacePlaybackPositionInstance() initWithPosition:position hostTime:CMClockGetTime(CMClockGetHostTimeClock()) rate:0]);
     self.playbackPosition = playbackPosition.get();
 }
@@ -99,7 +117,7 @@ NSErrorDomain const WebMockMediaDeviceRouteErrorDomain = @"WebMockMediaDeviceRou
     _urlCallback = urlCallback;
 }
 
-- (void)startWithURL:(NSURL *)url completionHandler:(void (^)(NSError * _Nullable, NSObject<AVPlaybackControl> * _Nullable))completionHandler
+- (void)startWithURL:(NSURL *)url completionHandler:(void (^)(NSError * _Nullable, NSObject<AVPlaybackUserInterfaceControllable> * _Nullable))completionHandler
 {
     if (!_urlCallback)
         return completionHandler([NSError errorWithDomain:WebMockMediaDeviceRouteErrorDomain code:WebMockMediaDeviceRouteErrorCodeInvalidState userInfo:nil], nil);

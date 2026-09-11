@@ -74,6 +74,10 @@ static std::optional<Vector<uint8_t>> cryptEncrypt(const Vector<uint8_t>& key, c
     if (1 != EVP_CIPHER_CTX_set_padding(ctx.get(), 0))
         return std::nullopt;
 
+    // Disable padding
+    if (1 != EVP_CIPHER_CTX_set_padding(ctx.get(), 0))
+        return std::nullopt;
+
     // Set IV length
     if (1 != EVP_CIPHER_CTX_ctrl(ctx.get(), EVP_CTRL_GCM_SET_IVLEN, iv.size(), nullptr))
         return std::nullopt;
@@ -129,6 +133,10 @@ static std::optional<Vector<uint8_t>> cryptDecrypt(const Vector<uint8_t>& key, c
     // Disable padding. This has to follow the call above: the context has no
     // cipher before it, and OpenSSL 3.0 refuses the request outright instead of
     // remembering it, which failed every AES-GCM operation.
+    if (1 != EVP_CIPHER_CTX_set_padding(ctx.get(), 0))
+        return std::nullopt;
+
+    // Disable padding
     if (1 != EVP_CIPHER_CTX_set_padding(ctx.get(), 0))
         return std::nullopt;
 

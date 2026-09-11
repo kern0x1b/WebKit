@@ -2,6 +2,7 @@
  * Copyright (C) 2007-2020 Apple Inc. All rights reserved.
  * Copyright (C) 2007 Justin Haygood <jhaygood@reaktix.com>
  * Copyright (C) 2017 Yusuke Suzuki <utatane.tea@gmail.com>
+ * Copyright (C) 2026 Igalia S.L.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -35,7 +36,6 @@
 #include <stdint.h>
 #include <wtf/Atomics.h>
 #include <wtf/Compiler.h>
-#include <wtf/Expected.h>
 #include <wtf/FastTLS.h>
 #include <wtf/Function.h>
 #include <wtf/HashMap.h>
@@ -86,6 +86,8 @@ class PrintStream;
 
 WTF_EXPORT_PRIVATE void initialize();
 
+WTF_EXPORT_PRIVATE bool processIsShuttingDown();
+
 class ThreadSuspendLocker {
     WTF_MAKE_NONCOPYABLE(ThreadSuspendLocker);
 public:
@@ -97,6 +99,9 @@ class WTF_CAPABILITY("is current") Thread : public ThreadSafeRefCountedAndCanMak
 public:
     friend class ThreadGroup;
     friend WTF_EXPORT_PRIVATE void initialize();
+#if OS(LINUX)
+    friend class HighPriorityThreads;
+#endif
 
     class ClientData : public ThreadSafeRefCounted<ClientData> {
     public:
@@ -118,11 +123,10 @@ public:
 
     using QOS = ThreadQOS;
     using SchedulingPolicy = ThreadSchedulingPolicy;
+    using SchedulingState = ThreadSchedulingState;
 
-    // These are not necessarily the system defaults, but they are what WebKit
-    // chooses to be the default for newly created WTF::Threads
-    static constexpr QOS defaultQOS = QOS::UserInitiated;
-    static constexpr SchedulingPolicy defaultSchedulingPolicy = SchedulingPolicy::Other;
+    static constexpr QOS defaultQOS = defaultThreadQOS;
+    static constexpr SchedulingPolicy defaultSchedulingPolicy = defaultThreadSchedulingPolicy;
 
 #if HAVE(QOS_CLASSES)
     static dispatch_qos_class_t dispatchQOSClass(QOS);
@@ -183,9 +187,15 @@ public:
     using PlatformSuspendError = DWORD;
 #endif
 
-    WTF_EXPORT_PRIVATE Expected<void, PlatformSuspendError> suspend(const ThreadSuspendLocker&);
+    WTF_EXPORT_PRIVATE std::expected<void, PlatformSuspendError> suspend(const ThreadSuspendLocker&);
     WTF_EXPORT_PRIVATE void resume(const ThreadSuspendLocker&);
     WTF_EXPORT_PRIVATE size_t getRegisters(const ThreadSuspendLocker&, PlatformRegisters&);
+
+    // Forces this thread through a context-synchronizing event so it re-fetches instructions that
+    // were modified by another thread (the caller must have already flushed the modified code from
+    // the instruction cache). This does not read or modify the thread's state; it only publishes the
+    // change to it.
+    WTF_EXPORT_PRIVATE void barrierInstructionCache();
 
 #if USE(PTHREADS)
 #if OS(LINUX)
@@ -201,7 +211,9 @@ public:
     WTF_EXPORT_PRIVATE static void setCurrentThreadIsUserInitiated(int relativePriority = 0);
     WTF_EXPORT_PRIVATE static QOS currentThreadQOS();
     WTF_EXPORT_PRIVATE static bool currentThreadIsRealtime();
-    bool isRealtime() const { return m_isRealtime; }
+    bool isRealtime() const { return m_schedulingPolicy == SchedulingPolicy::Realtime; }
+
+    QOS qos() const { return m_qos; }
 
 #if HAVE(QOS_CLASSES)
     WTF_EXPORT_PRIVATE static void setGlobalMaxQOSClass(qos_class_t);
@@ -217,7 +229,7 @@ public:
     // Helpful for platforms where the thread name must be set from within the thread.
     static void initializeCurrentThreadInternal(const char* threadName);
     static void NODELETE initializeCurrentThreadEvenIfNonWTFCreated();
-    
+
     WTF_EXPORT_PRIVATE static void yield();
 
     WTF_EXPORT_PRIVATE static bool exchangeIsCompilationThread(bool newValue);
@@ -293,11 +305,19 @@ public:
     static Thread* currentMayBeNull();
 #endif
 
+private:
+    void updateSchedulingAttributes(SchedulingState) const;
+    // updateSchedulingAttributes for the first time + initialization bookkeeping
+    void initializeSchedulingAttributes();
+
+    static void setCurrentThreadQOS(QOS);
+
 protected:
     enum class IsMain : uint8_t { No, Yes, Unknown };
 
-    explicit Thread(SchedulingPolicy schedulingPolicy, IsMain isMain = IsMain::Unknown)
-        : m_isRealtime(schedulingPolicy == SchedulingPolicy::Realtime)
+    explicit Thread(QOS qos, SchedulingPolicy schedulingPolicy, IsMain isMain = IsMain::Unknown)
+        : m_qos(qos)
+        , m_schedulingPolicy(schedulingPolicy)
         , m_uid(isMain == IsMain::Yes ? 1 : ++s_uid)
     {
     }
@@ -374,7 +394,8 @@ protected:
     bool m_isJSThread : 1 { false };
     unsigned m_gcThreadType : 2 { static_cast<unsigned>(GCThreadType::None) };
 
-    bool m_isRealtime : 1 { false };
+    QOS m_qos { defaultQOS };
+    SchedulingPolicy m_schedulingPolicy { SchedulingPolicy::Other };
 
     // Lock & ParkingLot rely on ThreadSpecific. But Thread object can be destroyed even after ThreadSpecific things are destroyed.
     // Use WordLock since WordLock does not depend on ThreadSpecific and this "Thread".

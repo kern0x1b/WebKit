@@ -307,16 +307,9 @@ static void testWebKitSettings(Test*, gconstpointer)
     webkit_settings_set_enable_media_stream(settings, FALSE);
     g_assert_false(webkit_settings_get_enable_media_stream(settings));
 
-    // WebRTC is only enabled by default when using the GStreamer-based implementation
-#if USE(GSTREAMER_WEBRTC)
     g_assert_true(webkit_settings_get_enable_webrtc(settings));
     webkit_settings_set_enable_webrtc(settings, FALSE);
     g_assert_false(webkit_settings_get_enable_webrtc(settings));
-#else
-    g_assert_false(webkit_settings_get_enable_webrtc(settings));
-    webkit_settings_set_enable_webrtc(settings, TRUE);
-    g_assert_true(webkit_settings_get_enable_webrtc(settings));
-#endif
 
     // By default, SpatialNavigation is disabled
     g_assert_false(webkit_settings_get_enable_spatial_navigation(settings));
@@ -551,11 +544,7 @@ void testWebKitSettingsApplyFromConfigFile(Test* test, gconstpointer)
 
     // Check default values of settings, before applying key_file settings.
     g_assert_true(webkit_settings_get_enable_webaudio(settings.get()));
-#if USE(GSTREAMER_WEBRTC)
     g_assert_true(webkit_settings_get_enable_webrtc(settings.get()));
-#else
-    g_assert_false(webkit_settings_get_enable_webrtc(settings.get()));
-#endif
     CString defaultUserAgent = webkit_settings_get_user_agent(settings.get());
 
     // Loading settings from a file that contains an unknown setting should raise an error.
@@ -571,7 +560,7 @@ void testWebKitSettingsApplyFromConfigFile(Test* test, gconstpointer)
     g_assert_error(error.get(), G_KEY_FILE_ERROR, G_KEY_FILE_ERROR_INVALID_VALUE);
 
     // Overflowing uint settings should raise an error.
-    g_key_file_load_from_data(key_file.get(), bigIntNotSupported.utf8().data(), bigIntNotSupported.length(), G_KEY_FILE_NONE, &error.outPtr());
+    g_key_file_load_from_data(key_file.get(), bigIntNotSupported.utf8().legacyCStringPointer(), bigIntNotSupported.length(), G_KEY_FILE_NONE, &error.outPtr());
     g_assert_no_error(error.get());
     g_assert_false(webkit_settings_apply_from_key_file(settings.get(), key_file.get(), "websettings", &error.outPtr()));
     g_assert_error(error.get(), G_KEY_FILE_ERROR, G_KEY_FILE_ERROR_INVALID_VALUE);

@@ -557,8 +557,8 @@ static inline WebKit::WebExtensionContext::PermissionState NODELETE toImpl(WKWeb
     Ref { *_webExtensionContext }->loadBackgroundContent([capturedBlock = makeBlockPtr(completionHandler)](RefPtr<API::Error> error) {
         if (error)
             capturedBlock(wrapper(error));
-
-        capturedBlock(nil);
+        else
+            capturedBlock(nil);
     });
 }
 
@@ -879,13 +879,24 @@ static inline OptionSet<WebKit::WebExtensionTab::ChangedProperties> NODELETE toI
     protect(*_webExtensionContext)->sendTestFinished(argument);
 }
 
+- (void)_reloadBackgroundContentForTesting
+{
+    protect(*_webExtensionContext)->reloadBackgroundContentForTesting();
+}
+
 #if ENABLE(WK_WEB_EXTENSIONS_SIDEBAR)
 - (_WKWebExtensionSidebar *)sidebarForTab:(id<WKWebExtensionTab>)tab
 {
     Ref extensionContext { *_webExtensionContext };
-    if (RefPtr maybeSidebar = extensionContext->getOrCreateSidebar(toImplNullable(tab, extensionContext.get())))
-        return maybeSidebar->wrapper();
-    return nil;
+    RefPtr implTab = toImplNullable(tab, extensionContext.get());
+    if (!implTab)
+        return nil;
+
+    auto sidebar = extensionContext->sidebarForTab(*implTab);
+    if (!sidebar || !sidebar.value()->opensSidebar())
+        return nil;
+
+    return sidebar.value()->wrapper();
 }
 #else
 - (_WKWebExtensionSidebar *)sidebarForTab:(id<WKWebExtensionTab>)tab
@@ -1303,6 +1314,10 @@ static inline OptionSet<WebKit::WebExtensionTab::ChangedProperties> NODELETE toI
 }
 
 - (void)_sendTestFinishedWithArgument:(id)argument
+{
+}
+
+- (void)_reloadBackgroundContentForTesting
 {
 }
 

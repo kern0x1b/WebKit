@@ -285,112 +285,62 @@ public:
             ++pos;
         }
 
-        void NODELETE rewind(unsigned amount)
+        unsigned NODELETE characterIndex(MatchDirection direction, unsigned negativePositionOffset)
         {
-            ASSERT(pos >= amount);
-            pos -= amount;
+            unsigned position = positionAt(direction, negativePositionOffset);
+            if (direction == Forward)
+                return position;
+            ASSERT(position);
+            return position - 1;
         }
 
-        char32_t NODELETE read()
+        char32_t NODELETE readChecked(MatchDirection direction, unsigned negativePositionOffset)
         {
-            ASSERT(pos < length);
-            if (pos < length)
-                return input[pos];
-            return errorCodePoint;
+            auto result = readCheckedDontAdvance(direction, negativePositionOffset);
+            if (result == errorCodePoint || U_IS_BMP(result))
+                return result;
+            if (!checkInput(direction, 1))
+                return errorCodePoint;
+            return result;
         }
 
-        char32_t NODELETE readChecked(unsigned negativePositionOffest)
+        char32_t NODELETE readCheckedDontAdvance(MatchDirection direction, unsigned negativePositionOffset)
         {
-            RELEASE_ASSERT(pos >= negativePositionOffest);
-            unsigned p = pos - negativePositionOffest;
-            ASSERT(p < length);
-            auto result = input[p];
-            if (U16_IS_LEAD(result) && decodeSurrogatePairs && p + 1 < length && U16_IS_TRAIL(input[p + 1])) {
-                if (atEnd())
+            return readCodePoint(direction, characterIndex(direction, negativePositionOffset));
+        }
+
+        char32_t NODELETE readSurrogatePairChecked(MatchDirection direction, unsigned negativePositionOffset)
+        {
+            ASSERT(decodeSurrogatePairs);
+            auto result = readCheckedDontAdvance(direction, negativePositionOffset);
+            return U_IS_BMP(result) ? errorCodePoint : result;
+        }
+
+        char32_t NODELETE readCodePoint(MatchDirection direction, unsigned index)
+        {
+            ASSERT(index < length);
+            auto result = input[index];
+            if (!decodeSurrogatePairs)
+                return result;
+            bool leadsPair = U16_IS_LEAD(result) && index + 1 < length && U16_IS_TRAIL(input[index + 1]);
+            bool trailsPair = U16_IS_TRAIL(result) && index > 0 && U16_IS_LEAD(input[index - 1]);
+            if (direction == Forward) {
+                if (leadsPair)
+                    return U16_GET_SUPPLEMENTARY(result, input[index + 1]);
+                if (trailsPair)
                     return errorCodePoint;
-                next();
-                return U16_GET_SUPPLEMENTARY(result, input[p + 1]);
-            } else if (decodeSurrogatePairs && p > 0 && U16_IS_TRAIL(result) && U16_IS_LEAD(input[p - 1]))
-                return errorCodePoint;
-            return result;
-        }
-
-        char32_t NODELETE readCheckedDontAdvance(unsigned negativePositionOffest)
-        {
-            RELEASE_ASSERT(pos >= negativePositionOffest);
-            unsigned p = pos - negativePositionOffest;
-            ASSERT(p < length);
-            auto result = input[p];
-            if (U16_IS_LEAD(result) && decodeSurrogatePairs && p + 1 < length && U16_IS_TRAIL(input[p + 1]))
-                return U16_GET_SUPPLEMENTARY(result, input[p + 1]);
-            if (U16_IS_TRAIL(result) && decodeSurrogatePairs && p > 0 && U16_IS_LEAD(input[p - 1]))
-                return errorCodePoint;
-            return result;
-        }
-
-        // readForCharacterDump() is only for use by the DUMP_CURR_CHAR macro.
-        // We don't want any side effects like the next() in readChecked() above.
-        char32_t NODELETE readForCharacterDump(unsigned negativePositionOffest)
-        {
-            RELEASE_ASSERT(pos >= negativePositionOffest);
-            unsigned p = pos - negativePositionOffest;
-            ASSERT(p < length);
-            auto result = input[p];
-            if (U16_IS_LEAD(result) && decodeSurrogatePairs && p + 1 < length && U16_IS_TRAIL(input[p + 1])) {
-                if (atEnd())
-                    return errorCodePoint;
-                return U16_GET_SUPPLEMENTARY(result, input[p + 1]);
+                return result;
             }
-            return result;
-        }
-        
-        char32_t NODELETE tryReadBackward(unsigned negativePositionOffest)
-        {
-            if (pos < negativePositionOffest)
+            if (trailsPair)
+                return U16_GET_SUPPLEMENTARY(input[index - 1], result);
+            if (leadsPair)
                 return errorCodePoint;
-            unsigned p = pos - negativePositionOffest;
-            ASSERT(p < length);
-            auto result = input[p];
-            if (U16_IS_TRAIL(result) && decodeSurrogatePairs && p > 0 && U16_IS_LEAD(input[p - 1])) {
-                rewind(1);
-                return U16_GET_SUPPLEMENTARY(input[p - 1], result);
-            }
             return result;
-        }
-
-        char32_t NODELETE readSurrogatePairChecked(unsigned negativePositionOffset)
-        {
-            RELEASE_ASSERT(pos >= negativePositionOffset);
-            unsigned p = pos - negativePositionOffset;
-            ASSERT(p < length);
-            if (p + 1 >= length)
-                return errorCodePoint;
-            auto first = input[p];
-            auto second = input[p + 1];
-            if (U16_IS_LEAD(first) && U16_IS_TRAIL(second))
-                return U16_GET_SUPPLEMENTARY(first, second);
-            return errorCodePoint;
         }
 
         char32_t NODELETE reread(unsigned from)
         {
-            ASSERT(from < length);
-            auto result = input[from];
-            if (decodeSurrogatePairs) {
-                if (U16_IS_LEAD(result) && from + 1 < length && U16_IS_TRAIL(input[from + 1]))
-                    return U16_GET_SUPPLEMENTARY(result, input[from + 1]);
-                if (U16_IS_TRAIL(result) && from > 0 && U16_IS_LEAD(input[from - 1]))
-                    return errorCodePoint;
-            }
-            return result;
-        }
-
-        char32_t prev()
-        {
-            ASSERT(!(pos > length));
-            if (pos && length)
-                return input[pos - 1];
-            return errorCodePoint;
+            return readCodePoint(Forward, from);
         }
 
         unsigned NODELETE getPos()
@@ -403,11 +353,6 @@ public:
             pos = p;
         }
 
-        bool atStart()
-        {
-            return pos == 0;
-        }
-
         bool NODELETE atEnd()
         {
             return pos == length;
@@ -418,38 +363,55 @@ public:
             return length;
         }
 
-        bool NODELETE checkInput(unsigned count)
+        static unsigned NODELETE positionAt(MatchDirection direction, unsigned position, unsigned negativePositionOffset)
         {
-            if (((pos + count) <= length) && ((pos + count) >= pos)) {
-                pos += count;
+            return direction == Forward ? position - negativePositionOffset : position + negativePositionOffset;
+        }
+
+        unsigned NODELETE positionAt(MatchDirection direction, unsigned negativePositionOffset)
+        {
+            if (direction == Forward)
+                RELEASE_ASSERT(pos >= negativePositionOffset);
+            else
+                RELEASE_ASSERT(negativePositionOffset <= length - pos);
+            return positionAt(direction, pos, negativePositionOffset);
+        }
+
+        bool NODELETE checkInput(MatchDirection direction, unsigned count)
+        {
+            if (direction == Forward) {
+                if (((pos + count) <= length) && ((pos + count) >= pos)) {
+                    pos += count;
+                    return true;
+                }
+                return false;
+            }
+            if (pos >= count) {
+                pos -= count;
                 return true;
             }
             return false;
         }
 
-        void NODELETE uncheckInput(unsigned count)
+        void NODELETE uncheckInput(MatchDirection direction, unsigned count)
         {
-            RELEASE_ASSERT(pos >= count);
-            pos -= count;
+            if (direction == Forward) {
+                RELEASE_ASSERT(pos >= count);
+                pos -= count;
+                return;
+            }
+            RELEASE_ASSERT(count <= length - pos);
+            pos += count;
         }
 
-        bool NODELETE tryUncheckInput(unsigned count)
+        template<MatchDirection direction>
+        ALWAYS_INLINE void NODELETE uncheckCodePoint(unsigned negativePositionOffset)
         {
-            if (count > pos)
-                return false;
-            pos -= count;
-            return true;
-        }
-
-        bool NODELETE atStart(unsigned negativePositionOffset)
-        {
-            return pos == negativePositionOffset;
-        }
-
-        bool NODELETE atEnd(unsigned negativePositionOffest)
-        {
-            RELEASE_ASSERT(pos >= negativePositionOffest);
-            return (pos - negativePositionOffest) == length;
+            uncheckInput(direction, 1);
+            if (!decodeSurrogatePairs)
+                return;
+            if (!U_IS_BMP(readCodePoint(direction == Forward ? Backward : Forward, characterIndex(direction, negativePositionOffset))))
+                uncheckInput(direction, 1);
         }
 
         bool NODELETE isAvailableInput(unsigned offset)
@@ -457,9 +419,11 @@ public:
             return (((pos + offset) <= length) && ((pos + offset) >= pos));
         }
 
-        bool NODELETE isValidNegativeInputOffset(unsigned offset)
+        bool NODELETE isValidNegativeInputOffset(MatchDirection direction, unsigned offset)
         {
-            return (pos >= offset) && ((pos - offset) < length);
+            if (direction == Forward)
+                return (pos >= offset) && ((pos - offset) < length);
+            return offset <= length - pos && pos + offset;
         }
 
         void dump(PrintStream& out) const
@@ -482,7 +446,7 @@ public:
         bool decodeSurrogatePairs;
     };
 
-    bool testCharacterClass(CharacterClass* characterClass, char32_t ch)
+    bool testCharacterClass(const CharacterClass* characterClass, char32_t ch)
     {
         auto linearSearchMatches = [ch](const Vector<char32_t>& matches) {
             for (unsigned i = 0; i < matches.size(); ++i) {
@@ -578,148 +542,201 @@ public:
         return false;
     }
 
-    bool NODELETE checkCharacter(ByteTerm& term, unsigned negativeInputOffset)
+    template<MatchDirection direction>
+    ALWAYS_INLINE bool NODELETE checkCharacter(ByteTerm& term, unsigned negativeInputOffset)
     {
         ASSERT(term.isCharacterType());
-        if (term.matchDirection() == Forward)
-            return term.atom.patternCharacter == static_cast<char32_t>(input.readChecked(negativeInputOffset));
-
-        return term.atom.patternCharacter == static_cast<char32_t>(input.tryReadBackward(negativeInputOffset));
+        return term.atom.patternCharacter == input.readChecked(direction, negativeInputOffset);
     }
 
-    bool NODELETE checkSurrogatePair(ByteTerm& term, unsigned negativeInputOffset)
+    template<MatchDirection direction>
+    ALWAYS_INLINE bool NODELETE checkSurrogatePair(ByteTerm& term, unsigned negativeInputOffset)
     {
         ASSERT(term.isCharacterType());
-        return term.atom.patternCharacter == static_cast<char32_t>(input.readSurrogatePairChecked(negativeInputOffset));
+        return term.atom.patternCharacter == input.readSurrogatePairChecked(direction, negativeInputOffset);
     }
 
-    bool NODELETE checkCasedCharacter(ByteTerm& term, unsigned negativeInputOffset)
+    template<MatchDirection direction>
+    ALWAYS_INLINE bool NODELETE checkCasedCharacter(ByteTerm& term, unsigned negativeInputOffset)
     {
         ASSERT(term.isCasedCharacterType());
-        char32_t ch = term.matchDirection() == Forward ? input.readChecked(negativeInputOffset) : input.tryReadBackward(negativeInputOffset);
+        char32_t ch = input.readChecked(direction, negativeInputOffset);
         return (term.atom.casedCharacter.lo == ch) || (term.atom.casedCharacter.hi == ch);
     }
 
+    template<MatchDirection direction>
     bool checkCharacterClass(ByteTerm& term, unsigned negativeInputOffset)
     {
         ASSERT(term.isCharacterClass());
 
-        auto inputChar = term.matchDirection() == Forward ? input.readChecked(negativeInputOffset) : input.tryReadBackward(negativeInputOffset);
+        auto inputChar = input.readChecked(direction, negativeInputOffset);
         if (inputChar == errorCodePoint)
             return false;
 
-        bool match = testCharacterClass(term.atom.characterClass, static_cast<char32_t>(inputChar));
+        bool match = testCharacterClass(term.atom.characterClass, inputChar);
         return term.invert() ? !match : match;
     }
     
+    template<MatchDirection direction>
     bool checkCharacterClassDontAdvanceInputForNonBMP(ByteTerm& term, unsigned negativeInputOffset)
     {
         ASSERT(term.isCharacterClass());
-        CharacterClass* characterClass = term.atom.characterClass;
+        const CharacterClass* characterClass = term.atom.characterClass;
 
-        if (term.matchDirection() == Backward && negativeInputOffset > input.getPos())
-            return false;
-
-        auto readCharacter = characterClass->hasOnlyNonBMPCharacters() ? input.readSurrogatePairChecked(negativeInputOffset) :  input.readChecked(negativeInputOffset);
+        auto readCharacter = characterClass->hasOnlyNonBMPCharacters() ? input.readSurrogatePairChecked(direction, negativeInputOffset) : input.readChecked(direction, negativeInputOffset);
 
         if (readCharacter == errorCodePoint)
             return false;
 
-        return testCharacterClass(characterClass, static_cast<char32_t>(readCharacter));
+        return testCharacterClass(characterClass, readCharacter);
     }
 
+    template<MatchDirection direction>
     bool NODELETE tryConsumeBackReference(int matchBegin, int matchEnd, ByteTerm& term)
     {
         unsigned matchSize = (unsigned)(matchEnd - matchBegin);
 
-        if (term.matchDirection() == Forward) {
-            if (!input.checkInput(matchSize))
-                return false;
-        }
-
-        unsigned savedPos = input.getPos();
+        if (!input.checkInput(direction, matchSize))
+            return false;
 
         for (unsigned i = 0; i < matchSize; ++i) {
             unsigned negativeInputOffset = term.inputPosition + matchSize - i;
-            if (term.matchDirection() == Backward && negativeInputOffset > input.getPos()) {
-                input.setPos(savedPos);
-                return false;
-            }
-
-            char32_t oldCh = input.reread(matchBegin + i);
+            char32_t oldCh = input.readCodePoint(direction, direction == Forward ? matchBegin + i : matchEnd - 1 - i);
             char32_t ch;
             if (!U_IS_BMP(oldCh)) {
-                ch = input.readSurrogatePairChecked(negativeInputOffset);
+                ch = input.readSurrogatePairChecked(direction, negativeInputOffset);
                 ++i;
             } else
-                ch = term.matchDirection() == Forward ? input.readCheckedDontAdvance(negativeInputOffset) : input.tryReadBackward(negativeInputOffset);
+                ch = input.readCheckedDontAdvance(direction, negativeInputOffset);
 
-            if (oldCh == errorCodePoint || ch == errorCodePoint) {
-                if (term.matchDirection() == Backward)
-                    input.setPos(savedPos);
-                return false;
-            }
-
-            if (oldCh == ch)
-                continue;
-
-            if (term.ignoreCase()) {
-                // See ES 6.0, 21.2.2.8.2 for the definition of Canonicalize(). For non-Unicode
-                // patterns, Unicode values are never allowed to match against ASCII ones.
-                // For Unicode, we need to check all canonical equivalents of a character.
-                if (isLegacyCompilation() && (isASCII(oldCh) || isASCII(ch))) {
-                    if (toASCIIUpper(oldCh) == toASCIIUpper(ch))
-                        continue;
-                } else if (areCanonicallyEquivalent(oldCh, ch, isEitherUnicodeCompilation() ? CanonicalMode::Unicode : CanonicalMode::UCS2))
+            if (oldCh != errorCodePoint && ch != errorCodePoint) {
+                if (oldCh == ch)
                     continue;
+
+                if (term.ignoreCase()) {
+                    // See ES 6.0, 21.2.2.8.2 for the definition of Canonicalize(). For non-Unicode
+                    // patterns, Unicode values are never allowed to match against ASCII ones.
+                    // For Unicode, we need to check all canonical equivalents of a character.
+                    if (isLegacyCompilation() && (isASCII(oldCh) || isASCII(ch))) {
+                        if (toASCIIUpper(oldCh) == toASCIIUpper(ch))
+                            continue;
+                    } else if (areCanonicallyEquivalent(oldCh, ch, isEitherUnicodeCompilation() ? CanonicalMode::Unicode : CanonicalMode::UCS2))
+                        continue;
+                }
             }
 
-            if (term.matchDirection() == Forward)
-                input.uncheckInput(matchSize);
-            else
-                input.setPos(savedPos);
-
+            input.uncheckInput(direction, matchSize);
             return false;
         }
-
-        if (term.matchDirection() == Backward)
-            input.uncheckInput(matchSize);
 
         return true;
     }
 
     bool matchAssertionBOL(ByteTerm& term)
     {
-        return (input.atStart(term.inputPosition)) || (term.multiline() && testCharacterClass(pattern->newlineCharacterClass, input.readCheckedDontAdvance(term.inputPosition + 1)));
+        unsigned position = input.positionAt(term.matchDirection(), term.inputPosition);
+        return !position || (term.multiline() && testCharacterClass(pattern->newlineCharacterClass, input.readCodePoint(Backward, position - 1)));
     }
 
     bool matchAssertionEOL(ByteTerm& term)
     {
-        if (term.inputPosition)
-            return (input.atEnd(term.inputPosition)) || (term.multiline() && testCharacterClass(pattern->newlineCharacterClass, input.readCheckedDontAdvance(term.inputPosition)));
+        unsigned position = input.positionAt(term.matchDirection(), term.inputPosition);
+        return position == input.end() || (term.multiline() && testCharacterClass(pattern->newlineCharacterClass, input.readCodePoint(Forward, position)));
+    }
 
-        return (input.atEnd()) || (term.multiline() && testCharacterClass(pattern->newlineCharacterClass, input.read()));
+    bool matchAssertionBOI(ByteTerm& term)
+    {
+        return !input.positionAt(term.matchDirection(), term.inputPosition);
+    }
+
+    bool matchAssertionEOI(ByteTerm& term)
+    {
+        unsigned assertionPos = input.positionAt(term.matchDirection(), term.inputPosition);
+        unsigned inputLength = input.end();
+
+        // \z: succeed at EOI
+        if (!term.m_withOptionalLineTerminator)
+            return assertionPos == inputLength;
+
+        // \Z: succeed at EOI, or at a line terminator immediately before EOI.
+        if (assertionPos == inputLength)
+            return true;
+
+        char32_t ch = input.readCodePoint(Forward, assertionPos);
+
+        if (!testCharacterClass(pattern->newlineCharacterClass, ch))
+            return false;
+
+        if (ch != '\r')
+            return assertionPos + 1 == inputLength;
+
+        if (assertionPos + 1 == inputLength)
+            return true; // \r alone at EOI
+
+        if (assertionPos + 2 != inputLength)
+            return false;
+
+        // Check for \r\n: read the char at assertionPos + 1.
+        return input.reread(assertionPos + 1) == '\n';
     }
 
     bool matchAssertionWordBoundary(ByteTerm& term)
     {
-        unsigned inputOffset = term.inputPosition;
-
+        unsigned position = input.positionAt(term.matchDirection(), term.inputPosition);
         auto boundaryCharacterClass = term.ignoreCase() ? pattern->ignoreCaseWordcharCharacterClass : pattern->wordcharCharacterClass;
 
-        bool prevIsWordchar = !input.atStart(inputOffset) && testCharacterClass(boundaryCharacterClass, input.readCheckedDontAdvance(inputOffset + 1));
-        bool readIsWordchar;
-        if (inputOffset)
-            readIsWordchar = !input.atEnd(inputOffset) && testCharacterClass(boundaryCharacterClass, input.readCheckedDontAdvance(inputOffset));
-        else
-            readIsWordchar = !input.atEnd() && testCharacterClass(boundaryCharacterClass, input.read());
+        bool prevIsWordchar = position && testCharacterClass(boundaryCharacterClass, input.readCodePoint(Backward, position - 1));
+        bool readIsWordchar = position != input.end() && testCharacterClass(boundaryCharacterClass, input.readCodePoint(Forward, position));
 
         bool wordBoundary = prevIsWordchar != readIsWordchar;
         return term.invert() ? !wordBoundary : wordBoundary;
     }
 
-    bool NODELETE backtrackPatternCharacter(ByteTerm& term, DisjunctionContext* context)
+    template<typename Check>
+    ALWAYS_INLINE bool matchFixedCount(ByteTerm& term, Check check)
     {
+        unsigned position = input.getPos(); // May need to back out reading a surrogate pair.
+        for (unsigned matchAmount = 0; matchAmount < term.atom.quantityMaxCount; ++matchAmount) {
+            if (!check(matchAmount)) {
+                input.setPos(position);
+                return false;
+            }
+        }
+        return true;
+    }
+
+    template<MatchDirection direction, typename BackTrackInfo, typename Check>
+    ALWAYS_INLINE void matchGreedy(ByteTerm& term, BackTrackInfo* backTrack, Check check)
+    {
+        unsigned position = input.getPos(); // May need to back out reading a surrogate pair.
+        unsigned matchAmount = 0;
+        while ((matchAmount < term.atom.quantityMaxCount) && input.checkInput(direction, 1)) {
+            if (!check(term.inputPosition + 1)) {
+                input.setPos(position);
+                break;
+            }
+            ++matchAmount;
+            position = input.getPos();
+        }
+        backTrack->matchAmount = matchAmount;
+    }
+
+    template<MatchDirection direction, typename BackTrackInfo, typename Check>
+    ALWAYS_INLINE bool backtrackNonGreedy(ByteTerm& term, BackTrackInfo* backTrack, Check check)
+    {
+        if ((backTrack->matchAmount < term.atom.quantityMaxCount) && input.checkInput(direction, 1)) {
+            ++backTrack->matchAmount;
+            if (check(term.inputPosition + 1))
+                return true;
+        }
+        input.setPos(backTrack->begin);
+        return false;
+    }
+
+    template<MatchDirection direction>
+    bool backtrackPatternCharacter(ByteTerm& term, DisjunctionContext* context)
+    {
+        ASSERT(term.matchDirection() == direction);
         BackTrackInfoPatternCharacter* backTrack = reinterpret_cast<BackTrackInfoPatternCharacter*>(context->frame + term.frameLocation);
 
         switch (term.atom.quantityType) {
@@ -729,47 +746,24 @@ public:
         case QuantifierType::Greedy:
             if (backTrack->matchAmount) {
                 --backTrack->matchAmount;
-                if (term.matchDirection() == Forward)
-                    input.uncheckInput(U16_LENGTH(term.atom.patternCharacter));
-                else {
-                    if (!input.checkInput(U16_LENGTH(term.atom.patternCharacter)))
-                        break;
-                }
+                input.uncheckInput(direction, U16_LENGTH(term.atom.patternCharacter));
                 return true;
             }
             break;
 
         case QuantifierType::NonGreedy:
-            if (term.matchDirection() == Forward) {
-                if ((backTrack->matchAmount < term.atom.quantityMaxCount) && input.checkInput(1)) {
-                    ++backTrack->matchAmount;
-                    if (checkCharacter(term, term.inputPosition + 1))
-                        return true;
-                }
-                input.setPos(backTrack->begin);
-                break;
-            }
-            // matchDirection Backward
-            unsigned position = input.getPos();
-
-            if (position < term.inputPosition)
-                break;
-
-            if ((backTrack->matchAmount < term.atom.quantityMaxCount) && input.tryUncheckInput(1)) {
-                ++backTrack->matchAmount;
-                if (checkCharacter(term, term.inputPosition))
-                    return true;
-            }
-            input.setPos(backTrack->begin);
-            break;
-
+            return backtrackNonGreedy<direction>(term, backTrack, [&](unsigned offset) {
+                return checkCharacter<direction>(term, offset);
+            });
         }
 
         return false;
     }
 
-    bool NODELETE backtrackPatternCasedCharacter(ByteTerm& term, DisjunctionContext* context)
+    template<MatchDirection direction>
+    bool backtrackPatternCasedCharacter(ByteTerm& term, DisjunctionContext* context)
     {
+        ASSERT(term.matchDirection() == direction);
         BackTrackInfoPatternCharacter* backTrack = reinterpret_cast<BackTrackInfoPatternCharacter*>(context->frame + term.frameLocation);
 
         switch (term.atom.quantityType) {
@@ -779,152 +773,54 @@ public:
         case QuantifierType::Greedy:
             if (backTrack->matchAmount) {
                 --backTrack->matchAmount;
-                if (term.matchDirection() == Forward)
-                    input.uncheckInput(1);
-                else {
-                    if (!input.checkInput(1))
-                        break;
-                }
+                input.uncheckInput(direction, 1);
                 return true;
             }
             break;
 
         case QuantifierType::NonGreedy:
-            if (term.matchDirection() == Forward) {
-                if ((backTrack->matchAmount < term.atom.quantityMaxCount) && input.checkInput(1)) {
-                    ++backTrack->matchAmount;
-                    if (checkCasedCharacter(term, term.inputPosition + 1))
-                        return true;
-                }
-                input.uncheckInput(backTrack->matchAmount);
-                break;
-            }
-            // matchDirection Backward
-            unsigned position = input.getPos();
-
-            if (position < term.inputPosition)
-                break;
-
-            if ((backTrack->matchAmount < term.atom.quantityMaxCount) && input.tryUncheckInput(1)) {
-                ++backTrack->matchAmount;
-                if (checkCasedCharacter(term, term.inputPosition))
-                    return true;
-            }
-            input.setPos(backTrack->begin);
-            break;
+            return backtrackNonGreedy<direction>(term, backTrack, [&](unsigned offset) {
+                return checkCasedCharacter<direction>(term, offset);
+            });
         }
 
         return false;
     }
 
+    template<MatchDirection direction>
     bool matchCharacterClass(ByteTerm& term, DisjunctionContext* context)
     {
-        ASSERT(term.type == ByteTerm::Type::CharacterClass);
+        ASSERT(term.isCharacterClass());
+        ASSERT(term.matchDirection() == direction);
         BackTrackInfoCharacterClass* backTrack = reinterpret_cast<BackTrackInfoCharacterClass*>(context->frame + term.frameLocation);
 
         switch (term.atom.quantityType) {
         case QuantifierType::FixedCount: {
-            if (term.matchDirection() == Forward) {
-                if (isEitherUnicodeCompilation()) {
-                    backTrack->begin = input.getPos();
-                    unsigned matchAmount = 0;
-                    for (matchAmount = 0; matchAmount < term.atom.quantityMaxCount; ++matchAmount) {
-                        if (term.invert()) {
-                            if (!checkCharacterClass(term, term.inputPosition - matchAmount)) {
-                                input.setPos(backTrack->begin);
-                                return false;
-                            }
-                        } else {
-                            unsigned matchOffset = matchAmount * (term.atom.characterClass->hasOnlyNonBMPCharacters() ? 2 : 1);
-                            if (!checkCharacterClassDontAdvanceInputForNonBMP(term, term.inputPosition - matchOffset)) {
-                                input.setPos(backTrack->begin);
-                                return false;
-                            }
-                        }
-                    }
-
-                    return true;
-                }
-
-                const unsigned quantityMaxCount = term.atom.quantityMaxCount;
-                const unsigned inputPosition = term.inputPosition;
-                for (unsigned matchAmount = 0; matchAmount < quantityMaxCount; ++matchAmount) {
-                    if (!checkCharacterClass(term, inputPosition - matchAmount))
+            if (!isEitherUnicodeCompilation()) {
+                for (unsigned matchAmount = 0; matchAmount < term.atom.quantityMaxCount; ++matchAmount) {
+                    if (!checkCharacterClass<direction>(term, term.inputPosition - matchAmount))
                         return false;
                 }
                 return true;
             }
 
-            // matchDirection is Backward
-            if (isEitherUnicodeCompilation()) {
-                backTrack->begin = input.getPos();
-                for (unsigned matchAmount = 0; matchAmount < term.atom.quantityMaxCount; ++matchAmount) {
-                    unsigned matchOffset = term.atom.quantityMaxCount - 1 - matchAmount;
-                    if (term.invert()) {
-                        if (!checkCharacterClass(term, term.inputPosition - matchOffset)) {
-                            input.setPos(backTrack->begin);
-                            return false;
-                        }
-                    } else {
-                        matchOffset = matchOffset * (term.atom.characterClass->hasOnlyNonBMPCharacters() ? 2 : 1);
-                        if (!checkCharacterClassDontAdvanceInputForNonBMP(term, term.inputPosition - matchOffset)) {
-                            input.setPos(backTrack->begin);
-                            return false;
-                        }
-                    }
-                }
-
-                return true;
+            backTrack->begin = input.getPos();
+            if (term.invert()) {
+                return matchFixedCount(term, [&](unsigned matchAmount) {
+                    return checkCharacterClass<direction>(term, term.inputPosition - matchAmount);
+                });
             }
-
-            if (input.getPos() < term.inputPosition)
-                return false;
-
-            for (unsigned matchAmount = 0; matchAmount < term.atom.quantityMaxCount; ++matchAmount) {
-                if (!checkCharacterClass(term, term.inputPosition - term.atom.quantityMaxCount + matchAmount + 1))
-                    return false;
-            }
-            return true;
+            unsigned matchWidth = term.atom.characterClass->hasOnlyNonBMPCharacters() ? 2 : 1;
+            return matchFixedCount(term, [&](unsigned matchAmount) {
+                return checkCharacterClassDontAdvanceInputForNonBMP<direction>(term, term.inputPosition - matchAmount * matchWidth);
+            });
         }
 
-        case QuantifierType::Greedy: {
-            unsigned position = input.getPos();
-            unsigned matchAmount = 0;
-            CharacterClass* characterClass = term.atom.characterClass;
-            const bool invert = term.invert();
-            const unsigned quantityMaxCount = term.atom.quantityMaxCount;
-            if (term.matchDirection() == Forward) {
-                const unsigned negativeInputOffset = term.inputPosition + 1;
-                while ((matchAmount < quantityMaxCount) && input.checkInput(1)) {
-                    auto inputChar = input.readChecked(negativeInputOffset);
-                    if (inputChar == errorCodePoint || testCharacterClass(characterClass, static_cast<char32_t>(inputChar)) == invert) {
-                        input.setPos(position);
-                        break;
-                    }
-                    ++matchAmount;
-                    position = input.getPos();
-                }
-                backTrack->matchAmount = matchAmount;
-                return true;
-            }
-
-            // matchDirection = Backward
-            const unsigned negativeInputOffset = term.inputPosition;
-            if (input.getPos() < negativeInputOffset)
-                return false;
-
-            while ((matchAmount < quantityMaxCount) && input.tryUncheckInput(1)) {
-                auto inputChar = input.tryReadBackward(negativeInputOffset);
-                if (inputChar == errorCodePoint || testCharacterClass(characterClass, static_cast<char32_t>(inputChar)) == invert) {
-                    input.setPos(position);
-                    break;
-                }
-                ++matchAmount;
-                position = input.getPos();
-            }
-            backTrack->matchAmount = matchAmount;
+        case QuantifierType::Greedy:
+            matchGreedy<direction>(term, backTrack, [&](unsigned offset) {
+                return checkCharacterClass<direction>(term, offset);
+            });
             return true;
-        }
 
         case QuantifierType::NonGreedy:
             backTrack->begin = input.getPos();
@@ -936,9 +832,11 @@ public:
         return false;
     }
 
+    template<MatchDirection direction>
     bool backtrackCharacterClass(ByteTerm& term, DisjunctionContext* context)
     {
-        ASSERT(term.type == ByteTerm::Type::CharacterClass);
+        ASSERT(term.isCharacterClass());
+        ASSERT(term.matchDirection() == direction);
         BackTrackInfoCharacterClass* backTrack = reinterpret_cast<BackTrackInfoCharacterClass*>(context->frame + term.frameLocation);
 
         switch (term.atom.quantityType) {
@@ -949,55 +847,26 @@ public:
 
         case QuantifierType::Greedy:
             if (backTrack->matchAmount) {
-                if (isEitherUnicodeCompilation()) {
-                    // Unmatch one codepoint
-                    if (term.matchDirection() == Forward) {
-                        --backTrack->matchAmount;
-                        input.uncheckInput(1);
-                        input.tryReadBackward(term.inputPosition);
-                        return true;
-                    }
-                    // matchDirection Backwards
-                    --backTrack->matchAmount;
-                    input.readChecked(term.inputPosition);
-                    input.checkInput(1);
-                    return true;
-                }
                 --backTrack->matchAmount;
-                if (term.matchDirection() == Forward)
-                    input.uncheckInput(1);
-                else
-                    input.checkInput(1);
+                input.template uncheckCodePoint<direction>(term.inputPosition);
                 return true;
             }
             break;
 
         case QuantifierType::NonGreedy:
-            if (term.matchDirection() == Forward) {
-                if ((backTrack->matchAmount < term.atom.quantityMaxCount) && input.checkInput(1)) {
-                    ++backTrack->matchAmount;
-                    if (checkCharacterClass(term, term.inputPosition + 1))
-                        return true;
-                }
-                input.setPos(backTrack->begin);
-                break;
-            }
-            // matchDirection Backward
-            if ((backTrack->matchAmount < term.atom.quantityMaxCount) && input.tryUncheckInput(1)) {
-                ++backTrack->matchAmount;
-                if (checkCharacterClass(term, term.inputPosition))
-                    return true;
-            }
-            input.setPos(backTrack->begin);
-            break;
+            return backtrackNonGreedy<direction>(term, backTrack, [&](unsigned offset) {
+                return checkCharacterClass<direction>(term, offset);
+            });
         }
 
         return false;
     }
 
+    template<MatchDirection direction>
     bool matchBackReference(ByteTerm& term, DisjunctionContext* context)
     {
-        ASSERT(term.type == ByteTerm::Type::BackReference);
+        ASSERT(term.isBackReference());
+        ASSERT(term.matchDirection() == direction);
         BackTrackInfoBackReference* backTrack = reinterpret_cast<BackTrackInfoBackReference*>(context->frame + term.frameLocation);
 
         // Initialize backtracking info first before we check for possible null matches.
@@ -1046,7 +915,7 @@ public:
         switch (term.atom.quantityType) {
         case QuantifierType::FixedCount: {
             for (unsigned matchAmount = 0; matchAmount < term.atom.quantityMaxCount; ++matchAmount) {
-                if (!tryConsumeBackReference(matchBegin, matchEnd, term)) {
+                if (!tryConsumeBackReference<direction>(matchBegin, matchEnd, term)) {
                     input.setPos(backTrack->begin);
                     return false;
                 }
@@ -1056,7 +925,7 @@ public:
 
         case QuantifierType::Greedy: {
             unsigned matchAmount = 0;
-            while ((matchAmount < term.atom.quantityMaxCount) && tryConsumeBackReference(matchBegin, matchEnd, term))
+            while ((matchAmount < term.atom.quantityMaxCount) && tryConsumeBackReference<direction>(matchBegin, matchEnd, term))
                 ++matchAmount;
             backTrack->matchAmount = matchAmount;
             return true;
@@ -1070,9 +939,11 @@ public:
         return false;
     }
 
+    template<MatchDirection direction>
     bool NODELETE backtrackBackReference(ByteTerm& term, DisjunctionContext* context)
     {
-        ASSERT(term.type == ByteTerm::Type::BackReference);
+        ASSERT(term.isBackReference());
+        ASSERT(term.matchDirection() == direction);
         BackTrackInfoBackReference* backTrack = reinterpret_cast<BackTrackInfoBackReference*>(context->frame + term.frameLocation);
 
         unsigned subpatternId;
@@ -1106,15 +977,13 @@ public:
         case QuantifierType::Greedy:
             if (backTrack->matchAmount) {
                 --backTrack->matchAmount;
-                if (term.matchDirection() == Backward)
-                    return input.checkInput(matchEnd - matchBegin);
-                input.rewind(matchEnd - matchBegin);
+                input.uncheckInput(direction, matchEnd - matchBegin);
                 return true;
             }
             break;
 
         case QuantifierType::NonGreedy:
-            if ((backTrack->matchAmount < term.atom.quantityMaxCount) && tryConsumeBackReference(matchBegin, matchEnd, term)) {
+            if ((backTrack->matchAmount < term.atom.quantityMaxCount) && tryConsumeBackReference<direction>(matchBegin, matchEnd, term)) {
                 ++backTrack->matchAmount;
                 return true;
             }
@@ -1125,13 +994,60 @@ public:
         return false;
     }
 
+    template<MatchDirection direction>
+    ALWAYS_INLINE bool matchPatternCharacterFixed(ByteTerm& term)
+    {
+        ASSERT(term.matchDirection() == direction);
+        if (isEitherUnicodeCompilation() && !U_IS_BMP(term.atom.patternCharacter)) {
+            return matchFixedCount(term, [&](unsigned matchAmount) {
+                return checkSurrogatePair<direction>(term, term.inputPosition - 2 * matchAmount);
+            });
+        }
+        return matchFixedCount(term, [&](unsigned matchAmount) {
+            return checkCharacter<direction>(term, term.inputPosition - matchAmount);
+        });
+    }
+
+    template<MatchDirection direction>
+    ALWAYS_INLINE void matchPatternCharacterGreedy(ByteTerm& term, DisjunctionContext* context)
+    {
+        ASSERT(term.matchDirection() == direction);
+        BackTrackInfoPatternCharacter* backTrack = reinterpret_cast<BackTrackInfoPatternCharacter*>(context->frame + term.frameLocation);
+        matchGreedy<direction>(term, backTrack, [&](unsigned offset) {
+            return checkCharacter<direction>(term, offset);
+        });
+    }
+
+    template<MatchDirection direction>
+    ALWAYS_INLINE bool matchPatternCasedCharacterFixed(ByteTerm& term)
+    {
+        ASSERT(term.matchDirection() == direction);
+        // Case insensitive matching of unicode characters is handled as Type::CharacterClass.
+        ASSERT(!isEitherUnicodeCompilation() || U_IS_BMP(term.atom.patternCharacter));
+        return matchFixedCount(term, [&](unsigned matchAmount) {
+            return checkCasedCharacter<direction>(term, term.inputPosition - matchAmount);
+        });
+    }
+
+    template<MatchDirection direction>
+    ALWAYS_INLINE void matchPatternCasedCharacterGreedy(ByteTerm& term, DisjunctionContext* context)
+    {
+        ASSERT(term.matchDirection() == direction);
+        // Case insensitive matching of unicode characters is handled as Type::CharacterClass.
+        ASSERT(!isEitherUnicodeCompilation() || U_IS_BMP(term.atom.patternCharacter));
+        BackTrackInfoPatternCharacter* backTrack = reinterpret_cast<BackTrackInfoPatternCharacter*>(context->frame + term.frameLocation);
+        matchGreedy<direction>(term, backTrack, [&](unsigned offset) {
+            return checkCasedCharacter<direction>(term, offset);
+        });
+    }
+
     void recordParenthesesMatch(ByteTerm& term, ParenthesesDisjunctionContext* context)
     {
         if (term.capture()) {
             unsigned subpatternId = term.subpatternId();
             // For Backward matches, the captured indexes are recorded end then start.
-            output[(subpatternId << 1) + term.matchDirection()] = context->getDisjunctionContext()->matchBegin - term.inputPosition;
-            output[(subpatternId << 1) + 1 - term.matchDirection()] = context->getDisjunctionContext()->matchEnd - term.inputPosition;
+            output[(subpatternId << 1) + term.matchDirection()] = InputStream::positionAt(term.matchDirection(), context->getDisjunctionContext()->matchBegin, term.inputPosition);
+            output[(subpatternId << 1) + 1 - term.matchDirection()] = InputStream::positionAt(term.matchDirection(), context->getDisjunctionContext()->matchEnd, term.inputPosition);
 
             if (term.duplicateNamedGroupId()) {
                 // Record which of the duplicate named subpatterns matched.
@@ -1190,7 +1106,7 @@ public:
         if (term.capture()) {
             unsigned subpatternId = term.subpatternId();
             // For Backward matches, the captured indexes are recorded end then start.
-            output[(subpatternId << 1) + term.matchDirection()] = input.getPos() - term.inputPosition;
+            output[(subpatternId << 1) + term.matchDirection()] = input.positionAt(term.matchDirection(), term.inputPosition);
         }
 
         return true;
@@ -1204,7 +1120,7 @@ public:
         if (term.capture()) {
             unsigned subpatternId = term.subpatternId();
             // For Backward matches, the captured indexes are recorded end then start.
-            output[(subpatternId << 1) + 1 - term.matchDirection()] = input.getPos() - term.inputPosition;
+            output[(subpatternId << 1) + 1 - term.matchDirection()] = input.positionAt(term.matchDirection(), term.inputPosition);
 
             if (term.duplicateNamedGroupId()) {
                 // Record which of the duplicate named subpatterns matched.
@@ -1279,7 +1195,7 @@ public:
                     ASSERT((&term - term.atom.parenthesesWidth)->inputPosition == term.inputPosition);
                     unsigned subpatternId = term.subpatternId();
                     // For Backward matches, the captured indexes are recorded end then start.
-                    output[(subpatternId << 1) + term.matchDirection()] = input.getPos() - term.inputPosition;
+                    output[(subpatternId << 1) + term.matchDirection()] = input.positionAt(term.matchDirection(), term.inputPosition);
                 }
                 context->term -= term.atom.parenthesesWidth;
                 return true;
@@ -1296,25 +1212,38 @@ public:
     {
         ASSERT(term.type == ByteTerm::Type::ParenthesesSubpatternTerminalBegin);
         ASSERT(term.atom.quantityType == QuantifierType::Greedy);
+        ASSERT(!term.atom.quantityMinCount || term.atom.quantityMinCount == 1);
         ASSERT(term.atom.quantityMaxCount == quantifyInfinite);
         ASSERT(!term.capture());
 
         BackTrackInfoParenthesesTerminal* backTrack = reinterpret_cast<BackTrackInfoParenthesesTerminal*>(context->frame + term.frameLocation);
         backTrack->begin = input.getPos();
+        backTrack->entryPosition = input.getPos();
         return true;
     }
 
     bool NODELETE matchParenthesesTerminalEnd(ByteTerm& term, DisjunctionContext* context)
     {
         ASSERT(term.type == ByteTerm::Type::ParenthesesSubpatternTerminalEnd);
+        ASSERT(!term.atom.quantityMinCount || term.atom.quantityMinCount == 1);
 
         BackTrackInfoParenthesesTerminal* backTrack = reinterpret_cast<BackTrackInfoParenthesesTerminal*>(context->frame + term.frameLocation);
-        // Empty match is a failed match.
-        if (backTrack->begin == input.getPos())
-            return false;
+        if (backTrack->begin == input.getPos()) {
+            // An empty iteration cannot be repeated, so it is only ever acceptable as the single
+            // iteration a minimum of one demands, and only before anything has been consumed.
+            // Clearing entryPosition both records that the minimum is now met and rejects any
+            // further empty iteration.
+            if (!term.atom.quantityMinCount || backTrack->entryPosition != input.getPos())
+                return false;
+            backTrack->entryPosition = notFound;
+        }
+
+        backTrack->begin = input.getPos();
 
         // Successful match! Okay, what's next? - loop around and try to match more!
-        context->term -= (term.atom.parenthesesWidth + 1);
+        // Loop back to the body's first term rather than to ParenthesesSubpatternTerminalBegin,
+        // whose stores initialize the whole group and must not run again per iteration.
+        context->term -= term.atom.parenthesesWidth;
         return true;
     }
 
@@ -1322,11 +1251,19 @@ public:
     {
         ASSERT(term.type == ByteTerm::Type::ParenthesesSubpatternTerminalBegin);
         ASSERT(term.atom.quantityType == QuantifierType::Greedy);
+        ASSERT(!term.atom.quantityMinCount || term.atom.quantityMinCount == 1);
         ASSERT(term.atom.quantityMaxCount == quantifyInfinite);
         ASSERT(!term.capture());
 
         // If we backtrack to this point, we have failed to match this iteration of the parens.
-        // Since this is greedy / zero minimum a failed is also accepted as a match!
+        // Nothing follows a terminal group, so an already satisfied minimum makes that failure an
+        // acceptable end of the match; an unsatisfied one fails the match.
+        if (term.atom.quantityMinCount) {
+            BackTrackInfoParenthesesTerminal* backTrack = reinterpret_cast<BackTrackInfoParenthesesTerminal*>(context->frame + term.frameLocation);
+            if (backTrack->entryPosition == input.getPos())
+                return false;
+        }
+
         context->term += term.atom.parenthesesWidth;
         return true;
     }
@@ -1347,6 +1284,7 @@ public:
         BackTrackInfoParentheticalAssertion* backTrack = reinterpret_cast<BackTrackInfoParentheticalAssertion*>(context->frame + term.frameLocation);
 
         backTrack->begin = input.getPos();
+        input.setPos(input.positionAt(term.parentMatchDirection(), term.inputPosition));
 
         return true;
     }
@@ -1380,10 +1318,8 @@ public:
         ASSERT(term.type == ByteTerm::Type::ParentheticalAssertionBegin);
         ASSERT(term.atom.quantityMaxCount == 1);
 
-        if (term.matchDirection() == Backward) {
-            BackTrackInfoParentheticalAssertion* backTrack = reinterpret_cast<BackTrackInfoParentheticalAssertion*>(context->frame + term.frameLocation);
-            input.setPos(backTrack->begin);
-        }
+        BackTrackInfoParentheticalAssertion* backTrack = reinterpret_cast<BackTrackInfoParentheticalAssertion*>(context->frame + term.frameLocation);
+        input.setPos(backTrack->begin);
 
         // We've failed to match parens; if they are inverted, this is win!
         if (term.invert()) {
@@ -1673,6 +1609,13 @@ public:
         UNUSED_PARAM(term);
 
         if (term.dotAll()) {
+            // In dotAll mode, .* can match line terminators. A non-multiline ^ matches only if the
+            // search begins at the start of the input (offset 0). A multiline ^ needs to check
+            // every line and is never optimized to a DotStarEnclosure.
+            ASSERT(!(term.anchors.m_bol && term.multiline()));
+            if (startOffset && term.anchors.m_bol && !term.multiline())
+                return false;
+
             context->matchBegin = startOffset;
             context->matchEnd = input.end();
             return true;
@@ -1732,13 +1675,10 @@ public:
 #define DUMP_CURR_CHAR() \
 { \
     if (verbose) { \
-        unsigned offset = currentTerm().inputPosition; \
-        if (currentTerm().matchDirection() == Backward && currentTerm().atom.quantityType == QuantifierType::FixedCount) \
-            offset -= currentTerm().atom.quantityMaxCount - 1; \
-        dataLog(" off:", offset, " got:'"); \
+        dataLog(" off:", currentTerm().inputPosition, " got:'"); \
         char32_t ch = errorCodePoint; \
-        if (input.isValidNegativeInputOffset(offset)) \
-            ch = input.readForCharacterDump(offset); \
+        if (input.isValidNegativeInputOffset(currentTerm().matchDirection(), currentTerm().inputPosition)) \
+            ch = input.readCheckedDontAdvance(currentTerm().matchDirection(), currentTerm().inputPosition); \
         if (ch == errorCodePoint) \
             dataLog("<illegal>"); \
         else if (ch < 0x10000 && (ch < 0xd800 || ch > 0xdfff))\
@@ -1808,112 +1748,47 @@ public:
             if (matchAssertionEOL(currentTerm()))
                 MATCH_NEXT();
             BACKTRACK();
+        case ByteTerm::Type::AssertionBOI:
+            if (matchAssertionBOI(currentTerm()))
+                MATCH_NEXT();
+            BACKTRACK();
+        case ByteTerm::Type::AssertionEOI:
+            if (matchAssertionEOI(currentTerm()))
+                MATCH_NEXT();
+            BACKTRACK();
         case ByteTerm::Type::AssertionWordBoundary:
             if (matchAssertionWordBoundary(currentTerm()))
                 MATCH_NEXT();
             BACKTRACK();
 
         case ByteTerm::Type::PatternCharacterOnce:
-        case ByteTerm::Type::PatternCharacterFixed: {
+        case ByteTerm::Type::PatternCharacterFixed:
             DUMP_CURR_CHAR();
-            if (currentTerm().matchDirection() == Forward) {
-                if (isEitherUnicodeCompilation()) {
-                    if (!U_IS_BMP(currentTerm().atom.patternCharacter)) {
-                        for (unsigned matchAmount = 0; matchAmount < currentTerm().atom.quantityMaxCount; ++matchAmount) {
-                            if (!checkSurrogatePair(currentTerm(), currentTerm().inputPosition - 2 * matchAmount))
-                                BACKTRACK();
-                        }
-                        MATCH_NEXT();
-                    }
-                }
-
-                unsigned position = input.getPos(); // May need to back out reading a surrogate pair.
-
-                auto& term = currentTerm();
-                const char32_t patternCharacter = term.atom.patternCharacter;
-                const unsigned quantityMaxCount = term.atom.quantityMaxCount;
-                const unsigned inputPosition = term.inputPosition;
-                for (unsigned matchAmount = 0; matchAmount < quantityMaxCount; ++matchAmount) {
-                    if (patternCharacter != static_cast<char32_t>(input.readChecked(inputPosition - matchAmount))) {
-                        input.setPos(position);
-                        BACKTRACK();
-                    }
-                }
-            } else {
-                auto& term = currentTerm();
-
-                if (isEitherUnicodeCompilation()) {
-                    if (!U_IS_BMP(term.atom.patternCharacter)) {
-                        for (unsigned matchAmount = 0; matchAmount < currentTerm().atom.quantityMaxCount; ++matchAmount) {
-                            auto inputPosition = term.inputPosition + 2 * matchAmount;
-                            if (input.getPos() < inputPosition)
-                                BACKTRACK();
-                            if (!checkSurrogatePair(term, inputPosition))
-                                BACKTRACK();
-                        }
-                        MATCH_NEXT();
-                    }
-                }
-
-                if (input.getPos() < term.inputPosition)
-                    BACKTRACK();
-
-                unsigned position = input.getPos(); // May need to back out reading a surrogate pair.
-
-                const char32_t patternCharacter = term.atom.patternCharacter;
-                const unsigned quantityMaxCount = term.atom.quantityMaxCount;
-                const unsigned inputPosition = term.inputPosition;
-                for (unsigned matchAmount = 0; matchAmount < quantityMaxCount; ++matchAmount) {
-                    if (patternCharacter != static_cast<char32_t>(input.tryReadBackward(inputPosition + matchAmount + 1 - quantityMaxCount))) {
-                        input.setPos(position);
-                        BACKTRACK();
-                    }
-                }
-            }
-            MATCH_NEXT();
-        }
-        case ByteTerm::Type::PatternCharacterGreedy: {
+            if (matchPatternCharacterFixed<Forward>(currentTerm()))
+                MATCH_NEXT();
+            BACKTRACK();
+        case ByteTerm::Type::PatternCharacterOnceBackward:
+        case ByteTerm::Type::PatternCharacterFixedBackward:
             DUMP_CURR_CHAR();
-            BackTrackInfoPatternCharacter* backTrack = reinterpret_cast<BackTrackInfoPatternCharacter*>(context->frame + currentTerm().frameLocation);
-            unsigned matchAmount = 0;
-            unsigned position = input.getPos(); // May need to back out reading a surrogate pair.
-            auto& term = currentTerm();
-            const char32_t patternCharacter = term.atom.patternCharacter;
-            const unsigned quantityMaxCount = term.atom.quantityMaxCount;
-            if (term.matchDirection() == Forward) {
-                const unsigned negativeInputOffset = term.inputPosition + 1;
-                while ((matchAmount < quantityMaxCount) && input.checkInput(1)) {
-                    if (patternCharacter != static_cast<char32_t>(input.readChecked(negativeInputOffset))) {
-                        input.setPos(position);
-                        break;
-                    }
-                    ++matchAmount;
-                    position = input.getPos();
-                }
-            } else {
-                const unsigned negativeInputOffset = term.inputPosition;
-                if (input.getPos() < negativeInputOffset)
-                    BACKTRACK();
-
-                while ((matchAmount < quantityMaxCount) && input.tryUncheckInput(1)) {
-                    if (patternCharacter != static_cast<char32_t>(input.tryReadBackward(negativeInputOffset))) {
-                        input.setPos(position);
-                        break;
-                    }
-                    ++matchAmount;
-                    position = input.getPos();
-                }
-            }
-            backTrack->matchAmount = matchAmount;
-
+            if (matchPatternCharacterFixed<Backward>(currentTerm()))
+                MATCH_NEXT();
+            BACKTRACK();
+        case ByteTerm::Type::PatternCharacterGreedy:
+            DUMP_CURR_CHAR();
+            matchPatternCharacterGreedy<Forward>(currentTerm(), context);
             MATCH_NEXT();
-        }
+        case ByteTerm::Type::PatternCharacterGreedyBackward:
+            DUMP_CURR_CHAR();
+            matchPatternCharacterGreedy<Backward>(currentTerm(), context);
+            MATCH_NEXT();
 
         case ByteTerm::Type::PatternCasedCharacterNonGreedy:
+        case ByteTerm::Type::PatternCasedCharacterNonGreedyBackward:
             // Case insensitive matching of unicode characters is handled as Type::CharacterClass.
             ASSERT(!isEitherUnicodeCompilation() || U_IS_BMP(currentTerm().atom.patternCharacter));
             [[fallthrough]];
-        case ByteTerm::Type::PatternCharacterNonGreedy: {
+        case ByteTerm::Type::PatternCharacterNonGreedy:
+        case ByteTerm::Type::PatternCharacterNonGreedyBackward: {
             DUMP_CURR_CHAR();
             BackTrackInfoPatternCharacter* backTrack = reinterpret_cast<BackTrackInfoPatternCharacter*>(context->frame + currentTerm().frameLocation);
             backTrack->begin = input.getPos();
@@ -1922,102 +1797,42 @@ public:
         }
 
         case ByteTerm::Type::PatternCasedCharacterOnce:
-        case ByteTerm::Type::PatternCasedCharacterFixed: {
+        case ByteTerm::Type::PatternCasedCharacterFixed:
             DUMP_CURR_CHAR();
-            if (isEitherUnicodeCompilation()) {
-                // Case insensitive matching of unicode characters is handled as Type::CharacterClass.
-                ASSERT(U_IS_BMP(currentTerm().atom.patternCharacter));
-
-                unsigned position = input.getPos(); // May need to back out reading a surrogate pair.
-
-                if (currentTerm().matchDirection() == Forward) {
-                    for (unsigned matchAmount = 0; matchAmount < currentTerm().atom.quantityMaxCount; ++matchAmount) {
-                        if (!checkCasedCharacter(currentTerm(), currentTerm().inputPosition - matchAmount)) {
-                            input.setPos(position);
-                            BACKTRACK();
-                        }
-                    }
-                } else {
-                    auto& term = currentTerm();
-
-                    if (input.getPos() < term.inputPosition)
-                        BACKTRACK();
-
-                    for (unsigned matchAmount = 0; matchAmount < currentTerm().atom.quantityMaxCount; ++matchAmount) {
-                        if (!checkCasedCharacter(term, term.inputPosition - term.atom.quantityMaxCount + matchAmount + 1)) {
-                            input.setPos(position);
-                            BACKTRACK();
-                        }
-                    }
-                }
+            if (matchPatternCasedCharacterFixed<Forward>(currentTerm()))
                 MATCH_NEXT();
-            }
-
-            auto& casedTerm = currentTerm();
-            const unsigned casedQuantityMaxCount = casedTerm.atom.quantityMaxCount;
-            const unsigned casedInputPosition = casedTerm.inputPosition;
-            for (unsigned matchAmount = 0; matchAmount < casedQuantityMaxCount; ++matchAmount) {
-                if (!checkCasedCharacter(casedTerm, casedInputPosition - matchAmount))
-                    BACKTRACK();
-            }
+            BACKTRACK();
+        case ByteTerm::Type::PatternCasedCharacterOnceBackward:
+        case ByteTerm::Type::PatternCasedCharacterFixedBackward:
+            DUMP_CURR_CHAR();
+            if (matchPatternCasedCharacterFixed<Backward>(currentTerm()))
+                MATCH_NEXT();
+            BACKTRACK();
+        case ByteTerm::Type::PatternCasedCharacterGreedy:
+            DUMP_CURR_CHAR();
+            matchPatternCasedCharacterGreedy<Forward>(currentTerm(), context);
             MATCH_NEXT();
-        }
-        case ByteTerm::Type::PatternCasedCharacterGreedy: {
+        case ByteTerm::Type::PatternCasedCharacterGreedyBackward:
             DUMP_CURR_CHAR();
-            BackTrackInfoPatternCharacter* backTrack = reinterpret_cast<BackTrackInfoPatternCharacter*>(context->frame + currentTerm().frameLocation);
-
-            // Case insensitive matching of unicode characters is handled as Type::CharacterClass.
-            ASSERT(!isEitherUnicodeCompilation() || U_IS_BMP(currentTerm().atom.patternCharacter));
-
-            auto& term = currentTerm();
-            const char32_t casedLo = term.atom.casedCharacter.lo;
-            const char32_t casedHi = term.atom.casedCharacter.hi;
-            const unsigned quantityMaxCount = term.atom.quantityMaxCount;
-            if (term.matchDirection() == Forward) {
-                const unsigned negativeInputOffset = term.inputPosition + 1;
-                unsigned matchAmount = 0;
-                while ((matchAmount < quantityMaxCount) && input.checkInput(1)) {
-                    char32_t ch = input.readChecked(negativeInputOffset);
-                    if (casedLo != ch && casedHi != ch) {
-                        input.uncheckInput(1);
-                        break;
-                    }
-                    ++matchAmount;
-                }
-                backTrack->matchAmount = matchAmount;
-
-                MATCH_NEXT();
-            } else {
-                const unsigned negativeInputOffset = term.inputPosition;
-
-                if (input.getPos() < negativeInputOffset)
-                    BACKTRACK();
-
-                unsigned position = input.getPos();
-                unsigned matchAmount = 0;
-                while ((matchAmount < quantityMaxCount) && input.tryUncheckInput(1)) {
-                    char32_t ch = input.tryReadBackward(negativeInputOffset);
-                    if (casedLo != ch && casedHi != ch) {
-                        input.setPos(position);
-                        break;
-                    }
-
-                    ++matchAmount;
-                    position = input.getPos();
-                }
-                backTrack->matchAmount = matchAmount;
-
-                MATCH_NEXT();
-            }
-        }
+            matchPatternCasedCharacterGreedy<Backward>(currentTerm(), context);
+            MATCH_NEXT();
 
         case ByteTerm::Type::CharacterClass:
             DUMP_CURR_CHAR();
-            if (matchCharacterClass(currentTerm(), context))
+            if (matchCharacterClass<Forward>(currentTerm(), context))
+                MATCH_NEXT();
+            BACKTRACK();
+        case ByteTerm::Type::CharacterClassBackward:
+            DUMP_CURR_CHAR();
+            if (matchCharacterClass<Backward>(currentTerm(), context))
                 MATCH_NEXT();
             BACKTRACK();
         case ByteTerm::Type::BackReference:
-            if (matchBackReference(currentTerm(), context))
+            if (matchBackReference<Forward>(currentTerm(), context))
+                MATCH_NEXT();
+            BACKTRACK();
+        case ByteTerm::Type::BackReferenceBackward:
+            if (matchBackReference<Backward>(currentTerm(), context))
                 MATCH_NEXT();
             BACKTRACK();
         case ByteTerm::Type::ParenthesesSubpattern: {
@@ -2060,18 +1875,7 @@ public:
 
         case ByteTerm::Type::CheckInput:
             DUMP_EXTRA("count:", currentTerm().checkInputCount);
-            if (input.checkInput(currentTerm().checkInputCount))
-                MATCH_NEXT();
-            BACKTRACK();
-
-        case ByteTerm::Type::UncheckInput:
-            DUMP_EXTRA("count:", currentTerm().checkInputCount);
-            input.uncheckInput(currentTerm().checkInputCount);
-            MATCH_NEXT();
-
-        case ByteTerm::Type::HaveCheckedInput:
-            DUMP_EXTRA("count:", currentTerm().checkInputCount);
-            if (input.isValidNegativeInputOffset(currentTerm().checkInputCount))
+            if (input.checkInput(currentTerm().matchDirection(), currentTerm().checkInputCount))
                 MATCH_NEXT();
             BACKTRACK();
 
@@ -2114,8 +1918,14 @@ public:
 
             context->matchBegin = input.getPos();
 
-            if (currentTerm().alternative.onceThrough)
-                context->term += currentTerm().alternative.next;
+            while (currentTerm().alternative.onceThrough) {
+                int next = currentTerm().alternative.next;
+                if (next <= 0) {
+                    DUMP_EXTRA("- Return NoMatch\n");
+                    return JSRegExpResult::NoMatch;
+                }
+                context->term += next;
+            }
 
             MATCH_NEXT();
         }
@@ -2140,6 +1950,8 @@ public:
 
         case ByteTerm::Type::AssertionBOL:
         case ByteTerm::Type::AssertionEOL:
+        case ByteTerm::Type::AssertionBOI:
+        case ByteTerm::Type::AssertionEOI:
         case ByteTerm::Type::AssertionWordBoundary:
             BACKTRACK();
 
@@ -2147,22 +1959,44 @@ public:
         case ByteTerm::Type::PatternCharacterFixed:
         case ByteTerm::Type::PatternCharacterGreedy:
         case ByteTerm::Type::PatternCharacterNonGreedy:
-            if (backtrackPatternCharacter(currentTerm(), context))
+            if (backtrackPatternCharacter<Forward>(currentTerm(), context))
+                MATCH_NEXT();
+            BACKTRACK();
+        case ByteTerm::Type::PatternCharacterOnceBackward:
+        case ByteTerm::Type::PatternCharacterFixedBackward:
+        case ByteTerm::Type::PatternCharacterGreedyBackward:
+        case ByteTerm::Type::PatternCharacterNonGreedyBackward:
+            if (backtrackPatternCharacter<Backward>(currentTerm(), context))
                 MATCH_NEXT();
             BACKTRACK();
         case ByteTerm::Type::PatternCasedCharacterOnce:
         case ByteTerm::Type::PatternCasedCharacterFixed:
         case ByteTerm::Type::PatternCasedCharacterGreedy:
         case ByteTerm::Type::PatternCasedCharacterNonGreedy:
-            if (backtrackPatternCasedCharacter(currentTerm(), context))
+            if (backtrackPatternCasedCharacter<Forward>(currentTerm(), context))
+                MATCH_NEXT();
+            BACKTRACK();
+        case ByteTerm::Type::PatternCasedCharacterOnceBackward:
+        case ByteTerm::Type::PatternCasedCharacterFixedBackward:
+        case ByteTerm::Type::PatternCasedCharacterGreedyBackward:
+        case ByteTerm::Type::PatternCasedCharacterNonGreedyBackward:
+            if (backtrackPatternCasedCharacter<Backward>(currentTerm(), context))
                 MATCH_NEXT();
             BACKTRACK();
         case ByteTerm::Type::CharacterClass:
-            if (backtrackCharacterClass(currentTerm(), context))
+            if (backtrackCharacterClass<Forward>(currentTerm(), context))
+                MATCH_NEXT();
+            BACKTRACK();
+        case ByteTerm::Type::CharacterClassBackward:
+            if (backtrackCharacterClass<Backward>(currentTerm(), context))
                 MATCH_NEXT();
             BACKTRACK();
         case ByteTerm::Type::BackReference:
-            if (backtrackBackReference(currentTerm(), context))
+            if (backtrackBackReference<Forward>(currentTerm(), context))
+                MATCH_NEXT();
+            BACKTRACK();
+        case ByteTerm::Type::BackReferenceBackward:
+            if (backtrackBackReference<Backward>(currentTerm(), context))
                 MATCH_NEXT();
             BACKTRACK();
         case ByteTerm::Type::ParenthesesSubpattern: {
@@ -2202,16 +2036,7 @@ public:
 
         case ByteTerm::Type::CheckInput:
             DUMP_EXTRA("count:", currentTerm().checkInputCount);
-            input.uncheckInput(currentTerm().checkInputCount);
-            BACKTRACK();
-
-        case ByteTerm::Type::UncheckInput:
-            DUMP_EXTRA("count:", currentTerm().checkInputCount);
-            input.checkInput(currentTerm().checkInputCount);
-            BACKTRACK();
-
-        case ByteTerm::Type::HaveCheckedInput:
-            DUMP_EXTRA("count:", currentTerm().checkInputCount);
+            input.uncheckInput(currentTerm().matchDirection(), currentTerm().checkInputCount);
             BACKTRACK();
 
         case ByteTerm::Type::DotStarEnclosure:
@@ -2245,6 +2070,9 @@ public:
         // [Yarr Interpreter] The interpreter doesn't have checks for stack overflow due to deep recursion
         if (!input.isAvailableInput(0))
             return offsetNoMatch;
+
+        if (pattern->hasEndAnchoredFixedSize() && input.end() >= pattern->m_endAnchoredFixedSize)
+            input.setPos(std::max(input.getPos(), input.end() - pattern->m_endAnchoredFixedSize));
 
         ConcurrentJSLocker locker(pattern->m_lock);
 
@@ -2348,29 +2176,29 @@ public:
         return makeUnique<BytecodePattern>(WTF::move(m_bodyDisjunction), m_allParenthesesInfo, m_pattern, allocator, lock, m_pattern.offsetVectorBaseForNamedCaptures(), m_pattern.offsetsSize());
     }
 
-    void checkInput(unsigned count)
+    void checkInput(MatchDirection matchDirection, unsigned count)
     {
-        m_bodyDisjunction->terms.append(ByteTerm::CheckInput(count, { }));
+        m_bodyDisjunction->terms.append(ByteTerm::CheckInput(matchDirection, count, { }));
     }
 
-    void uncheckInput(unsigned count)
+    void assertionBOL(MatchDirection matchDirection, unsigned inputPosition, OptionSet<Flags> flags)
     {
-        m_bodyDisjunction->terms.append(ByteTerm::UncheckInput(count, { }));
+        m_bodyDisjunction->terms.append(ByteTerm::BOL(matchDirection, inputPosition, flags));
     }
 
-    void haveCheckedInput(unsigned count)
+    void assertionEOL(MatchDirection matchDirection, unsigned inputPosition, OptionSet<Flags> flags)
     {
-        m_bodyDisjunction->terms.append(ByteTerm::HaveCheckedInput(count, { }));
+        m_bodyDisjunction->terms.append(ByteTerm::EOL(matchDirection, inputPosition, flags));
     }
 
-    void assertionBOL(unsigned inputPosition, OptionSet<Flags> flags)
+    void assertionBOI(MatchDirection matchDirection, unsigned inputPosition, OptionSet<Flags> flags)
     {
-        m_bodyDisjunction->terms.append(ByteTerm::BOL(inputPosition, flags));
+        m_bodyDisjunction->terms.append(ByteTerm::BOI(matchDirection, inputPosition, flags));
     }
 
-    void assertionEOL(unsigned inputPosition, OptionSet<Flags> flags)
+    void assertionEOI(bool withOptionalLineTerminator, MatchDirection matchDirection, unsigned inputPosition, OptionSet<Flags> flags)
     {
-        m_bodyDisjunction->terms.append(ByteTerm::EOL(inputPosition, flags));
+        m_bodyDisjunction->terms.append(ByteTerm::EOI(matchDirection, inputPosition, flags, withOptionalLineTerminator));
     }
 
     void assertionWordBoundary(bool invert, MatchDirection matchDirection, unsigned inputPosition, OptionSet<Flags> flags)
@@ -2380,31 +2208,30 @@ public:
 
     void atomPatternCharacter(char32_t ch, MatchDirection matchDirection, unsigned inputPosition, unsigned frameLocation, Checked<unsigned> quantityMaxCount, QuantifierType quantityType, OptionSet<Flags> flags)
     {
-        if (flags.contains(Flags::IgnoreCase)) {
-            char32_t lo = u_tolower(ch);
-            char32_t hi = u_toupper(ch);
-
+        // For case-insesitive compares, non-ascii characters that have different
+        // upper & lower case representations are converted to a character class.
+        ASSERT(!flags.contains(Flags::IgnoreCase) || isASCIIAlpha(ch) || isCanonicallyUnique(ch, m_pattern.eitherUnicode() ? CanonicalMode::Unicode : CanonicalMode::UCS2));
+        if (flags.contains(Flags::IgnoreCase) && isASCIIAlpha(ch)) {
+            auto lo = toASCIILower(static_cast<Latin1Character>(ch));
+            auto hi = toASCIIUpper(static_cast<Latin1Character>(ch));
             if (lo != hi) {
-                m_bodyDisjunction->terms.append(ByteTerm(lo, hi, inputPosition, frameLocation, quantityMaxCount, quantityType, flags));
-                m_bodyDisjunction->terms.last().m_matchDirection = matchDirection;
+                m_bodyDisjunction->terms.append(ByteTerm(lo, hi, matchDirection, inputPosition, frameLocation, quantityMaxCount, quantityType, flags));
                 return;
             }
         }
 
-        m_bodyDisjunction->terms.append(ByteTerm(ch, inputPosition, frameLocation, quantityMaxCount, quantityType, flags));
-        m_bodyDisjunction->terms.last().m_matchDirection = matchDirection;
+        m_bodyDisjunction->terms.append(ByteTerm(ch, matchDirection, inputPosition, frameLocation, quantityMaxCount, quantityType, flags));
     }
 
-    void atomCharacterClass(CharacterClass* characterClass, bool invert, MatchDirection matchDirection, unsigned inputPosition, unsigned frameLocation, Checked<unsigned> quantityMaxCount, QuantifierType quantityType, OptionSet<Flags> flags)
+    void atomCharacterClass(const CharacterClass* characterClass, bool invert, MatchDirection matchDirection, unsigned inputPosition, unsigned frameLocation, Checked<unsigned> quantityMaxCount, QuantifierType quantityType, OptionSet<Flags> flags)
     {
-        m_bodyDisjunction->terms.append(ByteTerm(characterClass, invert, inputPosition, flags));
+        m_bodyDisjunction->terms.append(ByteTerm(characterClass, invert, matchDirection, inputPosition, flags));
 
         if (quantityType != QuantifierType::FixedCount)
             m_bodyDisjunction->terms.last().atom.quantityMinCount = 0;
         m_bodyDisjunction->terms.last().atom.quantityMaxCount = quantityMaxCount;
         m_bodyDisjunction->terms.last().atom.quantityType = quantityType;
         m_bodyDisjunction->terms.last().frameLocation = frameLocation;
-        m_bodyDisjunction->terms.last().m_matchDirection = matchDirection;
     }
 
     void atomBackReference(bool isNamed, unsigned subpatternId, MatchDirection matchDirection, unsigned inputPosition, unsigned frameLocation, Checked<unsigned> quantityMaxCount, QuantifierType quantityType, OptionSet<Flags> flags)
@@ -2467,11 +2294,11 @@ public:
         m_currentAlternativeIndex = beginTerm + 1;
     }
 
-    void atomParentheticalAssertionBegin(unsigned subpatternId, bool invert, MatchDirection matchDirection, unsigned frameLocation, unsigned alternativeFrameLocation)
+    void atomParentheticalAssertionBegin(unsigned subpatternId, bool invert, MatchDirection matchDirection, MatchDirection parentMatchDirection, unsigned uncheckAmount, unsigned frameLocation, unsigned alternativeFrameLocation)
     {
         unsigned beginTerm = m_bodyDisjunction->terms.size();
 
-        m_bodyDisjunction->terms.append(ByteTerm::ParentheticalAssertionBegin(subpatternId, invert, matchDirection, m_currentFlags));
+        m_bodyDisjunction->terms.append(ByteTerm::ParentheticalAssertionBegin(subpatternId, invert, matchDirection, parentMatchDirection, uncheckAmount, m_currentFlags));
         m_bodyDisjunction->terms.last().frameLocation = frameLocation;
         m_bodyDisjunction->terms.append(ByteTerm::AlternativeBegin(m_currentFlags));
         m_bodyDisjunction->terms.last().frameLocation = alternativeFrameLocation;
@@ -2623,11 +2450,6 @@ public:
         unsigned subpatternId = m_bodyDisjunction->terms[beginTerm].subpatternId();
 
         m_bodyDisjunction->terms.append(ByteTerm(ByteTerm::Type::ParenthesesSubpatternOnceEnd, subpatternId, capture, false, inputPosition, m_currentFlags));
-        if (m_bodyDisjunction->terms[beginTerm].matchDirection() == Backward) {
-            // Swap input positions for backward captures.
-            m_bodyDisjunction->terms[endTerm].inputPosition = m_bodyDisjunction->terms[beginTerm].inputPosition;
-            m_bodyDisjunction->terms[beginTerm].inputPosition = inputPosition;
-        }
 
         if (m_pattern.hasDuplicateNamedCaptureGroups() && m_bodyDisjunction->terms[beginTerm].capture()) {
             auto duplicateNamedGroupId = m_pattern.m_duplicateNamedGroupForSubpatternId[subpatternId];
@@ -2658,8 +2480,6 @@ public:
 
         ASSERT(m_bodyDisjunction->terms[beginTerm].type == ByteTerm::Type::ParenthesesSubpatternTerminalBegin);
 
-        if (m_bodyDisjunction->terms[beginTerm].matchDirection() == Backward)
-            inputPosition = 0;
         bool capture = m_bodyDisjunction->terms[beginTerm].capture();
         unsigned subpatternId = m_bodyDisjunction->terms[beginTerm].subpatternId();
 
@@ -2733,50 +2553,23 @@ public:
             }
 
             unsigned minimumSize = alternative->m_minimumSize;
-            ASSERT(matchDirection == Backward || minimumSize >= parenthesesInputCountAlreadyChecked);
-
-            unsigned countToCheck = 0;
-            unsigned backwardUncheckAmount = 0;
-
-            if (matchDirection == Forward)
-                countToCheck = minimumSize - parenthesesInputCountAlreadyChecked;
-            else {
-                // Backward case
-                unsigned minAlreadyChecked = std::min(disjunction->m_minimumSize, parenthesesInputCountAlreadyChecked);
-                if (minimumSize > minAlreadyChecked) {
-                    countToCheck = minimumSize - minAlreadyChecked;
-                    auto checkedInput = countToCheck + currentCountAlreadyChecked;
-                    if (checkedInput.hasOverflowed())
-                        return ErrorCode::OffsetTooLarge;
-                    haveCheckedInput(checkedInput);
-
-                    if (minimumSize > disjunction->m_minimumSize)
-                        backwardUncheckAmount = countToCheck;
-                    else
-                        backwardUncheckAmount = minimumSize;
-                }
-            }
+            ASSERT(minimumSize >= parenthesesInputCountAlreadyChecked);
+            unsigned countToCheck = minimumSize - parenthesesInputCountAlreadyChecked;
 
             if (countToCheck) {
-                if (matchDirection == Forward)
-                    checkInput(countToCheck);
-
+                checkInput(matchDirection, countToCheck);
                 currentCountAlreadyChecked += countToCheck;
                 if (currentCountAlreadyChecked.hasOverflowed())
                     return ErrorCode::OffsetTooLarge;
             }
 
-            auto termCount = alternative->m_terms.size();
-            for (unsigned i = 0; i < termCount; ++i) {
-                unsigned termIndex = matchDirection == Forward ? i : termCount - 1 - i;
-                auto& term = alternative->m_terms[termIndex];
-
+            for (auto& term : alternative->m_terms) {
                 switch (term.type) {
                 case PatternTerm::Type::AssertionBOL: {
                     auto currentInputPosition = currentCountAlreadyChecked - term.inputPosition;
                     if (currentInputPosition.hasOverflowed())
                         return ErrorCode::OffsetTooLarge;
-                    assertionBOL(currentInputPosition, term.m_currentFlags);
+                    assertionBOL(matchDirection, currentInputPosition, term.m_currentFlags);
                     break;
                 }
 
@@ -2784,7 +2577,23 @@ public:
                     auto currentInputPosition = currentCountAlreadyChecked - term.inputPosition;
                     if (currentInputPosition.hasOverflowed())
                         return ErrorCode::OffsetTooLarge;
-                    assertionEOL(currentInputPosition, term.m_currentFlags);
+                    assertionEOL(matchDirection, currentInputPosition, term.m_currentFlags);
+                    break;
+                }
+
+                case PatternTerm::Type::AssertionBOI: {
+                    auto currentInputPosition = currentCountAlreadyChecked - term.inputPosition;
+                    if (currentInputPosition.hasOverflowed())
+                        return ErrorCode::OffsetTooLarge;
+                    assertionBOI(matchDirection, currentInputPosition, term.m_currentFlags);
+                    break;
+                }
+
+                case PatternTerm::Type::AssertionEOI: {
+                    auto currentInputPosition = currentCountAlreadyChecked - term.inputPosition;
+                    if (currentInputPosition.hasOverflowed())
+                        return ErrorCode::OffsetTooLarge;
+                    assertionEOI(term.m_withOptionalLineTerminator, matchDirection, currentInputPosition, term.m_currentFlags);
                     break;
                 }
 
@@ -2800,6 +2609,7 @@ public:
                     auto currentInputPosition = currentCountAlreadyChecked - term.inputPosition;
                     if (currentInputPosition.hasOverflowed())
                         return ErrorCode::OffsetTooLarge;
+
                     atomPatternCharacter(term.patternCharacter, matchDirection, currentInputPosition, term.frameLocation, term.quantityMaxCount, term.quantityType, term.m_currentFlags);
                     break;
                 }
@@ -2867,49 +2677,17 @@ public:
                     auto positiveInputOffset = currentCountAlreadyChecked - term.inputPosition;
                     if (positiveInputOffset.hasOverflowed())
                         return ErrorCode::OffsetTooLarge;
-                    if (term.matchDirection() == Forward) {
-                        unsigned uncheckAmount = 0;
-                        if (positiveInputOffset > term.parentheses.disjunction->m_minimumSize) {
-                            uncheckAmount = positiveInputOffset - term.parentheses.disjunction->m_minimumSize;
-                            uncheckInput(uncheckAmount);
-                            currentCountAlreadyChecked -= uncheckAmount;
-                            if (currentCountAlreadyChecked.hasOverflowed())
-                                return ErrorCode::OffsetTooLarge;
-                        }
 
-                        atomParentheticalAssertionBegin(term.parentheses.subpatternId, term.invert(), term.matchDirection(), term.frameLocation, alternativeFrameLocation);
-                        if (auto error = emitDisjunction(term.parentheses.disjunction, currentCountAlreadyChecked, positiveInputOffset - uncheckAmount, term.matchDirection()))
-                            return error;
-                        atomParentheticalAssertionEnd(term.parentheses.lastSubpatternId, term.frameLocation, term.quantityMaxCount, term.quantityType);
-                        if (uncheckAmount) {
-                            checkInput(uncheckAmount);
-                            currentCountAlreadyChecked += uncheckAmount;
-                            if (currentCountAlreadyChecked.hasOverflowed())
-                                return ErrorCode::OffsetTooLarge;
-                        }
-                    } else { // Backward
-                        CheckedUint32 checkedCountForLookbehind = currentCountAlreadyChecked;
-                        ASSERT(checkedCountForLookbehind >= term.inputPosition);
-                        checkedCountForLookbehind -= term.inputPosition;
-                        if (checkedCountForLookbehind.hasOverflowed())
-                            return ErrorCode::OffsetTooLarge;
-                        auto minimumSize = term.parentheses.disjunction->m_minimumSize;
-                        if (minimumSize) {
-                            checkedCountForLookbehind += minimumSize;
-                            if (checkedCountForLookbehind.hasOverflowed())
-                                return ErrorCode::OffsetTooLarge;
-                            if (checkedCountForLookbehind > currentCountAlreadyChecked && !term.invert()) {
-                                // Do a quick check for what is required for the lookbehind.
-                                // An inverted lookbehind can "match" without processing any input.
-                                haveCheckedInput(checkedCountForLookbehind);
-                            }
-                        }
-                        atomParentheticalAssertionBegin(term.parentheses.subpatternId, term.invert(), term.matchDirection(), term.frameLocation, alternativeFrameLocation);
+                    bool sameDirection = term.matchDirection() == matchDirection;
+                    PatternDisjunction* disjunction = term.parentheses.disjunction;
+                    unsigned origin = (term.matchDirection() == Forward && matchDirection == Forward) ? term.inputPosition : 0;
 
-                        if (auto error = emitDisjunction(term.parentheses.disjunction, checkedCountForLookbehind, positiveInputOffset + minimumSize, term.matchDirection()))
-                            return error;
-                        atomParentheticalAssertionEnd(term.parentheses.lastSubpatternId, term.frameLocation, term.quantityMaxCount, term.quantityType);
-                    }
+                    unsigned alreadyChecked = std::min<unsigned>(sameDirection ? positiveInputOffset.value() : term.inputPosition, disjunction->m_minimumSize);
+                    unsigned uncheckAmount = sameDirection ? positiveInputOffset.value() - alreadyChecked : positiveInputOffset.value() + alreadyChecked;
+                    atomParentheticalAssertionBegin(term.parentheses.subpatternId, term.invert(), term.matchDirection(), matchDirection, uncheckAmount, term.frameLocation, alternativeFrameLocation);
+                    if (auto error = emitDisjunction(disjunction, origin + alreadyChecked, alreadyChecked, term.matchDirection()))
+                        return error;
+                    atomParentheticalAssertionEnd(term.parentheses.lastSubpatternId, term.frameLocation, term.quantityMaxCount, term.quantityType);
                     break;
                 }
 
@@ -2918,9 +2696,6 @@ public:
                     break;
                 }
             }
-
-            if (matchDirection == Backward && backwardUncheckAmount)
-                uncheckInput(backwardUncheckAmount);
         }
         return std::nullopt;
     }
@@ -3053,18 +2828,36 @@ void ByteTermDumper::dumpTerm(size_t idx, ByteTerm term)
     case ByteTerm::Type::AssertionBOL:
         outputTermIndexAndNest(idx, m_nesting);
         out.print("AssertionBOL");
+        dumpMatchDirection(term);
+        dumpInputPosition(term);
         break;
     case ByteTerm::Type::AssertionEOL:
         outputTermIndexAndNest(idx, m_nesting);
         out.print("AssertionEOL");
+        dumpMatchDirection(term);
+        dumpInputPosition(term);
+        break;
+    case ByteTerm::Type::AssertionBOI:
+        outputTermIndexAndNest(idx, m_nesting);
+        out.print("AssertionBOI");
+        dumpMatchDirection(term);
+        dumpInputPosition(term);
+        break;
+    case ByteTerm::Type::AssertionEOI:
+        outputTermIndexAndNest(idx, m_nesting);
+        out.print("AssertionEOI ", term.m_withOptionalLineTerminator ? "(\\Z)" : "(\\z)");
+        dumpMatchDirection(term);
+        dumpInputPosition(term);
         break;
     case ByteTerm::Type::AssertionWordBoundary:
         outputTermIndexAndNest(idx, m_nesting);
         out.print("AssertionWordBoundary");
         dumpInverted(term);
         dumpMatchDirection(term);
+        dumpInputPosition(term);
         break;
     case ByteTerm::Type::PatternCharacterOnce:
+    case ByteTerm::Type::PatternCharacterOnceBackward:
         outputTermIndexAndNest(idx, m_nesting);
         out.print("PatternCharacterOnce");
         dumpInverted(term);
@@ -3074,6 +2867,7 @@ void ByteTermDumper::dumpTerm(size_t idx, ByteTerm term)
         dumpMatchDirection(term);
         break;
     case ByteTerm::Type::PatternCharacterFixed:
+    case ByteTerm::Type::PatternCharacterFixedBackward:
         outputTermIndexAndNest(idx, m_nesting);
         out.print("PatternCharacterFixed");
         dumpInverted(term);
@@ -3084,6 +2878,7 @@ void ByteTermDumper::dumpTerm(size_t idx, ByteTerm term)
         dumpMatchDirection(term);
         break;
     case ByteTerm::Type::PatternCharacterGreedy:
+    case ByteTerm::Type::PatternCharacterGreedyBackward:
         outputTermIndexAndNest(idx, m_nesting);
         out.print("PatternCharacterGreedy");
         dumpInverted(term);
@@ -3094,6 +2889,7 @@ void ByteTermDumper::dumpTerm(size_t idx, ByteTerm term)
         dumpMatchDirection(term);
         break;
     case ByteTerm::Type::PatternCharacterNonGreedy:
+    case ByteTerm::Type::PatternCharacterNonGreedyBackward:
         outputTermIndexAndNest(idx, m_nesting);
         out.print("PatternCharacterNonGreedy");
         dumpInverted(term);
@@ -3104,26 +2900,31 @@ void ByteTermDumper::dumpTerm(size_t idx, ByteTerm term)
         dumpMatchDirection(term);
         break;
     case ByteTerm::Type::PatternCasedCharacterOnce:
+    case ByteTerm::Type::PatternCasedCharacterOnceBackward:
         outputTermIndexAndNest(idx, m_nesting);
         out.print("PatternCasedCharacterOnce");
         dumpMatchDirection(term);
         break;
     case ByteTerm::Type::PatternCasedCharacterFixed:
+    case ByteTerm::Type::PatternCasedCharacterFixedBackward:
         outputTermIndexAndNest(idx, m_nesting);
         out.print("PatternCasedCharacterFixed");
         dumpMatchDirection(term);
         break;
     case ByteTerm::Type::PatternCasedCharacterGreedy:
+    case ByteTerm::Type::PatternCasedCharacterGreedyBackward:
         outputTermIndexAndNest(idx, m_nesting);
         out.print("PatternCasedCharacterGreedy");
         dumpMatchDirection(term);
         break;
     case ByteTerm::Type::PatternCasedCharacterNonGreedy:
+    case ByteTerm::Type::PatternCasedCharacterNonGreedyBackward:
         outputTermIndexAndNest(idx, m_nesting);
         out.print("PatternCasedCharacterNonGreedy");
         dumpMatchDirection(term);
         break;
     case ByteTerm::Type::CharacterClass:
+    case ByteTerm::Type::CharacterClassBackward:
         outputTermIndexAndNest(idx, m_nesting);
         out.print("CharacterClass");
         dumpInverted(term);
@@ -3135,6 +2936,7 @@ void ByteTermDumper::dumpTerm(size_t idx, ByteTerm term)
         dumpMatchDirection(term);
         break;
     case ByteTerm::Type::BackReference:
+    case ByteTerm::Type::BackReferenceBackward:
         //  Need to update this for named capture group back references
         outputTermIndexAndNest(idx, m_nesting);
         out.print("BackReference #", term.subpatternId());
@@ -3194,7 +2996,7 @@ void ByteTermDumper::dumpTerm(size_t idx, ByteTerm term)
         out.print("ParentheticalAssertionBegin");
         dumpInverted(term);
         dumpMatchDirection(term);
-        dumpInputPosition(term);
+        out.print(" uncheck ", term.inputPosition, term.parentMatchDirection() == Backward ? " backward" : "");
         dumpFrameLocation(term);
         break;
     case ByteTerm::Type::ParentheticalAssertionEnd:
@@ -3208,14 +3010,7 @@ void ByteTermDumper::dumpTerm(size_t idx, ByteTerm term)
     case ByteTerm::Type::CheckInput:
         outputTermIndexAndNest(idx, m_nesting);
         out.print("CheckInput ", term.checkInputCount);
-        break;
-    case ByteTerm::Type::UncheckInput:
-        outputTermIndexAndNest(idx, m_nesting);
-        out.print("UncheckInput ", term.checkInputCount);
-        break;
-    case ByteTerm::Type::HaveCheckedInput:
-        outputTermIndexAndNest(idx, m_nesting);
-        out.print("HaveCheckedInput ", term.checkInputCount);
+        dumpMatchDirection(term);
         break;
     case ByteTerm::Type::DotStarEnclosure:
         outputTermIndexAndNest(idx, m_nesting);
@@ -3268,6 +3063,7 @@ static_assert(sizeof(BackTrackInfoBackReference) == (YarrStackSpaceForBackTrackI
 static_assert(sizeof(BackTrackInfoAlternative) == (YarrStackSpaceForBackTrackInfoAlternative * sizeof(uintptr_t)));
 static_assert(sizeof(BackTrackInfoParentheticalAssertion) == (YarrStackSpaceForBackTrackInfoParentheticalAssertion * sizeof(uintptr_t)));
 static_assert(sizeof(BackTrackInfoParenthesesOnce) == (YarrStackSpaceForBackTrackInfoParenthesesOnce * sizeof(uintptr_t)));
+static_assert(sizeof(BackTrackInfoParenthesesTerminal) == (YarrStackSpaceForBackTrackInfoParenthesesTerminal * sizeof(uintptr_t)));
 static_assert(sizeof(Interpreter<char16_t>::BackTrackInfoParentheses) <= (YarrStackSpaceForBackTrackInfoParentheses * sizeof(uintptr_t)));
 
 

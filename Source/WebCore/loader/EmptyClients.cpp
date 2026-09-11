@@ -67,7 +67,6 @@
 #include "LocalFrame.h"
 #include "LocalFrameLoaderClient.h"
 #include "ModalContainerTypes.h"
-#include "NetworkStorageSession.h"
 #include "Page.h"
 #include "PageConfiguration.h"
 #include "PaymentCoordinatorClient.h"
@@ -87,6 +86,10 @@
 #include "UserContentProvider.h"
 #include "VisitedLinkStore.h"
 #include "WebRTCProvider.h"
+#include "WebTransportConnectionInfo.h"
+#include "WebTransportConnectionStats.h"
+#include "WebTransportReceiveStreamStats.h"
+#include "WebTransportSendStreamStats.h"
 #include "WebTransportSession.h"
 #include <JavaScriptCore/HeapInlines.h>
 #include <pal/SessionID.h>
@@ -105,10 +108,6 @@
 #include "DigitalCredentialsRequestData.h"
 #include "DigitalCredentialsResponseData.h"
 #include "ExceptionData.h"
-#endif
-
-#if USE(GSTREAMER_WEBRTC) && USE(LIBRICE)
-#include "GStreamerIceAgent.h"
 #endif
 
 namespace WebCore {
@@ -312,7 +311,7 @@ private:
     void NODELETE didWriteSelectionToPasteboard() final { }
     void NODELETE getClientPasteboardData(const std::optional<SimpleRange>&, Vector<std::pair<String, RefPtr<SharedBuffer>>>&) final { }
     void NODELETE requestCandidatesForSelection(const VisibleSelection&) final { }
-    void NODELETE handleAcceptedCandidateWithSoftSpaces(TextCheckingResult) final { }
+    void NODELETE handleAcceptedCandidateWithSoftSpaces(const TextCheckingResult&) final { }
 
     void registerUndoStep(UndoStep&) final;
     void registerRedoStep(UndoStep&) final;
@@ -409,7 +408,7 @@ private:
         void NODELETE checkGrammarOfString(StringView, Vector<GrammarDetail>&, int*, int*) final { }
 
 #if USE(UNIFIED_TEXT_CHECKING)
-        Vector<TextCheckingResult> NODELETE checkTextOfParagraph(StringView, OptionSet<TextCheckingType>, const VisibleSelection&) final { return Vector<TextCheckingResult>(); }
+        Vector<TextCheckingResult> NODELETE checkTextOfParagraph(StringView, OptionSet<TextCheckingType>, const VisibleSelection&) final { return { }; }
 #endif
 
         void NODELETE getGuessesForWord(const String&, const String&, const VisibleSelection&, Vector<String>&) final { }
@@ -430,7 +429,7 @@ private:
     EmptyFrameNetworkingContext();
 
     bool NODELETE shouldClearReferrerOnHTTPSToHTTPRedirect() const { return true; }
-    NetworkStorageSession* NODELETE storageSession() const final { return nullptr; }
+    CookieStorageSession* NODELETE storageSession() const final { return nullptr; }
 
 #if PLATFORM(COCOA)
     bool NODELETE localFileContentSniffingEnabled() const { return false; }
@@ -500,7 +499,7 @@ public:
         return adoptRef(*new EmptyCredentialRequestCoordinatorClient);
     }
 
-    void showDigitalCredentialsChooser(std::optional<FrameIdentifier>, DigitalCredentialsRawRequests&&, const DigitalCredentialsRequestData&, CompletionHandler<void(Expected<DigitalCredentialsResponseData, ExceptionData>&&)>&& completionHandler)
+    void showDigitalCredentialsChooser(std::optional<FrameIdentifier>, DigitalCredentialsRawRequests&&, const DigitalCredentialsRequestData&, CompletionHandler<void(std::expected<DigitalCredentialsResponseData, ExceptionData>&&)>&& completionHandler)
     {
         callOnMainThread([completionHandler = WTF::move(completionHandler)]() mutable {
             completionHandler(makeUnexpected(ExceptionData { ExceptionCode::NotSupportedError, "Empty client."_s }));
@@ -1183,7 +1182,7 @@ Ref<FrameNetworkingContext> EmptyFrameLoaderClient::createNetworkingContext()
     return EmptyFrameNetworkingContext::create();
 }
 
-void EmptyFrameLoaderClient::sendH2Ping(const URL& url, CompletionHandler<void(Expected<Seconds, ResourceError>&&)>&& completionHandler)
+void EmptyFrameLoaderClient::sendH2Ping(const URL& url, CompletionHandler<void(std::expected<Seconds, ResourceError>&&)>&& completionHandler)
 {
     ASSERT_NOT_REACHED();
     completionHandler(makeUnexpected(internalError(url)));
@@ -1221,7 +1220,7 @@ Ref<StorageNamespace> EmptyStorageNamespaceProvider::createTransientLocalStorage
 }
 
 class EmptyStorageSessionProvider final : public StorageSessionProvider {
-    NetworkStorageSession* NODELETE storageSession() const final { return nullptr; }
+    CookieStorageSession* NODELETE storageSession() const final { return nullptr; }
 };
 
 class EmptyBroadcastChannelRegistry final : public BroadcastChannelRegistry {
@@ -1238,16 +1237,43 @@ private:
     void NODELETE postMessage(const PartitionedSecurityOrigin&, const String&, BroadcastChannelIdentifier, Ref<SerializedScriptValue>&&, CompletionHandler<void()>&&) final { }
 };
 
+class EmptyWebTransportSession final : public WebTransportSession, public ThreadSafeRefCountedAndCanMakeThreadSafeWeakPtr<EmptyWebTransportSession> {
+public:
+    WTF_ABSTRACT_THREAD_SAFE_REF_COUNTED_AND_CAN_MAKE_WEAK_PTR_IMPL;
+
+    Ref<WebTransportSessionInitializationPromise> initialize(ScriptExecutionContext&, const URL&, const WebTransportOptions&, const Vector<KeyValuePair<String, String>>&, const ClientOrigin&) final { return WebTransportSessionInitializationPromise::createAndReject(); }
+    Ref<WebTransportSendPromise> sendDatagram(std::optional<WebTransportSendGroupIdentifier>, std::span<const uint8_t>) final { return WebTransportSendPromise::createAndReject(); }
+    Ref<WebTransportStreamPromise> createOutgoingUnidirectionalStream() final { return WebTransportStreamPromise::createAndReject(); }
+    Ref<WebTransportStreamPromise> createBidirectionalStream() final { return WebTransportStreamPromise::createAndReject(); }
+    Ref<WebTransportSendPromise> streamSendBytes(WebTransportStreamIdentifier, std::span<const uint8_t>, bool) final { return WebTransportSendPromise::createAndReject(); }
+    Ref<WebTransportConnectionStatsPromise> getStats() final { return WebTransportConnectionStatsPromise::createAndReject(); }
+    Ref<WebTransportSendStreamStatsPromise> getSendStreamStats(WebTransportStreamIdentifier) final { return WebTransportSendStreamStatsPromise::createAndReject(); }
+    Ref<WebTransportReceiveStreamStatsPromise> getReceiveStreamStats(WebTransportStreamIdentifier) final { return WebTransportReceiveStreamStatsPromise::createAndReject(); }
+    Ref<WebTransportSendStreamStatsPromise> getSendGroupStats(WebTransportSendGroupIdentifier) final { return WebTransportSendStreamStatsPromise::createAndReject(); }
+    Ref<WebTransportExportKeyingMaterialPromise> exportKeyingMaterial(std::span<const uint8_t>, std::span<const uint8_t>, uint32_t) final { return WebTransportExportKeyingMaterialPromise::createAndReject(); }
+
+    void cancelReceiveStream(WebTransportStreamIdentifier, std::optional<WebTransportStreamErrorCode>) final { }
+    void cancelSendStream(WebTransportStreamIdentifier, std::optional<WebTransportStreamErrorCode>) final { }
+    void destroyStream(WebTransportStreamIdentifier, std::optional<WebTransportStreamErrorCode>) final { }
+    void terminate(WebTransportSessionErrorCode, CString&&) final { }
+    void datagramIncomingMaxAgeUpdated(std::optional<double>) final { }
+    void datagramOutgoingMaxAgeUpdated(std::optional<double>) final { }
+    void incomingMaxBufferedDatagramsUpdated(uint32_t) final { }
+    void outgoingMaxBufferedDatagramsUpdated(uint32_t) final { }
+};
+
 class EmptySocketProvider final : public SocketProvider {
 public:
     RefPtr<ThreadableWebSocketChannel> createWebSocketChannel(Document&, WebSocketChannelClient&, IsInitiatedByDedicatedWorker) final { return nullptr; }
 
-    std::pair<RefPtr<WebTransportSession>, Ref<WebTransportSessionPromise>> initializeWebTransportSession(ScriptExecutionContext&, WebTransportSessionClient&, const URL&, const WebTransportOptions&) { return { nullptr, WebTransportSessionPromise::createAndReject() }; }
-
-#if USE(LIBRICE)
-    RefPtr<WebCore::RiceBackend> createRiceBackend(WebCore::RiceBackendClient&) final { return nullptr; }
-#endif
+    Ref<WebTransportSession> createWebTransportSession(ScriptExecutionContext&, WebTransportSessionClient&) { return adoptRef(*new EmptyWebTransportSession()); }
 };
+
+Ref<SocketProvider> emptySocketProvider()
+{
+    static NeverDestroyed<Ref<SocketProvider>> provider { adoptRef(*new EmptySocketProvider()) };
+    return provider.get();
+}
 
 class EmptyHistoryItemClient final : public HistoryItemClient {
 public:
@@ -1264,7 +1290,7 @@ PageConfiguration pageConfigurationWithEmptyClients(std::optional<PageIdentifier
         std::nullopt,
         sessionID,
         makeUniqueRef<EmptyEditorClient>(),
-        adoptRef(*new EmptySocketProvider),
+        emptySocketProvider(),
         WebRTCProvider::create(),
         CacheStorageProvider::create(),
         adoptRef(*new EmptyUserContentProvider),

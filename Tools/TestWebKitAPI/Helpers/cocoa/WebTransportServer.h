@@ -27,7 +27,7 @@
 
 #ifdef __cplusplus
 
-#if PLATFORM(COCOA)
+#if HAVE(WEBTRANSPORT)
 
 #import "Helpers/CoroutineUtilities.h"
 #import "Helpers/cocoa/NetworkConnection.h"
@@ -37,11 +37,11 @@ namespace TestWebKitAPI {
 
 class WebTransportServer {
 public:
-    WebTransportServer(Function<ConnectionTask(ConnectionGroup)>&&, sec_identity_t = nullptr);
+    enum class Protocol : bool { H2, H3 };
+    WebTransportServer(Function<ConnectionTask(ConnectionGroup)>&&, sec_identity_t = nullptr, Protocol = Protocol::H3);
     ~WebTransportServer();
 
     uint16_t port() const;
-    static bool isAvailable();
 private:
     struct Data;
     Ref<Data> m_data;
@@ -51,6 +51,6 @@ private:
 
 } // namespace TestWebKitAPI
 
-#endif // PLATFORM(COCOA)
+#endif // HAVE(WEBTRANSPORT)
 
 #endif // __cplusplus

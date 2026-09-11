@@ -30,7 +30,6 @@ set(WTF_PUBLIC_HEADERS
     BloomFilter.h
     BooleanLattice.h
     Borrow.h
-    BorrowedBytes.h
     Box.h
     BoxPtr.h
     Brigand.h
@@ -91,7 +90,7 @@ set(WTF_PUBLIC_HEADERS
     EnumSet.h
     EnumTraits.h
     EnumeratedArray.h
-    Expected.h
+    EscapableByteSpan.h
     ExperimentalFeatureNames.h
     ExportMacros.h
     FailureAction.h
@@ -158,6 +157,7 @@ set(WTF_PUBLIC_HEADERS
     JSValueMalloc.h
     KeyValuePair.h
     LEBDecoder.h
+    LEBEncoder.h
     LLVMProfilingUtils.h
     Language.h
     LazyRef.h
@@ -792,6 +792,7 @@ elseif (APPLE)
 elseif (CMAKE_SYSTEM_NAME MATCHES "Linux")
     list(APPEND WTF_PUBLIC_HEADERS
         linux/CurrentProcessMemoryStatus.h
+        linux/HighPriorityThreads.h
         linux/ProcessMemoryFootprint.h
     )
 endif ()
@@ -842,7 +843,6 @@ WEBKIT_INCLUDE_CONFIG_FILES_IF_EXISTS()
 WEBKIT_ADD_TARGET_UNSAFE_BUFFER_WARNINGS(WTF)
 
 WEBKIT_COPY_FILES(WTF_CopyHeaders
-    PRUNE_STALE
     DESTINATION ${WTF_HEADERS_DIR}
     FILES ${WTF_PUBLIC_HEADERS}
 )
@@ -896,6 +896,9 @@ file(COPY
 
 set(WTF_PREFERENCES
     ../Scripts/GeneratePreferences.rb
+    ../Scripts/GenerateSecurityFlags.rb
+
+    ../Scripts/Preferences/SecurityFlags.yaml
     ../Scripts/Preferences/UnifiedWebPreferences.yaml
 )
 

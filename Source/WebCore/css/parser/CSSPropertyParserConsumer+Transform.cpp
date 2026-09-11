@@ -42,6 +42,7 @@
 #include "CSSPropertyParserConsumer+Primitives.h"
 #include "CSSPropertyParserState.h"
 #include "CSSPropertyParsing.h"
+#include "CSSTransformListValue.h"
 #include "CSSValueList.h"
 #include "CSSValuePool.h"
 #include "StyleBuilderState.h"
@@ -116,13 +117,13 @@ RefPtr<CSSValue> consumeTranslateFunction(CSSParserTokenRange& range, CSS::Prope
     auto consumeParameters = [](auto& args, auto& state) -> std::optional<CSSValueListBuilder> {
         CSSValueListBuilder arguments;
 
-        auto firstValue = CSSPrimitiveValueResolver<CSS::LengthPercentage<CSS::AllUnzoomed>>::consumeAndResolve(args, state);
+        auto firstValue = CSSPrimitiveValueResolver<CSS::LengthPercentage<>>::consumeAndResolve(args, state);
         if (!firstValue)
             return { };
         arguments.append(firstValue.releaseNonNull());
 
         if (consumeCommaIncludingWhitespace(args)) {
-            auto secondValue = CSSPrimitiveValueResolver<CSS::LengthPercentage<CSS::AllUnzoomed>>::consumeAndResolve(args, state);
+            auto secondValue = CSSPrimitiveValueResolver<CSS::LengthPercentage<>>::consumeAndResolve(args, state);
             if (!secondValue)
                 return { };
             // A second value of `0` is the same as no second argument, so there is no need to store one if we know it is `0`.
@@ -156,21 +157,21 @@ RefPtr<CSSValue> consumeTranslate3dFunction(CSSParserTokenRange& range, CSS::Pro
     // translate3d() = translate3d( <length-percentage> , <length-percentage> , <length> )
 
     auto consumeParameters = [](auto& args, auto& state) -> std::optional<CSSValueListBuilder> {
-        auto firstValue = CSSPrimitiveValueResolver<CSS::LengthPercentage<CSS::AllUnzoomed>>::consumeAndResolve(args, state);
+        auto firstValue = CSSPrimitiveValueResolver<CSS::LengthPercentage<>>::consumeAndResolve(args, state);
         if (!firstValue)
             return { };
 
         if (!consumeCommaIncludingWhitespace(args))
             return { };
 
-        auto secondValue = CSSPrimitiveValueResolver<CSS::LengthPercentage<CSS::AllUnzoomed>>::consumeAndResolve(args, state);
+        auto secondValue = CSSPrimitiveValueResolver<CSS::LengthPercentage<>>::consumeAndResolve(args, state);
         if (!secondValue)
             return { };
 
         if (!consumeCommaIncludingWhitespace(args))
             return { };
 
-        auto thirdValue = CSSPrimitiveValueResolver<CSS::Length<CSS::AllUnzoomed>>::consumeAndResolve(args, state);
+        auto thirdValue = CSSPrimitiveValueResolver<CSS::Length<>>::consumeAndResolve(args, state);
         if (!thirdValue)
             return { };
 
@@ -213,7 +214,7 @@ RefPtr<CSSValue> consumeTranslate(CSSParserTokenRange& range, CSS::PropertyParse
     // value is missing, it defaults to 0px. If three values are given, this specifies a 3d translation, equivalent to the
     // translate3d() function.
 
-    auto x = CSSPrimitiveValueResolver<CSS::LengthPercentage<CSS::AllUnzoomed>>::consumeAndResolve(range, state);
+    auto x = CSSPrimitiveValueResolver<CSS::LengthPercentage<>>::consumeAndResolve(range, state);
     if (!x)
         return nullptr;
 
@@ -222,7 +223,7 @@ RefPtr<CSSValue> consumeTranslate(CSSParserTokenRange& range, CSS::PropertyParse
     if (range.atEnd())
         return CSSValueList::createSpaceSeparated(x.releaseNonNull());
 
-    auto y = CSSPrimitiveValueResolver<CSS::LengthPercentage<CSS::AllUnzoomed>>::consumeAndResolve(range, state);
+    auto y = CSSPrimitiveValueResolver<CSS::LengthPercentage<>>::consumeAndResolve(range, state);
     if (!y)
         return nullptr;
 
@@ -239,7 +240,7 @@ RefPtr<CSSValue> consumeTranslate(CSSParserTokenRange& range, CSS::PropertyParse
         return CSSValueList::createSpaceSeparated(x.releaseNonNull(), y.releaseNonNull());
     }
 
-    auto z = CSSPrimitiveValueResolver<CSS::Length<CSS::AllUnzoomed>>::consumeAndResolve(range, state);
+    auto z = CSSPrimitiveValueResolver<CSS::Length<>>::consumeAndResolve(range, state);
     if (!z)
         return nullptr;
 
@@ -313,11 +314,11 @@ RefPtr<CSSValue> consumeRotate(CSSParserTokenRange& range, CSS::PropertyParserSt
         return nullptr;
 
     auto knownToBeZero = [](std::optional<bool> value) -> bool {
-        return !value ? false : *value == true;
+        return value && *value;
     };
 
     auto knownToBeNotZero = [](std::optional<bool> value) -> bool {
-        return !value ? false : *value == false;
+        return value && !*value;
     };
 
     if (list.size() == 3) {
@@ -410,7 +411,7 @@ RefPtr<CSSValue> consumeScale(CSSParserTokenRange& range, CSS::PropertyParserSta
     return CSSValueList::createSpaceSeparated(x.releaseNonNull());
 }
 
-std::optional<Style::Transform> parseTransformRaw(const String& string, const CSSParserContext& context, const Document& document)
+std::optional<Style::Transform> parseTransformRaw(StringView string, const CSSParserContext& context, const Document& document)
 {
     auto tokenizer = CSSTokenizer(string);
     auto range = tokenizer.tokenRange();
@@ -432,10 +433,59 @@ std::optional<Style::Transform> parseTransformRaw(const String& string, const CS
     auto dummyStyle = Style::ComputedStyle::create();
     auto dummyState = Style::BuilderState::create(dummyStyle, Style::BuilderContext { document });
 
-    ASSERT(parsedValue->canResolveDependenciesWithConversionData(dummyState->cssToLengthConversionData()));
+    ASSERT(parsedValue->computedStyleDependencies().isAbsolute());
 
     return Style::toStyleFromCSSValue<Style::Transform>(*CheckedPtr { dummyState.ptr() }, *parsedValue);
 }
+
+#if ENABLE(SPATIAL_PORTAL)
+
+static void flattenTransformListValues(CSSValueListBuilder& builder, CSSValue& transformList)
+{
+    builder.appendVector(downcast<CSSTransformListValue>(transformList).copyValues());
+}
+
+RefPtr<CSSValue> consumePortalTransform(CSSParserTokenRange& range, CSS::PropertyParserState& state)
+{
+    // <'portal-transform'> = none | auto | auto? <transform-list> | <transform-list> auto <transform-list>?
+    // https://webkit.github.io/explainers/css-spatial/Overview.html#stage-transform
+
+    if (range.peek().id() == CSSValueNone)
+        return consumeIdent(range);
+
+    RefPtr leadingAuto = consumeIdent<CSSValueAuto>(range);
+    RefPtr firstList = CSSPropertyParsing::consumeTransformList(range, state);
+
+    if (leadingAuto) {
+        // `auto` | `auto <transform-list>`
+        if (!firstList)
+            return leadingAuto;
+
+        CSSValueListBuilder builder;
+        builder.append(leadingAuto.releaseNonNull());
+        flattenTransformListValues(builder, *firstList);
+        return CSSValueList::createSpaceSeparated(WTF::move(builder));
+    }
+
+    if (!firstList)
+        return nullptr;
+
+    RefPtr trailingAuto = consumeIdent<CSSValueAuto>(range);
+    if (!trailingAuto)
+        return firstList; // `<transform-list>`
+
+    // `<transform-list> auto` | `<transform-list> auto <transform-list>`
+    CSSValueListBuilder builder;
+    flattenTransformListValues(builder, *firstList);
+    builder.append(trailingAuto.releaseNonNull());
+
+    if (RefPtr secondList = CSSPropertyParsing::consumeTransformList(range, state))
+        flattenTransformListValues(builder, *secondList);
+
+    return CSSValueList::createSpaceSeparated(WTF::move(builder));
+}
+
+#endif // ENABLE(SPATIAL_PORTAL)
 
 } // namespace CSSPropertyParserHelpers
 } // namespace WebCore

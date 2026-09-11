@@ -40,12 +40,12 @@ ElementBox::ElementBox(ElementAttributes&& attributes, Style::ComputedStyle&& st
 {
 }
 
-ElementBox::ElementBox(ElementAttributes&& attributes, EnumSet<ListMarkerAttribute> listMarkerAttributes, Style::ComputedStyle&& style, std::unique_ptr<Style::ComputedStyle>&& firstLineStyle)
+ElementBox::ElementBox(ElementAttributes&& attributes, IsListMarkerImage isListMarkerImage, Style::ComputedStyle&& style, std::unique_ptr<Style::ComputedStyle>&& firstLineStyle)
     : Box(WTF::move(attributes), WTF::move(style), WTF::move(firstLineStyle), ElementBoxFlag)
     , m_replacedData(makeUnique<ReplacedData>())
 {
     ASSERT(isListMarkerBox());
-    m_replacedData->listMarkerAttributes = listMarkerAttributes;
+    m_replacedData->isListMarkerImage = isListMarkerImage == IsListMarkerImage::Yes;
 }
 
 ElementBox::ElementBox(ElementAttributes&& attributes, ReplacedAttributes&& replacedAttributes, Style::ComputedStyle&& style, std::unique_ptr<Style::ComputedStyle>&& firstLineStyle)
@@ -199,6 +199,28 @@ bool ElementBox::hasIntrinsicRatio() const
     if (!hasAspectRatio())
         return false;
     return m_replacedData && (m_replacedData->intrinsicSize || m_replacedData->intrinsicRatio);
+}
+
+bool ElementBox::hasNaturalWidth() const
+{
+    return m_replacedData && m_replacedData->intrinsicSize;
+}
+
+bool ElementBox::hasNaturalHeight() const
+{
+    return m_replacedData && m_replacedData->intrinsicSize;
+}
+
+LayoutUnit ElementBox::naturalWidth() const
+{
+    ASSERT(hasNaturalWidth());
+    return m_replacedData->intrinsicSize->width();
+}
+
+LayoutUnit ElementBox::naturalHeight() const
+{
+    ASSERT(hasNaturalHeight());
+    return m_replacedData->intrinsicSize->height();
 }
 
 LayoutUnit ElementBox::intrinsicWidth() const

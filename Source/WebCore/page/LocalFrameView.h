@@ -272,7 +272,7 @@ public:
 
     FloatSize sizeForCSSDynamicViewportUnits() const;
 
-    IntRect windowClipRect() const final;
+    WEBCORE_EXPORT IntRect windowClipRect() const final;
     WEBCORE_EXPORT IntRect windowClipRectForFrameOwner(const HTMLFrameOwnerElement*, bool clipToLayerContents) const;
 
     WEBCORE_EXPORT void scrollToEdgeWithOptions(WebCore::RectEdges<bool>, const ScrollPositionChangeOptions&);
@@ -325,7 +325,6 @@ public:
 
     // These are in document coordinates, unaffected by page scale (but affected by zooming).
     WEBCORE_EXPORT LayoutRect layoutViewportRect() const final;
-    void updateLayoutViewportRect();
     WEBCORE_EXPORT LayoutRect visualViewportRect() const;
 
     LayoutRect layoutViewportRectIncludingObscuredInsets() const;
@@ -335,6 +334,9 @@ public:
     LayoutPoint childFrameOwnerContentBoxLocation(const Frame&) const final;
     TransformationMatrix childFrameOwnerToRootContentTransform(const Frame&) const final;
     TransformationMatrix absoluteToChildFrameOwnerLocalTransform(const Frame&) const final;
+
+    FloatRect mapAbsoluteToChildFrameViewRect(const FloatRect&, const Frame& child) const;
+    static FloatRect mapAbsoluteToChildFrameViewRect(const FloatRect& rectInAbsolute, const TransformationMatrix& absoluteToChildFrameOwnerLocalTransform, FloatPoint childFrameOwnerContentBoxLocation);
 
     static LayoutRect visibleDocumentRect(const FloatRect& visibleContentRect, float headerHeight, float footerHeight, const FloatSize& totalContentsSize, float pageScaleFactor);
 
@@ -346,7 +348,7 @@ public:
 
     LayoutRect rectForFixedPositionLayout() const;
 
-    void viewportContentsChanged();
+    WEBCORE_EXPORT void viewportContentsChanged();
     WEBCORE_EXPORT void resumeVisibleImageAnimationsIncludingSubframes();
 #if ENABLE(ACCESSIBILITY_ANIMATION_CONTROL)
     void updatePlayStateForAllAnimationsIncludingSubframes();
@@ -693,6 +695,18 @@ public:
     WEBCORE_EXPORT void setViewExposedRect(std::optional<FloatRect>);
     std::optional<FloatRect> viewExposedRect() const { return m_viewExposedRect; }
 
+    // Set once the main WCP has supplied this iframe root's exposed content rect via childrenFrameLayoutInfo,
+    // so a compositing flush that precedes the first sync doesn't clamp coverage to a stale/empty rect.
+    void setHasSetExposedContentRectFromEmbedder() { m_hasSetExposedContentRectFromEmbedder = true; }
+    bool hasEverSetExposedContentRectFromEmbedder() const { return m_hasSetExposedContentRectFromEmbedder; }
+
+    // The part of this frame that the parent remote frame thinks is visible in the current view's window coordinates.
+    void setVisibleRectFromParentFrameProcess(std::optional<IntRect> rect) { m_visibleRectFromParentFrameProcess = rect; }
+    std::optional<IntRect> visibleRectFromParentFrameProcess() const { return m_visibleRectFromParentFrameProcess; }
+
+    void setOwnerHasRendererInParentFrameProcess(bool hasRenderer) { m_ownerHasRendererInParentFrameProcess = hasRenderer; }
+    bool ownerHasRendererInParentFrameProcess() const { return m_ownerHasRendererInParentFrameProcess; }
+
     void updateSnapOffsets() final;
     bool isScrollSnapInProgress() const final;
 
@@ -799,6 +813,8 @@ public:
 #endif
     void scrollDidEnd() final;
     void scrollOriginDidChange() final;
+
+    void setLoadedWhileHidden() { m_loadedWhileHidden = true; }
 
 private:
     explicit LocalFrameView(LocalFrame&);
@@ -1046,6 +1062,10 @@ private:
     std::optional<LayoutRect> m_visualViewportOverrideRect; // Used when the iOS keyboard is showing.
 
     std::optional<FloatRect> m_viewExposedRect;
+    std::optional<IntRect> m_visibleRectFromParentFrameProcess;
+
+    bool m_hasSetExposedContentRectFromEmbedder { false };
+    bool m_ownerHasRendererInParentFrameProcess { true };
 
     OptionSet<PaintBehavior> m_paintBehavior;
 
@@ -1112,6 +1132,7 @@ private:
     bool m_isOverlapped { false };
     bool m_contentIsOpaque { false };
     bool m_firstLayoutCallbackPending { false };
+    bool m_loadedWhileHidden { false };
 
     bool m_isTransparent { false };
 #if ENABLE(DARK_MODE_CSS)

@@ -72,7 +72,6 @@
 #include "FontPaletteValues.h"
 #include "MediaList.h"
 #include "MediaQueryParser.h"
-#include "MediaQueryParserContext.h"
 #include "MutableCSSSelector.h"
 #include "NestingLevelIncrementer.h"
 #include "NodeDocument.h"
@@ -111,7 +110,7 @@ CSSParser::CSSParser(const CSSParserContext& context, StyleSheetContents* styleS
 {
 }
 
-CSSParser::CSSParser(const CSSParserContext& context, const String& string, StyleSheetContents* styleSheet, CSSParserObserverWrapper* wrapper, CSSParserEnum::NestedContext nestedContext)
+CSSParser::CSSParser(const CSSParserContext& context, StringView string, StyleSheetContents* styleSheet, CSSParserObserverWrapper* wrapper, CSSParserEnum::NestedContext nestedContext)
     : m_context(context)
     , m_styleSheet(styleSheet)
     , m_tokenizer(wrapper ? CSSTokenizer::tryCreate(string, *wrapper) : CSSTokenizer::tryCreate(string))
@@ -122,7 +121,7 @@ CSSParser::CSSParser(const CSSParserContext& context, const String& string, Styl
         m_ancestorRuleTypeStack.append(*nestedContext);
 }
 
-auto CSSParser::parseValue(MutableStyleProperties& declaration, CSSPropertyID propertyID, const String& string, IsImportant important, const CSSParserContext& context) -> ParseResult
+auto CSSParser::parseValue(MutableStyleProperties& declaration, CSSPropertyID propertyID, StringView string, IsImportant important, const CSSParserContext& context) -> ParseResult
 {
     auto ruleType = context.enclosingRuleType.value_or(StyleRuleType::Style);
 
@@ -142,7 +141,7 @@ auto CSSParser::parseValue(MutableStyleProperties& declaration, CSSPropertyID pr
     return declaration.addParsedProperties(parser.topContext().m_parsedProperties) ? ParseResult::Changed : ParseResult::Unchanged;
 }
 
-auto CSSParser::parseCustomPropertyValue(MutableStyleProperties& declaration, const AtomString& propertyName, const String& string, IsImportant important, const CSSParserContext& context) -> ParseResult
+auto CSSParser::parseCustomPropertyValue(MutableStyleProperties& declaration, const AtomString& propertyName, StringView string, IsImportant important, const CSSParserContext& context) -> ParseResult
 {
     CSSParser parser(context, string);
 
@@ -197,7 +196,7 @@ static Ref<ImmutableStyleProperties> createStyleProperties(ParsedPropertyVector&
     return result;
 }
 
-Ref<ImmutableStyleProperties> CSSParser::parseInlineStyleDeclaration(const String& string, const Element& element)
+Ref<ImmutableStyleProperties> CSSParser::parseInlineStyleDeclaration(StringView string, const Element& element)
 {
     CSSParserContext context(element.document());
     context.mode = strictToCSSParserMode(element.isHTMLElement() && !element.document().inQuirksMode());
@@ -207,7 +206,7 @@ Ref<ImmutableStyleProperties> CSSParser::parseInlineStyleDeclaration(const Strin
     return createStyleProperties(parser.topContext().m_parsedProperties, context.mode);
 }
 
-bool CSSParser::parseDeclarationList(MutableStyleProperties& declaration, const String& string, const CSSParserContext& context)
+bool CSSParser::parseDeclarationList(MutableStyleProperties& declaration, StringView string, const CSSParserContext& context)
 {
     CSSParser parser(context, string);
     auto ruleType = context.enclosingRuleType.value_or(StyleRuleType::Style);
@@ -227,7 +226,7 @@ bool CSSParser::parseDeclarationList(MutableStyleProperties& declaration, const 
     return declaration.addParsedProperties(results.subspan(unusedEntries));
 }
 
-RefPtr<StyleRuleBase> CSSParser::parseRule(const String& string, const CSSParserContext& context, StyleSheetContents* styleSheet, AllowedRules allowedRules, CSSParserEnum::NestedContext nestedContext)
+RefPtr<StyleRuleBase> CSSParser::parseRule(StringView string, const CSSParserContext& context, StyleSheetContents* styleSheet, AllowedRules allowedRules, CSSParserEnum::NestedContext nestedContext)
 {
     CSSParser parser(context, string, styleSheet, nullptr, nestedContext);
     CSSParserTokenRange range = parser.tokenizer()->tokenRange();
@@ -247,13 +246,13 @@ RefPtr<StyleRuleBase> CSSParser::parseRule(const String& string, const CSSParser
     return rule;
 }
 
-RefPtr<StyleRuleKeyframe> CSSParser::parseKeyframeRule(const String& string, const CSSParserContext& context)
+RefPtr<StyleRuleKeyframe> CSSParser::parseKeyframeRule(StringView string, const CSSParserContext& context)
 {
     RefPtr keyframe = parseRule(string, context, nullptr, CSSParser::AllowedRules::KeyframeRules);
     return downcast<StyleRuleKeyframe>(keyframe.get());
 }
 
-RefPtr<StyleRuleNestedDeclarations> CSSParser::parseNestedDeclarations(const CSSParserContext&context , const String& string)
+RefPtr<StyleRuleNestedDeclarations> CSSParser::parseNestedDeclarations(StringView string, const CSSParserContext& context)
 {
     auto properties = MutableStyleProperties::createEmpty();
     if (!parseDeclarationList(properties, string , context))
@@ -262,7 +261,7 @@ RefPtr<StyleRuleNestedDeclarations> CSSParser::parseNestedDeclarations(const CSS
     return StyleRuleNestedDeclarations::create(WTF::move(properties));
 }
 
-void CSSParser::parseStyleSheet(const String& string, const CSSParserContext& context, StyleSheetContents& styleSheet)
+void CSSParser::parseStyleSheet(StringView string, const CSSParserContext& context, StyleSheetContents& styleSheet)
 {
     CSSParser parser(context, string, &styleSheet, nullptr);
     bool firstRuleValid = parser.consumeRuleList(parser.tokenizer()->tokenRange(), RuleList::TopLevel, [&](Ref<StyleRuleBase> rule) {
@@ -329,7 +328,7 @@ bool CSSParser::supportsDeclaration(CSSParserTokenRange& range)
     return result;
 }
 
-void CSSParser::parseDeclarationListForInspector(const String& declaration, const CSSParserContext& context, CSSParserObserver& observer)
+void CSSParser::parseDeclarationListForInspector(StringView declaration, const CSSParserContext& context, CSSParserObserver& observer)
 {
     Ref wrapper = CSSParserObserverWrapper::create(observer);
     CSSParser parser(context, declaration, nullptr, wrapper.ptr());
@@ -338,7 +337,7 @@ void CSSParser::parseDeclarationListForInspector(const String& declaration, cons
     parser.consumeDeclarationList(parser.tokenizer()->tokenRange(), StyleRuleType::Style);
 }
 
-void CSSParser::parseStyleSheetForInspector(const String& string, const CSSParserContext& context, StyleSheetContents& styleSheet, CSSParserObserver& observer)
+void CSSParser::parseStyleSheetForInspector(StringView string, const CSSParserContext& context, StyleSheetContents& styleSheet, CSSParserObserver& observer)
 {
     Ref wrapper = CSSParserObserverWrapper::create(observer);
     CSSParser parser(context, string, &styleSheet, wrapper.ptr());
@@ -1117,9 +1116,6 @@ RefPtr<StyleRuleViewTransition> CSSParser::consumeViewTransitionRule(CSSParserTo
 
 RefPtr<StyleRulePositionTry> CSSParser::consumePositionTryRule(CSSParserTokenRange prelude, CSSParserTokenRange block)
 {
-    if (!m_context.propertySettings.cssAnchorPositioningEnabled)
-        return nullptr;
-
     // Prelude should ONLY be a <dashed-ident>.
     auto ruleName = CSSPropertyParserHelpers::consumeEagerlyResolvableDashedIdentRaw(prelude);
     if (!ruleName)
@@ -1185,11 +1181,12 @@ RefPtr<StyleRuleFunction> CSSParser::consumeFunctionRule(CSSParserTokenRange pre
             if (parametersRange.peek().type() == ColonToken) {
                 parametersRange.consumeIncludingWhitespace();
                 // <default-value> = <declaration-value>
+                // A comma only separates parameters at the top level, so blocks are consumed whole.
                 auto defaultRangeStart = parametersRange;
                 while (!parametersRange.atEnd() && parametersRange.peek().type() != CommaToken) {
                     if (parametersRange.peek().type() == DelimiterToken && parametersRange.peek().delimiter() == '!')
                         return { };
-                    parametersRange.consumeIncludingWhitespace();
+                    parametersRange.consumeComponentValue();
                 }
 
                 auto defaultRange = defaultRangeStart.rangeUntil(parametersRange);
@@ -1402,9 +1399,8 @@ RefPtr<StyleRuleContainer> CSSParser::consumeContainerRule(CSSParserTokenRange p
     if (!query)
         return nullptr;
 
-    prelude.consumeWhitespace();
-    if (!prelude.atEnd())
-        return nullptr;
+    // If we successfully parsed any conditions, there has to be at least one.
+    ASSERT(!query->isEmpty());
 
     if (RefPtr observerWrapper = m_observerWrapper.get()) {
         observerWrapper->observer().startRuleHeader(StyleRuleType::Container, observerWrapper->startOffset(originalPreludeRange));
@@ -1544,7 +1540,7 @@ static void validateUserAgentSheetSelector(const CSSSelectorList& selectorList)
         }
         // Don't use subject position :is(foo, bar) and similar on UA sheet before we have good optimizations for them.
         // Selectors like this should be expanded manually.
-        ASSERT_WITH_MESSAGE(hasBucketedSelector || !hasLogicalCombination, "Subject position selector list in '%s' not allowed in user-agent stylesheet", complexSelector.selectorText().utf8().data());
+        ASSERT_WITH_MESSAGE(hasBucketedSelector || !hasLogicalCombination, "Subject position selector list in '%s' not allowed in user-agent stylesheet", complexSelector.selectorText().utf8().legacyCStringPointer());
     };
 
     for (auto& complexSelector : selectorList)
@@ -1837,6 +1833,11 @@ bool CSSParser::consumeDeclaration(CSSParserTokenRange range, StyleRuleType rule
     auto didParseNewProperties = [&] {
         return parsedProperties.size() != oldPropertiesCount;
     };
+
+    // In @page, `size` aliases the always-exposed `page-size` descriptor; remap
+    // before the isExposed() check so gating the shorthand can't disable it.
+    if (ruleType == StyleRuleType::Page && propertyID == CSSPropertySize)
+        propertyID = CSSPropertyPageSize;
 
     if (!isExposed(propertyID, &m_context.propertySettings))
         propertyID = CSSPropertyInvalid;

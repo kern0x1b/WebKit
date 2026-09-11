@@ -25,7 +25,7 @@
 
 #pragma once
 
-#if USE(COORDINATED_GRAPHICS) && USE(SKIA)
+#if USE(COORDINATED_GRAPHICS) && USE(SKIA) && !USE(TEXTURE_MAPPER)
 #include "BoxExtents.h"
 #include "Color.h"
 #include "CoordinatedBackingStoreProxy.h"
@@ -78,10 +78,12 @@ public:
     void setChildrenTransform(const TransformationMatrix& matrix) { m_childrenTransform = matrix; }
     void setPreserves3D(bool preserves3D) { m_preserves3D = preserves3D; }
     void setBackfaceVisibility(bool visible) { m_backfaceVisibility = visible; }
+    void setBackgroundColor(const Color& color) { m_backgroundColor = color; }
     void setContentsVisible(bool visible) { m_contentsVisible = visible; }
     void setContentsOpaque(bool opaque) { m_contentsOpaque = opaque; }
     void setMasksToBounds(bool masksToBounds) { m_masksToBounds = masksToBounds; }
     void setContentsClippingRect(const FloatRoundedRect& rect) { m_contentsClippingRect = rect; }
+    void setContentsClipPath(std::optional<SkPath>&& clipPath) { m_contentsClipPath = WTF::move(clipPath); }
     void setContentsRectClipsDescendants(bool clips) { m_contentsRectClipsDescendants = clips; }
     void setOpacity(float);
     void setBlendMode(BlendMode);
@@ -94,6 +96,7 @@ public:
     void setFilters(const FilterOperations&);
     void setBackdropFilters(const FilterOperations&);
     void setBackdropFiltersRect(const FloatRoundedRect&);
+    void setBackdropFiltersClipPath(std::optional<SkPath>&& clipPath) { m_backdrop.clipPath = WTF::move(clipPath); }
     void setIsBackdropRoot(bool isBackdropRoot) { m_isBackdropRoot = isBackdropRoot; }
     void setChildren(Vector<Ref<SkiaCompositingLayer>>&&);
 
@@ -133,7 +136,7 @@ private:
     bool isReplica() const { return !!m_replicatedLayer; }
     // Contents are painted into m_contentsRect, which the layer bounds do not have to contain.
     bool paintsContentsRect() const { return m_contentsBuffer || m_imageBackingStore || (m_contentsSolidColor.isValid() && m_contentsSolidColor.isVisible()); }
-    bool hasVisualContent() const { return m_backingStore || paintsContentsRect(); }
+    bool hasVisualContent() const { return (m_backgroundColor.isValid() && m_backgroundColor.isVisible()) || m_backingStore || paintsContentsRect(); }
     bool hasVisiblePaintableContent() const { return !m_rect.isEmpty() && m_visible && m_contentsVisible && hasVisualContent(); }
 
     // A backdrop filter paints the layer without any content of its own, so it contributes damage too.
@@ -226,7 +229,8 @@ private:
 #if ENABLE(DAMAGE_TRACKING)
     void collectFrameDamage(SkCanvas&, PaintContext&);
     void collectBackdropDamage(SkCanvas&, PaintContext&);
-    void collectMaskDamage(SkCanvas&, PaintContext&);
+    void collectGroupDamage(SkCanvas&, PaintContext&);
+    void addGroupDamage(SkCanvas&, PaintContext&, const Vector<IntRect, 1>& overlapRects);
     static void resolveBackdropDamage(const Vector<FloatRect>& backdropRectsInFrame, Damage&);
 #endif
     void paintSelfAndChildren(SkCanvas&, PaintContext&);
@@ -261,9 +265,18 @@ private:
 #endif
     }
 
+    void groupPropertyChanged()
+    {
+#if ENABLE(DAMAGE_TRACKING)
+        m_groupPropertyChanged = true;
+#endif
+    }
+
 #if ENABLE(DAMAGE_TRACKING)
     bool damagePropagationEnabled() const { return m_damagePropagationEnabled; }
     bool hasLayerDamage() const { return m_layerDamage && !m_layerDamage->isEmpty(); }
+    bool hasGroupPropertyDamage() const;
+    bool hasDamageInSubtree() const;
     void trackLayerRect(PaintContext&, const FloatRect& layerRectInFrame);
 #endif
 
@@ -272,6 +285,7 @@ private:
         std::optional<TransformationMatrix> futureTransform;
         std::optional<float> opacity;
         std::optional<Filter> filter;
+        std::optional<FilterOperations> filterOperations;
         bool isRunning { false };
     };
     std::optional<AnimationsState> syncAnimations(MonotonicTime);
@@ -279,7 +293,9 @@ private:
     const TransformationMatrix& localTransform() const;
     const TransformationMatrix& futureLocalTransform() const;
     float opacity() const;
+    float opacityForAnimationsState(const AnimationsState*) const;
     const std::optional<Filter> filter() const;
+    IntOutsets unclippedFilterOutsets() const;
 
     struct DebugBorder {
         Color color;
@@ -312,6 +328,7 @@ private:
     float m_opacity { 1 };
     std::optional<SkBlendMode> m_blendMode;
     std::optional<SkPath> m_clipPath;
+    std::optional<SkPath> m_contentsClipPath;
     sk_sp<SkImage> m_maskImage;
     RefPtr<SkiaCompositingLayer> m_mask;
     RefPtr<SkiaCompositingLayer> m_replica;
@@ -320,6 +337,7 @@ private:
     RefPtr<CoordinatedAnimatedBackingStoreClient> m_animatedBackingStoreClient;
     RefPtr<CoordinatedImageBackingStore> m_imageBackingStore;
     std::unique_ptr<CoordinatedPlatformLayerBuffer> m_contentsBuffer;
+    Color m_backgroundColor;
     Color m_contentsSolidColor;
     std::optional<DebugBorder> m_debugBorder;
     std::optional<unsigned> m_repaintCount;
@@ -339,6 +357,7 @@ private:
     struct {
         sk_sp<SkImageFilter> filter;
         FloatRoundedRect clipRect;
+        std::optional<SkPath> clipPath;
     } m_backdrop;
     bool m_isBackdropRoot { false };
     bool m_shouldBlend { false };
@@ -353,10 +372,10 @@ private:
     std::optional<Damage> m_layerDamage;
     std::unique_ptr<LayerRectTracker> m_layerRectTracker;
     uint64_t m_layerRectID { 0 };
-    bool m_maskChanged { false };
+    bool m_groupPropertyChanged { false };
 #endif
 };
 
 } // namespace WebCore
 
-#endif // USE(COORDINATED_GRAPHICS) && USE(SKIA)
+#endif // USE(COORDINATED_GRAPHICS) && USE(SKIA) && !USE(TEXTURE_MAPPER)

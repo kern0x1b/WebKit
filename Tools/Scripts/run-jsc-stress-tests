@@ -1191,8 +1191,6 @@ BASE_MODES = [
             "--validateGraph=true",
             "--validateBCE=true",
             "--useSamplingProfiler=true",
-            "--airForceIRCAllocator=true",
-            "--airUseGreedyRegAlloc=false", # FIXME: remove with rdar://144792585
             "--useHandlerICInFTL=true",
             "--forceUnlinkedDFG=true",
             "--allowNonSPTagging=false",
@@ -1206,7 +1204,6 @@ BASE_MODES = [
         [
             "--validateGraph=true",
             "--usePutStackSinking=false",
-            "--airForceIRCAllocator=true",
         ] +
         FTL_OPTIONS +
         NO_CJIT_OPTIONS
@@ -1217,7 +1214,6 @@ BASE_MODES = [
         [
             "--validateGraph=true",
             "--maximumInliningDepth=1",
-            "--airForceBriggsAllocator=true",
             "--useB3HoistLoopInvariantValues=true",
         ] +
         FTL_OPTIONS +
@@ -1253,7 +1249,6 @@ BASE_MODES = [
         "FTLEager",
         "ftl-eager",
         [
-            "--airForceBriggsAllocator=true",
             "--useRandomizingExecutableIslandAllocation=true",
             "--forcePolyProto=true",
             "--useHandlerICInFTL=true",
@@ -1269,8 +1264,6 @@ BASE_MODES = [
         [
             "--validateGraph=true",
             "--validateBCE=true",
-            "--airForceBriggsAllocator=true",
-            "--airUseGreedyRegAlloc=false", # FIXME: remove with rdar://144792585
             "--libpasForcePGMWithRate=#{10 + rand(10)}",
         ] +
         FTL_OPTIONS +
@@ -1827,8 +1820,6 @@ def runWebAssembly
         if $isFTLPlatform
             run("wasm-simd", "-m", "--useWasmSIMD=1", "--forceAllFunctionsToUseSIMD=1", *FTL_OPTIONS) unless !$isSIMDPlatform
             run("wasm-aggressive-inline", "-m", "--wasmInliningMaximumWasmCalleeSize=2147483647", "--wasmInliningBudget=100000", "--wasmInliningMaximumDepth=10", *(FTL_OPTIONS + EAGER_OPTIONS))
-            # FIXME: remove with rdar://144792585
-            run("wasm-graph-reg-alloc", "-m", "--airUseGreedyRegAlloc=false", *FTL_OPTIONS)
         end
     end
 end
@@ -1860,8 +1851,6 @@ def runWebAssemblyJetStream2
         if $isFTLPlatform
             run("wasm-simd", "--useWasmSIMD=1", "--forceAllFunctionsToUseSIMD=1", *FTL_OPTIONS) unless !$isSIMDPlatform
             run("wasm-aggressive-inline", "--wasmInliningMaximumWasmCalleeSize=2147483647", "--wasmInliningBudget=100000", "--wasmInliningMaximumDepth=10", *(FTL_OPTIONS + EAGER_OPTIONS))
-            # FIXME: remove with rdar://144792585
-            run("wasm-graph-reg-alloc", "--airUseGreedyRegAlloc=false", *FTL_OPTIONS)
         end
     end
 end
@@ -1900,8 +1889,6 @@ def runWebAssemblySuite(*optionalTestSpecificOptions)
         if $isFTLPlatform
             run("wasm-simd", "--useWasmSIMD=1", "--forceAllFunctionsToUseSIMD=1", *(FTL_OPTIONS + optionalTestSpecificOptions)) unless !$isSIMDPlatform
             run("wasm-aggressive-inline", "--wasmInliningMaximumWasmCalleeSize=2147483647", "--wasmInliningBudget=100000", "--wasmInliningMaximumDepth=10", *(FTL_OPTIONS + EAGER_OPTIONS + optionalTestSpecificOptions))
-            # FIXME: remove with rdar://144792585
-            run("wasm-graph-reg-alloc", "--airUseGreedyRegAlloc=false", *(FTL_OPTIONS + optionalTestSpecificOptions))
         end
     end
 end
@@ -1933,8 +1920,6 @@ def runV8WebAssemblySuite(*optionalTestSpecificOptions)
         if $isFTLPlatform
             run("wasm-simd", "--useWasmSIMD=1", "--forceAllFunctionsToUseSIMD=1", *(FTL_OPTIONS + optionalTestSpecificOptions)) unless !$isSIMDPlatform
             run("wasm-aggressive-inline", "--wasmInliningMaximumWasmCalleeSize=2147483647", "--wasmInliningBudget=100000", "--wasmInliningMaximumDepth=10", *(FTL_OPTIONS + EAGER_OPTIONS + optionalTestSpecificOptions))
-            # FIXME: remove with rdar://144792585
-            run("wasm-graph-reg-alloc", "--airUseGreedyRegAlloc=false", *(FTL_OPTIONS + optionalTestSpecificOptions))
         end
     end
 end
@@ -1985,8 +1970,6 @@ def runWebAssemblyWithHarness(*optionalTestSpecificOptions)
         if $isFTLPlatform
             runWasmHarnessTest("wasm-simd", "--useWasmSIMD=1", "--forceAllFunctionsToUseSIMD=1", *FTL_OPTIONS) unless !$isSIMDPlatform
             runWasmHarnessTest("wasm-aggressive-inline", "--wasmInliningMaximumWasmCalleeSize=2147483647", "--wasmInliningBudget=100000", "--wasmInliningMaximumDepth=10", *(FTL_OPTIONS + EAGER_OPTIONS))
-            # FIXME: remove with rdar://144792585
-            runWasmHarnessTest("wasm-graph-reg-alloc", "--airUseGreedyRegAlloc=false", *(FTL_OPTIONS + optionalTestSpecificOptions))
         end
     end
 end
@@ -2015,8 +1998,6 @@ def runWebAssemblyEmscripten(mode)
         if $isFTLPlatform
             run("wasm-simd", "--useWasmSIMD=1", "--forceAllFunctionsToUseSIMD=1", *FTL_OPTIONS) unless !$isSIMDPlatform
             run("wasm-aggressive-inline", "--wasmInliningMaximumWasmCalleeSize=2147483647", "--wasmInliningBudget=100000", "--wasmInliningMaximumDepth=10", *(FTL_OPTIONS + EAGER_OPTIONS))
-            # FIXME: remove with rdar://144792585
-            run("wasm-graph-reg-alloc", "--airUseGreedyRegAlloc=false", *FTL_OPTIONS)
         end
     end
 end
@@ -2053,34 +2034,8 @@ def runWebAssemblySpecTestBase(mode, specHarnessPath, postfix, *optionalTestSpec
     end
 end
 
-def runWebAssemblySpecTest(mode)
-    runWebAssemblySpecTestBase(mode, "spec-harness", nil)
-end
-
-def runWebAssemblyFunctionReferenceSpecTest(mode)
-    runWebAssemblySpecTestBase(mode, "funcref-spec-harness", nil)
-end
-
-def runWebAssemblyGCSpecTest(mode)
-    runWebAssemblySpecTestBase(mode, "gc-spec-harness", nil)
-end
-
 def runWebAssemblyThreadsSpecTest(mode)
     runWebAssemblySpecTestBase(mode, "threads-spec-harness", nil)
-end
-
-def runWebAssemblySIMDSpecTest(mode, *optionalTestSpecificOptions)
-    return if !$isSIMDPlatform
-    runWebAssemblySpecTestBase(mode, "spec-harness", nil, "--useWasmSIMD=true", *optionalTestSpecificOptions)
-    runWebAssemblySpecTestBase(mode, "spec-harness", "-eager", "--useWasmSIMD=true", "--useBBQJIT=1", "--useWasmIPInt=1", "--thresholdForBBQOptimizeAfterWarmUp=0", "--thresholdForBBQOptimizeSoon=0", "--thresholdForOMGOptimizeAfterWarmUp=0", "--thresholdForOMGOptimizeSoon=0", *optionalTestSpecificOptions)
-end
-
-def runWebAssemblyTailCallSpecTest(mode)
-    runWebAssemblySpecTestBase(mode, "tail-call-spec-harness", nil, "--useWasmTailCalls=true")
-end
-
-def runWebAssemblyMultiMemorySpecTest(mode)
-    runWebAssemblySpecTestBase(mode, "multi-memory-spec-harness", nil, "--useWasmMultiMemory=true")
 end
 
 def runWebAssemblyLowExecutableMemory(*optionalTestSpecificOptions)
@@ -2096,6 +2051,12 @@ end
 # (LayoutTests/imported/w3c/web-platform-tests/wasm) in the jsc shell. Results are diffed against
 # the committed -expected.txt baselines.
 WPT_PATH = LAYOUTTESTS_PATH + "imported/w3c/web-platform-tests"
+
+# Origin the WPT server serves the imported tree from during a browser layout-test run, as
+# configured by LayoutTests/imported/w3c/resources/config.json. Stack locations that the WAST
+# harness bakes into assertion descriptions are these URLs in the committed baselines, so
+# wpt-harness-post.js rewrites the shell's relative load paths against this.
+WPT_BASE_URL = "http://web-platform.test:8800/"
 
 # The wasm JIT-configuration matrix, mirroring runWebAssemblySpecTestBase. Returns [kind, options].
 def wasmWPTConfigs(*extraOptions)
@@ -2148,6 +2109,13 @@ def wptCopyBeside(relativeName, sourceDir)
     prepareExtraRelativeFilesWithBaseDirectory([relativeName], $benchmarkDirectory, sourceDir)
 end
 
+# The collection root's path within the served WPT tree (e.g. "wasm/core/js"). Load paths in the
+# run directory are relative to this root, so it is also the prefix that turns one into the URL
+# the WPT server would serve it from.
+def wptCollectionPrefix
+    $extraFilesBaseDir.relative_path_from(WPT_PATH.realpath)
+end
+
 # Maps each `// META: script=` dependency to a load path relative to the run's working directory
 # (the collection root). prepareCollection copies the whole collection tree into the bundle, so a
 # dependency within it is already present: a /-absolute (/wasm/...) dep resolves to its
@@ -2155,11 +2123,10 @@ end
 # pointing outside the collection would not be in the bundle, so raise rather than reference a
 # missing file (no jsshell test does this today).
 def wptPrepareScripts(scripts)
-    collectionPrefix = $extraFilesBaseDir.relative_path_from(WPT_PATH.realpath)
     scripts.map { | s |
         if s.start_with?("/")
-            rel = Pathname.new(s.sub(%r{^/}, '')).relative_path_from(collectionPrefix)
-            raise "WPT script dependency #{s} is outside the #{collectionPrefix} collection" if rel.to_s.start_with?("..")
+            rel = Pathname.new(s.sub(%r{^/}, '')).relative_path_from(wptCollectionPrefix)
+            raise "WPT script dependency #{s} is outside the #{wptCollectionPrefix} collection" if rel.to_s.start_with?("..")
             rel.to_s
         else
             ($benchmark.dirname + s).to_s
@@ -2180,7 +2147,7 @@ def runWebAssemblyWPT(expectedFile, harnessBeforeBenchmark, *extraOptions)
     wptCopyBeside("wpt-harness-post.js", WASMTESTS_PATH + "wpt")
 
     before = ["wpt-harness-pre.js", "resources/testharness.js"] + harnessBeforeBenchmark + ["wpt-harness-mid.js"]
-    after = ["wpt-harness-post.js", "--", wptTitle($benchmark)]
+    after = ["wpt-harness-post.js", "--", wptTitle($benchmark), WPT_BASE_URL + wptCollectionPrefix.to_s + "/"]
 
     # Enable the in-development JSC features the same way WebKitTestRunner does for the browser
     # layout-test run, so these tests exercise the same feature set (and match the baselines the
@@ -3044,6 +3011,14 @@ def runAndMonitorTestRunnerCommand(cmd, options={})
        didFail = {}
        blankLine = true
        prevStringLength = 0
+       printAboveProgressMeter = Proc.new {
+           | line |
+           unless blankLine
+               print("\r" + " " * prevStringLength + "\r")
+           end
+           puts line
+           blankLine = true
+       }
        IO.popen(cmd.join(' '), mode="r") {
            | inp |
            inp.each_line {
@@ -3053,15 +3028,12 @@ def runAndMonitorTestRunnerCommand(cmd, options={})
                    running[$~.post_match] = true
                elsif line =~ /^PASS: /
                    didRun[$~.post_match] = true
+                   printAboveProgressMeter.call(line) if $reportExecutionTime
                elsif line =~ /^FAIL: /
                    didRun[$~.post_match] = true
                    didFail[$~.post_match] = true
                else
-                   unless blankLine
-                       print("\r" + " " * prevStringLength + "\r")
-                   end
-                   puts line
-                   blankLine = true
+                   printAboveProgressMeter.call(line)
                end
 
                def lpad(str, chars)

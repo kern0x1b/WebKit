@@ -343,7 +343,7 @@ void TestInvocation::dumpResults()
     if (m_textOutput.hasOverflowed())
         dump("text output overflowed");
     else if (m_textOutput.length() || !m_audioResult)
-        dump(m_textOutput.toString().utf8().data());
+        dump(m_textOutput.toString().utf8().legacyCStringPointer());
     else
         dumpAudio(m_audioResult.get());
 
@@ -609,7 +609,7 @@ void TestInvocation::didReceiveMessageFromInjectedBundle(WKStringRef messageName
     ASSERT_NOT_REACHED();
 }
 
-WKRetainPtr<WKTypeRef> TestInvocation::didReceiveSynchronousMessageFromInjectedBundle(WKStringRef messageName, WKTypeRef messageBody)
+WKRetainPtr<WKTypeRef> TestInvocation::didReceiveSynchronousMessageFromInjectedBundle(WKStringRef messageName, WKTypeRef messageBody, bool fromMainFrameProcess)
 {
     if (WKStringIsEqualToUTF8CString(messageName, "Initialization")) {
         auto settings = createTestSettingsDictionary();
@@ -662,10 +662,10 @@ WKRetainPtr<WKTypeRef> TestInvocation::didReceiveSynchronousMessageFromInjectedB
     }
 
     if (WKStringIsEqualToUTF8CString(messageName, "ResolveNotifyDone"))
-        return adoptWK(WKBooleanCreate(resolveNotifyDone(booleanValue(messageBody))));
+        return adoptWK(WKBooleanCreate(resolveNotifyDone(fromMainFrameProcess)));
 
     if (WKStringIsEqualToUTF8CString(messageName, "ResolveForceImmediateCompletion"))
-        return adoptWK(WKBooleanCreate(resolveForceImmediateCompletion(booleanValue(messageBody))));
+        return adoptWK(WKBooleanCreate(resolveForceImmediateCompletion(fromMainFrameProcess)));
 
     if (WKStringIsEqualToUTF8CString(messageName, "SetWindowIsKey")) {
         TestController::singleton().mainWebView()->setWindowIsKey(booleanValue(messageBody));
@@ -1311,8 +1311,8 @@ WKRetainPtr<WKTypeRef> TestInvocation::didReceiveSynchronousMessageFromInjectedB
 
     if (WKStringIsEqualToUTF8CString(messageName, "SetPrivateClickMeasurementAttributionReportURLsForTesting")) {
         auto testDictionary = dictionaryValue(messageBody);
-        auto sourceURL = adoptWK(WKURLCreateWithUTF8CString(toWTFString(stringValue(testDictionary, "SourceURLString")).utf8().data()));
-        auto destinationURL = adoptWK(WKURLCreateWithUTF8CString(toWTFString(stringValue(testDictionary, "AttributeOnURLString")).utf8().data()));
+        auto sourceURL = adoptWK(WKURLCreateWithUTF8CString(toWTFString(stringValue(testDictionary, "SourceURLString")).utf8().legacyCStringPointer()));
+        auto destinationURL = adoptWK(WKURLCreateWithUTF8CString(toWTFString(stringValue(testDictionary, "AttributeOnURLString")).utf8().legacyCStringPointer()));
         TestController::singleton().setPrivateClickMeasurementAttributionReportURLsForTesting(sourceURL.get(), destinationURL.get());
         return nullptr;
     }
@@ -1389,12 +1389,12 @@ WKRetainPtr<WKTypeRef> TestInvocation::didReceiveSynchronousMessageFromInjectedB
     }
 
     if (WKStringIsEqualToUTF8CString(messageName, "GetGlobalPrivacyControl")) {
-        bool value = WKPreferencesGetBoolValueForKeyForTesting(TestController::singleton().platformPreferences(), toWK("GlobalPrivacyControlEnabled").get());
+        bool value = TestController::singleton().globalPrivacyControl();
         return adoptWK(WKBooleanCreate(value)).leakRef();
     }
 
     if (WKStringIsEqualToUTF8CString(messageName, "SetGlobalPrivacyControl")) {
-        WKPreferencesSetBoolValueForKeyForTesting(TestController::singleton().platformPreferences(), booleanValue(messageBody), toWK("GlobalPrivacyControlEnabled").get());
+        TestController::singleton().setGlobalPrivacyControl(booleanValue(messageBody));
         return nullptr;
     }
 
@@ -1514,7 +1514,7 @@ bool TestInvocation::resolveNotifyDone(bool canCompleteSynchronously)
     if (m_options.siteIsolationEnabled()) {
         // If notifyDone() arrived mid-work-queue, defer it until the queue drains.
         bool deferForWorkQueue = TestController::singleton().useWorkQueue() && !TestController::singleton().workQueueManager().isWorkQueueEmpty();
-        // The caller can dump synchronously only if it hosts the local main frame and nothing is pending.
+        // Complete locally only from the main-frame process with no pending work queue; the bundle handles deferral.
         if (canCompleteSynchronously && !deferForWorkQueue)
             return true;
         m_notifyDoneMessageSent = true;

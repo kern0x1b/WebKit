@@ -76,6 +76,7 @@ static std::optional<std::array<CGFloat, 4>> NODELETE ios6DeviceRGBComponents(co
 #endif
 
 static void setCGFillColor(CGContextRef context, const Color& color, const DestinationColorSpace& colorSpace)
+static void setCGFillColor(CGContextRef context, const Color& color, const ColorSpace& colorSpace)
 {
 #if defined(WEBKIT_IOS6)
     if (auto components = ios6DeviceRGBComponents(color)) {
@@ -278,7 +279,7 @@ CGContextRef GraphicsContextCG::contextForState() const
     return m_cgContext.get();
 }
 
-const DestinationColorSpace& GraphicsContextCG::colorSpace() const
+const ColorSpace& GraphicsContextCG::colorSpace() const
 {
     if (m_colorSpace)
         return *m_colorSpace;
@@ -299,7 +300,7 @@ const DestinationColorSpace& GraphicsContextCG::colorSpace() const
         colorSpace = CGContextGetColorSpace(context);
 
     // FIXME: Need to ASSERT(colorSpace). For now fall back to sRGB if colorSpace is nil.
-    m_colorSpace = colorSpace ? DestinationColorSpace(colorSpace) : DestinationColorSpace::SRGB();
+    m_colorSpace = colorSpace ? ColorSpace(colorSpace) : ColorSpace::SRGB();
     return *m_colorSpace;
 }
 
@@ -337,8 +338,8 @@ void GraphicsContextCG::drawNativeImage(const NativeImage& nativeImage, const Fl
     MonotonicTime startTime = MonotonicTime::now();
 #endif
 
-    auto shouldUseSubimage = [](CGInterpolationQuality interpolationQuality, const FloatRect& destRect, const FloatRect& srcRect, const AffineTransform& transform) -> bool {
-        if (interpolationQuality == kCGInterpolationNone)
+    auto shouldUseSubimage = [](InterpolationQuality interpolationQuality, const FloatRect& destRect, const FloatRect& srcRect, const AffineTransform& transform) -> bool {
+        if (interpolationQuality == InterpolationQuality::DoNotInterpolate)
             return false;
         if (transform.isRotateOrShear())
             return true;
@@ -390,11 +391,14 @@ void GraphicsContextCG::drawNativeImage(const NativeImage& nativeImage, const Fl
 
     RetainPtr<CGImageRef> retainedSubImage;
     auto subImage = image.get();
+    auto oldInterpolationQuality = imageInterpolationQuality();
+    auto interpolationQuality = imageInterpolationQualityForOptions(options);
+
+    auto subImage = image;
 
     auto adjustedDestRect = normalizedDestRect;
 
     if (normalizedSrcRect != imageRect) {
-        CGInterpolationQuality interpolationQuality = CGContextGetInterpolationQuality(context);
         auto scale = normalizedDestRect.size() / normalizedSrcRect.size();
 
         if (shouldUseSubimage(interpolationQuality, normalizedDestRect, normalizedSrcRect, transform)) {
@@ -436,6 +440,9 @@ void GraphicsContextCG::drawNativeImage(const NativeImage& nativeImage, const Fl
     bool blendModeChanged = oldCompositeOperator != options.compositeOperator() || oldBlendMode != options.blendMode();
     if (blendModeChanged)
         setCGBlendMode(context, options.compositeOperator(), options.blendMode());
+
+    if (interpolationQuality != oldInterpolationQuality)
+        CGContextSetInterpolationQuality(context, toCGInterpolationQuality(interpolationQuality));
 
 #if HAVE(SUPPORT_HDR_DISPLAY_APIS)
     auto oldHeadroom = CGContextGetEDRTargetHeadroom(context);
@@ -484,6 +491,9 @@ void GraphicsContextCG::drawNativeImage(const NativeImage& nativeImage, const Fl
 #endif
         if (blendModeChanged)
             setCGBlendMode(context, oldCompositeOperator, oldBlendMode);
+        setCGBlendMode(context, oldCompositeOperator, oldBlendMode);
+        if (interpolationQuality != oldInterpolationQuality)
+            CGContextSetInterpolationQuality(context, toCGInterpolationQuality(oldInterpolationQuality));
 #if HAVE(SUPPORT_HDR_DISPLAY_APIS)
         CGContextSetContentToneMappingInfo(context, oldToneMappingInfo);
         CGContextSetEDRTargetHeadroom(context, oldHeadroom);
@@ -518,6 +528,10 @@ void GraphicsContextCG::drawPattern(const NativeImage& nativeImage, const FloatR
     CGContextClipToRect(context, destRect);
 
     setCGBlendMode(context, options.compositeOperator(), options.blendMode());
+
+    auto interpolationQuality = imageInterpolationQualityForOptions(options);
+    if (interpolationQuality != imageInterpolationQuality())
+        CGContextSetInterpolationQuality(context, toCGInterpolationQuality(interpolationQuality));
 
     CGContextTranslateCTM(context, destRect.x(), destRect.y() + destRect.height());
     CGContextScaleCTM(context, 1, -1);
@@ -1034,11 +1048,10 @@ void GraphicsContextCG::fillRectWithRoundedHole(const FloatRect& rect, const Flo
     else
         path.addRect(roundedHoleRect.rect());
 
-    WindRule oldFillRule = fillRule();
     Color oldFillColor = fillColor();
 
-    setFillRule(WindRule::EvenOdd);
-    setFillColor(color);
+    if (oldFillColor != color)
+        setCGFillColor(context, color, colorSpace());
 
     // fillRectWithRoundedHole() assumes that the edges of rect are clipped out, so we only care about shadows cast around inside the hole.
     bool drawOwnShadow = canUseShadowBlur();
@@ -1053,13 +1066,13 @@ void GraphicsContextCG::fillRectWithRoundedHole(const FloatRect& rect, const Flo
         contextShadow.drawInsetShadow(*this, rect, roundedHoleRect);
     }
 
-    fillPath(path);
+    drawPathWithCGContext(context, kCGPathEOFill, path);
 
     if (drawOwnShadow)
         stateSaver.restore();
 
-    setFillRule(oldFillRule);
-    setFillColor(oldFillColor);
+    if (oldFillColor != color)
+        setCGFillColor(context, oldFillColor, colorSpace());
 }
 
 void GraphicsContextCG::resetClip()
@@ -1279,15 +1292,24 @@ void GraphicsContextCG::setCGStyle(const std::optional<GraphicsStyle>& style, bo
 
 void GraphicsContextCG::didUpdateState(GraphicsContextState& state)
 {
-    if (!state.changes())
+    auto changes = state.changes();
+    if (!changes)
         return;
+
+    if (changes.contains(GraphicsContextState::Change::ShadowsIgnoreTransforms)) {
+        if (state.dropShadow())
+            changes.add(GraphicsContextState::Change::DropShadow);
+        if (state.style())
+            changes.add(GraphicsContextState::Change::Style);
+    }
 
     auto context = platformContext();
 
-    for (auto change : state.changes()) {
+    for (auto change : changes) {
         switch (change) {
         case GraphicsContextState::Change::FillBrush:
-            setCGFillColor(context, state.fillBrush().color(), colorSpace());
+            if (!state.fillBrush().hasPatternOrGradient())
+                setCGFillColor(context, state.fillBrush().color(), colorSpace());
             break;
 
         case GraphicsContextState::Change::StrokeThickness:
@@ -1296,6 +1318,8 @@ void GraphicsContextCG::didUpdateState(GraphicsContextState& state)
 
         case GraphicsContextState::Change::StrokeBrush:
             setCGStrokeColor(context, state.strokeBrush().color(), colorSpace());
+            if (!state.strokeBrush().hasPatternOrGradient())
+                CGContextSetStrokeColorWithColor(context, cachedCGColorInDestinationStandardRange(state.strokeBrush().color(), colorSpace()).get());
             break;
 
         case GraphicsContextState::Change::CompositeMode:
@@ -1383,7 +1407,7 @@ void GraphicsContextCG::strokeRect(const FloatRect& rect, float lineWidth)
             CGContextDrawLayerInRect(context, CGRectMake(destinationX, destinationY, adjustedWidth, adjustedHeight), layer.get());
         } else {
             CGContextStateSaver stateSaver(context);
-            setStrokeThickness(lineWidth);
+            CGContextSetLineWidth(context, std::max(lineWidth, 0.f));
             CGContextAddRect(context, rect);
             CGContextReplacePathWithStrokedPath(context);
             CGContextClip(context);
@@ -1401,11 +1425,10 @@ void GraphicsContextCG::strokeRect(const FloatRect& rect, float lineWidth)
     // The convenience functions currently (in at least OSX 10.9.4) fail to
     // apply some attributes of the graphics state in certain cases
     // (as identified in https://bugs.webkit.org/show_bug.cgi?id=132948)
-    CGContextStateSaver stateSaver(context);
-    setStrokeThickness(lineWidth);
-
+    CGContextSetLineWidth(context, std::max(lineWidth, 0.f));
     CGContextAddRect(context, rect);
     CGContextStrokePath(context);
+    CGContextSetLineWidth(context, std::max(strokeThickness(), 0.f));
 }
 
 void GraphicsContextCG::strokeArc(const PathArc& arc)

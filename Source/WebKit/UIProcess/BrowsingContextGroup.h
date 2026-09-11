@@ -81,6 +81,7 @@ public:
     void removePage(WebPageProxy&);
     void closeRemotePagesForPage(WebPageProxy&);
     bool hasMultiplePages() const;
+    bool hasVisiblePage() const;
     void forEachRemotePage(const WebPageProxy&, Function<void(RemotePageProxy&)>&&);
 
     RefPtr<RemotePageProxy> remotePageInProcess(const WebPageProxy&, const WebProcessProxy&);
@@ -98,6 +99,9 @@ public:
 private:
     BrowsingContextGroup();
 
+    RefPtr<FrameProcess> liveSharedProcess();
+    void clearSharedProcess();
+
     WebCore::BrowsingContextGroupIdentifier m_identifier { WebCore::BrowsingContextGroupIdentifier::generate() };
 
     WeakPtr<FrameProcess> m_sharedProcess;
@@ -109,7 +113,7 @@ private:
     WeakHashMap<WebPageProxy, HashSet<Ref<RemotePageProxy>>> m_remotePages;
 
     HashMap<WebCore::SecurityOriginData, WebCore::OriginKeyed> m_historicalAgentClusterKeyMap;
-} SWIFT_SHARED_REFERENCE(refBrowsingContextGroup, derefBrowsingContextGroup);
+} SWIFT_SHARED_REFERENCE(refBrowsingContextGroup, derefBrowsingContextGroup) SWIFT_RETURNED_AS_UNRETAINED_BY_DEFAULT;
 
 }
 

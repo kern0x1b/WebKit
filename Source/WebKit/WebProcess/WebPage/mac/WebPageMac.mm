@@ -90,7 +90,6 @@
 #import <WebCore/LocalFrameInlines.h>
 #import <WebCore/LocalFrameView.h>
 #import <WebCore/MIMETypeRegistry.h>
-#import <WebCore/NetworkStorageSession.h>
 #import <WebCore/NodeHTMLConverter.h>
 #import <WebCore/NodeRenderStyle.h>
 #import <WebCore/Page.h>
@@ -164,14 +163,19 @@ void WebPage::platformInitializeAccessibility(ShouldInitializeNSAccessibility sh
     WebProcess::singleton().revokeLaunchServicesSandboxExtension();
 }
 
-void WebPage::createMockAccessibilityElement(pid_t pid)
+RetainPtr<WKAccessibilityWebPageObject> WebPage::createMockAccessibilityElementWithPresenter(pid_t pid)
 {
     auto mockAccessibilityElement = adoptNS([[WKAccessibilityWebPageObject alloc] init]);
 
     if ([mockAccessibilityElement respondsToSelector:@selector(accessibilitySetPresenterProcessIdentifier:)])
         [(id)mockAccessibilityElement.get() accessibilitySetPresenterProcessIdentifier:pid];
     [mockAccessibilityElement setWebPage:this];
-    m_mockAccessibilityElement = WTF::move(mockAccessibilityElement);
+    return mockAccessibilityElement;
+}
+
+void WebPage::createMockAccessibilityElement(pid_t pid)
+{
+    m_mockAccessibilityElement = createMockAccessibilityElementWithPresenter(pid);
 }
 
 void WebPage::platformReinitializeAccessibilityToken()
@@ -198,6 +202,14 @@ RetainPtr<NSData> WebPage::accessibilityRemoteTokenData() const
 {
     ASSERT(m_mockAccessibilityElement);
     return [NSAccessibilityRemoteUIElement remoteTokenForLocalUIElement:m_mockAccessibilityElement.get()];
+}
+
+RetainPtr<NSData> WebPage::accessibilityRemoteTokenDataForFrame(WebCore::FrameIdentifier frameID) const
+{
+    RetainPtr element = m_remoteFrameAccessibilityElements.get(frameID);
+    if (!element)
+        return accessibilityRemoteTokenData();
+    return [NSAccessibilityRemoteUIElement remoteTokenForLocalUIElement:element.get()];
 }
 
 void WebPage::platformDetach()
@@ -471,7 +483,7 @@ bool WebPage::performNonEditingBehaviorForSelector(const String& selector, Keybo
     return didPerformAction;
 }
 
-void WebPage::updateRemotePageAccessibilityOffset(WebCore::FrameIdentifier, WebCore::IntPoint offset)
+void WebPage::updateRemotePageOffsetInMainFrame(WebCore::FrameIdentifier, WebCore::IntPoint offset)
 {
 #if ENABLE(ACCESSIBILITY_LOCAL_FRAME)
     // With local frame support, position data is sent from the UI process in frameScreenPosition.
@@ -486,20 +498,15 @@ void WebPage::registerRemoteFrameAccessibilityTokens(pid_t pid, WebCore::Accessi
     RetainPtr elementTokenData = toNSData(elementToken.bytes);
     auto remoteElement = [elementTokenData length] ? adoptNS([[NSAccessibilityRemoteUIElement alloc] initWithRemoteToken:elementTokenData.get()]) : nil;
 
-    // Don't replace m_mockAccessibilityElement here. The AXIsolatedTree's ScrollArea caches a strong
-    // reference to the current mock element as its RemoteParent property at construction time, so
-    // recreating the mock would leave the isolated tree pointing at a stale instance with no remote
-    // parent set, breaking cross-process accessibility-parent traversal from inside this iframe.
-    // Reuse the existing mock element and only update what changed: the presenter PID, the remote
-    // parent, and the frame identifier.
-    if (!m_mockAccessibilityElement)
-        createMockAccessibilityElement(pid);
-    else if ([m_mockAccessibilityElement respondsToSelector:@selector(accessibilitySetPresenterProcessIdentifier:)])
-        [(id)m_mockAccessibilityElement.get() accessibilitySetPresenterProcessIdentifier:pid];
+    // Each local root frame gets a mock accessibility element that serves as the target for the
+    // remote accessibility element in the parent process.
+    RetainPtr frameElement = ensureRemoteFrameAccessibilityElement(frameID);
 
-    RetainPtr accessibilityRemoteObject = this->accessibilityRemoteObject();
-    [accessibilityRemoteObject setRemoteParent:remoteElement.get() token:elementTokenData.get()];
-    [accessibilityRemoteObject setFrameIdentifier:frameID];
+    if ([frameElement respondsToSelector:@selector(accessibilitySetPresenterProcessIdentifier:)])
+        [(id)frameElement.get() accessibilitySetPresenterProcessIdentifier:pid];
+
+    [frameElement setRemoteParent:remoteElement.get() token:elementTokenData.get()];
+    [frameElement setFrameIdentifier:frameID];
 }
 
 void WebPage::registerUIProcessAccessibilityTokens(WebCore::AccessibilityRemoteToken elementToken, WebCore::AccessibilityRemoteToken windowToken)
@@ -550,7 +557,7 @@ void WebPage::getDataSelectionForPasteboard(const String pasteboardType, Complet
     completionHandler(buffer.releaseNonNull());
 }
 
-WebCore::IntPoint WebPage::accessibilityRemoteFrameOffset()
+WebCore::IntPoint WebPage::remoteFrameOffsetInMainFrame()
 {
     return [m_mockAccessibilityElement accessibilityRemoteFrameOffset];
 }
@@ -566,19 +573,26 @@ void WebPage::cacheAXSize(const WebCore::IntSize& size)
     [m_mockAccessibilityElement setSize:size];
 }
 
-void WebPage::setIsolatedTree(Ref<WebCore::AXIsolatedTree>&& tree)
+void WebPage::setIsolatedTreeForFrame(WebCore::LocalFrame& frame, Ref<WebCore::AXIsolatedTree>&& tree)
 {
-    [m_mockAccessibilityElement setIsolatedTree:WTF::move(tree)];
+    [protect(accessibilityRemoteObjectForFrame(frame)) setIsolatedTree:WTF::move(tree)];
 }
 
-RefPtr<AXIsolatedTree> WebPage::isolatedTree() const
+RefPtr<AXIsolatedTree> WebPage::isolatedTreeForFrame(WebCore::LocalFrame& frame)
 {
-    return [m_mockAccessibilityElement isolatedTree];
+    return [protect(accessibilityRemoteObjectForFrame(frame)) isolatedTree];
 }
 #endif
 
 bool WebPage::platformCanHandleRequest(const WebCore::ResourceRequest& request)
 {
+    // CFNetwork's built-in protocols always handle these schemes, and a custom NSURLProtocol can
+    // only add handling, never take it away. Materializing the NSURLRequest just to ask is very
+    // expensive for URLs with a long query.
+    auto& url = request.url();
+    if (url.protocolIsInHTTPFamily() || url.protocolIsFile() || url.protocolIsData() || url.protocolIsAbout())
+        return true;
+
     RetainPtr nsRequest = request.nsURLRequest(HTTPBodyUpdatePolicy::DoNotUpdateHTTPBody);
     if (!nsRequest.get().URL)
         return false;
@@ -587,15 +601,16 @@ bool WebPage::platformCanHandleRequest(const WebCore::ResourceRequest& request)
 
     // FIXME: Return true if this scheme is any one WebKit2 knows how to handle.
 #if ENABLE(SWIFT_DEMO_URI_SCHEME)
-    return request.url().protocolIs("applewebdata"_s)
-        || request.url().protocolIs("x-swift-demo"_s);
+    return url.protocolIs("applewebdata"_s)
+        || url.protocolIs("x-swift-demo"_s);
 #else
-    return request.url().protocolIs("applewebdata"_s);
+    return url.protocolIs("applewebdata"_s);
 #endif
 }
 
-void WebPage::shouldDelayWindowOrderingEvent(const WebKit::WebMouseEvent& event, CompletionHandler<void(bool)>&& completionHandler)
+void WebPage::shouldDelayWindowOrderingEvent(Ref<WebKit::WebMouseEvent>&& eventRef, CompletionHandler<void(bool)>&& completionHandler)
 {
+    const auto& event = eventRef.get();
     RefPtr frame = m_page->focusController().focusedOrMainFrame();
     if (!frame)
         return completionHandler({ });
@@ -610,8 +625,9 @@ void WebPage::shouldDelayWindowOrderingEvent(const WebKit::WebMouseEvent& event,
     completionHandler(result);
 }
 
-void WebPage::requestAcceptsFirstMouse(int eventNumber, const WebKit::WebMouseEvent& event)
+void WebPage::requestAcceptsFirstMouse(int eventNumber, Ref<WebKit::WebMouseEvent>&& eventRef)
 {
+    const auto& event = eventRef.get();
     if (WebProcess::singleton().parentProcessConnection()->inSendSync()) {
         // In case we're already inside a sendSync message, it's possible that the page is in a
         // transitionary state, so any hit-testing could cause crashes  so we just return early in that case.
@@ -819,7 +835,7 @@ void WebPage::performImmediateActionHitTestAtLocation(WebCore::FrameIdentifier f
         if (RefPtr remoteFrameView = remoteFrame->view()) {
             immediateActionResult.remoteUserInputEventData = RemoteUserInputEventData {
                 remoteFrame->frameID(),
-                remoteFrameView->rootViewToContents(roundedIntPoint(locationInViewCoordinates))
+                remoteFrameView->convertFromRootView(roundedIntPoint(locationInViewCoordinates))
             };
         }
     }
@@ -1102,6 +1118,16 @@ void WebPage::zoomPDFOut(PDFPluginIdentifier identifier)
     pdfPlugin->zoomOut();
 }
 
+#if ENABLE(AX_PDF_SUPPORT)
+
+void WebPage::togglePDFAccessibilityDisplayMode(PDFPluginIdentifier identifier)
+{
+    if (RefPtr pdfPlugin = m_pdfPlugInsWithHUD.get(identifier))
+        pdfPlugin->toggleAccessibilityDisplayMode();
+}
+
+#endif // ENABLE(AX_PDF_SUPPORT)
+
 void WebPage::savePDF(PDFPluginIdentifier identifier, CompletionHandler<void(const String&, const URL&, std::span<const uint8_t>)>&& completionHandler)
 {
     RefPtr pdfPlugin = m_pdfPlugInsWithHUD.get(identifier);
@@ -1123,8 +1149,13 @@ void WebPage::openPDFWithPreview(PDFPluginIdentifier identifier, CompletionHandl
 void WebPage::createPDFHUD(PDFPluginBase& plugin, WebCore::FrameIdentifier frameID, const IntRect& boundingBox)
 {
     auto addResult = m_pdfPlugInsWithHUD.add(plugin.identifier(), plugin);
-    if (addResult.isNewEntry)
-        send(Messages::WebPageProxy::CreatePDFHUD(plugin.identifier(), frameID, boundingBox));
+    if (!addResult.isNewEntry)
+        return;
+
+    send(Messages::WebPageProxy::CreatePDFHUD(plugin.identifier(), frameID, boundingBox));
+#if ENABLE(AX_PDF_SUPPORT)
+    updatePDFHUDAccessibilityDisplayMode(plugin);
+#endif
 }
 
 void WebPage::updatePDFHUDLocation(PDFPluginBase& plugin, const IntRect& boundingBox)
@@ -1132,6 +1163,16 @@ void WebPage::updatePDFHUDLocation(PDFPluginBase& plugin, const IntRect& boundin
     if (m_pdfPlugInsWithHUD.contains(plugin.identifier()))
         send(Messages::WebPageProxy::UpdatePDFHUDLocation(plugin.identifier(), boundingBox));
 }
+
+#if ENABLE(AX_PDF_SUPPORT)
+
+void WebPage::updatePDFHUDAccessibilityDisplayMode(PDFPluginBase& plugin)
+{
+    if (m_pdfPlugInsWithHUD.contains(plugin.identifier()))
+        send(Messages::WebPageProxy::UpdatePDFHUDAccessibilityDisplayMode(plugin.identifier(), plugin.accessibilityDisplayModeState()));
+}
+
+#endif // ENABLE(AX_PDF_SUPPORT)
 
 void WebPage::removePDFHUD(PDFPluginBase& plugin)
 {
@@ -1143,6 +1184,18 @@ void WebPage::showPDFHUD(PDFPluginBase& plugin)
 {
     if (m_pdfPlugInsWithHUD.contains(plugin.identifier()))
         send(Messages::WebPageProxy::ShowPDFHUD(plugin.identifier()));
+}
+
+void WebPage::updatePDFHUDLocationsAfterRemoteFrameGeometryChange()
+{
+    // A remote parent's geometry changes but a cross-origin <iframe> plugin's
+    // local root view transform stays unchanged, so we ask the plugin to re-report
+    // its HUD location to the UI process, which runs the main frame conversion
+    // with newer geometry.
+    for (WeakPtr weakPlugin : m_pdfPlugInsWithHUD.values()) {
+        if (RefPtr plugin = weakPlugin.get())
+            plugin->updateHUDLocation();
+    }
 }
 
 #endif // ENABLE(PDF_PLUGIN)

@@ -37,7 +37,7 @@
 #if ENABLE(JIT)
 
 namespace JSC {
-    class JSInterfaceJIT : public CCallHelpers, public GPRInfo, public JSRInfo, public FPRInfo {
+    class JSInterfaceJIT : public CCallHelpers, public GPRInfo, public FPRInfo {
         WTF_MAKE_TZONE_NON_HEAP_ALLOCATABLE(JSInterfaceJIT);
     public:
 
@@ -51,43 +51,13 @@ namespace JSC {
         inline Jump emitLoadInt32(VirtualRegister, RegisterID dst);
         inline Jump emitLoadDouble(VirtualRegister, FPRegisterID dst, RegisterID scratch);
 
-        inline void emitLoadJSValue(VirtualRegister, JSValueRegs dst);
+        inline void emitLoadJSValue(VirtualRegister, GPRReg dst);
 
         VM* vm() const { return m_vm; }
 
         VM* const m_vm;
     };
 
-#if USE(JSVALUE32_64)
-    inline JSInterfaceJIT::Jump JSInterfaceJIT::emitLoadJSCell(VirtualRegister virtualRegister, RegisterID payload)
-    {
-        ASSERT(virtualRegister < VirtualRegister(FirstConstantRegisterIndex));
-        loadPtr(payloadFor(virtualRegister), payload);
-        return branchIfNotCell(tagFor(virtualRegister));
-    }
-
-    inline JSInterfaceJIT::Jump JSInterfaceJIT::emitLoadInt32(VirtualRegister virtualRegister, RegisterID dst)
-    {
-        ASSERT(virtualRegister < VirtualRegister(FirstConstantRegisterIndex));
-        loadPtr(payloadFor(virtualRegister), dst);
-        return branch32(NotEqual, tagFor(virtualRegister), TrustedImm32(JSValue::Int32Tag));
-    }
-
-    inline JSInterfaceJIT::Jump JSInterfaceJIT::emitLoadDouble(VirtualRegister virtualRegister, FPRegisterID dst, RegisterID scratch)
-    {
-        ASSERT(virtualRegister < VirtualRegister(FirstConstantRegisterIndex));
-        loadPtr(tagFor(virtualRegister), scratch);
-        Jump isDouble = branch32(Below, scratch, TrustedImm32(JSValue::LowestTag));
-        Jump notInt = branch32(NotEqual, scratch, TrustedImm32(JSValue::Int32Tag));
-        loadPtr(payloadFor(virtualRegister), scratch);
-        convertInt32ToDouble(scratch, dst);
-        Jump done = jump();
-        isDouble.link(this);
-        loadDouble(addressFor(virtualRegister), dst);
-        done.link(this);
-        return notInt;
-    }
-#elif USE(JSVALUE64)
     inline JSInterfaceJIT::Jump JSInterfaceJIT::emitLoadJSCell(VirtualRegister virtualRegister, RegisterID dst)
     {
         load64(addressFor(virtualRegister), dst);
@@ -114,9 +84,8 @@ namespace JSC {
         done.link(this);
         return notNumber;
     }
-#endif
 
-inline void JSInterfaceJIT::emitLoadJSValue(VirtualRegister virtualRegister, JSValueRegs dst)
+inline void JSInterfaceJIT::emitLoadJSValue(VirtualRegister virtualRegister, GPRReg dst)
 {
     loadValue(addressFor(virtualRegister), dst);
 }

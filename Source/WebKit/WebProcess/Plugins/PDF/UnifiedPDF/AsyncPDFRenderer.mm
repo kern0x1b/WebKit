@@ -118,6 +118,17 @@ void AsyncPDFRenderer::releaseMemory()
     LOG_WITH_STREAM(PDFAsyncRendering, stream << "AsyncPDFRenderer::releaseMemory - reduced page preview count from " << oldPagePreviewCount << " to " << m_pagePreviews.size());
 }
 
+void AsyncPDFRenderer::invalidateAllRenderedContent()
+{
+    clearRequestsAndCachedTiles();
+    m_rendereredTiles.clear();
+    m_rendereredTilesForOldState.clear();
+    m_pendingPagePreviewOrder.clear();
+    m_pendingPagePreviews.clear();
+    m_pagePreviews.clear();
+    ensurePreviewsForCurrentPageCoverage();
+}
+
 void AsyncPDFRenderer::startTrackingLayer(GraphicsLayer& layer)
 {
     CheckedPtr tiledBacking = layer.tiledBacking();
@@ -157,7 +168,7 @@ void AsyncPDFRenderer::setShowDebugBorders(bool showDebugBorders)
 static RefPtr<NativeImage> renderPDFPagePreview(RetainPtr<PDFDocument>&& pdfDocument, const PDFPagePreviewRenderRequest& request)
 {
     ASSERT(!isMainRunLoop());
-    RefPtr imageBuffer = ImageBuffer::create(request.normalizedPageBounds.size(), RenderingMode::Unaccelerated, RenderingPurpose::Unspecified, request.scale, DestinationColorSpace::SRGB(), PixelFormat::BGRA8);
+    RefPtr imageBuffer = ImageBuffer::create(request.normalizedPageBounds.size(), RenderingMode::Unaccelerated, RenderingPurpose::Unspecified, request.scale, ColorSpace::SRGB(), PixelFormat::BGRA8);
     if (!imageBuffer)
         return nullptr;
     if (RetainPtr pdfPage = [pdfDocument pageAtIndex:request.pageIndex]) {
@@ -172,6 +183,7 @@ static RefPtr<NativeImage> renderPDFPagePreview(RetainPtr<PDFDocument>&& pdfDocu
         RetainPtr platformContext = context.platformContext();
         CGContextSetShouldSubpixelQuantizeFonts(platformContext.get(), false);
         CGContextSetAllowsFontSubpixelPositioning(platformContext.get(), true);
+        applyPDFContentAXColorAdjustment(platformContext, pdfPage, request.accessibilityDisplayMode);
         LOG_WITH_STREAM(PDFAsyncRendering, stream << "renderPDFPagePreview - page:" << request.pageIndex);
         [pdfPage drawWithBox:kPDFDisplayBoxCropBox toContext:platformContext.get()];
     }
@@ -197,7 +209,7 @@ void AsyncPDFRenderer::generatePreviewImageForPage(PDFDocumentLayout::PageIndex 
     auto pageBounds = presentationController->layoutBoundsForPageAtIndex(pageIndex);
     pageBounds.setLocation({ });
 
-    PDFPagePreviewRenderRequest request { pageIndex, pageBounds, scale, m_showDebugBorders };
+    PDFPagePreviewRenderRequest request { pageIndex, pageBounds, scale, m_showDebugBorders, presentationController->accessibilityDisplayMode() };
     m_pendingPagePreviews.set(key, request);
     m_pendingPagePreviewOrder.appendOrMoveToLast(key);
     serviceRequestQueues();
@@ -466,14 +478,9 @@ void AsyncPDFRenderer::willRemoveGrid(TiledBacking&, TileGridIdentifier gridIden
         return keyValuePair.key.gridIdentifier == gridIdentifier;
     });
 
-    Vector<TileForGrid> requestsToRemove;
-    for (auto& tileRequests : m_pendingTileRenderOrder) {
-        if (tileRequests.gridIdentifier == gridIdentifier)
-            requestsToRemove.append(tileRequests);
-    }
-
-    for (auto& tile : requestsToRemove)
-        m_pendingTileRenderOrder.remove(tile);
+    m_pendingTileRenderOrder.removeIf([gridIdentifier](auto& tileRequests) {
+        return tileRequests.gridIdentifier == gridIdentifier;
+    });
 
     m_tileGridToLayerIDMap.remove(gridIdentifier);
 }
@@ -555,7 +562,7 @@ TileRenderInfo AsyncPDFRenderer::renderInfoForTile(const TiledBacking& tiledBack
 
     auto pageCoverage = presentationController->pageCoverageAndScalesForContentsRect(paintingClipRect, layoutRow, tilingScaleFactor);
 
-    return TileRenderInfo { tileRect, encloseRectToDevicePixels(renderRect, pageCoverage.deviceScaleFactor), WTF::move(background), pageCoverage, m_showDebugBorders };
+    return TileRenderInfo { tileRect, encloseRectToDevicePixels(renderRect, pageCoverage.deviceScaleFactor), WTF::move(background), pageCoverage, m_showDebugBorders, presentationController->accessibilityDisplayMode() };
 }
 
 static void renderPDFTile(PDFDocument *pdfDocument, const TileRenderInfo& renderInfo, GraphicsContext& context)
@@ -575,7 +582,7 @@ static void renderPDFTile(PDFDocument *pdfDocument, const TileRenderInfo& render
         auto destinationRect = pageInfo.pageBounds;
         auto pageStateSaver = GraphicsContextStateSaver(context);
         context.clip(destinationRect);
-        context.fillRect(destinationRect, Color::white);
+        context.fillRect(destinationRect, pdfPageBackgroundColor(renderInfo.accessibilityDisplayMode));
         if (renderInfo.showDebugIndicators)
             context.fillRect(destinationRect, Color::green.colorWithAlphaByte(32));
 
@@ -585,14 +592,16 @@ static void renderPDFTile(PDFDocument *pdfDocument, const TileRenderInfo& render
         context.scale({ 1, -1 });
 
         LOG_WITH_STREAM(PDFAsyncRendering, stream << "renderPDFTile renderInfo:" << renderInfo << ", PDF page:" << pageInfo.pageIndex << " destinationRect:" << destinationRect);
-        [pdfPage drawWithBox:kPDFDisplayBoxCropBox toContext:RetainPtr { context.platformContext() }.get()];
+        RetainPtr platformContext = context.platformContext();
+        applyPDFContentAXColorAdjustment(platformContext, pdfPage, renderInfo.accessibilityDisplayMode);
+        [pdfPage drawWithBox:kPDFDisplayBoxCropBox toContext:platformContext];
     }
 }
 
 static RefPtr<NativeImage> renderPDFTileToImage(PDFDocument *pdfDocument, const TileRenderInfo& renderInfo)
 {
     ASSERT(!isMainRunLoop());
-    RefPtr tileBuffer = ImageBuffer::create(renderInfo.tileRect.size(), RenderingMode::Unaccelerated, RenderingPurpose::Unspecified, renderInfo.pageCoverage.deviceScaleFactor, DestinationColorSpace::SRGB(), PixelFormat::BGRA8);
+    RefPtr tileBuffer = ImageBuffer::create(renderInfo.tileRect.size(), RenderingMode::Unaccelerated, RenderingPurpose::Unspecified, renderInfo.pageCoverage.deviceScaleFactor, ColorSpace::SRGB(), PixelFormat::BGRA8);
     if (!tileBuffer)
         return nullptr;
     {
@@ -610,7 +619,7 @@ static std::optional<DynamicContentScalingDisplayList> renderPDFTileToDynamicCon
     ASSERT(!isMainRunLoop());
     WebCore::ImageBufferCreationContext creationContext;
     creationContext.dynamicContentScalingResourceCache = dynamicContentScalingResourceCache;
-    RefPtr tileBuffer = ImageBuffer::create<DynamicContentScalingImageBufferBackend, DynamicContentScalingImageBuffer>(renderInfo.tileRect.size(), renderInfo.pageCoverage.deviceScaleFactor, DestinationColorSpace::SRGB(), { PixelFormat::BGRA8 }, RenderingPurpose::Unspecified, creationContext);
+    RefPtr tileBuffer = ImageBuffer::create<DynamicContentScalingImageBufferBackend, DynamicContentScalingImageBuffer>(renderInfo.tileRect.size(), renderInfo.pageCoverage.deviceScaleFactor, ColorSpace::SRGB(), { PixelFormat::BGRA8 }, RenderingPurpose::Unspecified, creationContext);
     if (!tileBuffer)
         return std::nullopt;
     // Fixup incremental rendering requests to render the contents covering the full tile.

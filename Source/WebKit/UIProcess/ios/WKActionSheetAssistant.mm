@@ -128,7 +128,7 @@ static LSAppLink *appLinkForURL(NSURL *url)
     std::unique_ptr<WebKit::FrameInfoData> _frameInfo;
 #endif // ENABLE(MEDIA_CONTROLS_CONTEXT_MENUS)
 #if ENABLE(VIDEO)
-    CompletionHandler<void(Expected<void, WebCore::ExceptionData>)> _captionDisplaySettingsMenuCompletionHandler;
+    CompletionHandler<void(std::expected<void, WebCore::ExceptionData>)> _captionDisplaySettingsMenuCompletionHandler;
 #endif
 #endif // USE(UICONTEXTMENU)
     WeakObjCPtr<UIView> _view;
@@ -225,7 +225,7 @@ static const CGFloat presentationElementRectPadding = 15;
         return CGRectZero;
 
     RefPtr textIndicator = _positionInformation->textIndicator;
-    if (textIndicator->textRectsInBoundingRectCoordinates().isEmpty())
+    if (!textIndicator || textIndicator->textRectsInBoundingRectCoordinates().isEmpty())
         return CGRectZero;
 
     WebCore::FloatPoint touchLocation = _positionInformation->request.point;
@@ -488,7 +488,8 @@ static bool isJavaScriptURL(NSURL *url)
     if (std::max(leftInset, rightInset) <= minimumAvailableWidthOrHeightRatio * CGRectGetWidth(visibleRect) && std::max(topInset, bottomInset) <= minimumAvailableWidthOrHeightRatio * CGRectGetHeight(visibleRect))
         return WKActionSheetPresentAtTouchLocation;
 
-    if (elementInfo.type == _WKActivatedElementTypeLink && positionInfo.textIndicator->textRectsInBoundingRectCoordinates().size())
+    RefPtr textIndicator = positionInfo.textIndicator;
+    if (elementInfo.type == _WKActivatedElementTypeLink && textIndicator && !textIndicator->textRectsInBoundingRectCoordinates().isEmpty())
         return WKActionSheetPresentAtClosestIndicatorRect;
 
     return WKActionSheetPresentAtElementRect;
@@ -1012,7 +1013,7 @@ ALLOW_DEPRECATED_DECLARATIONS_END
 #endif // ENABLE(MEDIA_CONTROLS_CONTEXT_MENUS)
 
 #if ENABLE(VIDEO) && USE(UICONTEXTMENU)
-- (void)showCaptionDisplaySettingsMenu:(WebCore::HTMLMediaElementIdentifier)identifier withOptions:(const WebCore::ResolvedCaptionDisplaySettingsOptions&)options completionHandler:(CompletionHandler<void(Expected<void, WebCore::ExceptionData>)>&&)completionHandler
+- (void)showCaptionDisplaySettingsMenu:(WebCore::HTMLMediaElementIdentifier)identifier withOptions:(const WebCore::ResolvedCaptionDisplaySettingsOptions&)options completionHandler:(CompletionHandler<void(std::expected<void, WebCore::ExceptionData>)>&&)completionHandler
 {
     _captionStyleMenuController = [WKCaptionStyleMenuController menuController];
     [_captionStyleMenuController setDelegate:self];

@@ -23,12 +23,12 @@
 #pragma once
 
 #include <WebCore/RenderBoxModelObject.h>
-#include <WebCore/RenderLineBoxList.h>
 #include <wtf/Platform.h>
 
 namespace WebCore {
 
 class Position;
+class RenderBlock;
 class RenderFragmentContainer;
 
 class RenderInline : public RenderBoxModelObject {
@@ -68,18 +68,6 @@ public:
     WEBCORE_EXPORT IntRect linesBoundingBox() const;
     LayoutRect linesVisualOverflowBoundingBox() const;
 
-    LegacyInlineFlowBox* createAndAppendInlineFlowBox();
-
-    RenderLineBoxList& legacyLineBoxes() LIFETIME_BOUND { return m_legacyLineBoxes; }
-    const RenderLineBoxList& legacyLineBoxes() const LIFETIME_BOUND { return m_legacyLineBoxes; }
-    void deleteLegacyLineBoxes();
-    LegacyInlineFlowBox* firstLegacyInlineBox() const LIFETIME_BOUND { return m_legacyLineBoxes.firstLegacyLineBox(); }
-    LegacyInlineFlowBox* lastLegacyInlineBox() const LIFETIME_BOUND { return m_legacyLineBoxes.lastLegacyLineBox(); }
-
-#if PLATFORM(IOS_FAMILY)
-    void absoluteQuadsForSelection(Vector<FloatQuad>& quads) const override;
-#endif
-    
     LayoutSize offsetForInFlowPositionedInline(const RenderBox* child) const;
 
     void collectLineBoxRects(Vector<LayoutRect>&, const LayoutPoint& additionalOffset) const;
@@ -90,8 +78,6 @@ public:
     LayoutPoint firstInlineBoxTopLeft() const;
 
 protected:
-    void willBeDestroyed() override;
-
     void styleWillChange(Style::Difference, const Style::ComputedStyle& newStyle) override;
     void styleDidChange(Style::Difference, const Style::ComputedStyle* oldStyle) override;
 
@@ -117,11 +103,11 @@ private:
     LayoutUnit offsetHeight() const final { return linesBoundingBox().height(); }
 
 protected:
-    LayoutRect clippedOverflowRect(const RenderLayerModelObject* repaintContainer, VisibleRectContext) const override;
+    LayoutRect clippedOverflowRect(const RenderLayerModelObject* repaintContainer, const VisibleRectContext&) const override;
     RepaintRects rectsForRepaintingAfterLayout(const RenderLayerModelObject* repaintContainer, RepaintOutlineBounds) const override;
     LayoutRect rectWithOutlineForRepaint(const RenderLayerModelObject* repaintContainer, LayoutUnit outlineWidth) const final;
 
-    std::optional<RepaintRects> computeVisibleRectsInContainer(const RepaintRects&, const RenderLayerModelObject* container, VisibleRectContext) const final;
+    std::optional<RepaintRects> computeVisibleRectsInContainer(const RepaintRects&, const RenderLayerModelObject* container, const VisibleRectContext&, VisibleRectState) const final;
     RepaintRects computeVisibleRectsUsingPaintOffset(const RepaintRects&) const;
 
     void mapLocalToContainer(const RenderLayerModelObject* repaintContainer, TransformState&, OptionSet<MapCoordinatesMode>, bool* wasFixed) const override;
@@ -132,19 +118,11 @@ private:
 
     LayoutRect frameRectForStickyPositioning() const final { return linesBoundingBox(); }
 
-    virtual std::unique_ptr<LegacyInlineFlowBox> createInlineFlowBox(); // Subclassed by RenderSVGInline
-
-    void dirtyLineFromChangedChild() final { m_legacyLineBoxes.dirtyLineFromChangedChild(*this); }
-
-    void updateHitTestResult(HitTestResult&, const LayoutPoint&) const final;
-
     void imageChanged(WrappedImagePtr, const IntRect* = 0) final;
-
-    // All of the line boxes created for this svg inline.
-    RenderLineBoxList m_legacyLineBoxes;
 };
 
 bool isEmptyInline(const RenderInline&);
+RenderObject* firstContentfulChild(RenderInline&);
 
 } // namespace WebCore
 

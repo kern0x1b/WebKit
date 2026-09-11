@@ -60,6 +60,7 @@
         return nil;
 
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(routeDidChange:) name:PAL::get_AVFoundation_AVAudioSessionRouteChangeNotificationSingleton() object:session];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(sessionMediaServicesWereReset:) name:AVAudioSessionMediaServicesWereResetNotification object:session];
 
     _callback = callback;
 
@@ -80,6 +81,17 @@
     callOnWebThreadOrDispatchAsyncOnMainThread([protectedSelf = retainPtr(self)]() mutable {
         if (auto* callback = protectedSelf->_callback)
             callback->scheduleUpdateCaptureDevices();
+    });
+}
+
+- (void)sessionMediaServicesWereReset:(NSNotification *)notification
+{
+    if (!_callback)
+        return;
+
+    callOnWebThreadOrDispatchAsyncOnMainThread([protectedSelf = retainPtr(self)]() mutable {
+        if (auto* callback = protectedSelf->_callback)
+            callback->scheduleMediaServicesWereReset();
     });
 }
 
@@ -207,7 +219,7 @@ bool AVAudioSessionCaptureDeviceManager::setPreferredAudioSessionDeviceIDs()
 
         NSError *error = nil;
         if (![[PAL::getAVAudioSessionClassSingleton() sharedInstance] setPreferredInput:preferredInputPort error:&error]) {
-            RELEASE_LOG_ERROR(WebRTC, "AVAudioSessionCaptureDeviceManager failed to set preferred input to '%{public}s' with error: %@", m_preferredMicrophoneID.utf8().data(), error.localizedDescription);
+            RELEASE_LOG_ERROR(WebRTC, "AVAudioSessionCaptureDeviceManager failed to set preferred input to '%{public}s' with error: %@", m_preferredMicrophoneID.utf8().legacyCStringPointer(), error.localizedDescription);
             return false;
         }
     }
@@ -221,6 +233,15 @@ bool AVAudioSessionCaptureDeviceManager::setPreferredAudioSessionDeviceIDs()
 void AVAudioSessionCaptureDeviceManager::scheduleUpdateCaptureDevices()
 {
     computeCaptureDevices([] { });
+}
+
+void AVAudioSessionCaptureDeviceManager::scheduleMediaServicesWereReset()
+{
+    m_captureDevices = { };
+    m_dispatchQueue->dispatch([this] {
+        createAudioSession();
+    });
+    scheduleUpdateCaptureDevices();
 }
 
 void AVAudioSessionCaptureDeviceManager::refreshAudioCaptureDevices()

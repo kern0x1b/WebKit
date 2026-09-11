@@ -32,17 +32,18 @@
 namespace WebCore {
 
 enum class PixelFormat : uint8_t {
+    RGBX8,
     RGBA8,
     BGRX8,
     BGRA8,
+#if ENABLE(PIXEL_FORMAT_RGBA16F)
+    RGBA16F,
+#endif
 #if ENABLE(PIXEL_FORMAT_RGB10)
     RGB10,
 #endif
 #if ENABLE(PIXEL_FORMAT_RGB10A8)
     RGB10A8,
-#endif
-#if ENABLE(PIXEL_FORMAT_RGBA16F)
-    RGBA16F,
 #endif
 };
 
@@ -51,6 +52,7 @@ enum class UseLosslessCompression : bool { No, Yes };
 constexpr ContentsFormat convertToContentsFormat(PixelFormat format)
 {
     switch (format) {
+    case PixelFormat::RGBX8:
     case PixelFormat::RGBA8:
     case PixelFormat::BGRX8:
     case PixelFormat::BGRA8:
@@ -67,15 +69,16 @@ constexpr ContentsFormat convertToContentsFormat(PixelFormat format)
     case PixelFormat::RGBA16F:
         return ContentsFormat::RGBA16F;
 #endif
-    default:
-        RELEASE_ASSERT_NOT_REACHED();
-        return ContentsFormat::RGBA8;
     }
+
+    RELEASE_ASSERT_NOT_REACHED();
+    return ContentsFormat::RGBA8;
 }
 
 constexpr bool pixelFormatIsOpaque(PixelFormat format)
 {
     switch (format) {
+    case PixelFormat::RGBX8:
     case PixelFormat::BGRX8:
 #if ENABLE(PIXEL_FORMAT_RGB10)
     case PixelFormat::RGB10:
@@ -94,6 +97,46 @@ constexpr bool pixelFormatIsOpaque(PixelFormat format)
 
     ASSERT_NOT_REACHED();
     return false;
+}
+
+enum class PixelComponentOrder : uint8_t { RGB, BGR };
+
+constexpr PixelComponentOrder pixelComponentOrder(PixelFormat format)
+{
+    switch (format) {
+    case PixelFormat::BGRX8:
+    case PixelFormat::BGRA8:
+        return PixelComponentOrder::BGR;
+
+    default:
+        return PixelComponentOrder::RGB;
+    }
+}
+
+enum class AllowExtendedColorSpace : bool { No, Yes };
+
+constexpr AllowExtendedColorSpace allowExtendedColorSpace(PixelFormat format)
+{
+    switch (format) {
+    case PixelFormat::RGBX8:
+    case PixelFormat::RGBA8:
+    case PixelFormat::BGRX8:
+    case PixelFormat::BGRA8:
+        return AllowExtendedColorSpace::No;
+#if ENABLE(PIXEL_FORMAT_RGB10)
+    case PixelFormat::RGB10:
+#endif
+#if ENABLE(PIXEL_FORMAT_RGB10A8)
+    case PixelFormat::RGB10A8:
+#endif
+#if ENABLE(PIXEL_FORMAT_RGBA16F)
+    case PixelFormat::RGBA16F:
+#endif
+        return AllowExtendedColorSpace::Yes;
+    }
+
+    ASSERT_NOT_REACHED();
+    return AllowExtendedColorSpace::No;
 }
 
 WEBCORE_EXPORT TextStream& operator<<(TextStream&, PixelFormat);

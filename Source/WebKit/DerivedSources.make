@@ -156,7 +156,6 @@ MESSAGE_RECEIVERS = \
 	Shared/Notifications/NotificationManagerMessageHandler \
 	Shared/IPCConnectionTester \
 	Shared/IPCStreamTester \
-	Shared/IPCStreamTesterProxy \
 	Shared/IPCTester \
 	Shared/IPCTesterReceiver \
 	UIProcess/WebFullScreenManagerProxy \
@@ -358,6 +357,7 @@ GENERATE_MESSAGE_RECEIVER_SCRIPTS = \
     $(WebKit2)/Scripts/webkit/parser.py \
     $(WebKit2)/Scripts/webkit/opaque_ipc_types.py \
     $(WebKit2)/Scripts/webkit/opaque_ipc_types.tracking.in \
+    $(WebKit2)/Scripts/webkit/untrusted_origins.py \
     $(WebKit2)/DerivedSources.make \
 #
 
@@ -610,6 +610,25 @@ all : $(WEB_PREFERENCES_FILES)
 $(WEB_PREFERENCES_PATTERNS) : $(WTF_BUILD_SCRIPTS_DIR)/GeneratePreferences.rb $(WEB_PREFERENCES_TEMPLATES) $(WEB_PREFERENCES)
 	$(RUBY) $< --frontend WebKit $(addprefix --template , $(WEB_PREFERENCES_TEMPLATES)) $(WEB_PREFERENCES)
 
+# Security flag generation
+
+SECURITY_FLAGS = \
+    $(WTF_BUILD_SCRIPTS_DIR)/Preferences/SecurityFlags.yaml \
+#
+
+SECURITY_FLAGS_TEMPLATES = \
+    $(WebKit2)/Scripts/SecurityFlagsTemplates/SecurityFlags.h.erb \
+    $(WebKit2)/Scripts/SecurityFlagsTemplates/SecurityFlags.cpp.erb \
+    $(WebKit2)/Scripts/SecurityFlagsTemplates/SecurityFlags.serialization.in.erb \
+#
+SECURITY_FLAGS_FILES = $(basename $(notdir $(SECURITY_FLAGS_TEMPLATES)))
+SECURITY_FLAGS_PATTERNS = $(call to-pattern, $(SECURITY_FLAGS_FILES))
+
+all : $(SECURITY_FLAGS_FILES)
+
+$(SECURITY_FLAGS_PATTERNS) : $(WTF_BUILD_SCRIPTS_DIR)/GenerateSecurityFlags.rb $(SECURITY_FLAGS_TEMPLATES) $(SECURITY_FLAGS)
+	$(RUBY) $< $(addprefix --template , $(SECURITY_FLAGS_TEMPLATES)) $(SECURITY_FLAGS)
+
 SERIALIZATION_DESCRIPTION_FILES = \
 	GPUProcess/GPUProcessCreationParameters.serialization.in \
 	GPUProcess/GPUProcessPreferences.serialization.in \
@@ -747,6 +766,7 @@ SERIALIZATION_DESCRIPTION_FILES = \
 	Shared/Extensions/WebExtensionMenuItem.serialization.in \
 	Shared/Extensions/WebExtensionMessageSenderParameters.serialization.in \
 	Shared/Extensions/WebExtensionMessageTargetParameters.serialization.in \
+	Shared/Extensions/WebExtensionOffscreenDocumentParameters.serialization.in \
 	Shared/Extensions/WebExtensionSidebarParameters.serialization.in \
 	Shared/Extensions/WebExtensionStorage.serialization.in \
 	Shared/Extensions/WebExtensionTab.serialization.in \
@@ -783,6 +803,7 @@ SERIALIZATION_DESCRIPTION_FILES = \
 	Shared/NavigationActionData.serialization.in \
 	Shared/NetworkProcessConnectionParameters.serialization.in \
 	Shared/NodeHitTestResult.serialization.in \
+	Shared/PDFAccessibilityDisplayModeState.serialization.in \
 	Shared/PDFDisplayMode.serialization.in \
 	Shared/Pasteboard.serialization.in \
 	Shared/PlatformPopupMenuData.serialization.in \
@@ -973,6 +994,7 @@ SERIALIZATION_DESCRIPTION_FILES = \
 	WebProcess/WebCoreSupport/WebSpeechSynthesisVoice.serialization.in \
 	WebProcess/WebPage/RemoteLayerTree/PlatformCAAnimationRemoteProperties.serialization.in \
 	SharedPreferencesForWebProcess.serialization.in \
+	SecurityFlags.serialization.in \
 #
 
 WEBCORE_SERIALIZATION_DESCRIPTION_FILES = \
@@ -1046,7 +1068,6 @@ BINDINGS_SCRIPTS = \
 
 EXTENSION_INTERFACES = \
     WebExtensionAPIAction \
-    WebExtensionAPIAlarms \
     WebExtensionAPIBookmarks \
     WebExtensionAPICommands \
     WebExtensionAPICookies \
@@ -1061,11 +1082,10 @@ EXTENSION_INTERFACES = \
     WebExtensionAPIExtension \
     WebExtensionAPILocalization \
     WebExtensionAPIMenus \
-    WebExtensionAPINamespace \
     WebExtensionAPINotifications \
+    WebExtensionAPIOffscreen \
     WebExtensionAPIPermissions \
     WebExtensionAPIPort \
-    WebExtensionAPIRuntime \
     WebExtensionAPIScripting \
     WebExtensionAPISidePanel \
     WebExtensionAPISidebarAction \
@@ -1074,8 +1094,6 @@ EXTENSION_INTERFACES = \
     WebExtensionAPITabs \
     WebExtensionAPIWebNavigation \
     WebExtensionAPIWebNavigationEvent \
-    WebExtensionAPIWebPageNamespace \
-    WebExtensionAPIWebPageRuntime \
     WebExtensionAPIWebRequest \
     WebExtensionAPIWebRequestEvent \
     WebExtensionAPIWindows \
@@ -1083,7 +1101,12 @@ EXTENSION_INTERFACES = \
 #
 
 CPP_EXTENSION_INTERFACES = \
+	WebExtensionAPIAlarms \
+	WebExtensionAPINamespace \
+    WebExtensionAPIRuntime \
     WebExtensionAPITest \
+	WebExtensionAPIWebPageNamespace \
+    WebExtensionAPIWebPageRuntime \
 #
 
 $(IDL_FILE_NAMES_LIST) : $(EXTENSION_INTERFACES:%=%.idl)
@@ -1102,9 +1125,13 @@ JS%.h JS%.cpp : %.idl $(BINDINGS_SCRIPTS) $(IDL_ATTRIBUTES_FILE) $(FEATURE_AND_P
 
 JSWebExtensionAPIUnified.mm: $(BINDINGS_SCRIPTS) $(EXTENSION_INTERFACES:%=JS%.mm)
 	@echo "Generating $@..."
-	$(PERL) $(EXTENSIONS_SCRIPTS_DIR)/GenerateImports.pl $@ $(EXTENSION_INTERFACES:%=JS%.mm)
+	$(PERL) $(EXTENSIONS_SCRIPTS_DIR)/GenerateImports.pl --output=$@ -- $(EXTENSION_INTERFACES:%=JS%.mm)
 
-all : JSWebExtensionAPIUnified.mm $(EXTENSION_INTERFACES:%=JS%.h) $(EXTENSION_INTERFACES:%=JS%.mm) $(CPP_EXTENSION_INTERFACES:%=JS%.cpp)
+JSWebExtensionAPIUnified.cpp: $(BINDINGS_SCRIPTS) $(CPP_EXTENSION_INTERFACES:%=JS%.cpp)
+	@echo "Generating $@..."
+	$(PERL) $(EXTENSIONS_SCRIPTS_DIR)/GenerateImports.pl --output=$@ --cpp -- $(CPP_EXTENSION_INTERFACES:%=JS%.cpp)
+
+all : JSWebExtensionAPIUnified.mm $(EXTENSION_INTERFACES:%=JS%.h) $(EXTENSION_INTERFACES:%=JS%.mm) JSWebExtensionAPIUnified.cpp $(CPP_EXTENSION_INTERFACES:%=JS%.h) $(CPP_EXTENSION_INTERFACES:%=JS%.cpp)
 
 ifeq ($(USE_INTERNAL_SDK),YES)
 WEBKIT_ADDITIONS_SWIFT_FILES = \

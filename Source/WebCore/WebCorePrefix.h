@@ -323,7 +323,6 @@
 #include <JavaScriptCore/DFGDoesGCCheck.h>
 #include <JavaScriptCore/DOMAnnotation.h>
 #include <JavaScriptCore/DOMAttributeGetterSetter.h>
-#include <JavaScriptCore/DateInstanceCache.h>
 #include <JavaScriptCore/DeferGC.h>
 #include <JavaScriptCore/DefinePropertyAttributes.h>
 #include <JavaScriptCore/DeleteAllCodeEffort.h>
@@ -342,6 +341,7 @@
 #include <JavaScriptCore/FreeList.h>
 #include <JavaScriptCore/FunctionHasExecutedCache.h>
 #include <JavaScriptCore/GCAssertions.h>
+#include <JavaScriptCore/GCCompletionCallback.h>
 #include <JavaScriptCore/GCConductor.h>
 #include <JavaScriptCore/GCIncomingRefCountedSet.h>
 #include <JavaScriptCore/GCOwnedDataScope.h>
@@ -350,13 +350,10 @@
 #include <JavaScriptCore/GenericOffset.h>
 #include <JavaScriptCore/GetVM.h>
 #include <JavaScriptCore/Handle.h>
-#include <JavaScriptCore/HandleBlock.h>
-#include <JavaScriptCore/HandleSet.h>
 #include <JavaScriptCore/HandleTypes.h>
 #include <JavaScriptCore/Heap.h>
 #include <JavaScriptCore/HeapCell.h>
 #include <JavaScriptCore/HeapCellType.h>
-#include <JavaScriptCore/HeapFinalizerCallback.h>
 #include <JavaScriptCore/HeapObserver.h>
 #include <JavaScriptCore/Identifier.h>
 #include <JavaScriptCore/ImplementationVisibility.h>
@@ -440,6 +437,8 @@
 #include <JavaScriptCore/StringReplaceCache.h>
 #include <JavaScriptCore/StringSplitCache.h>
 #include <JavaScriptCore/Strong.h>
+#include <JavaScriptCore/StrongBlock.h>
+#include <JavaScriptCore/StrongSet.h>
 #include <JavaScriptCore/Structure.h>
 #include <JavaScriptCore/StructureInlinesLight.h>
 #include <JavaScriptCore/StructureID.h>
@@ -618,6 +617,7 @@
 #include "CharacterData.h"
 #include "ClipboardAccessPolicy.h"
 #include "ColorInterpolationMethod.h"
+#include "ColorSpace.h"
 #include "CommonAtomStrings.h"
 #include "CompositeOperation.h"
 #include "ComputedStyleDependencies.h"
@@ -636,7 +636,6 @@
 #include "DataDetectorType.h"
 #endif
 #include "DecodingOptions.h"
-#include "DestinationColorSpace.h"
 #include "Document.h"
 #include "DocumentClasses.h"
 #include "DocumentEnums.h"

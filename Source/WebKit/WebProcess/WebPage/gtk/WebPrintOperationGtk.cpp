@@ -184,8 +184,8 @@ void WebPrintOperationGtk::PrintPagesData::incrementPageSequence()
 }
 
 WebPrintOperationGtk::WebPrintOperationGtk(const PrintInfo& printInfo)
-    : m_printSettings(printInfo.printSettings.get())
-    , m_pageSetup(printInfo.pageSetup.get())
+    : m_printSettings(printInfo.printSettings ? printInfo.printSettings : adoptGRef(gtk_print_settings_new()))
+    , m_pageSetup(printInfo.pageSetup ? printInfo.pageSetup : adoptGRef(gtk_page_setup_new()))
     , m_printMode(printInfo.printMode)
 {
 }
@@ -287,7 +287,7 @@ void WebPrintOperationGtk::endPrint()
     if (m_printContext) {
         if (auto* document = m_printContext->frame()->document()) {
             auto title = document->title().utf8();
-            metadata.fTitle = SkString(title.data(), title.length());
+            metadata.fTitle = SkString(title.legacyCStringPointer(), title.length());
         }
     }
 

@@ -308,7 +308,7 @@ void HTMLButtonElement::defaultEventHandler(Event& event)
         handlePopoverTargetAction(protect(event.target()).get());
     }
 
-    if (RefPtr keyboardEvent = dynamicDowncast<KeyboardEvent>(event)) {
+    if (RefPtr keyboardEvent = dynamicDowncast<KeyboardEvent>(event); keyboardEvent && document().focusedElement() == this) {
         if (keyboardEvent->type() == eventNames.keydownEvent && keyboardEvent->keyIdentifier() == "U+0020"_s) {
             setActive(true);
             // No setDefaultHandled() - IE dispatches a keypress in this case.
@@ -340,6 +340,11 @@ void HTMLButtonElement::defaultEventHandler(Event& event)
 bool HTMLButtonElement::willRespondToMouseClickEventsWithEditability(Editability) const
 {
     return !isDisabledFormControl();
+}
+
+bool HTMLButtonElement::hasActivationBehavior() const
+{
+    return true;
 }
 
 bool HTMLButtonElement::isSuccessfulSubmitButton() const

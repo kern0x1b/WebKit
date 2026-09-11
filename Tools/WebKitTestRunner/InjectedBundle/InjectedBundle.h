@@ -59,8 +59,6 @@ public:
     AccessibilityController* accessibilityController() { return m_accessibilityController.get(); }
 
     InjectedBundlePage* page() const;
-    // True if the active page's main frame is local to this process (not remote under site isolation).
-    bool pageHasLocalMainFrame() const;
     WKBundlePageRef pageRef() const;
     uint64_t testIdentifier() const { return m_testIdentifier; }
     size_t pageCount() const { return m_pages.size(); }
@@ -74,9 +72,6 @@ public:
     void setRepaintRects(WKArrayRef rects) { m_repaintRects = rects; }
 
     bool isTestRunning() { return !!testRunner(); }
-
-    WKBundleFrameRef topLoadingFrame() { return m_topLoadingFrame; }
-    void setTopLoadingFrame(WKBundleFrameRef frame) { m_topLoadingFrame = frame; }
 
     bool shouldDumpPixels() const { return m_dumpPixels; }
 
@@ -189,8 +184,6 @@ private:
     RefPtr<GCController> m_gcController;
     RefPtr<EventSendingController> m_eventSendingController;
     RefPtr<TextInputController> m_textInputController;
-
-    WKBundleFrameRef m_topLoadingFrame { nullptr };
 
     bool m_dumpPixels { false };
     bool m_pixelResultIsPending { false };

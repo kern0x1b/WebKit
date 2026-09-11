@@ -72,6 +72,7 @@
 #include <wtf/text/CString.h>
 #include <wtf/text/MakeString.h>
 #include <wtf/text/StringBuilder.h>
+#include <wtf/text/TextStream.h>
 
 #if USE(WEB_THREAD)
 #include "WebCoreThreadRun.h"
@@ -134,12 +135,24 @@ static String joinStrings(const Vector<String>& strings, ASCIILiteral separator)
     return builder.toString();
 }
 
-static unsigned NODELETE saturateAdd(unsigned a, unsigned b)
+// bufferedAmount is only ever added to while the socket is closing or closed, so it accumulates without
+// anything draining it. No single payload comes close to overflowing, but repeated sends do, and the
+// attribute has no value to report past its own range, so it stops there.
+static uint64_t NODELETE saturateAdd(uint64_t a, uint64_t b)
 {
-    if (std::numeric_limits<unsigned>::max() - a < b)
-        return std::numeric_limits<unsigned>::max();
+    if (std::numeric_limits<uint64_t>::max() - a < b)
+        return std::numeric_limits<uint64_t>::max();
     return a + b;
 }
+
+// Every channel implementation stages a binary payload into a Vector or a SharedBuffer before it
+// reaches the network, so a payload longer than one of those can hold can never be framed at all.
+static bool isFramablePayloadSize(size_t payloadSize)
+{
+    return WTF::isValidCapacityForVector<uint8_t>(payloadSize);
+}
+
+static constexpr ASCIILiteral payloadTooLargeMessage = "Failed to send WebSocket frame: payload is too large"_s;
 
 ASCIILiteral WebSocket::subprotocolSeparator()
 {
@@ -227,7 +240,7 @@ void WebSocket::failAsynchronously()
 
 ExceptionOr<void> WebSocket::connect(const String& url, const Vector<String>& protocols)
 {
-    LOG(Network, "WebSocket %p connect() url='%s'", this, url.utf8().data());
+    LOG_WITH_STREAM(Network, stream << "WebSocket "_s << this << " connect() url='"_s << url << "'"_s);
     m_url = URL { url };
 
     Ref context = *scriptExecutionContext();
@@ -372,7 +385,7 @@ ExceptionOr<void> WebSocket::connect(const String& url, const Vector<String>& pr
 
 ExceptionOr<void> WebSocket::send(const String& message)
 {
-    LOG(Network, "WebSocket %p send() Sending String '%s'", this, message.utf8().data());
+    LOG_WITH_STREAM(Network, stream << "WebSocket "_s << this << " send() Sending String '"_s << message << "'"_s);
     if (m_state == CONNECTING)
         return Exception { ExceptionCode::InvalidStateError };
     auto utf8 = message.utf8(StrictConversionReplacingUnpairedSurrogatesWithFFFD);
@@ -395,9 +408,13 @@ ExceptionOr<void> WebSocket::send(ArrayBuffer& binaryData)
     if (m_state == CONNECTING)
         return Exception { ExceptionCode::InvalidStateError };
     if (m_state == CLOSING || m_state == CLOSED) {
-        unsigned payloadSize = binaryData.byteLength();
+        size_t payloadSize = binaryData.byteLength();
         m_bufferedAmountAfterClose = saturateAdd(m_bufferedAmountAfterClose, payloadSize);
         m_bufferedAmountAfterClose = saturateAdd(m_bufferedAmountAfterClose, getFramingOverhead(payloadSize));
+        return { };
+    }
+    if (!isFramablePayloadSize(binaryData.byteLength())) {
+        channel()->fail(payloadTooLargeMessage);
         return { };
     }
     m_bufferedAmount = saturateAdd(m_bufferedAmount, binaryData.byteLength());
@@ -412,9 +429,13 @@ ExceptionOr<void> WebSocket::send(ArrayBufferView& arrayBufferView)
     if (m_state == CONNECTING)
         return Exception { ExceptionCode::InvalidStateError };
     if (m_state == CLOSING || m_state == CLOSED) {
-        unsigned payloadSize = arrayBufferView.byteLength();
+        size_t payloadSize = arrayBufferView.byteLength();
         m_bufferedAmountAfterClose = saturateAdd(m_bufferedAmountAfterClose, payloadSize);
         m_bufferedAmountAfterClose = saturateAdd(m_bufferedAmountAfterClose, getFramingOverhead(payloadSize));
+        return { };
+    }
+    if (!isFramablePayloadSize(arrayBufferView.byteLength())) {
+        channel()->fail(payloadTooLargeMessage);
         return { };
     }
     m_bufferedAmount = saturateAdd(m_bufferedAmount, arrayBufferView.byteLength());
@@ -424,11 +445,11 @@ ExceptionOr<void> WebSocket::send(ArrayBufferView& arrayBufferView)
 
 ExceptionOr<void> WebSocket::send(Blob& binaryData)
 {
-    LOG(Network, "WebSocket %p send() Sending Blob '%s'", this, binaryData.url().stringCenterEllipsizedToLength().utf8().data());
+    LOG_WITH_STREAM(Network, stream << "WebSocket "_s << this << " send() Sending Blob '"_s << binaryData.url().stringCenterEllipsizedToLength() << "'"_s);
     if (m_state == CONNECTING)
         return Exception { ExceptionCode::InvalidStateError };
     if (m_state == CLOSING || m_state == CLOSED) {
-        unsigned payloadSize = static_cast<unsigned>(binaryData.size());
+        size_t payloadSize = binaryData.size();
         m_bufferedAmountAfterClose = saturateAdd(m_bufferedAmountAfterClose, payloadSize);
         m_bufferedAmountAfterClose = saturateAdd(m_bufferedAmountAfterClose, getFramingOverhead(payloadSize));
         return { };
@@ -444,10 +465,10 @@ ExceptionOr<void> WebSocket::close(std::optional<unsigned short> optionalCode, c
     if (code == ThreadableWebSocketChannel::CloseEventCodeNotSpecified)
         LOG(Network, "WebSocket %p close() without code and reason", this);
     else {
-        LOG(Network, "WebSocket %p close() code=%d reason='%s'", this, code, reason.utf8().data());
+        LOG_WITH_STREAM(Network, stream << "WebSocket "_s << this << " close() code="_s << code << " reason='"_s << reason << "'"_s);
         if (!(code == ThreadableWebSocketChannel::CloseEventCodeNormalClosure || (ThreadableWebSocketChannel::CloseEventCodeMinimumUserDefined <= code && code <= ThreadableWebSocketChannel::CloseEventCodeMaximumUserDefined)))
             return Exception { ExceptionCode::InvalidAccessError };
-        CString utf8 = reason.utf8(StrictConversionReplacingUnpairedSurrogatesWithFFFD);
+        auto utf8 = reason.utf8(StrictConversionReplacingUnpairedSurrogatesWithFFFD);
         if (utf8.length() > maxReasonSizeInBytes) {
             protect(scriptExecutionContext())->addConsoleMessage(MessageSource::JS, MessageLevel::Error, "WebSocket close message is too long."_s);
             return Exception { ExceptionCode::SyntaxError };
@@ -483,7 +504,7 @@ WebSocket::State WebSocket::readyState() const
     return m_state;
 }
 
-unsigned WebSocket::bufferedAmount() const
+uint64_t WebSocket::bufferedAmount() const
 {
     return saturateAdd(m_bufferedAmount, m_bufferedAmountAfterClose);
 }
@@ -572,7 +593,7 @@ void WebSocket::didConnect()
 
 void WebSocket::didReceiveMessage(String&& message)
 {
-    LOG(Network, "WebSocket %p didReceiveMessage() Text message '%s'", this, message.utf8().data());
+    LOG_WITH_STREAM(Network, stream << "WebSocket "_s << this << " didReceiveMessage() Text message '"_s << message << "'"_s);
     queueTaskKeepingObjectAlive(*this, TaskSource::WebSocket, [message = WTF::move(message)](auto& socket) mutable {
         if (socket.m_state != OPEN)
             return;
@@ -631,9 +652,9 @@ void WebSocket::didReceiveMessageError(String&& reason)
     });
 }
 
-void WebSocket::didUpdateBufferedAmount(unsigned bufferedAmount)
+void WebSocket::didUpdateBufferedAmount(uint64_t bufferedAmount)
 {
-    LOG(Network, "WebSocket %p didUpdateBufferedAmount() New bufferedAmount is %u", this, bufferedAmount);
+    LOG(Network, "WebSocket %p didUpdateBufferedAmount() New bufferedAmount is %" PRIu64, this, bufferedAmount);
     if (m_state == CLOSED)
         return;
     m_bufferedAmount = bufferedAmount;
@@ -649,7 +670,7 @@ void WebSocket::didStartClosingHandshake()
     });
 }
 
-void WebSocket::didClose(unsigned unhandledBufferedAmount, ClosingHandshakeCompletionStatus closingHandshakeCompletion, unsigned short code, const String& reason)
+void WebSocket::didClose(uint64_t unhandledBufferedAmount, ClosingHandshakeCompletionStatus closingHandshakeCompletion, unsigned short code, const String& reason)
 {
     LOG(Network, "WebSocket %p didClose()", this);
     queueTaskKeepingObjectAlive(*this, TaskSource::WebSocket, [unhandledBufferedAmount, closingHandshakeCompletion, code, reason](auto& socket) {

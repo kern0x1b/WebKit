@@ -28,7 +28,6 @@ if (ENABLE_VIDEO OR ENABLE_WEB_AUDIO)
         platform/graphics/gstreamer/GStreamerCommon.h
         platform/graphics/gstreamer/GUniquePtrGStreamer.h
 
-        platform/mediastream/gstreamer/GStreamerWebRTCProvider.h
         platform/mediastream/libwebrtc/gstreamer/GStreamerVideoDecoderFactory.h
         platform/mediastream/libwebrtc/gstreamer/GStreamerVideoEncoderFactory.h
         platform/mediastream/libwebrtc/gstreamer/LibWebRTCProviderGStreamer.h
@@ -119,38 +118,6 @@ if (ENABLE_VIDEO)
                 ${GSTREAMER_CODECPARSERS_LIBRARIES}
             )
         endif ()
-    elseif (USE_GSTREAMER_WEBRTC)
-        list(APPEND WebCore_SYSTEM_INCLUDE_DIRECTORIES
-            ${GSTREAMER_RTP_INCLUDE_DIRS}
-            ${GSTREAMER_SDP_INCLUDE_DIRS}
-            ${GSTREAMER_WEBRTC_INCLUDE_DIRS}
-        )
-        if (NOT USE_GSTREAMER_FULL)
-            list(APPEND WebCore_LIBRARIES
-                ${GSTREAMER_RTP_LIBRARIES}
-                ${GSTREAMER_SDP_LIBRARIES}
-                ${GSTREAMER_WEBRTC_LIBRARIES}
-            )
-        endif ()
-
-        list(APPEND WebCore_LIBRARIES OpenSSL::Crypto)
-
-        if (USE_LIBRICE)
-            list(APPEND WebCore_LIBRARIES Rice::Proto)
-            list(APPEND WebCore_PRIVATE_FRAMEWORK_HEADERS
-                Modules/mediastream/gstreamer/GStreamerIceAgent.h
-                Modules/mediastream/gstreamer/RiceGatherResult.h
-
-                platform/rice/GRefPtrRice.h
-                platform/rice/GUniquePtrRice.h
-                platform/rice/RiceUtilities.h
-                platform/rice/RiceVersioning.h
-            )
-            list(APPEND WebCore_PRIVATE_INCLUDE_DIRECTORIES
-                "${WEBCORE_DIR}/Modules/mediastream/gstreamer"
-                "${WEBCORE_DIR}/platform/rice"
-              )
-        endif ()
     endif ()
 endif ()
 
@@ -184,6 +151,13 @@ if (ENABLE_ENCRYPTED_MEDIA AND ENABLE_THUNDER)
 
     # Globally add thunder libraries, required for the check_cxx_symbol_exists call.
     set(CMAKE_REQUIRED_LIBRARIES ${THUNDER_LIBRARIES})
+
+    check_cxx_symbol_exists(opencdm_system_supported_robustness ${THUNDER_INCLUDE_DIR}/open_cdm.h HAS_OCDM_SUPPORTED_ROBUSTNESS)
+    if (HAS_OCDM_SUPPORTED_ROBUSTNESS)
+      list(APPEND WebCore_PRIVATE_DEFINITIONS THUNDER_HAS_OCDM_SUPPORTED_ROBUSTNESS=1)
+    else ()
+      list(APPEND WebCore_PRIVATE_DEFINITIONS THUNDER_HAS_OCDM_SUPPORTED_ROBUSTNESS=0)
+    endif ()
 
     check_cxx_symbol_exists(opencdm_gstreamer_session_decrypt_buffer ${THUNDER_INCLUDE_DIR}/open_cdm_adapter.h HAS_OCDM_DECRYPT_BUFFER)
     if (HAS_OCDM_DECRYPT_BUFFER)

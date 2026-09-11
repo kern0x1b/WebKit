@@ -45,6 +45,14 @@
 #include <wtf/UniqueRef.h>
 #include <wtf/WeakPtrFactory.h>
 
+#if ENABLE(LOGD_BLOCKING_IN_WEBCONTENT)
+#include "LogStream.h"
+#include "LogStreamIdentifier.h"
+#include "ScopedActiveMessageReceiveQueue.h"
+#include "XPCEventHandler.h"
+#include <wtf/OSObjectPtr.h>
+#endif
+
 namespace WebCore {
 class SharedBuffer;
 }
@@ -101,7 +109,7 @@ public:
     virtual Type type() const = 0;
 
     void connect();
-    virtual void terminate();
+    virtual void terminate(std::optional<IPC::MessageName> invalidMessageName = std::nullopt);
 
     ProcessThrottler& throttler() { return m_throttler; }
     const ProcessThrottler& throttler() const { return m_throttler; }
@@ -116,8 +124,8 @@ public:
     using AsyncReplyID = IPC::Connection::AsyncReplyID;
     template<typename T, typename C> std::optional<AsyncReplyID> sendWithAsyncReply(T&&, C&&, uint64_t destinationID = 0, OptionSet<IPC::SendOption> = { }, ShouldStartProcessThrottlerActivity = ShouldStartProcessThrottlerActivity::Yes);
 
-    template<typename T, typename C, typename RawValue>
-    std::optional<AsyncReplyID> sendWithAsyncReply(T&& message, C&& completionHandler, const ObjectIdentifierGenericBase<RawValue>& destinationID, OptionSet<IPC::SendOption> sendOptions = { }, ShouldStartProcessThrottlerActivity shouldStartProcessThrottlerActivity = ShouldStartProcessThrottlerActivity::Yes)
+    template<typename T, typename C>
+    std::optional<AsyncReplyID> sendWithAsyncReply(T&& message, C&& completionHandler, const ObjectIdentifierGenericBase& destinationID, OptionSet<IPC::SendOption> sendOptions = { }, ShouldStartProcessThrottlerActivity shouldStartProcessThrottlerActivity = ShouldStartProcessThrottlerActivity::Yes)
     {
         return sendWithAsyncReply(std::forward<T>(message), std::forward<C>(completionHandler), destinationID.toUInt64(), sendOptions, shouldStartProcessThrottlerActivity);
     }
@@ -128,14 +136,14 @@ public:
     // has been dispatched onto the provided dispatcher.
     template<typename T, typename C> std::optional<AsyncReplyID> sendWithAsyncReplyOnDispatcher(T&&, GuaranteedSerialFunctionDispatcher&, C&&, uint64_t destinationID = 0, OptionSet<IPC::SendOption> = { }, ShouldStartProcessThrottlerActivity = ShouldStartProcessThrottlerActivity::Yes);
 
-    template<typename T, typename RawValue>
-    bool send(T&& message, const ObjectIdentifierGenericBase<RawValue>& destinationID, OptionSet<IPC::SendOption> sendOptions = { })
+    template<typename T>
+    bool send(T&& message, const ObjectIdentifierGenericBase& destinationID, OptionSet<IPC::SendOption> sendOptions = { })
     {
         return send<T>(std::forward<T>(message), destinationID.toUInt64(), sendOptions);
     }
 
-    template<typename T, typename RawValue>
-    SendSyncResult<T> sendSync(T&& message, const ObjectIdentifierGenericBase<RawValue>& destinationID, IPC::Timeout timeout = 1_s, OptionSet<IPC::SendSyncOption> sendSyncOptions = { }, ShouldStartProcessThrottlerActivity shouldStartProcessThrottlerActivity = ShouldStartProcessThrottlerActivity::Yes)
+    template<typename T>
+    SendSyncResult<T> sendSync(T&& message, const ObjectIdentifierGenericBase& destinationID, IPC::Timeout timeout = 1_s, OptionSet<IPC::SendSyncOption> sendSyncOptions = { }, ShouldStartProcessThrottlerActivity shouldStartProcessThrottlerActivity = ShouldStartProcessThrottlerActivity::Yes)
     {
         return sendSync<T>(std::forward<T>(message), destinationID.toUInt64(), timeout, sendSyncOptions, shouldStartProcessThrottlerActivity);
     }
@@ -163,14 +171,12 @@ public:
     void removeMessageReceiver(IPC::ReceiverName, uint64_t destinationID);
     void removeMessageReceiver(IPC::ReceiverName);
     
-    template<typename RawValue>
-    void addMessageReceiver(IPC::ReceiverName messageReceiverName, const ObjectIdentifierGenericBase<RawValue>& destinationID, IPC::MessageReceiver& receiver)
+    void addMessageReceiver(IPC::ReceiverName messageReceiverName, const ObjectIdentifierGenericBase& destinationID, IPC::MessageReceiver& receiver)
     {
         addMessageReceiver(messageReceiverName, destinationID.toUInt64(), receiver);
     }
     
-    template<typename RawValue>
-    void removeMessageReceiver(IPC::ReceiverName messageReceiverName, const ObjectIdentifierGenericBase<RawValue>& destinationID)
+    void removeMessageReceiver(IPC::ReceiverName messageReceiverName, const ObjectIdentifierGenericBase& destinationID)
     {
         removeMessageReceiver(messageReceiverName, destinationID.toUInt64());
     }
@@ -206,6 +212,7 @@ public:
 #if PLATFORM(MAC) && USE(RUNNINGBOARD)
     bool runningBoardThrottlingEnabled();
     void setRunningBoardThrottlingEnabled();
+    void setJetsamBoostEnabled(bool);
 #endif
 
     enum class UseLazyStop : bool { No, Yes };
@@ -271,6 +278,30 @@ protected:
     void logInvalidMessage(IPC::Connection&, IPC::MessageName);
     virtual ASCIILiteral processName() const = 0;
 
+#if ENABLE(LOGD_BLOCKING_IN_WEBCONTENT)
+    // Re-emits os_log messages forwarded by a child process during its launch window, before the
+    // streaming LogStream is established. Shared by every process type that forwards logs.
+    class LogXPCEventHandler final : public XPCEventHandler {
+    public:
+        explicit LogXPCEventHandler(const AuxiliaryProcessProxy&);
+
+        bool handleXPCEvent(xpc_object_t) final;
+
+    private:
+        WeakPtr<AuxiliaryProcessProxy> m_process;
+        bool m_logEndpointEnabled { true };
+    };
+
+#if ENABLE(STREAMING_IPC_IN_LOG_FORWARDING)
+    void createLogStream(IPC::StreamServerConnectionHandle&&, LogStreamIdentifier, CompletionHandler<void()>&&);
+#else
+    void createLogStream(LogStreamIdentifier, CompletionHandler<void()>&&);
+#endif
+    void stopLogStream();
+
+    virtual void didReceiveLogsDuringLaunchForTesting() { }
+#endif
+
     virtual void getLaunchOptions(ProcessLauncher::LaunchOptions&);
     virtual void platformGetLaunchOptions(ProcessLauncher::LaunchOptions&) { }
 
@@ -314,6 +345,10 @@ private:
     Vector<String> platformOverrideLanguages() const;
     void platformStartConnectionTerminationWatchdog();
 
+#if PLATFORM(MAC) && USE(RUNNINGBOARD)
+    void updateJetsamBoostAssertion();
+#endif
+
     // Connection::Client
     void requestRemoteProcessTermination() final;
 
@@ -325,6 +360,10 @@ private:
     Vector<PendingMessage> m_pendingMessages;
     RefPtr<ProcessLauncher> m_processLauncher;
     RefPtr<IPC::Connection> m_connection;
+
+#if ENABLE(LOGD_BLOCKING_IN_WEBCONTENT)
+    IPC::ScopedActiveMessageReceiveQueue<LogStream> m_logStream;
+#endif
     IPC::MessageReceiverMap m_messageReceiverMap;
     bool m_alwaysRunsAtBackgroundPriority { false };
     bool m_didBeginResponsivenessChecks { false };
@@ -338,6 +377,7 @@ private:
 #if PLATFORM(MAC)
     RefPtr<ProcessThrottler::ForegroundActivity> m_lifetimeActivity;
     RefPtr<ProcessAssertion> m_boostedJetsamAssertion;
+    bool m_isJetsamBoostEnabled { true };
 #endif
 #endif
 #if ENABLE(EXTENSION_CAPABILITIES)
@@ -347,7 +387,7 @@ private:
     const ASCIILiteral m_clientName;
     HashMap<Vector<uint8_t>, std::pair<unsigned, std::unique_ptr<IPC::Encoder>>> m_messagesToSendOnResume;
     unsigned m_messagesToSendOnResumeIndex { 0 };
-} SWIFT_SHARED_REFERENCE(refAuxiliaryProcessProxy, derefAuxiliaryProcessProxy);
+} SWIFT_SHARED_REFERENCE(refAuxiliaryProcessProxy, derefAuxiliaryProcessProxy) SWIFT_RETURNED_AS_UNRETAINED_BY_DEFAULT;
 
 template<typename T>
 bool AuxiliaryProcessProxy::send(T&& message, uint64_t destinationID, OptionSet<IPC::SendOption> sendOptions)

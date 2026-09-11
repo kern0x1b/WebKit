@@ -26,7 +26,11 @@
 #include <JavaScriptCore/Structure.h>
 #include <JavaScriptCore/Yarr.h>
 #include <JavaScriptCore/YarrErrorCode.h>
+#include <wtf/Atomics.h>
+#include <wtf/BitSet.h>
+#include <wtf/FixedVector.h>
 #include <wtf/Forward.h>
+#include <wtf/ThreadSafeLazyUniquePtr.h>
 #include <wtf/text/WTFString.h>
 
 #if ENABLE(YARR_JIT)
@@ -35,8 +39,20 @@
 
 namespace JSC {
 
+namespace Yarr {
+struct YarrPattern;
+}
+
 struct RegExpRepresentation;
 class VM;
+
+// Where a first-character fast-fail filter reads the byte it tests.
+enum class FirstCharacterFilterPosition : uint8_t {
+    // Reads input[0]. Sound only when every match must begin at index 0.
+    AtStart,
+    // Reads input[lastIndex]. Sound only for a sticky pattern.
+    AtLastIndex,
+};
 
 class RegExp final : public JSCell {
     friend class CachedRegExp;
@@ -57,8 +73,11 @@ public:
     void dumpSimpleName(PrintStream&) const;
 
     static constexpr ptrdiff_t offsetOfFlags() { return OBJECT_OFFSETOF(RegExp, m_flags); }
+    static constexpr ptrdiff_t offsetOfMinimumSize() { return OBJECT_OFFSETOF(RegExp, m_minimumSize); }
+    static constexpr uint16_t globalOrStickyFlagsMask = OptionSet<Yarr::Flags> { Yarr::Flags::Global, Yarr::Flags::Sticky }.toRaw();
 
     OptionSet<Yarr::Flags> flags() const { return m_flags; }
+    unsigned minimumSize() const { return m_minimumSize; }
 #define JSC_DEFINE_REGEXP_FLAG_ACCESSOR(key, name, lowerCaseName, index) bool lowerCaseName() const { return m_flags.contains(Yarr::Flags::name); }
     JSC_REGEXP_FLAGS(JSC_DEFINE_REGEXP_FLAG_ACCESSOR)
 #undef JSC_DEFINE_REGEXP_FLAG_ACCESSOR
@@ -73,6 +92,7 @@ public:
     void reset()
     {
         m_state = NotCompiled;
+        m_minimumSize = 0;
         m_constructionErrorCode = Yarr::ErrorCode::NoError;
     }
 
@@ -172,16 +192,25 @@ WTF_ALLOW_UNSAFE_BUFFER_USAGE_END
 
         return m_regExpJITCode.get();
     }
+
+    Yarr::YarrCodeBlock* getRegExpJITCodeBlockConcurrently()
+    {
+        return m_regExpJITCode.get();
+    }
 #endif
 
     bool hasValidAtom() const { return !m_atom.isNull(); }
     const String& atom() const LIFETIME_BOUND { return m_atom; }
     Yarr::SpecificPattern specificPattern() const { return m_specificPattern; }
 
+    const WTF::BitSet<256>* firstCharacterBitmap(FirstCharacterFilterPosition);
+
 private:
     friend class RegExpCache;
     RegExp(VM&, const String&, OptionSet<Yarr::Flags>);
     void finishCreation(VM&);
+
+    void updateMetadataFromPattern(Yarr::YarrPattern&);
 
     static RegExp* createWithoutCaching(VM&, const String&, OptionSet<Yarr::Flags>);
 
@@ -205,18 +234,13 @@ private:
 #endif
 
 #if ENABLE(YARR_JIT)
-    Yarr::YarrCodeBlock& ensureRegExpJITCode()
-    {
-        if (!m_regExpJITCode)
-            m_regExpJITCode = makeUnique<Yarr::YarrCodeBlock>(this);
-        return *m_regExpJITCode.get();
-    }
+    Yarr::YarrCodeBlock& ensureRegExpJITCode();
 #endif
 
     struct RareData {
         WTF_DEPRECATED_MAKE_STRUCT_FAST_ALLOCATED(RareData);
         unsigned m_numDuplicateNamedCaptureGroups;
-        Vector<AtomString> m_captureGroupNames;
+        FixedVector<AtomString> m_captureGroupNames;
 
         // This first element of the RHS vector is the subpatternId in the non-duplicate case.
         // For the duplicate case, the first element is the namedCaptureGroupId.
@@ -232,12 +256,14 @@ private:
     OptionSet<Yarr::Flags> m_flags;
     Yarr::ErrorCode m_constructionErrorCode { Yarr::ErrorCode::NoError };
     unsigned m_numSubpatterns { 0 };
+    unsigned m_minimumSize { 0 };
     std::unique_ptr<Yarr::BytecodePattern> m_regExpBytecode;
 #if ENABLE(YARR_JIT)
     std::unique_ptr<Yarr::YarrCodeBlock> m_regExpJITCode;
 #endif
     std::unique_ptr<RareData> m_rareData;
-    Vector<int> m_ovector;
+    FixedVector<int> m_ovector;
+    mutable ThreadSafeLazyUniquePtr<const WTF::BitSet<256>> m_firstCharacterBitmap;
 #if ENABLE(REGEXP_TRACING)
     double m_rtMatchOnlyTotalSubjectStringLen { 0.0 };
     double m_rtMatchTotalSubjectStringLen { 0.0 };

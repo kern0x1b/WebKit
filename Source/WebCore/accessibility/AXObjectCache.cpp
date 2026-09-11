@@ -87,6 +87,7 @@
 #include "HTMLInputElement.h"
 #include "HTMLLabelElement.h"
 #include "HTMLMapElement.h"
+#include "HTMLMediaElement.h"
 #include "HTMLMeterElement.h"
 #include "HTMLNames.h"
 #include "HTMLOptGroupElement.h"
@@ -118,7 +119,7 @@
 #include "RenderLayer.h"
 #include "RenderLineBreak.h"
 #include "RenderListBox.h"
-#include "RenderListMarker.h"
+#include "RenderListOutsideMarker.h"
 #include "RenderMathMLOperator.h"
 #include "RenderMeter.h"
 #include "RenderObjectInlines.h"
@@ -129,7 +130,9 @@
 #include "RenderTableCell.h"
 #include "RenderTableRow.h"
 #include "RenderView.h"
+#include "SVGAElement.h"
 #include "SVGElement.h"
+#include "SVGElementTypeHelpers.h"
 #include "ScriptDisallowedScope.h"
 #include "ScrollView.h"
 #include "SelectPopoverElement.h"
@@ -142,6 +145,7 @@
 #include <utility>
 #include <wtf/Borrow.h>
 #include <wtf/DataLog.h>
+#include <wtf/HexNumber.h>
 #include <wtf/NeverDestroyed.h>
 #include <wtf/SetForScope.h>
 #include <wtf/TZoneMallocInlines.h>
@@ -307,15 +311,15 @@ void AXObjectCache::disableAccessibilityForTesting()
 }
 
 #if ENABLE(ACCESSIBILITY_ISOLATED_TREE)
-std::optional<AccessibilityMode> AXObjectCache::transitionToAXThreadModeIfNeeded(ForceAXThreadMode forceAXThread)
+std::optional<AccessibilityMode> AXObjectCache::transitionToAXThreadModeIfNeeded(AXThreadModePreconditions preconditions)
 {
     if (accessibilityMode() == AccessibilityMode::AXThread)
         return std::nullopt;
 
-    if (platformAXThreadSupport(forceAXThread) == PlatformAXThreadSupport::NotSupported)
+    if (platformAXThreadSupport(preconditions) == PlatformAXThreadSupport::NotSupported)
         return std::nullopt;
 
-    if (forceAXThread == ForceAXThreadMode::No
+    if (preconditions != AXThreadModePreconditions::None
         && !DeprecatedGlobalSettings::isAccessibilityIsolatedTreeEnabled())
         return std::nullopt;
 
@@ -401,13 +405,17 @@ bool AXObjectCache::shouldServeInitialCachedFrame()
     return !clientIsInTestMode() || forceInitialFrameCaching();
 }
 
-static constexpr Seconds updateTreeSnapshotTimerInterval { 100_ms };
+// Just over one frame at 60Hz (16.67ms). The timer is scheduled on demand when the isolated
+// tree first queues work, so this is "publish one frame after the first change in this batch",
+// with any further changes in the window coalescing into the same commit.
+static constexpr Seconds updateTreeSnapshotTimerDuration { 17_ms };
 #endif
 
 AXObjectCache::AXObjectCache(LocalFrame& localFrame, Document* document)
     : m_document(document)
     , m_frameID(localFrame.frameID())
     , m_notificationPostTimer(*this, &AXObjectCache::notificationPostTimerFired)
+    , m_pendingAnnouncementTimeoutTimer(*this, &AXObjectCache::pendingAnnouncementTimeoutTimerFired)
 #if PLATFORM(COCOA)
     , m_passwordNotificationTimer(*this, &AXObjectCache::passwordNotificationTimerFired)
 #endif
@@ -484,6 +492,7 @@ AXObjectCache::~AXObjectCache()
     m_notificationPostTimer.stop();
     m_liveRegionChangedPostTimer.stop();
     m_performCacheUpdateTimer.stop();
+    m_pendingAnnouncementTimeoutTimer.stop();
 
     for (const auto& object : m_objects.values())
         object->detach(AccessibilityDetachmentType::CacheDestroyed);
@@ -1243,10 +1252,14 @@ RefPtr<AXIsolatedTree> AXObjectCache::getOrCreateIsolatedTree()
     }
 
     RefPtr tree = AXIsolatedTree::treeForFrameID(m_frameID);
-    if (tree) {
-        if (tree->treeID() == treeID())
-            return tree;
+    if (tree && tree->treeID() == treeID())
+        return tree;
 
+    // An AXObjectCache might still exist for a document that's detached from its frame.
+    if (!page())
+        return nullptr;
+
+    if (tree) {
         // The tree belongs to a different document (navigation occurred).
         // Remove the old tree and create a new one.
         AXIsolatedTree::removeTreeForFrameID(m_frameID);
@@ -1284,6 +1297,10 @@ void AXObjectCache::initializeIsolatedTreeGeometry()
 void AXObjectCache::buildIsolatedTree()
 {
     m_buildIsolatedTreeTimer.stop();
+
+    // Our document may have been detached from its frame since this timer was scheduled.
+    if (!page())
+        return;
 
     RefPtr tree = AXIsolatedTree::create(*this);
 
@@ -1641,7 +1658,8 @@ void AXObjectCache::handleClickHandlerChanged(Node& node, const AtomString& even
 
     // A hrefless anchor is exposed as a link only when it has a click handler, so adding or removing
     // one can change its role. (An anchor with an href is a link regardless of its click handlers.)
-    if (RefPtr anchor = dynamicDowncast<HTMLAnchorElement>(node); anchor && !anchor->isLink())
+    RefPtr anchor = dynamicDowncast<Element>(node);
+    if ((is<HTMLAnchorElement>(anchor.get()) || is<SVGAElement>(anchor.get())) && !anchor->isLink())
         object->updateRole();
 
 #if ENABLE(ACCESSIBILITY_ISOLATED_TREE)
@@ -1728,6 +1746,11 @@ void AXObjectCache::handleAllDeferredChildrenChanged()
             postPlatformNotification(object, AXNotification::ChildrenChanged);
 #endif
     }
+
+    // These entries only suppress the children-changed raised by the re-render that recorded them, so
+    // they must not survive into subsequent, genuine mutations of the same live region.
+    m_deferredReRenderedContent.clear();
+    m_reRenderedContentAndAncestors = std::nullopt;
 }
 
 void AXObjectCache::handleChildrenChanged(AccessibilityObject& object)
@@ -1803,7 +1826,7 @@ void AXObjectCache::handleChildrenChanged(AccessibilityObject& object)
         // This notification needs to be sent even when the screen reader has not accessed this live region since the last update.
         // Sometimes this function can be called many times within a short period of time, leading to posting too many AXLiveRegionChanged notifications.
         // To fix this, we use a timer to make sure we only post one notification for the children changes within a pre-defined time interval.
-        if (parent->supportsLiveRegion())
+        if (parent->supportsLiveRegion() && !isReRenderedContent(*parent))
             postLiveRegionChangeNotification(*parent);
 
         // If this object is an ARIA text control, notify that its value changed.
@@ -1889,7 +1912,7 @@ void AXObjectCache::setDirtyStitchGroups(const RenderBlock& renderBlock)
 #if ENABLE(ACCESSIBILITY_ISOLATED_TREE)
 void AXObjectCache::onTextRunsChanged(const RenderObject& renderer)
 {
-    if (is<RenderInline>(renderer) || is<RenderListMarker>(renderer)) {
+    if (is<RenderInline>(renderer) || is<RenderListOutsideMarker>(renderer)) {
         // Fast-path exit for common renderers that will never produce text runs.
         return;
     }
@@ -2069,7 +2092,7 @@ void AXObjectCache::notificationPostTimerFired()
     RefPtr document = m_document.get();
     m_notificationPostTimer.stop();
 
-    if (!document || !document->hasLivingRenderTree())
+    if (!document || document->renderTreeState() != Document::RenderTreeState::Built)
         return;
 
     // In tests, posting notifications has a tendency to immediately queue up other notifications, which can lead to unexpected behavior
@@ -2107,6 +2130,9 @@ void AXObjectCache::notificationPostTimerFired()
 
 #if ENABLE(ACCESSIBILITY_ISOLATED_TREE)
     updateIsolatedTree(notificationsToPost);
+    // We're going to post platform notifications, so make sure to publish isolated tree
+    // changes so we provide up-to-date information.
+    processQueuedIsolatedNodeUpdates();
 #endif
 
     for (const auto& note : notificationsToPost) {
@@ -2152,6 +2178,200 @@ void AXObjectCache::enqueueNotificationToPost(Ref<AccessibilityObject>&& object,
     m_notificationsToPost.append(std::make_pair(WTF::move(object), WTF::move(notification)));
     if (!m_notificationPostTimer.isActive())
         m_notificationPostTimer.startOneShot(0_s);
+}
+
+static std::optional<Seconds>& announcementTranslationTimeoutOverrideForTesting()
+{
+    static NeverDestroyed<std::optional<Seconds>> override;
+    return override;
+}
+
+void AXObjectCache::setAnnouncementTranslationTimeoutForTesting(std::optional<Seconds> timeout)
+{
+    announcementTranslationTimeoutOverrideForTesting() = timeout;
+}
+
+Seconds AXObjectCache::announcementTranslationTimeout()
+{
+    // Long enough for an on-device translation of a short string, short enough that a stalled
+    // translation service does not leave the user waiting on an announcement.
+    static constexpr Seconds defaultAnnouncementTranslationTimeout = 250_ms;
+    return announcementTranslationTimeoutOverrideForTesting().value_or(defaultAnnouncementTranslationTimeout);
+}
+
+void AXObjectCache::translateAnnouncementThenAssemble(Ref<AccessibilityObject>&& object, Vector<String>&& segments, Function<void(Vector<String>&&, const String&)>&& assemble)
+{
+    RefPtr document = m_document.get();
+    RefPtr page = document ? document->page() : nullptr;
+
+    bool needsTranslation = false;
+    String targetLocale;
+    if (page) {
+        // Every announcement in a translated rendering needs translating.
+        targetLocale = page->displayedTranslationLocaleIdentifier();
+        needsTranslation = !targetLocale.isEmpty();
+    }
+
+    if (!needsTranslation && m_pendingAnnouncements.isEmpty()) {
+        assemble(WTF::move(segments), { });
+        return;
+    }
+
+    static constexpr size_t maxPendingAnnouncements = 64;
+    if (m_pendingAnnouncements.size() >= maxPendingAnnouncements) [[unlikely]] {
+        // If we hit the pending announcements cap (e.g. translation is running slowly, and / or
+        // there is a high volume of announcements), release the oldest one untranslated rather
+        // than dropping it. Losing an announcement is worse than announcing it in the original language.
+        AX_ASSERT_NOT_REACHED();
+        auto oldest = m_pendingAnnouncements.takeFirst();
+        if (!oldest.object->isDetached() && oldest.object->axObjectCache())
+            oldest.assembleAndEnqueue(WTF::move(oldest.segments), { });
+    }
+
+    uint64_t requestID = needsTranslation ? ++m_nextAnnouncementTranslationRequestID : 0;
+    m_pendingAnnouncements.append(PendingAnnouncement {
+        WTF::move(object),
+        segments,
+        needsTranslation ? targetLocale : String { },
+        requestID,
+        MonotonicTime::now() + announcementTranslationTimeout(),
+        WTF::move(assemble)
+    });
+
+    if (needsTranslation) {
+        page->chrome().client().translateAccessibilityAnnouncementStrings(segments, targetLocale,
+            [weakCache = WeakPtr { *this }, requestID](Vector<String>&& translatedSegments) mutable {
+                if (CheckedPtr cache = weakCache.get())
+                    cache->announcementTranslationDidComplete(requestID, WTF::move(translatedSegments));
+            });
+    }
+
+    scheduleAnnouncementTimeoutTimerIfNeeded();
+}
+
+void AXObjectCache::deferReRenderedContent(Node& node)
+{
+    RefPtr document = m_document.get();
+    RefPtr page = document ? document->page() : nullptr;
+    if (!page || !page->isPresentingMachineTranslation()) {
+        // Re-rendered content is only relevant when page-level translation
+        // is active (the "re-rendering" is the replacement of the original
+        // DOM text with the translated version).
+        return;
+    }
+
+    m_deferredReRenderedContent.add(node);
+    // The ancestor closure was built from a smaller set, so it no longer answers correctly.
+    m_reRenderedContentAndAncestors = std::nullopt;
+}
+
+
+bool AXObjectCache::isReRenderedContent(const AccessibilityObject& object) const
+{
+    if (m_deferredReRenderedContent.isEmptyIgnoringNullReferences())
+        return false;
+
+    RefPtr document = m_document.get();
+    RefPtr page = document ? document->page() : nullptr;
+    if (!page || !page->isPresentingMachineTranslation()) {
+        // Only relevant when page-level translation is happening -- see similar comment
+        // in AXObjectCache::deferReRenderedContent.
+        return false;
+    }
+
+    // m_deferredReRenderedContent holds the containers whose text was swapped out, recorded by
+    // deferReRenderedContent(). The children-changed notification is raised either on such a
+    // container or on a live region ancestor of one, so both directions have to match.
+    RefPtr candidateNode = object.node();
+    if (!candidateNode)
+        return false;
+
+    if (!m_reRenderedContentAndAncestors) {
+        // Build a one-time cache (m_reRenderedContentAndAncestors) capturing whether any re-rendered
+        // node or any ancestor of one is a given node, so each query is a set lookup rather than an
+        // ancestor walk per m_deferredReRenderedContent member.
+        m_reRenderedContentAndAncestors.emplace();
+        for (Ref reRenderedNode : m_deferredReRenderedContent) {
+            for (RefPtr node = reRenderedNode.get(); node; node = node->parentNode()) {
+                if (!m_reRenderedContentAndAncestors->add(*node).isNewEntry) {
+                    // Stop when we found an ancestor that was already present, since everything above it
+                    // was already added by an earlier m_deferredReRenderedContent member.
+                    break;
+                }
+            }
+        }
+    }
+
+    return m_reRenderedContentAndAncestors->contains(*candidateNode);
+}
+
+void AXObjectCache::announcementTranslationDidComplete(uint64_t requestID, Vector<String>&& translatedSegments)
+{
+    AX_ASSERT(isMainThread());
+
+    auto iterator = m_pendingAnnouncements.findIf([&](auto& entry) {
+        return entry.translationRequestID == requestID;
+    });
+    // Already force-completed by a timeout or an overflow.
+    if (iterator == m_pendingAnnouncements.end())
+        return;
+
+    auto& entry = *iterator;
+    entry.translationRequestID = 0;
+
+    // A short or oversized reply means the client could not translate these strings,
+    // so keep the originals, and with them the original language.
+    if (translatedSegments.size() == entry.segments.size())
+        entry.segments = WTF::move(translatedSegments);
+    else
+        entry.targetLocale = { };
+
+    flushPendingAnnouncements();
+}
+
+void AXObjectCache::flushPendingAnnouncements()
+{
+    // Releasing an entry only enqueues a notification to post on a zero-delay timer, so nothing here
+    // re-enters this function. That matters: an inner flush would release later entries while an
+    // outer one was still draining, which is exactly the ordering this queue exists to preserve.
+    while (!m_pendingAnnouncements.isEmpty() && !m_pendingAnnouncements.first().translationRequestID) {
+        auto entry = m_pendingAnnouncements.takeFirst();
+        if (entry.object->isDetached() || !entry.object->axObjectCache())
+            continue;
+        entry.assembleAndEnqueue(WTF::move(entry.segments), entry.targetLocale);
+    }
+
+    scheduleAnnouncementTimeoutTimerIfNeeded();
+}
+
+void AXObjectCache::scheduleAnnouncementTimeoutTimerIfNeeded()
+{
+    if (m_pendingAnnouncements.isEmpty()) {
+        m_pendingAnnouncementTimeoutTimer.stop();
+        return;
+    }
+
+    if (m_pendingAnnouncementTimeoutTimer.isActive())
+        return;
+
+    // We only need to arm the timer based on the first entries deadline, since
+    // we re-arm the timer as subsequent entries (with their own deadline) are drained.
+    auto delay = std::max(0_s, m_pendingAnnouncements.first().deadline - MonotonicTime::now());
+    m_pendingAnnouncementTimeoutTimer.startOneShot(delay);
+}
+
+void AXObjectCache::pendingAnnouncementTimeoutTimerFired()
+{
+    auto now = MonotonicTime::now();
+    for (auto& entry : m_pendingAnnouncements) {
+        if (entry.deadline > now)
+            break;
+        // Give up waiting and announce the original text in the original language.
+        entry.translationRequestID = 0;
+        entry.targetLocale = { };
+    }
+
+    flushPendingAnnouncements();
 }
 
 void AXObjectCache::postNotification(RenderObject* renderer, AXNotification notification, PostTarget postTarget)
@@ -2282,7 +2502,24 @@ void AXObjectCache::postARIANotifyNotification(Node& node, const String& announc
         }
     }
 
-    enqueueNotificationToPost(Ref { *object }, AXNotificationWithData(AXNotification::ARIANotify, AriaNotifyData { announcement, priority, interruptBehavior, object->languageIncludingAncestors() }));
+    auto sourceLanguage = object->languageIncludingAncestors();
+
+    // Assembles and enqueues the notification once the announcement text is final, which is true when either:
+    //   1. No translation is needed, and thus can be announced immediately.
+    //   2. The translation request returns the new text.
+    //   3. The translation request times out, and the original text is used.
+    auto assemble = [weakCache = WeakPtr { *this }, object, priority, interruptBehavior, sourceLanguage](Vector<String>&& segments, const String& language) mutable {
+        if (segments.isEmpty())
+            return;
+        CheckedPtr cache = weakCache.get();
+        if (!cache)
+            return;
+
+        cache->enqueueNotificationToPost(Ref { *object }, AXNotificationWithData(AXNotification::ARIANotify,
+            AriaNotifyData { WTF::move(segments[0]), priority, interruptBehavior, language.isEmpty() ? sourceLanguage : language }));
+    };
+
+    translateAnnouncementThenAssemble(Ref { *object }, { announcement }, WTF::move(assemble));
 }
 
 #if PLATFORM(COCOA)
@@ -2367,6 +2604,18 @@ void AXObjectCache::onPageActivityStateChange(OptionSet<ActivityState> newState)
         tree->setPageActivityState(newState);
 #endif
 }
+
+#if ENABLE(WRITING_TOOLS)
+void AXObjectCache::setWritingToolsAvailable(bool isAvailable)
+{
+#if ENABLE(ACCESSIBILITY_ISOLATED_TREE)
+    if (auto tree = AXIsolatedTree::treeForFrameID(m_frameID))
+        tree->setWritingToolsAvailable(isAvailable);
+#else
+    UNUSED_PARAM(isAvailable);
+#endif // ENABLE(ACCESSIBILITY_ISOLATED_TREE)
+}
+#endif // ENABLE(WRITING_TOOLS)
 
 static bool shouldDeferFocusChange(Element* element)
 {
@@ -2630,6 +2879,13 @@ void AXObjectCache::selectedChildrenChanged(RenderObject* renderer)
         selectedChildrenChanged(protect(renderer->node()));
 }
 
+#if ENABLE(VIDEO)
+void AXObjectCache::onMediaElementCurrentSrcChanged(HTMLMediaElement& element)
+{
+    postNotification(&element, AXNotification::URLChanged);
+}
+#endif
+
 void AXObjectCache::onScrollbarFrameRectChange(const Scrollbar& scrollbar)
 {
 #if ENABLE(ACCESSIBILITY_ISOLATED_TREE)
@@ -2664,14 +2920,18 @@ void AXObjectCache::onSelectedOptionChanged(Element& element)
 
 void AXObjectCache::onSelectedOptionChanged(HTMLSelectElement& select, int optionIndex)
 {
-    if (RefPtr axMenuList = dynamicDowncast<AccessibilityMenuList>(get(select))) {
+    if (RefPtr axMenuList = dynamicDowncast<AccessibilityMenuList>(get(select)))
         axMenuList->didUpdateActiveOption(optionIndex);
-        return;
+    else {
+        // Base-appearance selects don't use AccessibilityMenuList (which normally handles this),
+        // so post the value change notification directly.
+        deferMenuListValueChange(&select);
     }
 
-    // Base-appearance selects don't use AccessibilityMenuList (which normally handles this),
-    // so post the value change notification directly.
-    deferMenuListValueChange(&select);
+#if ENABLE(ACCESSIBILITY_ISOLATED_TREE)
+    // Make sure the string value is updated in the same cycle as the expanded-state change.
+    updateIsolatedTree(get(select), AXProperty::StringValue);
+#endif
 }
 
 void AXObjectCache::onSlottedContentChange(const HTMLSlotElement& slot)
@@ -2837,7 +3097,6 @@ void AXObjectCache::onAccessibilityPaintFinished()
     }
 
     tree->markMostRecentlyPaintedTextDirty();
-    startUpdateTreeSnapshotTimer();
 }
 
 bool AXObjectCache::onFontChange(Element& element, const Style::ComputedStyle* oldStyle, const Style::ComputedStyle* newStyle)
@@ -3358,22 +3617,26 @@ void AXObjectCache::postLiveRegionChangeNotification(AccessibilityObject& object
 void AXObjectCache::liveRegionChangedNotificationPostTimerFired()
 {
     m_liveRegionChangedPostTimer.stop();
+    processChangedLiveRegions();
+}
 
+void AXObjectCache::processChangedLiveRegions()
+{
     if (m_changedLiveRegions.isEmpty())
         return;
 
+    auto changedLiveRegions = std::exchange(m_changedLiveRegions, { });
+
 #if PLATFORM(COCOA)
     if (m_liveRegionManager) {
-        for (auto& object : m_changedLiveRegions)
+        for (auto& object : changedLiveRegions)
             m_liveRegionManager->handleLiveRegionChange(object.get());
-        m_changedLiveRegions.clear();
         return;
     }
 #endif
 
-    for (auto& object : m_changedLiveRegions)
+    for (auto& object : changedLiveRegions)
         postNotification(object.ptr(), protect(object->document()).get(), AXNotification::LiveRegionChanged);
-    m_changedLiveRegions.clear();
 }
 
 void AXObjectCache::onScrollbarUpdate(ScrollView& view)
@@ -3386,10 +3649,19 @@ void AXObjectCache::onScrollbarUpdate(ScrollView& view)
 void AXObjectCache::handleScrollbarUpdate(ScrollView& view)
 {
     // We don't want to create a scroll view from this method, only update an existing one.
-    if (RefPtr scrollViewObject = get(&view)) {
-        stopCachingComputedObjectAttributes();
-        scrollViewObject->updateChildrenIfNecessary();
-    }
+    RefPtr scrollViewObject = get(&view);
+    if (!scrollViewObject)
+        return;
+
+    stopCachingComputedObjectAttributes();
+    scrollViewObject->updateChildrenIfNecessary();
+
+#if ENABLE(ACCESSIBILITY_ISOLATED_TREE)
+    // AccessibilityScrollView::updateChildrenIfNecessary() rebuilds the live children
+    // but doesn't mark the scroll view as needing a children update.
+    if (RefPtr tree = AXIsolatedTree::treeForFrameID(m_frameID))
+        tree->queueNodeUpdate(scrollViewObject->objectID(), NodeUpdateOptions::childrenUpdate());
+#endif
 }
 
 void AXObjectCache::handleAriaExpandedChange(Element& element)
@@ -3671,8 +3943,8 @@ void AXObjectCache::handleAttributeChange(Element* element, const QualifiedName&
         // An anchor's role depends on whether it is a link (Element::isLink(), i.e. whether it has an
         // href). Recompute the role when href changes so a hrefless anchor with a click handler can
         // become a link, and vice versa.
-        if (RefPtr anchor = dynamicDowncast<HTMLAnchorElement>(element)) {
-            if (RefPtr object = get(*anchor))
+        if (is<HTMLAnchorElement>(element) || is<SVGAElement>(element)) {
+            if (RefPtr object = get(*element))
                 object->updateRole();
         }
     }
@@ -4044,7 +4316,6 @@ void AXObjectCache::dirtyIsolatedTreeRelations()
 #if ENABLE(ACCESSIBILITY_ISOLATED_TREE)
     if (RefPtr tree = AXIsolatedTree::treeForFrameID(m_frameID))
         tree->markRelationsDirty();
-    startUpdateTreeSnapshotTimer();
 #endif
 }
 
@@ -4080,7 +4351,14 @@ VisiblePosition AXObjectCache::visiblePositionForTextMarkerData(const TextMarker
     if (node->isPseudoElement())
         return { };
 
-    auto visiblePosition = VisiblePosition({ node.get(), textMarkerData.offset, textMarkerData.anchorType }, textMarkerData.affinity);
+    // Only the offset-in-anchor constructor takes an offset. A marker can be anchored before or
+    // after its node instead — the caret on the empty final line of a text control is anchored
+    // before the placeholder <br>, for instance — and those anchor types have their own constructor,
+    // which derives the offset from the node.
+    auto position = textMarkerData.anchorType == Position::PositionIsOffsetInAnchor
+        ? Position { node.get(), textMarkerData.offset, textMarkerData.anchorType }
+        : Position { node.get(), textMarkerData.anchorType };
+    auto visiblePosition = VisiblePosition(position, textMarkerData.affinity);
     auto deepPosition = visiblePosition.deepEquivalent();
     if (deepPosition.isNull())
         return { };
@@ -4573,7 +4851,7 @@ Node* AXObjectCache::previousNode(Node* node) const
     return NodeTraversal::previousSkippingChildren(*node);
 }
 
-VisiblePosition AXObjectCache::visiblePositionFromCharacterOffset(const CharacterOffset& characterOffset)
+VisiblePosition AXObjectCache::visiblePositionFromCharacterOffset(const CharacterOffset& characterOffset, AllowUserSelectNone allowUserSelectNone)
 {
     if (characterOffset.isNull())
         return VisiblePosition();
@@ -4583,7 +4861,7 @@ VisiblePosition AXObjectCache::visiblePositionFromCharacterOffset(const Characte
     auto range = rangeForUnorderedCharacterOffsets(characterOffset, characterOffset);
     if (!range)
         return { };
-    return makeContainerOffsetPosition(range->start);
+    return { makeContainerOffsetPosition(range->start), VisiblePosition::defaultAffinity, allowUserSelectNone };
 }
 
 CharacterOffset AXObjectCache::characterOffsetFromVisiblePosition(const VisiblePosition& targetVisiblePosition)
@@ -5431,7 +5709,7 @@ void AXObjectCache::performDeferredCacheUpdate(ForceLayout forceLayout)
     if (!document->view())
         return;
 
-    if (needsLayoutOrStyleRecalc(*document)) {
+    if (auto documentNeeds = needsLayoutOrStyleRecalc(*document)) {
         // Layout became dirty while waiting to performDeferredCacheUpdate, and we require clean layout
         // to update the accessibility tree correctly in this function.
         if ((m_cacheUpdateDeferredCount >= 3 || forceLayout == ForceLayout::Yes) && !Accessibility::inRenderTreeOrStyleUpdate(*document)) {
@@ -5439,8 +5717,12 @@ void AXObjectCache::performDeferredCacheUpdate(ForceLayout forceLayout)
             m_cacheUpdateDeferredCount = 0;
             document->updateLayoutIgnorePendingStylesheets();
         } else {
-            // Wait for layout to trigger another async cache update.
             ++m_cacheUpdateDeferredCount;
+            if (!documentNeeds.contains(DocumentNeeds::Layout) && !m_performCacheUpdateTimer.isActive()) {
+                // A pending style recalc may not necessarily trigger layout, so restart the timer explicitly
+                // to avoid stranding deferred changes.
+                m_performCacheUpdateTimer.startOneShot(0_s);
+            }
             return;
         }
     }
@@ -5677,6 +5959,13 @@ void AXObjectCache::performDeferredCacheUpdate(ForceLayout forceLayout)
 #endif
 
     platformPerformDeferredCacheUpdate();
+
+#if PLATFORM(COCOA)
+    if (m_liveRegionManager && !m_changedLiveRegions.isEmpty()) {
+        m_liveRegionChangedPostTimer.stop();
+        processChangedLiveRegions();
+    }
+#endif
 }
 
 void AXObjectCache::handleDeferredPopoverToggle(AccessibilityObject& axPopover)
@@ -5909,6 +6198,12 @@ void AXObjectCache::updateIsolatedTree(const Vector<std::pair<Ref<AccessibilityO
         case AXNotification::PopoverTargetChanged:
             tree->queueNodeUpdate(notification.first->objectID(), { { AXProperty::SupportsExpanded, AXProperty::IsExpanded } });
             break;
+        case AXNotification::PressDidSucceed:
+            // The only presses that post this toggle a select's picker, so the expanded state
+            // has just changed. Refresh it in the same batch that posts the notification so
+            // an AT that queries in response gets the right value.
+            tree->queueNodeUpdate(notification.first->objectID(), { AXProperty::IsExpanded });
+            break;
         case AXNotification::SelectedTextChanged:
             tree->queueNodeUpdate(notification.first->objectID(), { AXProperty::SelectedTextRange });
             break;
@@ -5993,8 +6288,15 @@ void AXObjectCache::updateIsolatedTree(const Vector<std::pair<Ref<AccessibilityO
         case AXNotification::PressedStateChanged:
         case AXNotification::TextChanged:
         case AXNotification::TextSecurityChanged:
+            tree->queueNodeUpdate(notification.first->objectID(), NodeUpdateOptions::nodeUpdate());
+            break;
         case AXNotification::ValueChanged:
             tree->queueNodeUpdate(notification.first->objectID(), NodeUpdateOptions::nodeUpdate());
+            // A text control's value and selection must stay consistent for clients that read the
+            // selection in response to this notification, so push the current selection alongside the
+            // value rather than letting it arrive later on the selection-change channel.
+            if (notification.first->isTextControl())
+                onSelectedTextChanged(notification.first->selectedVisiblePositionRange(), notification.first.ptr());
             break;
         case AXNotification::LabelChanged: {
             tree->queueNodeUpdate(notification.first->objectID(), NodeUpdateOptions::nodeUpdate());
@@ -6030,7 +6332,7 @@ void AXObjectCache::updateIsolatedTree(AccessibilityObject& axObject, AXProperty
 void AXObjectCache::startUpdateTreeSnapshotTimer()
 {
     if (!m_updateTreeSnapshotTimer.isActive())
-        m_updateTreeSnapshotTimer.startOneShot(updateTreeSnapshotTimerInterval);
+        m_updateTreeSnapshotTimer.startOneShot(updateTreeSnapshotTimerDuration);
 }
 
 void AXObjectCache::onPaint(const RenderObject& renderer, IntRect&& paintRect) const
@@ -6884,6 +7186,13 @@ bool AXObjectCache::addRelation(Element& origin, const QualifiedName& attribute)
 
 void AXObjectCache::addLabelForRelation(Element& origin)
 {
+    RefPtr label = dynamicDowncast<HTMLLabelElement>(origin);
+
+    if (label) {
+        if (const auto& controlID = label->attributeWithoutSynchronization(forAttr); !controlID.isEmpty())
+            m_referencedRelationTargetIds.add(controlID);
+    }
+
     // A detached label has no accessibility object, so its label relations have no consumer. Skipping
     // it here also avoids HTMLLabelElement::control()'s scan of the label's descendants.
     if (!origin.isInTreeScope())
@@ -6892,7 +7201,7 @@ void AXObjectCache::addLabelForRelation(Element& origin)
     bool addedRelation = false;
 
     // LabelFor relations are established for <label for=...>.
-    if (RefPtr label = dynamicDowncast<HTMLLabelElement>(origin)) {
+    if (label) {
         if (RefPtr control = Accessibility::controlForLabelElement(*label)) {
             // Always add NativeLabelFor for geometry purposes.
             addedRelation = addRelation(origin, *control, AXRelation::NativeLabelFor);
@@ -7031,12 +7340,6 @@ void AXObjectCache::selectedTextRangeTimerFired()
     }
 
     m_lastDebouncedTextRangeObject = std::nullopt;
-}
-
-void AXObjectCache::updateTreeSnapshotTimerFired()
-{
-    m_updateTreeSnapshotTimer.stop();
-    processQueuedIsolatedNodeUpdates();
 }
 
 void AXObjectCache::processQueuedIsolatedNodeUpdates()

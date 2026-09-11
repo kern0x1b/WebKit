@@ -25,6 +25,8 @@
 
 #import "WKBackForwardListItemPrivate.h"
 
+#if !__has_feature(modules) || (defined(WK_SUPPORTS_SWIFT_OBJCXX_INTEROP) && WK_SUPPORTS_SWIFT_OBJCXX_INTEROP)
+
 #import "WKObject.h"
 #import "WebBackForwardListItem.h"
 
@@ -39,5 +41,14 @@ template<> struct WrapperTraits<WebBackForwardListItem> {
 @interface WKBackForwardListItem () <WKObject>
 
 @property (readonly) WebKit::WebBackForwardListItem& _item;
+
+@end
+
+#endif // !__has_feature(modules) || (defined(WK_SUPPORTS_SWIFT_OBJCXX_INTEROP) && WK_SUPPORTS_SWIFT_OBJCXX_INTEROP)
+
+@interface WKBackForwardListItem (NonCpp)
+
+@property (nonatomic, readonly) uint64_t _identifier;
+@property (nonatomic, readonly) uint64_t _identifierProcess;
 
 @end

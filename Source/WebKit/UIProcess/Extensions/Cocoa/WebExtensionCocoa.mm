@@ -42,6 +42,7 @@
 #import <CoreFoundation/CFBundle.h>
 #import <WebCore/DataURLDecoder.h>
 #import <WebCore/LocalizedStrings.h>
+#import <WebCore/MIMETypeRegistry.h>
 #import <wtf/FileSystem.h>
 #import <wtf/cf/TypeCastsCF.h>
 #import <wtf/text/MakeString.h>
@@ -210,7 +211,7 @@ bool WebExtension::validateResourceData(NSURL *resourceURL, NSData *resourceData
 }
 #endif // PLATFORM(MAC)
 
-Expected<Ref<API::Data>, RefPtr<API::Error>> WebExtension::resourceDataForPath(const String& originalPath, CacheResult cacheResult, SuppressNotFoundErrors suppressErrors)
+std::expected<Ref<API::Data>, RefPtr<API::Error>> WebExtension::resourceDataForPath(const String& originalPath, CacheResult cacheResult, SuppressNotFoundErrors suppressErrors)
 {
     ASSERT(originalPath);
 
@@ -292,7 +293,7 @@ void WebExtension::recordError(Ref<API::Error> error)
     [wrapper() didChangeValueForKey:@"errors"];
 }
 
-Expected<Ref<WebCore::Icon>, RefPtr<API::Error>> WebExtension::iconForPath(const String& imagePath, WebCore::FloatSize sizeForResizing, std::optional<double> idealDisplayScale)
+std::expected<Ref<WebCore::Icon>, RefPtr<API::Error>> WebExtension::iconForPath(const String& imagePath, WebCore::FloatSize sizeForResizing, std::optional<double> idealDisplayScale)
 {
     ASSERT(!imagePath.isEmpty());
 
@@ -355,6 +356,16 @@ Expected<Ref<WebCore::Icon>, RefPtr<API::Error>> WebExtension::iconForPath(const
         result = [UIImage _imageWithCGSVGDocument:document scale:displayScale orientation:UIImageOrientationUp];
 #endif
     }
+
+#if USE(APPKIT)
+    if (WebCore::MIMETypeRegistry::isPDFMIMEType(imageType)) {
+        RetainPtr<NSImageRep> pdfImageRep = adoptNS([[NSPDFImageRep alloc] initWithData:imageData]);
+        if (pdfImageRep && !NSEqualSizes([pdfImageRep size], NSZeroSize)) {
+            result = [[NSImage alloc] initWithSize:[pdfImageRep size]];
+            [result addRepresentation:pdfImageRep.get()];
+        }
+    }
+#endif
 
     if (!result) {
 #if USE(APPKIT)

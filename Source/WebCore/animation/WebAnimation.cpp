@@ -1261,8 +1261,12 @@ ExceptionOr<void> WebAnimation::play(AutoRewind autoRewind)
     }
 
     // 8. If animation’s hold time is resolved, let its start time be unresolved.
-    if (m_holdTime)
+    if (m_holdTime) {
         m_startTime = std::nullopt;
+        // We also reset the pending start time since a previous call to pause() would
+        // have recorded one which is now stale.
+        m_pendingStartTime = std::nullopt;
+    }
 
     // 9. If animation has a pending play task or a pending pause task,
     //     - Cancel that task.
@@ -2045,34 +2049,24 @@ std::optional<double> WebAnimation::overallProgress() const
     return std::min(std::max(*currentTime / endTime, 0.0), 1.0);
 }
 
-void WebAnimation::setBindingsRangeStart(TimelineRangeValue&& rangeStartValue)
+ExceptionOr<void> WebAnimation::setBindingsRangeStart(Document& document, TimelineRangeValue&& range)
 {
-    RefPtr keyframeEffect = this->keyframeEffect();
-    if (!keyframeEffect)
-        return;
+    auto validatedRange = validateTimelineRangeStart(WTF::move(range), document);
+    if (!validatedRange)
+        return Exception { ExceptionCode::TypeError };
 
-    auto rangeStart = convertToCSSValue(WTF::move(rangeStartValue), keyframeEffect->target(), Style::SingleAnimationRangeType::Start);
-    if (m_specifiedRangeStart == rangeStart)
-        return;
-
-    m_specifiedRangeStart = WTF::move(rangeStart);
-    if (auto* effect = this->effect())
-        effect->animationRangeDidChange();
+    setRangeStart(WTF::move(*validatedRange), Style::ZoomFactor::none());
+    return { };
 }
 
-void WebAnimation::setBindingsRangeEnd(TimelineRangeValue&& rangeEndValue)
+ExceptionOr<void> WebAnimation::setBindingsRangeEnd(Document& document, TimelineRangeValue&& range)
 {
-    RefPtr keyframeEffect = this->keyframeEffect();
-    if (!keyframeEffect)
-        return;
+    auto validatedRange = validateTimelineRangeEnd(WTF::move(range), document);
+    if (!validatedRange)
+        return Exception { ExceptionCode::TypeError };
 
-    auto rangeEnd = convertToCSSValue(WTF::move(rangeEndValue), keyframeEffect->target(), Style::SingleAnimationRangeType::End);
-    if (m_specifiedRangeEnd == rangeEnd)
-        return;
-
-    m_specifiedRangeEnd = WTF::move(rangeEnd);
-    if (auto* effect = this->effect())
-        effect->animationRangeDidChange();
+    setRangeEnd(WTF::move(*validatedRange), Style::ZoomFactor::none());
+    return { };
 }
 
 void WebAnimation::setRangeStart(Style::SingleAnimationRangeStart&& start, Style::ZoomFactor startZoom)
@@ -2097,32 +2091,6 @@ void WebAnimation::setRangeEnd(Style::SingleAnimationRangeEnd&& end, Style::Zoom
 
     if (auto* effect = this->effect())
         effect->animationRangeDidChange();
-}
-
-const ResolvableTimelineRange& WebAnimation::range()
-{
-    if (m_specifiedRangeStart || m_specifiedRangeEnd) {
-        if (RefPtr keyframeEffect = this->keyframeEffect()) {
-            auto conversionData = CSSToLengthConversionData::tryCreateForNonStyleBuildingResolution(keyframeEffect->target());
-
-            auto computedEdge = [&]<typename To>(const CSSValue& specifiedEdge, To&& defaultValue) {
-                if (!conversionData)
-                    return Style::deprecatedToStyleFromCSSValue<To>(specifiedEdge).value_or(defaultValue);
-                return Style::toStyleFromCSSValue<To>(*conversionData, specifiedEdge);
-            };
-
-            if (m_specifiedRangeStart) {
-                m_timelineRange.start = computedEdge(protect(*m_specifiedRangeStart), Style::SingleAnimationRangeStart { CSS::Keyword::Normal { } });
-                m_timelineRange.startZoom = Style::ZoomFactor::none();
-            }
-            if (m_specifiedRangeEnd) {
-                m_timelineRange.end = computedEdge(protect(*m_specifiedRangeEnd), Style::SingleAnimationRangeEnd { CSS::Keyword::Normal { } });
-                m_timelineRange.endZoom = Style::ZoomFactor::none();
-            }
-        }
-    }
-
-    return m_timelineRange;
 }
 
 void WebAnimation::progressBasedTimelineSourceDidChangeMetrics()

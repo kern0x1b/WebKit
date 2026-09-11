@@ -35,6 +35,9 @@
 #include "WebEvent.h"
 #include "WebHitTestResultData.h"
 #include "WebImage.h"
+#if ENABLE(WK_WEB_EXTENSIONS)
+#include "WebKitWebExtensionContext.h"
+#endif
 #include "WebKitWebView.h"
 #include "WebPageProxy.h"
 #include <WebCore/CompositionUnderline.h>
@@ -104,9 +107,7 @@ void webkitWebViewDidChangePageScale(WebKitWebView*);
 WebKitWebsiteDataManager* webkitWebViewGetWebsiteDataManager(WebKitWebView*);
 void webkitWebViewPermissionStateQuery(WebKitWebView*, WebKitPermissionStateQuery*);
 
-#if PLATFORM(GTK)
 bool webkitWebViewEmitRunColorChooser(WebKitWebView*, WebKitColorChooserRequest*);
-#endif
 
 void webkitWebViewEmitThemeColorChanged(WebKitWebView*);
 
@@ -130,6 +131,7 @@ void webkitWebViewCancelComposition(WebKitWebView*, const String&);
 void webkitWebViewDeleteSurrounding(WebKitWebView*, int offset, unsigned characterCount);
 void webkitWebViewSetIsWebProcessResponsive(WebKitWebView*, bool);
 
+guint createRunColorChooserSignal(WebKitWebViewClass*);
 guint createShowOptionMenuSignal(WebKitWebViewClass*);
 guint createContextMenuSignal(WebKitWebViewClass*);
 
@@ -139,4 +141,10 @@ WebKit::RendererBufferDescription webkitWebViewGetRendererBufferDescription(WebK
 
 #if ENABLE(WEBXR) && USE(OPENXR)
 void webkitWebViewSetIsImmersiveModeEnabled(WebKitWebView*, bool);
+#endif
+
+void webkitWebViewLoadServiceWorker(WebKitWebView*, const gchar* url, bool usingModules, CompletionHandler<void(bool success)>&&);
+
+#if ENABLE(WK_WEB_EXTENSIONS)
+WebKitWebExtensionContext *webkitWebViewGetWebExtensionContext(WebKitWebView*);
 #endif

@@ -232,6 +232,7 @@ private:
     void serializeVariable(AST::Variable&);
     void generatePackingHelpers(AST::Structure&);
     bool emitPackedVector(const Types::Vector&, bool shouldPack);
+    bool NODELETE shouldForceInlining(AST::Function&) const;
 
     bool outlineConstant(const Type*, AST::Expression&);
     void serializeConstant(const Type*, ConstantValue);
@@ -796,6 +797,27 @@ void FunctionDefinitionWriter::emitNecessaryHelpers()
     m_shaderModule.clearUsesPackedVec3();
 }
 
+bool FunctionDefinitionWriter::shouldForceInlining(AST::Function& functionDefinition) const
+{
+    if (metalAppleGPUFamily() < 9 || m_entryPointStage)
+        return false;
+
+    auto* returnType = functionDefinition.maybeReturnType();
+    if (!returnType)
+        return false;
+
+    auto* type = returnType->inferredType();
+    if (!type)
+        return false;
+
+    if (!std::holds_alternative<Types::Struct>(*type) && !std::holds_alternative<Types::Array>(*type))
+        return false;
+
+    constexpr unsigned minimumInlinedReturnSize = 128;
+    auto size = type->maybeSize();
+    return size && *size >= minimumInlinedReturnSize;
+}
+
 void FunctionDefinitionWriter::visit(AST::Function& functionDefinition)
 {
     if (!m_visitedFunctions.add(&functionDefinition).isNewEntry)
@@ -808,6 +830,9 @@ void FunctionDefinitionWriter::visit(AST::Function& functionDefinition)
         checkErrorAndVisit(attribute);
         m_body.append(' ');
     }
+
+    if (shouldForceInlining(functionDefinition))
+        m_body.append("__attribute__((always_inline)) "_s);
 
     if (functionDefinition.maybeReturnType())
         visit(functionDefinition.maybeReturnType()->inferredType());
@@ -1683,7 +1708,7 @@ static void emitTextureDimensions(FunctionDefinitionWriter* writer, AST::CallExp
         if (vector && call.arguments().size() > 1) {
             writer->stringBuilder().append("min("_s);
             writer->visit(call.arguments()[0]);
-            writer->stringBuilder().append(".get_num_mip_levels(), uint("_s);
+            writer->stringBuilder().append(".get_num_mip_levels() - 1, uint("_s);
             writer->visit(call.arguments()[1]);
             writer->stringBuilder().append(')');
             writer->stringBuilder().append(')');
@@ -2363,9 +2388,9 @@ void FunctionDefinitionWriter::visit(const Type* type, AST::CallExpression& call
         }
     }
 
-    auto isArray = is<AST::ArrayTypeExpression>(call.target());
-    auto isStruct = !isArray && std::holds_alternative<Types::Struct>(*call.target().inferredType());
-    if (call.isConstructor() && (isArray || isStruct)) {
+    auto isArray = call.isConstructor() && std::holds_alternative<Types::Array>(*type);
+    auto isStruct = call.isConstructor() && !isArray && std::holds_alternative<Types::Struct>(*call.target().inferredType());
+    if (isArray || isStruct) {
         visit(type);
         m_body.append('(');
         const Type* arrayElementType = nullptr;
@@ -3059,11 +3084,19 @@ void FunctionDefinitionWriter::visit(AST::SwitchStatement& statement)
         }
         if (isDefault)
             m_body.append('\n', m_indent, "default:"_s);
-        m_body.append("\n{ " DECLARE_FORWARD_PROGRESS "\n"_s);
+        // rdar://154262212: the forward-progress workaround is only needed when
+        // shader validation is enabled; emit it selectively based on DeviceState.
+        if (shaderValidationEnabled())
+            m_body.append("\n{ " DECLARE_FORWARD_PROGRESS "\n"_s);
+        else
+            m_body.append(' ');
         visit(clause.body);
 
         IndentationScope scope(m_indent);
-        m_body.append('\n', m_indent, "\n}\nbreak;"_s);
+        if (shaderValidationEnabled())
+            m_body.append('\n', m_indent, "\n}\nbreak;"_s);
+        else
+            m_body.append('\n', m_indent, "break;"_s);
     };
 
     m_body.append("switch ("_s);

@@ -47,7 +47,7 @@ void Font::platformCharWidthInit()
     initCharWidths();
 }
 
-void Font::platformInit()
+void FontBase::platformInit()
 {
     m_syntheticBoldOffset = m_platformData.syntheticBold() ? 1.0f : 0.f;
 
@@ -128,7 +128,7 @@ RefPtr<Font> Font::platformCreateScaledFont(const FontDescription&, float scaleF
     GetObject(m_platformData.hfont(), sizeof(LOGFONT), &winfont);
     winfont.lfHeight = -lroundf(scaledSize * cWindowsFontScaleFactor);
     auto hfont = adoptGDIObject(::CreateFontIndirect(&winfont));
-    return Font::create(FontPlatformData(WTF::move(hfont), scaledSize, m_platformData.syntheticBold(), m_platformData.syntheticOblique(), m_platformData.customPlatformData()), origin());
+    return Font::create(FontPlatformData(WTF::move(hfont), scaledSize, m_platformData.syntheticBold(), m_platformData.syntheticOblique(), m_platformData.metricsOverrides(), m_platformData.customPlatformData()), origin());
 }
 
 RefPtr<Font> Font::platformCreateHalfWidthFont() const

@@ -115,7 +115,7 @@ public:
 #else
     void removeAllUserStyleSheets();
 #endif
-    WebCoreUserStyleSheetData dataFromUserStyleSheet(const WebCore::UserStyleSheet&) const;
+    WebCoreUserStyleSheetData dataFromUserStyleSheet(const API::UserStyleSheet&, WebProcessProxy&) const;
 
     void addJSBuffer(Ref<WebCore::SharedMemory>&&, API::ContentWorld&, const String&);
     void removeJSBuffer(API::ContentWorld&, const String&);
@@ -144,7 +144,7 @@ public:
 
     bool operator==(const WebUserContentControllerProxy& other) const { return (this == &other); }
 
-    void didPostMessage(WebPageProxy&, FrameInfoData&&, ScriptMessageHandlerIdentifier, JavaScriptEvaluationResult&&, CompletionHandler<void(Expected<JavaScriptEvaluationResult, String>&&)>&&) const;
+    void didPostMessage(WebPageProxy&, FrameInfoData&&, ScriptMessageHandlerIdentifier, JavaScriptEvaluationResult&&, CompletionHandler<void(std::expected<JavaScriptEvaluationResult, String>&&)>&&) const;
 
 private:
     mutable WeakHashSet<WebProcessProxy> m_processes;

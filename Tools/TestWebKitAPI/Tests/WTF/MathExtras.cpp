@@ -386,9 +386,9 @@ TEST(WTF, clampSameSignIntegers)
 {
     testClampSameSignIntegers<char, char>();
     testClampSameSignIntegers<unsigned char, unsigned char>();
-    testClampSameSignIntegers<char, int32_t>();
+    testClampSameSignIntegers<signed char, int32_t>();
     testClampSameSignIntegers<unsigned char, uint32_t>();
-    testClampSameSignIntegers<char, int64_t>();
+    testClampSameSignIntegers<signed char, int64_t>();
     testClampSameSignIntegers<unsigned char, uint64_t>();
 
     testClampSameSignIntegers<int32_t, int32_t>();
@@ -414,8 +414,8 @@ static void testClampUnsignedToSigned()
 
 TEST(WTF, clampUnsignedToSigned)
 {
-    testClampUnsignedToSigned<char, unsigned char>();
-    testClampUnsignedToSigned<char, uint32_t>();
+    testClampUnsignedToSigned<signed char, unsigned char>();
+    testClampUnsignedToSigned<signed char, uint32_t>();
     testClampUnsignedToSigned<int32_t, uint32_t>();
     testClampUnsignedToSigned<int64_t, uint64_t>();
     testClampUnsignedToSigned<int32_t, uint64_t>();
@@ -446,7 +446,7 @@ static void testClampSignedToUnsigned()
 
 TEST(WTF, clampSignedToUnsigned)
 {
-    testClampSignedToUnsigned<unsigned char, char>();
+    testClampSignedToUnsigned<unsigned char, signed char>();
     testClampSignedToUnsigned<unsigned char, int32_t>();
     testClampSignedToUnsigned<uint32_t, int32_t>();
     testClampSignedToUnsigned<uint64_t, int64_t>();
@@ -679,6 +679,88 @@ TEST(WTF, negate)
     EXPECT_EQ(WTF::negate<long long>(0LL), 0LL);
 }
 
+template<typename T>
+static void testHasZeroByte()
+{
+    constexpr size_t byteCount = sizeof(T);
+
+    // No zero byte anywhere.
+    EXPECT_FALSE(hasZeroByte<T>(static_cast<T>(~static_cast<T>(0))));
+
+    // A zero byte at every position, rest set to a clean nonzero byte (0x78).
+    auto wordWithByteAt = [](size_t position, uint8_t byteValue) {
+        T word = 0;
+        for (size_t i = 0; i < byteCount; ++i)
+            word |= static_cast<T>(i == position ? byteValue : 0x78) << (i * 8);
+        return word;
+    };
+    for (size_t position = 0; position < byteCount; ++position)
+        EXPECT_TRUE(hasZeroByte<T>(wordWithByteAt(position, 0x00)));
+
+    // Exhaustive: every byte value at every position must match a plain per-byte reference
+    // check, including values right at the 0x00/0x80/0xFF boundaries where the underlying
+    // subtract-and-mask trick is easiest to get wrong.
+    for (size_t position = 0; position < byteCount; ++position) {
+        for (unsigned byteValue = 0; byteValue <= 0xFF; ++byteValue) {
+            bool expected = !byteValue;
+            EXPECT_EQ(hasZeroByte<T>(wordWithByteAt(position, static_cast<uint8_t>(byteValue))), expected);
+        }
+    }
+
+    // Two zero bytes simultaneously, at every pair of positions, must not miscount or cancel out.
+    if (byteCount >= 2) {
+        for (size_t p1 = 0; p1 < byteCount; ++p1) {
+            for (size_t p2 = 0; p2 < byteCount; ++p2) {
+                if (p1 == p2)
+                    continue;
+                T word = wordWithByteAt(p1, 0x00);
+                word &= ~(static_cast<T>(0xFF) << (p2 * 8));
+                EXPECT_TRUE(hasZeroByte<T>(word));
+            }
+        }
+    }
+}
+
+TEST(WTF, hasZeroByte)
+{
+    testHasZeroByte<uint8_t>();
+    testHasZeroByte<uint16_t>();
+    testHasZeroByte<uint32_t>();
+    testHasZeroByte<uint64_t>();
+}
+
+TEST(WTF, zeroExtendBytesToHalfwords)
+{
+    auto referenceWiden = [](uint32_t value) -> uint64_t {
+        uint64_t result = 0;
+        for (unsigned i = 0; i < 4; ++i) {
+            uint8_t byte = static_cast<uint8_t>(value >> (i * 8));
+            result |= static_cast<uint64_t>(byte) << (i * 16);
+        }
+        return result;
+    };
+
+    EXPECT_EQ(zeroExtendBytesToHalfwords(0), 0ULL);
+    EXPECT_EQ(zeroExtendBytesToHalfwords(0xFFFFFFFFU), 0x00FF00FF00FF00FFULL);
+    EXPECT_EQ(zeroExtendBytesToHalfwords(0xDDCCBBAAU), 0x00DD00CC00BB00AAULL);
+
+    // Exhaustive per byte value at every position, with the other three bytes held to a
+    // clean nonzero pattern, matching testHasZeroByte's style above.
+    for (size_t position = 0; position < 4; ++position) {
+        for (unsigned byteValue = 0; byteValue <= 0xFF; ++byteValue) {
+            uint32_t word = 0;
+            for (size_t i = 0; i < 4; ++i)
+                word |= (i == position ? byteValue : 0x78) << (i * 8);
+            EXPECT_EQ(zeroExtendBytesToHalfwords(word), referenceWiden(word));
+        }
+    }
+
+    // A handful of full-width sampled values, cross-checked against the same reference.
+    static constexpr uint32_t samples[] = { 0x00000000, 0xFFFFFFFF, 0x01020304, 0x80808080, 0x7F7F7F7F, 0xA5A5A5A5, 0x12345678, 0xFF00FF00, 0x00FF00FF };
+    for (uint32_t sample : samples)
+        EXPECT_EQ(zeroExtendBytesToHalfwords(sample), referenceWiden(sample));
+}
+
 TEST(WTF, divideRoundedUp)
 {
     // Basic rounding behavior.
@@ -702,6 +784,47 @@ TEST(WTF, divideRoundedUp)
     EXPECT_EQ(divideRoundedUp<uint8_t>(std::numeric_limits<uint8_t>::max(), std::numeric_limits<uint8_t>::max()), 1U);
     EXPECT_EQ(divideRoundedUp<size_t>(std::numeric_limits<size_t>::max(), std::numeric_limits<size_t>::max()), 1U);
     EXPECT_EQ(divideRoundedUp<size_t>(std::numeric_limits<size_t>::max() - 1, std::numeric_limits<size_t>::max()), 1U);
+}
+
+static bool isNegativeZero(float value)
+{
+    return !value && std::signbit(value);
+}
+
+static bool isNegativeZero(double value)
+{
+    return !value && std::signbit(value);
+}
+
+TEST(WTF, roundeven)
+{
+    EXPECT_EQ(roundevenf(0.5f), 0.0f);
+    EXPECT_EQ(roundevenf(1.5f), 2.0f);
+    EXPECT_EQ(roundevenf(2.5f), 2.0f);
+    EXPECT_EQ(roundevenf(3.5f), 4.0f);
+    EXPECT_EQ(roundevenf(-1.5f), -2.0f);
+    EXPECT_EQ(roundevenf(-2.5f), -2.0f);
+    EXPECT_EQ(roundevenf(-3.5f), -4.0f);
+
+    EXPECT_EQ(roundeven(0.5), 0.0);
+    EXPECT_EQ(roundeven(1.5), 2.0);
+    EXPECT_EQ(roundeven(2.5), 2.0);
+    EXPECT_EQ(roundeven(3.5), 4.0);
+    EXPECT_EQ(roundeven(-1.5), -2.0);
+    EXPECT_EQ(roundeven(-2.5), -2.0);
+    EXPECT_EQ(roundeven(-3.5), -4.0);
+
+    // A tie that rounds to zero keeps the sign of the operand. wasm's f32.nearest and
+    // f64.nearest are specified this way and the hardware instructions agree, so the
+    // polyfill used when __builtin_roundeven is unavailable must too.
+    EXPECT_TRUE(isNegativeZero(roundevenf(-0.5f)));
+    EXPECT_TRUE(isNegativeZero(roundeven(-0.5)));
+    EXPECT_TRUE(isNegativeZero(roundevenf(-0.0f)));
+    EXPECT_TRUE(isNegativeZero(roundeven(-0.0)));
+    EXPECT_TRUE(isNegativeZero(roundevenf(-0.25f)));
+    EXPECT_TRUE(isNegativeZero(roundeven(-0.25)));
+    EXPECT_FALSE(isNegativeZero(roundevenf(0.5f)));
+    EXPECT_FALSE(isNegativeZero(roundeven(0.5)));
 }
 
 } // namespace TestWebKitAPI

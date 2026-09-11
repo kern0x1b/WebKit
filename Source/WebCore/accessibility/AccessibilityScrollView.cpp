@@ -303,6 +303,9 @@ AccessibilityRole AccessibilityScrollView::determineAccessibilityRole()
 
 bool AccessibilityScrollView::computeIsIgnored() const
 {
+    if (m_remoteFrame)
+        return false;
+
 #if ENABLE(ACCESSIBILITY_LOCAL_FRAME)
     WeakPtr cache = axObjectCache();
     if (!cache)
@@ -312,10 +315,6 @@ bool AccessibilityScrollView::computeIsIgnored() const
     if (!isRoot())
         return true;
 #endif
-
-    // Scroll view's that host remote frames won't have web area objects, but shouldn't be ignored so that they are also available in the isolated tree.
-    if (m_remoteFrame)
-        return false;
 
     RefPtr webArea = webAreaObject();
     if (!webArea)
@@ -401,7 +400,7 @@ void AccessibilityScrollView::addRemoteFrameChild()
             RefPtr parentAXScrollView = frameRootScrollView();
             if (RefPtr parentScrollView = parentAXScrollView ? parentAXScrollView->scrollView() : nullptr)
                 iframePosition = parentScrollView->contentsToView(iframePosition);
-            scrollFrame->updateRemoteFrameAccessibilityOffset(iframePosition);
+            scrollFrame->updateRemoteFrameOffsetInMainFrame(iframePosition);
 
 #if ENABLE(ACCESSIBILITY_LOCAL_FRAME)
             InheritedFrameState state { isHostingFrameHidden(), isHostingFrameInert(), isHostingFrameRenderHidden() };
@@ -447,7 +446,7 @@ void AccessibilityScrollView::addChildren()
 AccessibilityObject* AccessibilityScrollView::webAreaObject() const
 {
     RefPtr document = this->document();
-    if (!document || !document->hasLivingRenderTree() || m_remoteFrame)
+    if (!document || document->renderTreeState() != Document::RenderTreeState::Built || m_remoteFrame)
         return nullptr;
 
     if (CheckedPtr cache = axObjectCache())
@@ -649,7 +648,7 @@ bool AccessibilityScrollView::isHostingFrameInert() const
 
     RefPtr frameOwner = frameOwnerElement();
     if (auto* renderer = frameOwner ? frameOwner->renderer() : nullptr)
-        return Style::effectiveInert(renderer->style());
+        return renderer->style().effectiveInertOutOfLine();
 
     return false;
 }

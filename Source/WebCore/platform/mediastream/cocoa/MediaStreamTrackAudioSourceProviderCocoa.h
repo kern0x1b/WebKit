@@ -32,6 +32,7 @@
 #include "RealtimeMediaSource.h"
 #include "WebAudioSourceProvider.h"
 #include <CoreAudio/CoreAudioTypes.h>
+#include <atomic>
 #include <wtf/CheckedRef.h>
 #include <wtf/MediaTime.h>
 #include <wtf/TZoneMalloc.h>
@@ -85,7 +86,7 @@ private:
 #endif
 
     // MediaStreamTrackPrivateObserver
-    void trackEnded(MediaStreamTrackPrivate&) final { }
+    void trackEnded(MediaStreamTrackPrivate&) final;
     void trackMutedChanged(MediaStreamTrackPrivate&) final { }
     void trackSettingsChanged(MediaStreamTrackPrivate&) final { }
     void trackEnabledChanged(MediaStreamTrackPrivate&) final;
@@ -97,16 +98,18 @@ private:
     WeakPtr<AudioSourceProviderClient> m_client;
 
     std::optional<CAAudioStreamDescription> m_inputDescription;
-    std::optional<CAAudioStreamDescription> m_outputDescription;
-    std::unique_ptr<WebAudioBufferList> m_audioBufferList;
+    std::optional<CAAudioStreamDescription> m_outputDescription WTF_GUARDED_BY_LOCK(m_lock);
+    std::unique_ptr<WebAudioBufferList> m_audioBufferList WTF_GUARDED_BY_LOCK(m_lock);
     RefPtr<AudioSampleDataSource> m_dataSource;
 
     size_t m_pollSamplesCount { 3 };
-    uint64_t m_writeCount { 0 };
-    uint64_t m_readCount { 0 };
+    // Written by the capture thread without the lock and read by the rendering thread under it.
+    std::atomic<uint64_t> m_writeCount { 0 };
+    uint64_t m_readCount WTF_GUARDED_BY_LOCK(m_lock) { 0 };
     WeakPtr<MediaStreamTrackPrivate> m_captureSource;
     const Ref<RealtimeMediaSource> m_source;
     bool m_enabled { true };
+    bool m_ended { false };
     bool m_connected { false };
 };
 

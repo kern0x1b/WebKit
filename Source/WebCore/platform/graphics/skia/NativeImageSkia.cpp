@@ -29,8 +29,11 @@
 #if USE(SKIA)
 #include "GLContext.h"
 #include "GraphicsContextSkia.h"
+#include "PixelBuffer.h"
 #include "PlatformDisplay.h"
 WTF_IGNORE_WARNINGS_IN_THIRD_PARTY_CODE_BEGIN // GLib/Win ports
+#include <skia/core/SkColorSpace.h>
+#include <skia/core/SkImage.h>
 #include <skia/core/SkPixmap.h>
 WTF_IGNORE_WARNINGS_IN_THIRD_PARTY_CODE_END
 
@@ -53,6 +56,65 @@ RefPtr<NativeImage> NativeImage::createTransient(PlatformImagePtr&& platformImag
     return create(WTF::move(platformImage), grContext);
 }
 
+RefPtr<NativeImage> NativeImage::create(Ref<PixelBuffer>&& pixelBuffer)
+{
+    if (pixelBuffer->size().isEmpty())
+        return nullptr;
+    auto format = pixelBuffer->format();
+    SkColorType colorType = kRGBA_8888_SkColorType;
+    switch (format.pixelFormat) {
+    case PixelFormat::RGBX8:
+        colorType = kRGB_888x_SkColorType;
+        break;
+    case PixelFormat::RGBA8:
+        colorType = kRGBA_8888_SkColorType;
+        break;
+    case PixelFormat::BGRX8:
+        // Skia has no BGR color type with an ignored fourth component, so the contents are
+        // described as BGRA and the alpha component is required to be 255, see below.
+        colorType = kBGRA_8888_SkColorType;
+        break;
+    case PixelFormat::BGRA8:
+        colorType = kBGRA_8888_SkColorType;
+        break;
+#if ENABLE(PIXEL_FORMAT_RGBA16F)
+    case PixelFormat::RGBA16F:
+        colorType = kRGBA_F16_SkColorType;
+        break;
+#endif
+#if ENABLE(PIXEL_FORMAT_RGB10)
+    case PixelFormat::RGB10:
+        ASSERT(!PixelBuffer::supportedPixelFormat(format.pixelFormat));
+        return nullptr;
+#endif
+#if ENABLE(PIXEL_FORMAT_RGB10A8)
+    case PixelFormat::RGB10A8:
+        ASSERT(!PixelBuffer::supportedPixelFormat(format.pixelFormat));
+        return nullptr;
+#endif
+    }
+    auto imageSize = pixelBuffer->size();
+    // kRGB_888x_SkColorType ignores the fourth component, but kBGRA_8888_SkColorType does not, so
+    // BGRX8 contents are required to have 255 in the component that holds no meaningful value.
+    SkAlphaType alphaType = kUnpremul_SkAlphaType;
+    if (pixelFormatIsOpaque(format.pixelFormat))
+        alphaType = kOpaque_SkAlphaType;
+    else if (format.alphaFormat == AlphaPremultiplication::Premultiplied)
+        alphaType = kPremul_SkAlphaType;
+    auto imageInfo = SkImageInfo::Make(imageSize.width(), imageSize.height(), colorType, alphaType, format.colorSpace.platformColorSpace());
+
+    SkPixmap pixmap(imageInfo, pixelBuffer->bytes().data(), imageInfo.minRowBytes());
+    // On success, the image owns the pixel buffer reference.
+    auto* pixelBufferContext = pixelBuffer.ptr();
+    auto image = SkImages::RasterFromPixmap(pixmap, [](const void*, void* context) {
+        static_cast<PixelBuffer*>(context)->deref();
+    }, pixelBufferContext);
+    if (!image)
+        return nullptr;
+    SUPPRESS_RETAINPTR_CTOR_ADOPT (void) pixelBuffer.leakRef(); // NOLINT
+    return create(WTF::move(image));
+}
+
 NativeImage::NativeImage(PlatformImagePtr&& platformImage, std::optional<GainMap>&& gainMap, GrDirectContext* grContext)
     : m_platformImage(WTF::move(platformImage))
     , m_gainMap(WTF::move(gainMap))
@@ -64,11 +126,13 @@ NativeImage::NativeImage(PlatformImagePtr&& platformImage, std::optional<GainMap
 
 IntSize NativeImage::size() const
 {
-    return m_platformImage ? IntSize(m_platformImage->width(), m_platformImage->height()) : IntSize();
+    Locker locker { m_lock };
+    return IntSize(m_platformImage->width(), m_platformImage->height());
 }
 
 bool NativeImage::hasAlpha() const
 {
+    Locker locker { m_lock };
     switch (m_platformImage->imageInfo().alphaType()) {
     case kUnknown_SkAlphaType:
     case kOpaque_SkAlphaType:
@@ -80,12 +144,13 @@ bool NativeImage::hasAlpha() const
     return false;
 }
 
-DestinationColorSpace NativeImage::colorSpace() const
+ColorSpace NativeImage::colorSpace() const
 {
-    if (auto colorSpace = platformImage()->refColorSpace())
-        return DestinationColorSpace(colorSpace);
+    Locker locker { m_lock };
+    if (auto colorSpace = m_platformImage->refColorSpace())
+        return ColorSpace(colorSpace);
     // No color space means the default - SRGB.
-    return DestinationColorSpace::SRGB();
+    return ColorSpace::SRGB();
 }
 
 std::optional<Color> NativeImage::singlePixelSolidColor() const
@@ -121,9 +186,7 @@ void NativeImage::clearSubimages()
 
 uint64_t NativeImage::uniqueID() const
 {
-    if (auto& image = platformImage())
-        return image->uniqueID();
-    return 0;
+    return platformImage()->uniqueID();
 }
 
 } // namespace WebCore

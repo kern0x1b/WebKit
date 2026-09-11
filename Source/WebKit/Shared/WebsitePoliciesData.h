@@ -48,6 +48,7 @@
 
 namespace WebCore {
 class DocumentLoader;
+class Settings;
 }
 
 namespace WebKit {
@@ -56,6 +57,7 @@ struct WebsitePoliciesData {
     WTF_MAKE_TZONE_ALLOCATED(WebsitePoliciesData);
 public:
     static void applyToDocumentLoader(WebsitePoliciesData&&, WebCore::DocumentLoader&);
+    static void applyToSettings(const WebsitePoliciesData&, WebCore::Settings&);
 
     HashMap<String, Vector<String>> activeContentRuleListActionPatterns;
     Vector<WebCore::CustomHeaderFields> customHeaderFields;
@@ -70,6 +72,11 @@ public:
 #if ENABLE(TOUCH_EVENTS)
     std::optional<bool> overrideTouchEventDOMAttributesEnabled;
 #endif
+#if ENABLE(IOS_TOUCH_EVENTS)
+    std::optional<bool> overrideShouldReportZeroMaxTouchPoints;
+#endif
+    std::optional<bool> overrideShouldReportViewportSizeAsScreenSize;
+    std::optional<bool> overrideShouldReportDesktopClassPointingDevice;
     std::optional<bool> globalPrivacyControlEnabled;
     WebsiteAutoplayPolicy autoplayPolicy { WebsiteAutoplayPolicy::Default };
     WebsitePopUpPolicy popUpPolicy { WebsitePopUpPolicy::Default };

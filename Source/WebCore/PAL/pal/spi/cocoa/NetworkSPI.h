@@ -102,11 +102,6 @@ void nw_parameters_set_traffic_class(nw_parameters_t, uint32_t traffic_class);
 
 OS_OBJECT_RETURNS_RETAINED nw_interface_t nw_path_copy_interface(nw_path_t);
 
-bool nw_settings_get_unified_http_enabled(void);
-#if HAVE(NWSETTINGS_UNIFIED_HTTP_WEBKIT)
-bool nw_settings_get_unified_http_enabled_webkit(void);
-#endif
-
 void nw_parameters_set_server_mode(nw_parameters_t, bool);
 OS_OBJECT_RETURNS_RETAINED nw_parameters_t nw_parameters_create_webtransport_http(nw_parameters_configure_protocol_block_t, nw_parameters_configure_protocol_block_t, nw_parameters_configure_protocol_block_t, nw_parameters_configure_protocol_block_t);
 OS_OBJECT_RETURNS_RETAINED nw_protocol_definition_t nw_protocol_copy_webtransport_definition(void);
@@ -133,6 +128,8 @@ OS_OBJECT_RETURNS_RETAINED nw_http_response_t nw_webtransport_metadata_copy_conn
 nw_webtransport_transport_mode_t nw_webtransport_metadata_get_transport_mode(nw_protocol_metadata_t);
 void nw_webtransport_metadata_set_remote_receive_error_handler(nw_protocol_metadata_t, nw_webtransport_receive_error_handler_t, dispatch_queue_t);
 void nw_webtransport_metadata_set_remote_send_error_handler(nw_protocol_metadata_t, nw_webtransport_send_error_handler_t, dispatch_queue_t);
+OS_OBJECT_RETURNS_RETAINED nw_protocol_definition_t nw_protocol_copy_quic_connection_definition();
+OS_OBJECT_RETURNS_RETAINED sec_protocol_metadata_t nw_quic_connection_copy_sec_protocol_metadata(nw_protocol_metadata_t);
 
 void nw_connection_abort_reads(nw_connection_t, uint64_t);
 void nw_connection_abort_writes(nw_connection_t, uint64_t);
@@ -147,6 +144,9 @@ void nw_connection_abort_writes(nw_connection_t, uint64_t);
 
 
 void nw_http_fields_access_value_by_name(nw_http_fields_t, const char*, NW_NOESCAPE nw_http_optional_string_accessor_t);
+
+typedef bool (^nw_http_fields_enumerate_block_t)(const char* name, size_t nameLength, const char* value, size_t valueLength);
+bool nw_http_fields_enumerate(nw_http_fields_t, NW_NOESCAPE nw_http_fields_enumerate_block_t);
 
 WTF_EXTERN_C_END
 

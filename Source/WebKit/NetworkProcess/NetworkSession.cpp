@@ -32,6 +32,7 @@
 #include "LoadedWebArchive.h"
 #include "Logging.h"
 #include "NetworkBroadcastChannelRegistry.h"
+#include "NetworkDataTask.h"
 #include "NetworkLoadScheduler.h"
 #include "NetworkProcess.h"
 #include "NetworkProcessProxyMessages.h"
@@ -40,7 +41,6 @@
 #include "NetworkSessionCreationParameters.h"
 #include "NetworkStorageManager.h"
 #include "NotificationManagerMessageHandlerMessages.h"
-#include "PingLoad.h"
 #include "PrivateClickMeasurementClientImpl.h"
 #include "PrivateClickMeasurementManager.h"
 #include "PrivateClickMeasurementManagerProxy.h"
@@ -173,6 +173,7 @@ NetworkSession::NetworkSession(NetworkProcess& networkProcess, const NetworkSess
     , m_testSpeedMultiplier(parameters.testSpeedMultiplier)
     , m_allowsServerPreconnect(parameters.allowsServerPreconnect)
     , m_shouldRunServiceWorkersOnMainThreadForTesting(parameters.shouldRunServiceWorkersOnMainThreadForTesting)
+    , m_qualifiedServerTrustDebugEnabledForTesting(parameters.qualifiedServerTrustDebugEnabledForTesting)
     , m_overrideServiceWorkerRegistrationCountTestingValue(parameters.overrideServiceWorkerRegistrationCountTestingValue)
     , m_inspectionForServiceWorkersAllowed(parameters.inspectionForServiceWorkersAllowed)
     , m_sharedWorkerServer([](NetworkSession& session, auto& ref) {
@@ -612,7 +613,7 @@ void NetworkSession::setPrivateClickMeasurementAppBundleIDForTesting(String&& ap
 #if PLATFORM(COCOA)
     auto appBundleID = applicationBundleIdentifier();
     if (!isRunningTest(appBundleID))
-        WTFLogAlways("isRunningTest() returned false. appBundleID is %s.", appBundleID.isEmpty() ? "empty" : appBundleID.utf8().data());
+        WTFLogAlways("isRunningTest() returned false. appBundleID is %s.", appBundleID.isEmpty() ? "empty" : appBundleID.utf8().legacyCStringPointer());
     RELEASE_ASSERT(isRunningTest(applicationBundleIdentifier()));
 #endif
     m_privateClickMeasurement->setPrivateClickMeasurementAppBundleIDForTesting(WTF::move(appBundleIDForTesting));
@@ -785,12 +786,13 @@ void NetworkSession::requestBackgroundFetchPermission(const ClientOrigin& origin
 }
 
 #if ENABLE(INSPECTOR_NETWORK_THROTTLING)
-void NetworkSession::setEmulatedConditions(std::optional<int64_t>&& bytesPerSecondLimit)
+void NetworkSession::setEmulatedConditions(std::optional<uint64_t> bandwidthBytesPerSecond, Seconds latency)
 {
-    m_bytesPerSecondLimit = WTF::move(bytesPerSecondLimit);
+    m_emulatedBandwidthBytesPerSecond = bandwidthBytesPerSecond;
+    m_emulatedLatency = latency;
 
-    m_dataTaskSet.forEach([&] (auto& task) {
-        task.setEmulatedConditions(m_bytesPerSecondLimit);
+    m_dataTaskSet.forEach([](auto& task) {
+        task.notifyEmulatedConditionsChanged();
     });
 }
 #endif // ENABLE(INSPECTOR_NETWORK_THROTTLING)

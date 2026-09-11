@@ -38,6 +38,7 @@
 #import "DOMNodeInternal.h"
 #import "DOMRangeInternal.h"
 #import "LegacyHistoryItemClient.h"
+#import <WebCore/CookieStorageSession.h>
 #import "LegacySocketProvider.h"
 #import "LegacyWebPageDebuggable.h"
 #import "LegacyWebPageInspectorController.h"
@@ -205,7 +206,6 @@
 #import <WebCore/MemoryRelease.h>
 #import <WebCore/MutableStyleProperties.h>
 #import <WebCore/NativeImage.h>
-#import <WebCore/NetworkStorageSession.h>
 #import <WebCore/NodeDocument.h>
 #import <WebCore/NodeList.h>
 #import <WebCore/Notification.h>
@@ -5356,7 +5356,7 @@ IGNORE_WARNINGS_END
     WTF::RefCountDebuggerBase::enableThreadingChecksGlobally();
 
     WTF::setProcessPrivileges(allPrivileges());
-    WebCore::NetworkStorageSession::permitProcessToUseCookieAPI(true);
+    WebCore::CookieStorageSession::permitProcessToUseCookieAPI(true);
 
 #if !PLATFORM(IOS_FAMILY)
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(_applicationWillTerminate) name:NSApplicationWillTerminateNotification object:NSApp];
@@ -9712,7 +9712,7 @@ FORWARD(toggleUnderline)
 static NSTextAlignment NODELETE nsTextAlignmentFromRenderStyle(const WebCore::Style::ComputedStyle* style)
 {
     NSTextAlignment textAlignment;
-    switch (WebCore::Style::textAlign(*style)) {
+    switch (style->textAlignOutOfLine()) {
     case WebCore::Style::TextAlign::Right:
     case WebCore::Style::TextAlign::WebKitRight:
         textAlignment = NSTextAlignmentRight;
@@ -9825,15 +9825,15 @@ static NSTextAlignment NODELETE nsTextAlignmentFromRenderStyle(const WebCore::St
         if (!selection.isNone()) {
             RefPtr<Node> nodeToRemove;
             if (auto* style = coreFrame->editor().styleForSelectionStart(nodeToRemove)) {
-                [_private->_textTouchBarItemController setTextIsBold:WebCore::Style::fontWeight(*style).isConsideredBold()];
-                [_private->_textTouchBarItemController setTextIsItalic:WebCore::Style::fontStyle(*style).isConsideredItalic()];
+                [_private->_textTouchBarItemController setTextIsBold:style->fontWeightOutOfLine().isConsideredBold()];
+                [_private->_textTouchBarItemController setTextIsItalic:style->fontStyleOutOfLine().isConsideredItalic()];
 
                 RefPtr<EditingStyle> typingStyle = coreFrame->selection().typingStyle();
                 if (typingStyle && typingStyle->style()) {
                     String value = typingStyle->style()->getPropertyValue(CSSPropertyWebkitTextDecorationsInEffect);
                     [_private->_textTouchBarItemController setTextIsUnderlined:value.contains("underline"_s)];
                 } else
-                    [_private->_textTouchBarItemController setTextIsUnderlined:WebCore::Style::textDecorationLineInEffect(*style).hasUnderline()];
+                    [_private->_textTouchBarItemController setTextIsUnderlined:style->textDecorationLineInEffectOutOfLine().hasUnderline()];
 
                 auto textColor = style->visitedDependentColor();
                 if (textColor.isValid())

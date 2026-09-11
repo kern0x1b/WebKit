@@ -29,7 +29,6 @@
 #include <WebCore/FrameIdentifier.h>
 #include <WebCore/ProcessIdentifier.h>
 #include <WebCore/ResourceLoaderIdentifier.h>
-#include <WebCore/ScriptExecutionContextIdentifier.h>
 #include <wtf/Forward.h>
 #include <wtf/RefCountedAndCanMakeWeakPtr.h>
 #include <wtf/RobinHoodHashMap.h>
@@ -61,6 +60,11 @@ public:
     WEBCORE_EXPORT virtual Protocol::Network::FrameId frameId(const WebCore::Frame*) = 0;
     virtual Protocol::Network::LoaderId loaderId(WebCore::DocumentLoader*) = 0;
     virtual WebCore::LocalFrame* assertFrame(Protocol::ErrorString&, const Protocol::Network::FrameId&) = 0;
+
+    // Assigning an ID is what makes frameForId() / assertFrame() able to resolve a frame, so a
+    // caller that reports the frame to the frontend over a channel that computes the ID elsewhere
+    // must still register it here for commands served in this process to work.
+    void registerFrame(const WebCore::Frame& frame) { frameId(&frame); }
 
     // Called when a frame is detached; returns the protocol ID that was assigned.
     // Callers must ensure takeFrame is called via InspectorInstrumentation::frameDetached
@@ -98,7 +102,7 @@ public:
     // across processes, so both forms agree in the common case.
     static inline String protocolFrameId(WebCore::FrameIdentifier frameID)
     {
-        return protocolFrameId(frameID, ObjectIdentifier<WebCore::ProcessIdentifierType>(frameID.toRawValue() >> 32));
+        return protocolFrameId(frameID, ObjectIdentifier<WebCore::ProcessIdentifierType>(frameID.toUInt64() >> 32));
     }
 
     static inline String protocolRequestId(WebCore::ProcessIdentifier pid, WebCore::ResourceLoaderIdentifier resourceID)
@@ -169,11 +173,6 @@ public:
             ObjectIdentifier<WebCore::ProcessIdentifierType>(*pidValue),
             WebCore::FrameIdentifier(*frameValue)
         };
-    }
-
-    static inline String protocolLoaderId(WebCore::ScriptExecutionContextIdentifier contextID)
-    {
-        return makeString("loader-"_s, contextID.processIdentifier().toUInt64(), '.', contextID.object().toString());
     }
 };
 

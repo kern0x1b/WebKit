@@ -388,7 +388,7 @@ GDBusInterfaceVTable AccessibilityObjectAtspi::s_accessibleFunctions = {
         if (!g_strcmp0(methodName, "GetRole"))
             g_dbus_method_invocation_return_value(invocation, g_variant_new("(u)", atspiObject->role()));
         else if (!g_strcmp0(methodName, "GetRoleName"))
-            g_dbus_method_invocation_return_value(invocation, g_variant_new("(s)", atspiObject->roleName().utf8().data()));
+            g_dbus_method_invocation_return_value(invocation, g_variant_new("(s)", atspiObject->roleName().utf8().legacyCStringPointer()));
         else if (!g_strcmp0(methodName, "GetLocalizedRoleName"))
             g_dbus_method_invocation_return_value(invocation, g_variant_new("(s)", atspiObject->localizedRoleName()));
         else if (!g_strcmp0(methodName, "GetState")) {
@@ -441,10 +441,10 @@ GDBusInterfaceVTable AccessibilityObjectAtspi::s_accessibleFunctions = {
         if (!g_strcmp0(propertyName, "Description"))
             return g_variant_new_string(atspiObject->description().data());
         if (!g_strcmp0(propertyName, "Locale"))
-            return g_variant_new_string(atspiObject->locale().utf8().data());
+            return g_variant_new_string(atspiObject->locale().utf8().legacyCStringPointer());
         if (!g_strcmp0(propertyName, "AccessibleId")) {
             auto objectID = atspiObject->m_coreObject->objectID();
-            return g_variant_new_string(atspiObject->m_coreObject ? String::number(objectID.toUInt64()).utf8().data() : "");
+            return g_variant_new_string(atspiObject->m_coreObject ? String::number(objectID.toUInt64()).utf8().legacyCStringPointer() : "");
         }
         if (!g_strcmp0(propertyName, "Parent"))
             return atspiObject->parentReference();
@@ -512,7 +512,7 @@ const String& AccessibilityObjectAtspi::path()
 
 GVariant* AccessibilityObjectAtspi::reference()
 {
-    return g_variant_new("(so)", AccessibilityAtspi::singleton().uniqueName(), path().utf8().data());
+    return g_variant_new("(so)", AccessibilityAtspi::singleton().uniqueName(), path().utf8().legacyCStringPointer());
 }
 
 GVariant* AccessibilityObjectAtspi::hyperlinkReference()
@@ -522,7 +522,7 @@ GVariant* AccessibilityObjectAtspi::hyperlinkReference()
         m_hyperlinkPath = AccessibilityAtspi::singleton().registerHyperlink(*this, { { const_cast<GDBusInterfaceInfo*>(&webkit_hyperlink_interface), &s_hyperlinkFunctions } });
     }
 
-    return g_variant_new("(so)", AccessibilityAtspi::singleton().uniqueName(), m_hyperlinkPath.utf8().data());
+    return g_variant_new("(so)", AccessibilityAtspi::singleton().uniqueName(), m_hyperlinkPath.utf8().legacyCStringPointer());
 }
 
 void AccessibilityObjectAtspi::setParent(std::optional<AccessibilityObjectAtspi*> atspiParent)
@@ -720,6 +720,33 @@ static bool shouldIncludeOrientationState(const AXCoreObject& coreObject)
         || coreObject.isSlider();
 }
 
+AccessibilityObjectAtspi* AccessibilityObjectAtspi::focusableAncestor() const
+{
+    if (!m_coreObject)
+        return nullptr;
+
+    auto ancestor = m_coreObject->focusableAncestor();
+    return ancestor ? ancestor->wrapper() : nullptr;
+}
+
+AccessibilityObjectAtspi* AccessibilityObjectAtspi::editableAncestor() const
+{
+    if (!m_coreObject)
+        return nullptr;
+
+    auto ancestor = m_coreObject->editableAncestor();
+    return ancestor ? ancestor->wrapper() : nullptr;
+}
+
+AccessibilityObjectAtspi* AccessibilityObjectAtspi::highestEditableAncestor() const
+{
+    if (!m_coreObject)
+        return nullptr;
+
+    auto ancestor = m_coreObject->highestEditableAncestor();
+    return ancestor ? ancestor->wrapper() : nullptr;
+}
+
 OptionSet<Atspi::State> AccessibilityObjectAtspi::states() const
 {
     OptionSet<Atspi::State> states;
@@ -759,7 +786,7 @@ OptionSet<Atspi::State> AccessibilityObjectAtspi::states() const
         if (m_coreObject->supportsChecked())
             states.add(Atspi::State::Checkable);
 
-        if (m_coreObject->isTextControl() || m_coreObject->isNonNativeTextControl())
+        if (m_coreObject->isTextControl() || m_coreObject->isNonNativeTextControl() || m_coreObject->editableAncestor())
             states.add(Atspi::State::Editable);
     } else if (liveObject && liveObject->supportsReadOnly())
         states.add(Atspi::State::ReadOnly);
@@ -1015,7 +1042,7 @@ HashMap<String, String> AccessibilityObjectAtspi::attributes() const
 void AccessibilityObjectAtspi::buildAttributes(GVariantBuilder* builder) const
 {
     for (const auto& it : attributes())
-        g_variant_builder_add(builder, "{ss}", it.key.utf8().data(), it.value.utf8().data());
+        g_variant_builder_add(builder, "{ss}", it.key.utf8().legacyCStringPointer(), it.value.utf8().legacyCStringPointer());
 }
 
 RelationMap AccessibilityObjectAtspi::relationMap() const
@@ -1121,7 +1148,7 @@ void AccessibilityObjectAtspi::buildStates(GVariantBuilder* builder) const
 
 void AccessibilityObjectAtspi::serialize(GVariantBuilder* builder) const
 {
-    g_variant_builder_add(builder, "(so)", AccessibilityAtspi::singleton().uniqueName(), m_path.utf8().data());
+    g_variant_builder_add(builder, "(so)", AccessibilityAtspi::singleton().uniqueName(), m_path.utf8().legacyCStringPointer());
     g_variant_builder_add(builder, "@(so)", AccessibilityAtspi::singleton().applicationReference());
     g_variant_builder_add(builder, "@(so)", parentReference());
 
@@ -1405,7 +1432,9 @@ AccessibilityObjectInclusion AccessibilityObject::accessibilityPlatformIncludesO
         return AccessibilityObjectInclusion::IgnoreObject;
 
     // Entries and password fields have extraneous children which we want to ignore.
-    if (parent->isSecureField() || parent->isTextControl())
+    // Exclude content-editable regions since they can contain valid non-text
+    // descendants (e.g: a button).
+    if (parent->isSecureField() || (parent->isTextControl() && !parent->hasContentEditableAttributeSet()))
         return AccessibilityObjectInclusion::IgnoreObject;
 
     // We expose the slider as a whole but not its value indicator.

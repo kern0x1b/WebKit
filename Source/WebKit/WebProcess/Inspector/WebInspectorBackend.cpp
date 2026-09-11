@@ -41,6 +41,7 @@
 #include <WebCore/Chrome.h>
 #include <WebCore/Document.h>
 #include <WebCore/DocumentLoader.h>
+#include <WebCore/DocumentPage.h>
 #include <WebCore/DocumentView.h>
 #include <WebCore/FrameInspectorController.h>
 #include <WebCore/FrameLoadRequest.h>
@@ -159,7 +160,7 @@ void WebInspectorBackend::show(CompletionHandler<void(bool success)>&& completio
         return;
     }
 
-    m_page->corePage()->inspectorController().show();
+    protect(m_page->corePage()->inspectorController())->show();
     completionHandler(true);
 }
 
@@ -180,7 +181,7 @@ void WebInspectorBackend::evaluateScriptForTest(const String& script)
     if (!m_page->corePage())
         return;
 
-    m_page->corePage()->inspectorController().evaluateForTestInFrontend(script);
+    protect(m_page->corePage()->inspectorController())->evaluateForTestInFrontend(script);
 }
 
 void WebInspectorBackend::showConsole()
@@ -212,7 +213,7 @@ void WebInspectorBackend::showMainResourceForFrame(WebCore::FrameIdentifier fram
     if (!m_page->corePage())
         return;
 
-    String inspectorFrameIdentifier = CheckedRef { m_page->corePage()->inspectorController().ensurePageAgent() }->frameId(protect(frame->coreLocalFrame()).get());
+    String inspectorFrameIdentifier = protect(protect(m_page->corePage()->inspectorController())->ensurePageAgent())->frameId(protect(frame->coreLocalFrame()).get());
 
     whenFrontendConnectionEstablished([inspectorFrameIdentifier](auto& frontendConnection) {
         frontendConnection.send(Messages::WebInspectorUI::ShowMainResourceForFrame(inspectorFrameIdentifier), 0);
@@ -269,6 +270,14 @@ void WebInspectorBackend::timelineRecordingChanged(bool active)
     protect(WebProcess::singleton().parentProcessConnection())->send(Messages::WebInspectorBackendProxy::TimelineRecordingChanged(active), m_page->identifier());
 }
 
+void WebInspectorBackend::showPaintRectsChanged(bool show)
+{
+    // Forward the main-frame process's paint-rects toggle to the UIProcess, which fans it out to the
+    // cross-origin subframe processes via ProxyingPageAgent (the frontend's Page domain only reaches
+    // this main-frame process).
+    protect(WebProcess::singleton().parentProcessConnection())->send(Messages::WebInspectorBackendProxy::ShowPaintRectsChanged(show), m_page->identifier());
+}
+
 void WebInspectorBackend::setDeveloperPreferenceOverride(InspectorBackendClient::DeveloperPreference developerPreference, std::optional<bool> overrideValue)
 {
     protect(WebProcess::singleton().parentProcessConnection())->send(Messages::WebInspectorBackendProxy::SetDeveloperPreferenceOverride(developerPreference, overrideValue), m_page->identifier());
@@ -276,9 +285,9 @@ void WebInspectorBackend::setDeveloperPreferenceOverride(InspectorBackendClient:
 
 #if ENABLE(INSPECTOR_NETWORK_THROTTLING)
 
-void WebInspectorBackend::setEmulatedConditions(std::optional<int64_t>&& bytesPerSecondLimit)
+void WebInspectorBackend::setEmulatedConditions(std::optional<uint64_t> bandwidthBytesPerSecond, Seconds latency)
 {
-    protect(WebProcess::singleton().parentProcessConnection())->send(Messages::WebInspectorBackendProxy::SetEmulatedConditions(WTF::move(bytesPerSecondLimit)), m_page->identifier());
+    protect(WebProcess::singleton().parentProcessConnection())->send(Messages::WebInspectorBackendProxy::SetEmulatedConditions(bandwidthBytesPerSecond, latency), m_page->identifier());
 }
 
 #endif // ENABLE(INSPECTOR_NETWORK_THROTTLING)
@@ -361,7 +370,7 @@ void WebInspectorBackend::ensureNetworkInstrumentationForFrame(LocalFrame& frame
 
     CheckedRef resourceDataStore = m_resourceDataStore.get();
     auto proxy = makeUnique<FrameNetworkAgentProxy>(webContext, *page, resourceDataStore.get(), m_extraRequestHeaders);
-    proxy->enable();
+    std::ignore = proxy->enable();
     m_frameNetworkAgentProxies.add(frameID, WTF::move(proxy));
 }
 
@@ -378,6 +387,9 @@ void WebInspectorBackend::enableNetworkInstrumentation()
         m_networkInstrumentationEnabled = true;
         corePage->settings().setDeveloperExtrasEnabled(true);
         corePage->inspectorController().connectRemoteInstrumentation();
+
+        // Buffer certificates only when the page opts in, matching PageNetworkAgent.
+        CheckedRef { m_resourceDataStore.get() }->setSupportsShowingCertificate(corePage->settings().inspectorSupportsShowingCertificate());
     }
 
     corePage->forEachLocalFrame([&](LocalFrame& frame) {
@@ -412,17 +424,62 @@ void WebInspectorBackend::removeInstrumentationForFrame(FrameIdentifier frameID)
 {
     m_frameNetworkAgentProxies.remove(frameID);
     m_framePageAgentProxies.remove(frameID);
+
+    // Tear down the frame's paint-rect overlay (if it owned one). The overlay is held by the page
+    // overlay controller, so it wouldn't be released just by the proxy above going away.
+    if (RefPtr corePage = m_page ? m_page->corePage() : nullptr) {
+        if (auto* client = corePage->inspectorController().inspectorBackendClient())
+            client->willDestroyFrameOverlays(frameID);
+    }
 }
 
-void WebInspectorBackend::getResponseBody(ResourceLoaderIdentifier resourceID, CompletionHandler<void(String content, bool base64Encoded, String errorString)>&& completionHandler)
+void WebInspectorBackend::getResponseBody(ResourceLoaderIdentifier resourceID, CompletionHandler<void(std::expected<std::pair<String, bool>, String>&&)>&& completionHandler)
 {
     CheckedRef resourceDataStore = m_resourceDataStore.get();
     auto result = resourceDataStore->getResponseBody(resourceID);
-    if (result.has_value()) {
-        auto& [content, base64Encoded] = result.value();
-        completionHandler(content, base64Encoded, String());
-    } else
-        completionHandler(String(), false, result.error());
+    // ProxyingNetworkAgent reads an empty error as the AsyncReplyError connection-loss sentinel, so
+    // every genuine failure here must carry a non-empty message.
+    // FIXME: <https://webkit.org/b/320234> The sibling proxying replies (Page.getResourceContent,
+    // Page.searchInResource) still use a bare error-string reply and should adopt this same
+    // Expected-based discriminator.
+    ASSERT(result.has_value() || !result.error().isEmpty());
+    completionHandler(WTF::move(result));
+}
+
+void WebInspectorBackend::getSerializedCertificate(ResourceLoaderIdentifier resourceID, CompletionHandler<void(std::expected<String, String>&&)>&& completionHandler)
+{
+    CheckedRef resourceDataStore = m_resourceDataStore.get();
+    auto result = resourceDataStore->getSerializedCertificate(resourceID);
+    // See getResponseBody: a genuine failure must carry a non-empty message (empty is connection loss).
+    ASSERT(result.has_value() || !result.error().isEmpty());
+    completionHandler(WTF::move(result));
+}
+
+void WebInspectorBackend::loadResource(WebCore::FrameIdentifier frameID, const String& url, CompletionHandler<void(std::expected<std::tuple<String, String, int>, String>&&)>&& completionHandler)
+{
+    // Site Isolation load leg for Network.loadResource: ProxyingNetworkAgent already routed this to
+    // the frame's hosting process, so resolve the frame locally and run the load in its document
+    // context. Failures carry a non-empty error string (empty is reserved for the connection-loss
+    // AsyncReplyError; see WebInspectorBackend.messages.in).
+    RefPtr webFrame = WebProcess::singleton().webFrame(frameID);
+    if (!webFrame) {
+        completionHandler(makeUnexpected("Frame not found in this process"_s));
+        return;
+    }
+
+    RefPtr localFrame = webFrame->coreLocalFrame();
+    if (!localFrame) {
+        completionHandler(makeUnexpected("Frame is not local to this process"_s));
+        return;
+    }
+
+    RefPtr document = localFrame->document();
+    if (!document) {
+        completionHandler(makeUnexpected("No document for frame"_s));
+        return;
+    }
+
+    Inspector::ResourceUtilities::loadResource(*document, url, WTF::move(completionHandler));
 }
 
 // Convert the JSON protocol matches from ContentSearchUtilities::searchInTextByLines into the plain
@@ -639,7 +696,12 @@ void WebInspectorBackend::ensurePageInstrumentationForFrame(LocalFrame& frame)
     };
 
     auto proxy = makeUnique<PageAgentProxy>(webContext, *page);
-    proxy->enable();
+    std::ignore = proxy->enable();
+
+    // Seed the just-created proxy with the current toggle: a frame can commit after
+    // setShowPaintRects(true) was fanned out, and would otherwise default to off.
+    proxy->setShowPaintRects(m_showPaintRects);
+
     m_framePageAgentProxies.add(frameID, WTF::move(proxy));
 }
 
@@ -673,18 +735,30 @@ void WebInspectorBackend::disablePageInstrumentation()
     // DisablePageInstrumentation IPC, not process teardown).
     m_framePageAgentProxies.clear();
     m_pageInstrumentationEnabled = false;
+
+    // Reset so a later re-enable seeds fresh proxies as off; the UIProcess ProxyingPageAgent also
+    // resets on disable().
+    m_showPaintRects = false;
 }
 
+void WebInspectorBackend::setShowPaintRects(bool show)
+{
+    // Remember it for frames that commit later (ensurePageInstrumentationForFrame), then drive every
+    // per-frame proxy this process hosts; each draws its frame's paint rects locally.
+    m_showPaintRects = show;
+    for (auto& proxy : m_framePageAgentProxies.values())
+        proxy->setShowPaintRects(show);
+}
 
 void WebInspectorBackend::getFrameResourceData(Vector<WebCore::FrameIdentifier>&& frameIDs, CompletionHandler<void(Vector<std::pair<WebCore::FrameIdentifier, Inspector::FrameResourceData>>&&)>&& completionHandler)
 {
     // Return, for each requested frame that is local to this WebContent process, its committed
-    // document's loaderId (as a ScriptExecutionContextIdentifier) and cached subresources. The
-    // UIProcess ProxyingPageAgent walks the authoritative cross-process frame tree, groups frame
-    // IDs by hosting process, and asks each process only for the frames it hosts; it then builds
-    // the Page.getResourceTree protocol objects from this typed data under Site Isolation. Frames
-    // not local to this process are silently skipped (another process answers for them).
-    // See webkit.org/b/308896.
+    // document's protocol loaderId string (computed here via IdentifierRegistry so it matches the
+    // live Network/Page events) and cached subresources. The UIProcess ProxyingPageAgent walks the
+    // authoritative cross-process frame tree, groups frame IDs by hosting process, and asks each
+    // process only for the frames it hosts; it then builds the Page.getResourceTree protocol objects
+    // from this typed data under Site Isolation. Frames not local to this process are silently
+    // skipped (another process answers for them). See webkit.org/b/308896.
     Vector<std::pair<WebCore::FrameIdentifier, Inspector::FrameResourceData>> resourcesByFrame;
     resourcesByFrame.reserveInitialCapacity(frameIDs.size());
 
@@ -697,8 +771,11 @@ void WebInspectorBackend::getFrameResourceData(Vector<WebCore::FrameIdentifier>&
             continue;
 
         Inspector::FrameResourceData frameData;
-        if (RefPtr document = localFrame->document())
-            frameData.loaderId = document->identifier();
+        if (RefPtr framePage = localFrame->page()) {
+            Ref registry = framePage->inspectorController().identifierRegistry();
+            RefPtr documentLoader = localFrame->loader().documentLoader();
+            frameData.loaderId = registry->loaderId(documentLoader.get());
+        }
         frameData.resources = Inspector::ResourceUtilities::buildResourceDataForFrame(*localFrame);
         resourcesByFrame.append({ frameID, WTF::move(frameData) });
     }

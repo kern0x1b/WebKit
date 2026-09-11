@@ -56,10 +56,7 @@ class MatchingContextHolder;
 class YarrCodeBlock;
 
 enum class JITFailureReason : uint8_t {
-    DecodeSurrogatePair,
-    BackReference,
     Lookbehind,
-    ParenthesizedSubpattern,
     ParenthesisNestedTooDeep,
     ExecutableMemoryAllocationFailure,
     OffsetTooLarge,
@@ -443,13 +440,9 @@ private:
 
 void jitCompile(YarrPattern&, StringView patternString, CharSize, std::optional<StringView> sampleString, VM*, YarrCodeBlock& jitObject, ExecutionMode);
 
-#if ENABLE(YARR_JIT_REGEXP_TEST_INLINE)
-
-
 class YarrJITRegisters;
 
-void jitCompileInlinedTest(StackCheck*, StringView, OptionSet<Yarr::Flags>, CharSize, VM*, YarrBoyerMooreData&, CCallHelpers&, YarrJITRegisters&);
-#endif
+void jitCompileInlinedTest(StackCheck*, StringView, OptionSet<Yarr::Flags>, CharSize, VM*, YarrBoyerMooreData&, CCallHelpers&, YarrJITRegisters&, unsigned reservedFrameSizeInBytes);
 
 } } // namespace JSC::Yarr
 

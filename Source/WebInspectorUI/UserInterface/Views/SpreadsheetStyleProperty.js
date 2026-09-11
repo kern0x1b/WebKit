@@ -322,6 +322,9 @@ WI.SpreadsheetStyleProperty = class SpreadsheetStyleProperty extends WI.Object
                 classNames.push("invalid-value");
                 elementTitle = WI.UIString("Unsupported property value");
             }
+        } else if (this._property.name === "flow-tolerance") {
+            classNames.push("has-warning", "deprecated-name");
+            elementTitle = WI.UIString("\u0022%s\u0022 is deprecated. Use \u0022%s\u0022 instead.").format("flow-tolerance", "fit-tolerance");
         }
 
         if (!this._property.enabled)
@@ -1063,7 +1066,7 @@ WI.SpreadsheetStyleProperty = class SpreadsheetStyleProperty extends WI.Object
 
     _resolveVariables(cssText)
     {
-        return cssText.replace(/var\(--[^\)]+\)/g, (match) => this._property.ownerStyle.nodeStyles.computedStyle.resolveVariableValue(match) || match);
+        return cssText.replace(/var\(--[^)]+\)/g, (match) => this._property.ownerStyle.nodeStyles.computedStyle.resolveVariableValue(match) || match);
     }
 
     _handleNameChange()

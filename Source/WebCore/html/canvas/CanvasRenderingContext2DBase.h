@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006-2024 Apple Inc. All rights reserved.
+ * Copyright (C) 2006-2026 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,6 +27,7 @@
 
 #include "AffineTransform.h"
 #include "CanvasDirection.h"
+#include "CanvasElementImage.h"
 #include "CanvasFillRule.h"
 #include "CanvasLineCap.h"
 #include "CanvasLineJoin.h"
@@ -216,6 +217,11 @@ public:
     ExceptionOr<void> drawImage(CanvasImageSource&&, float dx, float dy, float dw, float dh);
     ExceptionOr<void> drawImage(CanvasImageSource&&, float sx, float sy, float sw, float sh, float dx, float dy, float dw, float dh);
 
+    ExceptionOr<Ref<DOMMatrix>> drawElementImage(CanvasElementImageSource&&, float dx, float dy);
+    ExceptionOr<Ref<DOMMatrix>> drawElementImage(CanvasElementImageSource&&, float dx, float dy, float dw, float dh);
+    ExceptionOr<Ref<DOMMatrix>> drawElementImage(CanvasElementImageSource&&, float sx, float sy, float sw, float sh, float dx, float dy);
+    ExceptionOr<Ref<DOMMatrix>> drawElementImage(CanvasElementImageSource&&, float sx, float sy, float sw, float sh, float dx, float dy, float dw, float dh);
+
     void clearCanvas();
 
     using StyleVariant = Variant<String, Ref<CanvasGradient>, Ref<CanvasPattern>>;
@@ -302,24 +308,24 @@ public:
         CanvasStyle strokeStyle;
         CanvasStyle fillStyle;
         double lineWidth;
-        LineCap lineCap;
-        LineJoin lineJoin;
         double miterLimit;
         FloatSize shadowOffset;
-        float shadowBlur;
         Color shadowColor;
         double globalAlpha;
-        CompositeOperator globalComposite;
-        BlendMode globalBlend;
         AffineTransform transform;
         std::optional<AffineTransform> transformInverse;
         Vector<double> lineDash;
         double lineDashOffset;
-        bool imageSmoothingEnabled;
+        float shadowBlur;
+        LineCap lineCap;
+        LineJoin lineJoin;
+        CompositeOperator globalComposite;
+        BlendMode globalBlend;
         ImageSmoothingQuality imageSmoothingQuality;
         TextAlign textAlign;
         TextBaseline textBaseline;
         Direction direction;
+        bool imageSmoothingEnabled;
 
         String filterString;
         Style::Filter filter;
@@ -329,6 +335,9 @@ public:
 
         String unparsedFont;
         FontProxy font;
+        // The font description `unparsedFont` was resolved against. Relative values in the font
+        // shorthand depend on it, so `font` is stale once it no longer matches the canvas element.
+        FontCascadeDescription fontResolutionBase;
 
         RefPtr<CanvasLayerContextSwitcher> targetSwitcher;
 
@@ -343,8 +352,8 @@ public:
     const Vector<State, 1>& stateStack() LIFETIME_BOUND;
 
 protected:
-    static const int DefaultFontSize;
-    static const ASCIILiteral DefaultFontFamily;
+    static constexpr auto DefaultFontSize = 10;
+    static constexpr auto DefaultFontFamily = "sans-serif"_s;
 
     const State& state() const LIFETIME_BOUND { return m_stateStack.last(); }
     void realizeSaves();
@@ -354,7 +363,7 @@ protected:
     GraphicsContext* effectiveDrawingContext() const;
     AffineTransform baseTransform() const;
 
-    enum class DidDrawOption {
+    enum class WillUpdateContentsOption {
         ApplyTransform = 1 << 0,
         ApplyShadow = 1 << 1,
         ApplyClip = 1 << 2,
@@ -362,28 +371,26 @@ protected:
         PreserveCachedContents = 1 << 4,
     };
 
-    static constexpr OptionSet<DidDrawOption> defaultDidDrawOptions()
+    static constexpr OptionSet<WillUpdateContentsOption> defaultWillUpdateContentsOptions()
     {
         return {
-            DidDrawOption::ApplyTransform,
-            DidDrawOption::ApplyShadow,
-            DidDrawOption::ApplyClip,
-            DidDrawOption::ApplyPostProcessing,
+            WillUpdateContentsOption::ApplyTransform,
+            WillUpdateContentsOption::ApplyShadow,
+            WillUpdateContentsOption::ApplyClip,
+            WillUpdateContentsOption::ApplyPostProcessing,
         };
     }
 
-    static constexpr OptionSet<DidDrawOption> defaultDidDrawOptionsWithoutPostProcessing()
+    static constexpr OptionSet<WillUpdateContentsOption> defaultWillUpdateContentsOptionsWithoutPostProcessing()
     {
         return {
-            DidDrawOption::ApplyTransform,
-            DidDrawOption::ApplyShadow,
-            DidDrawOption::ApplyClip,
+            WillUpdateContentsOption::ApplyTransform,
+            WillUpdateContentsOption::ApplyShadow,
+            WillUpdateContentsOption::ApplyClip,
         };
     }
-    void didDraw(std::optional<FloatRect>, OptionSet<DidDrawOption> = defaultDidDrawOptions());
-    void didDrawEntireCanvas(OptionSet<DidDrawOption> options = defaultDidDrawOptions());
-    void didDraw(bool entireCanvas, const FloatRect&, OptionSet<DidDrawOption> options = defaultDidDrawOptions());
-    template<typename RectProvider> void didDraw(bool entireCanvas, NOESCAPE const RectProvider&, OptionSet<DidDrawOption> options = defaultDidDrawOptions());
+    void willUpdateContents(std::optional<FloatRect>, OptionSet<WillUpdateContentsOption> = defaultWillUpdateContentsOptions());
+    void willUpdateEntireContents(OptionSet<WillUpdateContentsOption> options = defaultWillUpdateContentsOptions());
 
     virtual std::optional<Style::Filter> setFilterStringWithoutUpdatingStyle(const String&) { return std::nullopt; }
 
@@ -403,6 +410,7 @@ protected:
     void NODELETE updateStateTransform(const AffineTransform&);
 
     RefPtr<ImageBuffer> allocateImageBuffer() const;
+    RefPtr<ImageBuffer> createCompatibleImageBuffer(GraphicsContext&, const FloatSize&) const;
     bool hasCreatedImageBuffer() const { return m_hasCreatedImageBuffer; }
     ImageBuffer* buffer() const;
     RefPtr<ImageBuffer> makeRenderingResultsAvailable(ShouldApplyPostProcessingToDirtyRect = ShouldApplyPostProcessingToDirtyRect::Yes);
@@ -415,9 +423,9 @@ private:
     struct CachedContentsUnknown {
     };
     struct CachedContentsImageData {
-        CachedContentsImageData(CanvasRenderingContext2DBase&, Ref<ByteArrayPixelBuffer>);
+        CachedContentsImageData(CanvasRenderingContext2DBase&, Ref<ArrayPixelBuffer>);
 
-        Ref<ByteArrayPixelBuffer> imageData;
+        Ref<ArrayPixelBuffer> imageData;
         DeferrableOneShotTimer evictionTimer;
     };
 
@@ -434,7 +442,7 @@ private:
     FloatRect backingStoreBounds() const { return FloatRect { { }, FloatSize { canvasBase().size() } }; }
 
     PixelFormat pixelFormat() const final;
-    DestinationColorSpace colorSpace() const final;
+    ColorSpace colorSpace() const final;
     bool willReadFrequently() const final;
 
     void realizeSavesLoop();
@@ -491,6 +499,7 @@ private:
     template<class T> void fullCanvasCompositedDrawImage(T&, const FloatRect&, const FloatRect&, CompositeOperator);
 
     RefPtr<ImageBuffer> surfaceBufferToImageBuffer(SurfaceBuffer) final;
+    RefPtr<NativeImage> surfaceBufferToNativeImage(SurfaceBuffer) final;
     bool isSurfaceBufferTransparentBlack(SurfaceBuffer) const override;
 #if USE(SKIA)
     RefPtr<GraphicsLayerContentsDisplayDelegate> layerContentsDisplayDelegate() override;
@@ -504,13 +513,21 @@ private:
 
     FloatPoint textOffset(float width, TextDirection);
 
-    RefPtr<ByteArrayPixelBuffer> cacheImageDataIfPossible(const ImageData&, const IntRect& sourceRect, const IntPoint& destinationPosition);
-    RefPtr<ImageData> makeImageDataIfContentsCached(const IntRect& sourceRect, PredefinedColorSpace) const;
+    RefPtr<ArrayPixelBuffer> cacheImageDataIfPossible(const ImageData&, const IntRect& sourceRect, const IntPoint& destinationPosition);
+    RefPtr<ImageData> makeImageDataIfContentsCached(const IntRect& sourceRect, PixelFormat, PredefinedColorSpace) const;
     void evictCachedImageData();
 
     static constexpr unsigned MaxSaveCount = 1024 * 16;
     mutable RefPtr<ImageBuffer> m_buffer;
-    Vector<State, 1> m_stateStack; // References go m_stateStack -> targetSwitcher -> m_buffer, so destroy state stack first.
+    RefPtr<NativeImage> m_bufferNativeImage;
+
+    // When layers are opened, m_stateStack contains target switchers where the top
+    // targetSwitcher on the stack draws to the targetSwitcher under it, ... until
+    // it eventually draws to m_buffer. So m_stateStack has to be freed in the stack
+    // order (top in stack/last in vector first, bottom in stack/first in vector last),
+    // then m_buffer can be freed after.
+    Vector<State, 1> m_stateStack;
+
     FloatRect m_dirtyRect;
     unsigned m_unrealizedSaveCount { 0 };
     bool m_usesCSSCompatibilityParseMode;

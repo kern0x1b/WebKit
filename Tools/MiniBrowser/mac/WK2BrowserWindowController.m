@@ -34,9 +34,12 @@
 #import <QuartzCore/CATextLayer.h>
 #import <SecurityInterface/SFCertificateTrustPanel.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
+#import <WebKit/WKDownload.h>
+#import <WebKit/WKDownloadDelegate.h>
 #import <WebKit/WKFrameInfo.h>
 #import <WebKit/WKNavigationActionPrivate.h>
 #import <WebKit/WKNavigationDelegate.h>
+#import <WebKit/WKNavigationDelegatePrivate.h>
 #import <WebKit/WKOpenPanelParametersPrivate.h>
 #import <WebKit/WKPreferencesPrivate.h>
 #import <WebKit/WKUIDelegate.h>
@@ -98,11 +101,12 @@ static const int testFooterBannerHeight = 58;
 
 @end
 
-@interface WK2BrowserWindowController () <NSTextFinderBarContainer, _WKFindDelegate, NSSearchFieldDelegate, WKNavigationDelegate, WKUIDelegate, WKUIDelegatePrivate, _WKIconLoadingDelegate>
+@interface WK2BrowserWindowController () <NSTextFinderBarContainer, _WKFindDelegate, NSSearchFieldDelegate, WKDownloadDelegate, WKNavigationDelegate, WKNavigationDelegatePrivate, WKUIDelegate, WKUIDelegatePrivate, _WKIconLoadingDelegate>
 @end
 
 @implementation WK2BrowserWindowController {
     WKWebViewConfiguration *_configuration;
+    WKWindowFeatures *_windowFeatures;
     WKWebView *_webView;
     BOOL _zoomTextOnly;
     BOOL _isPrivateBrowsingWindow;
@@ -198,10 +202,16 @@ static const int testFooterBannerHeight = 58;
 
 - (instancetype)initWithConfiguration:(WKWebViewConfiguration *)configuration
 {
+    return [self initWithConfiguration:configuration windowFeatures:nil];
+}
+
+- (instancetype)initWithConfiguration:(WKWebViewConfiguration *)configuration windowFeatures:(WKWindowFeatures *)windowFeatures
+{
     if (!(self = [super initWithWindowNibName:@"BrowserWindow"]))
         return nil;
 
     _configuration = [configuration copy];
+    _windowFeatures = windowFeatures;
     _isPrivateBrowsingWindow = !_configuration.websiteDataStore.isPersistent;
 
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(userAgentDidChange:) name:kUserAgentChangedNotificationName object:nil];
@@ -225,6 +235,47 @@ static const int testFooterBannerHeight = 58;
     [progressIndicator unbind:NSValueBinding];
 }
 
+static NSRect frameForWindowFeatures(WKWindowFeatures *features, NSWindow *window)
+{
+    NSRect contentRect = [window contentRectForFrameRect:window.frame];
+
+    // The web view insets its viewport underneath the titlebar and toolbar, so that inset has to be
+    // added back on to give the page the size it asked for.
+    CGFloat viewportInset = NSHeight(window.contentView.frame) - NSHeight(window.contentLayoutRect);
+
+    if (features.width.doubleValue > 0)
+        contentRect.size.width = features.width.doubleValue;
+    if (features.height.doubleValue > 0)
+        contentRect.size.height = features.height.doubleValue + viewportInset;
+
+    NSRect frameRect = [window frameRectForContentRect:contentRect];
+
+    if (features.x)
+        frameRect.origin.x = features.x.doubleValue;
+
+    if (features.y)
+        frameRect.origin.y = NSMaxY(NSScreen.screens.firstObject.frame) - features.y.doubleValue - NSHeight(frameRect);
+    else
+        frameRect.origin.y = NSMaxY(window.frame) - NSHeight(frameRect);
+
+    return [window constrainFrameRect:frameRect toScreen:nil];
+}
+
+- (void)applyWindowFeatures
+{
+    if (!_windowFeatures.x && !_windowFeatures.y && !_windowFeatures.width && !_windowFeatures.height)
+        return;
+
+    NSWindow *window = self.window;
+
+    // For windows that are opened with specific geometry, ignore AppKit's frame autosaving (and don't contribute to it).
+    self.windowFrameAutosaveName = @"";
+    window.tabbingMode = NSWindowTabbingModeDisallowed;
+
+    [window layoutIfNeeded];
+    [window setFrame:frameForWindowFeatures(_windowFeatures, window) display:NO];
+}
+
 - (void)windowDidLoad
 {
     [super windowDidLoad];
@@ -232,6 +283,8 @@ static const int testFooterBannerHeight = 58;
     // Private windows get separate identifier so they can't merge with regular windows
     if (_isPrivateBrowsingWindow)
         self.window.tabbingIdentifier = @"MiniBrowserPrivateWindow";
+
+    [self applyWindowFeatures];
 }
 
 - (void)userAgentDidChange:(NSNotification *)notification
@@ -756,9 +809,9 @@ static BOOL areEssentiallyEqual(double a, double b)
 
 - (nullable WKWebView *)webView:(WKWebView *)webView createWebViewWithConfiguration:(WKWebViewConfiguration *)configuration forNavigationAction:(WKNavigationAction *)navigationAction windowFeatures:(WKWindowFeatures *)windowFeatures
 {
-    WK2BrowserWindowController *controller = [[WK2BrowserWindowController alloc] initWithConfiguration:configuration];
+    WK2BrowserWindowController *controller = [[WK2BrowserWindowController alloc] initWithConfiguration:configuration windowFeatures:windowFeatures];
     [controller.window makeKeyAndOrderFront:self];
-    
+
     [[[NSApplication sharedApplication] browserAppDelegate] didCreateBrowserWindowController:controller];
 
     return controller->_webView;
@@ -927,6 +980,19 @@ static BOOL isJavaScriptURL(NSURL *url)
     return [url.scheme isEqualToString:@"javascript"];
 }
 
+static BOOL responseIsAttachment(NSURLResponse *response)
+{
+    if (![response isKindOfClass:[NSHTTPURLResponse class]])
+        return NO;
+
+    NSString *disposition = [(NSHTTPURLResponse *)response valueForHTTPHeaderField:@"Content-Disposition"];
+    if (!disposition.length)
+        return NO;
+
+    NSString *type = [[disposition componentsSeparatedByString:@";"].firstObject stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    return [type caseInsensitiveCompare:@"attachment"] == NSOrderedSame;
+}
+
 #pragma mark WKNavigationDelegate
 
 - (void)webView:(WKWebView *)webView decidePolicyForNavigationAction:(WKNavigationAction *)navigationAction preferences:(WKWebpagePreferences *)preferences decisionHandler:(void (^)(WKNavigationActionPolicy, WKWebpagePreferences *))decisionHandler
@@ -944,6 +1010,13 @@ static BOOL isJavaScriptURL(NSURL *url)
     }();
 
     preferences.allowsContentJavaScript = NSApplication.sharedApplication.browserAppDelegate.settingsController.allowsContentJavascript;
+
+    // This has to be tested before _canHandleRequest, which is true for the http and https
+    // URLs that a download attribute usually points at.
+    if (navigationAction.shouldPerformDownload) {
+        decisionHandler(WKNavigationActionPolicyDownload, preferences);
+        return;
+    }
 
     if (navigationAction._canHandleRequest) {
         decisionHandler(WKNavigationActionPolicyAllow, preferences);
@@ -964,7 +1037,11 @@ static BOOL isJavaScriptURL(NSURL *url)
 - (void)webView:(WKWebView *)webView decidePolicyForNavigationResponse:(WKNavigationResponse *)navigationResponse decisionHandler:(void (^)(WKNavigationResponsePolicy))decisionHandler
 {
     LOG(@"decidePolicyForNavigationResponse");
-    decisionHandler(WKNavigationResponsePolicyAllow);
+
+    // WebKit does not turn these into downloads on the client's behalf, so a browser that wants
+    // them downloaded has to ask for it here.
+    BOOL shouldDownload = responseIsAttachment(navigationResponse.response) || (!navigationResponse.canShowMIMEType && navigationResponse.forMainFrame);
+    decisionHandler(shouldDownload ? WKNavigationResponsePolicyDownload : WKNavigationResponsePolicyAllow);
     [self validateToolbar];
 }
 
@@ -1038,6 +1115,24 @@ static BOOL isJavaScriptURL(NSURL *url)
     LOG(@"didFailNavigation: %@, error %@", navigation, error);
 }
 
+- (void)webView:(WKWebView *)webView navigationAction:(WKNavigationAction *)navigationAction didBecomeDownload:(WKDownload *)download
+{
+    LOG(@"navigationAction didBecomeDownload: %@", download);
+    download.delegate = self;
+}
+
+- (void)webView:(WKWebView *)webView navigationResponse:(WKNavigationResponse *)navigationResponse didBecomeDownload:(WKDownload *)download
+{
+    LOG(@"navigationResponse didBecomeDownload: %@", download);
+    download.delegate = self;
+}
+
+- (void)_webView:(WKWebView *)webView contextMenuDidCreateDownload:(WKDownload *)download
+{
+    LOG(@"contextMenuDidCreateDownload: %@", download);
+    download.delegate = self;
+}
+
 - (void)webViewWebContentProcessDidTerminate:(WKWebView *)webView
 {
     NSLog(@"WebContent process crashed; reloading");
@@ -1067,6 +1162,52 @@ static BOOL isJavaScriptURL(NSURL *url)
     completionHandler(^void (NSData *data) {
         LOG(@"Icon URL %@ received icon data of length %u", parameters.url, (unsigned)data.length);
     });
+}
+
+#pragma mark WKDownloadDelegate
+
+static NSURL *availableDownloadURLWithFilename(NSString *filename)
+{
+    NSURL *downloadsDirectory = [NSFileManager.defaultManager URLsForDirectory:NSDownloadsDirectory inDomains:NSUserDomainMask].firstObject;
+    if (!downloadsDirectory)
+        return nil;
+
+    NSURL *candidate = [downloadsDirectory URLByAppendingPathComponent:filename];
+
+    // WebKit refuses a destination that already exists rather than overwriting it, so keep
+    // looking until the name is free.
+    NSString *base = candidate.URLByDeletingPathExtension.lastPathComponent;
+    NSString *extension = candidate.pathExtension;
+    for (unsigned suffix = 1; [NSFileManager.defaultManager fileExistsAtPath:candidate.path]; ++suffix) {
+        candidate = [downloadsDirectory URLByAppendingPathComponent:[NSString stringWithFormat:@"%@-%u", base, suffix]];
+        if (extension.length)
+            candidate = [candidate URLByAppendingPathExtension:extension];
+    }
+
+    return candidate;
+}
+
+- (void)download:(WKDownload *)download decideDestinationUsingResponse:(NSURLResponse *)response suggestedFilename:(NSString *)suggestedFilename completionHandler:(void (^)(NSURL *))completionHandler
+{
+    NSURL *destination = availableDownloadURLWithFilename(suggestedFilename.length ? suggestedFilename : @"download");
+    if (!destination) {
+        NSLog(@"Cancelling download of %@: no download folder.", download.originalRequest.URL);
+        completionHandler(nil);
+        return;
+    }
+
+    NSLog(@"Downloading %@ to %@", download.originalRequest.URL, destination.path);
+    completionHandler(destination);
+}
+
+- (void)downloadDidFinish:(WKDownload *)download
+{
+    NSLog(@"Finished downloading %@", download.progress.fileURL.path);
+}
+
+- (void)download:(WKDownload *)download didFailWithError:(NSError *)error resumeData:(NSData *)resumeData
+{
+    NSLog(@"Failed downloading %@: %@", download.originalRequest.URL, error);
 }
 
 #pragma mark Find in Page

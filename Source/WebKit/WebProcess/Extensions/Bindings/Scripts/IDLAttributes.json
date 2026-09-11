@@ -23,6 +23,10 @@
             "values": ["*"],
             "supportsConjunction": true
         },
+        "Platform": {
+            "contextsAllowed": ["attribute"],
+            "values": ["*"]
+        },
         "CallbackHandler": {
             "contextsAllowed": ["argument"]
         },
@@ -110,6 +114,9 @@
             "contextsAllowed": ["argument", "attribute", "operation"]
         },
         "NSDictionary": {
+            "contextsAllowed": ["argument", "attribute", "operation"]
+        },
+        "JSONValue": {
             "contextsAllowed": ["argument", "attribute", "operation"]
         },
         "NSObject": {

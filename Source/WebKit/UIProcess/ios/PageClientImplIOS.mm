@@ -238,7 +238,7 @@ bool PageClientImpl::isVisuallyIdle()
     return !isActiveViewVisible();
 }
 
-WebCore::DestinationColorSpace PageClientImpl::colorSpace()
+WebCore::ColorSpace PageClientImpl::colorSpace()
 {
     if (!m_colorSpace)
         m_colorSpace = screenColorSpace(nullptr);
@@ -416,6 +416,11 @@ double PageClientImpl::minimumZoomScale() const
 WebCore::FloatRect PageClientImpl::documentRect() const
 {
     return [contentView() bounds];
+}
+
+WebCore::InteractiveWidgetValue PageClientImpl::viewportMetaTagInteractiveWidget() const
+{
+    return [webView() _viewportMetaTagInteractiveWidget];
 }
 
 void PageClientImpl::setCursor(const Cursor& cursor)
@@ -858,7 +863,7 @@ void PageClientImpl::showContactPicker(WebCore::ContactsRequestData&& requestDat
 }
 
 #if ENABLE(WEB_AUTHN)
-void PageClientImpl::showDigitalCredentialsChooser(const WebCore::DigitalCredentialsRequestData& requestData, WTF::CompletionHandler<void(Expected<WebCore::DigitalCredentialsResponseData, WebCore::ExceptionData>&&)>&& completionHandler)
+void PageClientImpl::showDigitalCredentialsChooser(const WebCore::DigitalCredentialsRequestData& requestData, WTF::CompletionHandler<void(std::expected<WebCore::DigitalCredentialsResponseData, WebCore::ExceptionData>&&)>&& completionHandler)
 {
     [contentView() _showDigitalCredentialsChooser:requestData completionHandler:WTF::move(completionHandler)];
 }
@@ -1458,7 +1463,7 @@ void PageClientImpl::removeAnyPDFPageNumberIndicator()
 
 #endif
 
-void PageClientImpl::showCaptionDisplaySettings(WebCore::HTMLMediaElementIdentifier identifier, const WebCore::ResolvedCaptionDisplaySettingsOptions& options, CompletionHandler<void(Expected<void, WebCore::ExceptionData>&&)>&& completionHandler)
+void PageClientImpl::showCaptionDisplaySettings(WebCore::HTMLMediaElementIdentifier identifier, const WebCore::ResolvedCaptionDisplaySettingsOptions& options, CompletionHandler<void(std::expected<void, WebCore::ExceptionData>&&)>&& completionHandler)
 {
 #if USE(UICONTEXTMENU)
     [contentView() showCaptionDisplaySettingsMenu:identifier withOptions:options completionHandler:WTF::move(completionHandler)];

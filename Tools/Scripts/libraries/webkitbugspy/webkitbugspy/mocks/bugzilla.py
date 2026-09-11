@@ -158,17 +158,36 @@ class Bugzilla(Base, mocks.Requests):
                 issue['component'] = data['component']
             if data.get('version'):
                 issue['version'] = data['version']
-            issue['related'] = {'blocks': [], 'depends_on': [], 'regressions': [], 'regressed_by': []}
-            if data.get('depends_on'):
-                issue['related']['depends_on'] = data['depends_on']
-            if data.get('blocks'):
-                issue['related']['blocks'] = data['blocks']
-            if data.get('regressed_by'):
-                issue['related']['regressed_by'] = data['regressed_by']
-            if data.get('regressions'):
-                issue['related']['regressions'] = data['regressions']
             if data.get('see_also'):
                 issue['related_links'] = data['see_also']['add']
+
+            # A dependency is one edge, so recording it on this issue also records it on the other
+            INVERSE = {
+                'depends_on': 'blocks',
+                'blocks': 'depends_on',
+                'regressed_by': 'regressions',
+                'regressions': 'regressed_by',
+            }
+
+            def related_for(number, relation):
+                related = self.issues[number].setdefault('related', {key: [] for key in INVERSE})
+                return related.setdefault(relation, [])
+
+            for relation, inverse in INVERSE.items():
+                if not (change := data.get(relation)):
+                    continue
+                for other in change.get('add') or []:
+                    forward, reverse = related_for(id, relation), related_for(other, inverse)
+                    if other not in forward:
+                        forward.append(other)
+                    if id not in reverse:
+                        reverse.append(id)
+                for other in change.get('remove') or []:
+                    forward, reverse = related_for(id, relation), related_for(other, inverse)
+                    if other in forward:
+                        forward.remove(other)
+                    if id in reverse:
+                        reverse.remove(id)
 
             keywords = data.get('keywords', {})
             if keywords:
@@ -393,7 +412,7 @@ class Bugzilla(Base, mocks.Requests):
                     ) for component, details in product['components'].items()],
                     versions=[dict(
                         name=version,
-                        is_active=True,
+                        is_active=version not in product.get('inactive_versions', []),
                     ) for version in product['versions']],
                 )]), url=url,
             )
@@ -434,6 +453,18 @@ class Bugzilla(Base, mocks.Requests):
                     error=True,
                     code=104,
                     message='The text you entered in the Summary field is too long ({} characters, above the maximum length allowed of 255 characters).'.format(len(data['summary'])),
+                )),
+                url=url,
+            )
+
+        inactive_versions = self.projects.get(data['product'], {}).get('inactive_versions', [])
+        if data['version'] in inactive_versions:
+            return mocks.Response(
+                status_code=400,
+                text=json.dumps(dict(
+                    error=True,
+                    code=106,
+                    message="The version value '{}' is not active.".format(data['version']),
                 )),
                 url=url,
             )

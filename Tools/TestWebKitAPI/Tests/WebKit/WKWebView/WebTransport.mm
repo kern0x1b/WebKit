@@ -23,9 +23,9 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#if PLATFORM(COCOA)
-
 #import "config.h"
+
+#if HAVE(WEBTRANSPORT)
 
 #import "Helpers/cocoa/HTTPServer.h"
 #import "Helpers/PlatformUtilities.h"
@@ -41,20 +41,10 @@
 #import <WebKit/WKWebsiteDataStorePrivate.h>
 #import <WebKit/_WKInternalDebugFeature.h>
 #import <pal/spi/cocoa/NetworkSPI.h>
-#import <wtf/SoftLinking.h>
 #import <wtf/cocoa/TypeCastsCocoa.h>
 #import <wtf/spi/cocoa/SecuritySPI.h>
 #import <wtf/text/MakeString.h>
 #import <wtf/text/StringBuilder.h>
-
-SOFT_LINK_FRAMEWORK(Network)
-SOFT_LINK_MAY_FAIL(Network, nw_webtransport_metadata_set_local_draining, void, (nw_protocol_metadata_t metadata), (metadata))
-SOFT_LINK_MAY_FAIL(Network, nw_webtransport_metadata_get_session_closed, bool, (nw_protocol_metadata_t metadata), (metadata))
-SOFT_LINK_MAY_FAIL(Network, nw_webtransport_metadata_get_transport_mode, nw_webtransport_transport_mode_t, (nw_protocol_metadata_t metadata), (metadata))
-SOFT_LINK_MAY_FAIL(Network, nw_connection_abort_reads, void, (nw_connection_t connection, uint64_t error_code), (connection, error_code))
-SOFT_LINK_MAY_FAIL(Network, nw_connection_abort_writes, void, (nw_connection_t connection, uint64_t error_code), (connection, error_code))
-SOFT_LINK_MAY_FAIL(Network, nw_webtransport_metadata_set_remote_receive_error_handler, void, (nw_protocol_metadata_t metadata, nw_webtransport_receive_error_handler_t handler, dispatch_queue_t queue), (metadata, handler, queue))
-SOFT_LINK_MAY_FAIL(Network, nw_webtransport_metadata_set_remote_send_error_handler, void, (nw_protocol_metadata_t metadata, nw_webtransport_send_error_handler_t handler, dispatch_queue_t queue), (metadata, handler, queue))
 
 namespace TestWebKitAPI {
 
@@ -80,9 +70,6 @@ static void validateChallenge(NSURLAuthenticationChallenge *challenge, uint16_t 
 
 TEST(WebTransport, ClientBidirectional)
 {
-    if (!WebTransportServer::isAvailable())
-        return;
-
     WebTransportServer echoServer([](ConnectionGroup group) -> ConnectionTask {
         auto connection = co_await group.receiveIncomingConnection();
         auto request = co_await connection.awaitableReceiveBytes();
@@ -149,9 +136,6 @@ TEST(WebTransport, ClientBidirectional)
 
 TEST(WebTransport, ClientBidirectionalBYOB)
 {
-    if (!WebTransportServer::isAvailable())
-        return;
-
     WebTransportServer echoServer([](ConnectionGroup group) -> ConnectionTask {
         auto connection = co_await group.receiveIncomingConnection();
         auto request = co_await connection.awaitableReceiveBytes();
@@ -199,9 +183,6 @@ TEST(WebTransport, ClientBidirectionalBYOB)
 
 TEST(WebTransport, Datagram)
 {
-    if (!WebTransportServer::isAvailable())
-        return;
-
     WebTransportServer echoServer([](ConnectionGroup group) -> ConnectionTask {
         auto datagramConnection = group.createWebTransportConnection(ConnectionGroup::ConnectionType::Datagram);
         auto request = co_await datagramConnection.awaitableReceiveBytes();
@@ -248,18 +229,12 @@ TEST(WebTransport, Datagram)
         "</script>",
         port];
     [webView loadHTMLString:html baseURL:[NSURL URLWithString:@"https://webkit.org/"]];
-    if (!canLoadnw_webtransport_metadata_get_transport_mode())
-        EXPECT_WK_STREQ([webView _test_waitForAlert], "successfully read abc, group sent 3 bytes, maxDatagramSize 65535, reliability pending");
-    else
-        EXPECT_WK_STREQ([webView _test_waitForAlert], "successfully read abc, group sent 3 bytes, maxDatagramSize 65535, reliability supports-unreliable");
+    EXPECT_WK_STREQ([webView _test_waitForAlert], "successfully read abc, group sent 3 bytes, maxDatagramSize 1024, reliability supports-unreliable");
     EXPECT_TRUE(challenged);
 }
 
 TEST(WebTransport, Unidirectional)
 {
-    if (!WebTransportServer::isAvailable())
-        return;
-
     WebTransportServer echoServer([](ConnectionGroup group) -> ConnectionTask {
         auto connection = co_await group.receiveIncomingConnection();
         auto request = co_await connection.awaitableReceiveBytes();
@@ -307,9 +282,6 @@ TEST(WebTransport, Unidirectional)
 
 TEST(WebTransport, ServerBidirectional)
 {
-    if (!WebTransportServer::isAvailable())
-        return;
-
     WebTransportServer echoServer([](ConnectionGroup group) -> ConnectionTask {
         auto connection = co_await group.receiveIncomingConnection();
         auto request = co_await connection.awaitableReceiveBytes();
@@ -357,9 +329,6 @@ TEST(WebTransport, ServerBidirectional)
 
 TEST(WebTransport, NetworkProcessCrash)
 {
-    if (!WebTransportServer::isAvailable())
-        return;
-
     WebTransportServer echoServer([](ConnectionGroup group) -> ConnectionTask {
         auto datagramConnection = group.createWebTransportConnection(ConnectionGroup::ConnectionType::Datagram);
         co_await datagramConnection.awaitableSend(@"abc");
@@ -529,7 +498,7 @@ TEST(WebTransport, NetworkProcessCrash)
 
     obj = [webView objectByCallingAsyncFunction:@"return await writeDatagram()" withArguments:@{ } error:&error];
     EXPECT_EQ(obj, nil);
-    EXPECT_NOT_NULL(error);
+    EXPECT_NULL(error);
     error = nil;
 
     obj = [webView objectByEvaluatingJavaScript:@"session.close()"];
@@ -538,9 +507,6 @@ TEST(WebTransport, NetworkProcessCrash)
 
 TEST(WebTransport, Worker)
 {
-    if (!WebTransportServer::isAvailable())
-        return;
-
     WebTransportServer transportServer([](ConnectionGroup group) -> ConnectionTask {
         auto connection = co_await group.receiveIncomingConnection();
         auto request = co_await connection.awaitableReceiveBytes();
@@ -587,9 +553,6 @@ TEST(WebTransport, Worker)
 
 TEST(WebTransport, WorkerAfterNetworkProcessCrash)
 {
-    if (!WebTransportServer::isAvailable())
-        return;
-
     WebTransportServer transportServer([](ConnectionGroup group) -> ConnectionTask {
         auto connection = co_await group.receiveIncomingConnection();
         auto request = co_await connection.awaitableReceiveBytes();
@@ -646,9 +609,6 @@ TEST(WebTransport, WorkerAfterNetworkProcessCrash)
 
 TEST(WebTransport, ServiceWorker)
 {
-    if (!WebTransportServer::isAvailable())
-        return;
-
     WebTransportServer datagramServer([](ConnectionGroup group) -> ConnectionTask {
         auto datagramConnection = group.createWebTransportConnection(ConnectionGroup::ConnectionType::Datagram);
         auto request = co_await datagramConnection.awaitableReceiveBytes();
@@ -718,9 +678,6 @@ TEST(WebTransport, ServiceWorker)
 
 TEST(WebTransport, CreateStreamsBeforeReady)
 {
-    if (!WebTransportServer::isAvailable())
-        return;
-
     WebTransportServer datagramServer([](ConnectionGroup group) -> ConnectionTask {
         auto datagramConnection = group.createWebTransportConnection(ConnectionGroup::ConnectionType::Datagram);
         auto request = co_await datagramConnection.awaitableReceiveBytes();
@@ -772,16 +729,8 @@ TEST(WebTransport, CreateStreamsBeforeReady)
     EXPECT_WK_STREQ([webView _test_waitForAlert], "successfully read abc");
 }
 
-// FIXME: Re-enable this test on iOS when rdar://161858543 is resolved.
-#if PLATFORM(MAC)
 TEST(WebTransport, CSP)
-#else
-TEST(WebTransport, DISABLED_CSP)
-#endif
 {
-    if (!WebTransportServer::isAvailable())
-        return;
-
     WebTransportServer server([](ConnectionGroup group) -> ConnectionTask {
         co_return;
     });
@@ -819,9 +768,6 @@ TEST(WebTransport, DISABLED_CSP)
 
 TEST(WebTransport, ServerCertificateHashes)
 {
-    if (!WebTransportServer::isAvailable())
-        return;
-
     auto runTest = [] (uint64_t certLifetime, bool matchHash = true) {
         NSDictionary* options = @{
             (id)kSecAttrKeyType: (id)kSecAttrKeyTypeECSECPrimeRandom,
@@ -880,7 +826,7 @@ TEST(WebTransport, ServerCertificateHashes)
             "    alert('successfully read ' + new TextDecoder().decode(value));"
             "  } catch (e) { alert('caught ' + e); }"
             "}; test();"
-            "</script>", certificateBytes.toString().utf8().data(), echoServer.port()];
+            "</script>", certificateBytes.toString().utf8().legacyCStringPointer(), echoServer.port()];
 
         RetainPtr configuration = adoptNS([WKWebViewConfiguration new]);
         enableWebTransport(configuration.get());
@@ -907,9 +853,6 @@ TEST(WebTransport, ServerCertificateHashes)
 
 TEST(WebTransport, ServerConnectionTermination)
 {
-    if (!WebTransportServer::isAvailable())
-        return;
-
     WebTransportServer echoServer([](ConnectionGroup group) -> ConnectionTask {
         auto connection = co_await group.receiveIncomingConnection();
         auto request = co_await connection.awaitableReceiveBytes();
@@ -938,14 +881,11 @@ TEST(WebTransport, ServerConnectionTermination)
         "}; test();"
         "</script>", echoServer.port()];
     [webView loadHTMLString:html baseURL:[NSURL URLWithString:@"https://webkit.org/"]];
-    EXPECT_WK_STREQ([webView _test_waitForAlert], canLoadnw_webtransport_metadata_get_session_closed() ? "successfully read closeInfo (0, )" : "caught WebTransportError");
+    EXPECT_WK_STREQ([webView _test_waitForAlert], "successfully read closeInfo (0, )");
 }
 
 TEST(WebTransport, BackForwardCache)
 {
-    if (!WebTransportServer::isAvailable())
-        return;
-
     bool serverConnectionTerminatedByClient { false };
     WebTransportServer echoServer([&](ConnectionGroup group) -> ConnectionTask {
         auto datagramConnection = group.createWebTransportConnection(ConnectionGroup::ConnectionType::Datagram);
@@ -996,11 +936,6 @@ TEST(WebTransport, BackForwardCache)
 
 TEST(WebTransport, ServerDrain)
 {
-    if (!WebTransportServer::isAvailable())
-        return;
-    if (!canLoadnw_webtransport_metadata_set_local_draining())
-        return;
-
     WebTransportServer echoServer([](ConnectionGroup group) -> ConnectionTask {
         auto connection = co_await group.receiveIncomingConnection();
         auto request = co_await connection.awaitableReceiveBytes();
@@ -1035,11 +970,6 @@ TEST(WebTransport, ServerDrain)
 // FIXME: Re-enable this test once rdar://157795985 is widely available.
 TEST(WebTransport, DISABLED_ClientStreamAborts)
 {
-    if (!WebTransportServer::isAvailable())
-        return;
-    if (!canLoadnw_webtransport_metadata_set_remote_receive_error_handler() || !canLoadnw_webtransport_metadata_set_remote_send_error_handler())
-        return;
-
     bool receivedReadError = false;
     bool receivedWriteError = false;
     uint64_t readErrorCode = 0;
@@ -1097,11 +1027,6 @@ TEST(WebTransport, DISABLED_ClientStreamAborts)
 // FIXME: Re-enable this test once rdar://157795985 is widely available.
 TEST(WebTransport, DISABLED_ServerStreamAborts)
 {
-    if (!WebTransportServer::isAvailable())
-        return;
-    if (!canLoadnw_connection_abort_reads() || !canLoadnw_connection_abort_writes())
-        return;
-
     WebTransportServer server([](ConnectionGroup group) -> ConnectionTask {
         auto stream = group.createWebTransportConnection(ConnectionGroup::ConnectionType::Bidirectional);
         co_await stream.awaitableSend(@"abc", false);
@@ -1153,6 +1078,79 @@ TEST(WebTransport, DISABLED_ServerStreamAborts)
     EXPECT_WK_STREQ([webView _test_waitForAlert], "received abc, read error: 789, write error: 456");
 }
 
+TEST(WebTransport, ExportKeyingMaterial)
+{
+    auto runTest = [] (auto protocol) {
+        constexpr auto label = "EXPORTER-webtransport"_s;
+        constexpr auto context = "context"_s;
+        constexpr uint32_t keyingMaterialLength = 32;
+
+        WebTransportServer server([&](ConnectionGroup group) -> ConnectionTask {
+            auto connection = co_await group.receiveIncomingConnection();
+            Vector<uint8_t> clientKeyingMaterial;
+            while (clientKeyingMaterial.size() < keyingMaterialLength)
+                clientKeyingMaterial.appendVector(co_await connection.awaitableReceiveBytes());
+            auto serverKeyingMaterial = group.exportKeyingMaterial(label.span8(), context.span8(), keyingMaterialLength);
+            EXPECT_EQ(serverKeyingMaterial.size(), keyingMaterialLength);
+            co_await connection.awaitableSend(clientKeyingMaterial == serverKeyingMaterial ? "matches"_str : "differs"_str);
+        }, nullptr, protocol);
+
+        RetainPtr configuration = adoptNS([WKWebViewConfiguration new]);
+        enableWebTransport(configuration.get());
+        RetainPtr webView = adoptNS([[WKWebView alloc] initWithFrame:CGRectZero configuration:configuration.get()]);
+        RetainPtr delegate = adoptNS([TestNavigationDelegate new]);
+        [delegate allowAnyTLSCertificate];
+        [webView setNavigationDelegate:delegate.get()];
+
+        NSString *html = [NSString stringWithFormat:@""
+            "<script>"
+            "function equal(a, b) { return a.length === b.length && a.every((v, i) => v === b[i]); }"
+            "async function test() {"
+            "  try {"
+            "    let t = new WebTransport('https://127.0.0.1:%d/');"
+            "    await t.ready;"
+            "    let reliability = t.reliability;"
+            "    let encoder = new TextEncoder();"
+            "    let label = encoder.encode('%s');"
+            "    let context = encoder.encode('%s');"
+            "    let keyingMaterial = await t.exportKeyingMaterial(label, context, %u);"
+            "    let otherLabel = await t.exportKeyingMaterial(encoder.encode('EXPORTER-other'), context, %u);"
+            "    let s = await t.createBidirectionalStream();"
+            "    let w = s.writable.getWriter();"
+            "    await w.write(keyingMaterial);"
+            "    let r = s.readable.getReader();"
+            "    const { value, done } = await r.read();"
+            "    await r.cancel();"
+            "    t.close();"
+            "    alert('reliability ' + reliability"
+            "        + ', length ' + keyingMaterial.byteLength"
+            "        + ', label changes material ' + !equal(keyingMaterial, otherLabel)"
+            "        + ', server ' + new TextDecoder().decode(value)"
+            "    );"
+            "  } catch (e) { alert('caught ' + e); }"
+            "}; test();"
+            "</script>",
+            server.port(),
+            label.characters(),
+            context.characters(),
+            keyingMaterialLength,
+            keyingMaterialLength];
+        [webView loadHTMLString:html baseURL:[NSURL URLWithString:@"https://webkit.org/"]];
+        const char* expected = protocol == WebTransportServer::Protocol::H2 ?
+        "reliability reliable-only"
+        ", length 32"
+        ", label changes material true"
+        ", server matches" :
+        "reliability supports-unreliable"
+        ", length 32"
+        ", label changes material true"
+        ", server matches";
+        EXPECT_WK_STREQ([webView _test_waitForAlert], expected);
+    };
+    runTest(WebTransportServer::Protocol::H2);
+    runTest(WebTransportServer::Protocol::H3);
+}
+
 } // namespace TestWebKitAPI
 
-#endif // PLATFORM(COCOA)
+#endif // HAVE(WEBTRANSPORT)

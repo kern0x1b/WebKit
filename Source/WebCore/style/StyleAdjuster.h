@@ -53,6 +53,7 @@ public:
     static void adjustFromBuilder(Style::ComputedStyle&);
     void adjust(Style::ComputedStyle&) const;
     void adjustAnimatedStyle(Style::ComputedStyle&, OptionSet<AnimationImpact>) const;
+    void adjustUsedUserSelect(Style::ComputedStyle&) const;
 
     static void adjustVisibilityForPseudoElement(Style::ComputedStyle&, const Element& host);
     static void NODELETE adjustFirstLetterStyle(Style::ComputedStyle&);
@@ -63,7 +64,6 @@ public:
     static void propagateToDocumentElementAndInitialContainingBlock(Update&, const Document&);
     static std::unique_ptr<Style::ComputedStyle> restoreUsedDocumentElementStyleToComputed(const Style::ComputedStyle&);
 
-#if ENABLE(TEXT_AUTOSIZING)
     struct AdjustmentForTextAutosizing {
         std::optional<float> newFontSize;
         std::optional<float> newLineHeight;
@@ -73,11 +73,14 @@ public:
     static AdjustmentForTextAutosizing adjustmentForTextAutosizing(const Style::ComputedStyle&, const Element&);
     static bool adjustForTextAutosizing(Style::ComputedStyle&, AdjustmentForTextAutosizing);
     static bool adjustForTextAutosizing(Style::ComputedStyle&, const Element&);
-#endif
 
 private:
     void NODELETE adjustDisplayContentsStyle(Style::ComputedStyle&) const;
     void adjustForSiteSpecificQuirks(Style::ComputedStyle&) const;
+
+#if ENABLE(AX_CUSTOM_COLOR_MODE)
+    void adjustForAXCustomColorMode(Style::ComputedStyle&) const;
+#endif
 
     void adjustThemeStyle(Style::ComputedStyle&, const Style::ComputedStyle& parentStyle) const;
 

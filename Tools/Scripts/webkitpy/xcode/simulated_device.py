@@ -24,6 +24,7 @@ import atexit
 import json
 import logging
 import os
+import plistlib
 import re
 import time
 
@@ -35,6 +36,7 @@ from webkitpy.common.system.systemhost import SystemHost
 from webkitpy.port.config import apple_additions
 from webkitpy.port.device import Device
 from webkitpy.xcode.device_type import DeviceType
+from webkitpy.xcode.simulator_daemons import disabled_launchd_jobs
 
 try:
     from plistlib import load as readPlist
@@ -70,8 +72,8 @@ class SimulatedDeviceManager(object):
 
     SIMULATOR_BOOT_TIMEOUT = 600
 
-    # FIXME: Switch this back to 6GB (or maybe lower?) once webkit.org/b/217392 is resolved.
-    MEMORY_ESTIMATE_PER_SIMULATOR_INSTANCE = 8 * (1024 ** 3)  # 8GB a simulator.
+    MEMORY_ESTIMATE_PER_SIMULATOR_INSTANCE = 2 * (1024 ** 3)  # 2GB a simulator.
+    CPU_ESTIMATE_PER_SIMULATOR_INSTANCE = 1
     PROCESS_COUNT_ESTIMATE_PER_SIMULATOR_INSTANCE = 125
 
     # Testing on iMac Pros has indicated that more than 12 simulators, even if we seem to have enough resources for them,
@@ -80,9 +82,15 @@ class SimulatedDeviceManager(object):
 
     xcrun = '/usr/bin/xcrun'
     simulator_device_path = '~/Library/Developer/CoreSimulator/Devices'
-    simulator_bundle_id = 'com.apple.iphonesimulator'
+
+    SIMULATOR_UI_APPS = (
+        ('../Applications/DeviceHub.app', [], 'DeviceHub'),                              # Xcode 27 and later
+        ('Applications/Simulator.app', ['-PasteboardAutomaticSync', '0'], 'Simulator'),  # Xcode 26 and earlier
+    )
+
+    launchd_state_path = '/private/var/tmp/com.apple.CoreSimulator.SimDevice.{}'
     _device_identifier_to_name = {}
-    _managing_simulator_app = False
+    _managed_simulator_ui_process = None
     _last_updated_state = 0
 
     @staticmethod
@@ -373,11 +381,44 @@ class SimulatedDeviceManager(object):
             state = device.platform_device.is_usable(force_update=True)
 
     @staticmethod
+    def _configure_launchd_before_booting(device, host):
+        """Puts the device's launchd configuration in place before the simulator starts.
+
+        launchd_sim reads its configuration as it starts, so what is written here applies to the boot itself rather
+        than having to be applied to a running device afterwards. The directory is named after the UDID, which is
+        known before the device boots.
+
+        On a key this configuration sets, its value wins; other pre-existing keys the runtime shipped are preserved."""
+        configuration = getattr(device.platform_device, 'launchd_configuration', None)
+        if not configuration:
+            return
+
+        directory = SimulatedDeviceManager.launchd_state_path.format(device.udid)
+        for name, entries in configuration.items():
+            path = host.filesystem.join(directory, name)
+            contents = {}
+            if host.filesystem.exists(path):
+                try:
+                    contents = plistlib.loads(host.filesystem.read_binary_file(path))
+                except Exception as error:
+                    _log.warning(u'Could not read {}, replacing it: {}'.format(path, error))
+            contents.update(entries)
+            try:
+                host.filesystem.maybe_make_directory(directory)
+                host.filesystem.write_binary_file(path, plistlib.dumps(contents))
+                _log.debug(u'Wrote {} for {} before booting'.format(name, device.udid))
+            except Exception as error:
+                # Not fatal: the device still boots, just without this configuration.
+                _log.warning(u'Could not write {} for {} before booting: {}'.format(name, device.udid, error))
+
+    @staticmethod
     def _boot_device(device, host=None):
         host = host or SystemHost.get_default()
 
         # FIXME: remove this workaround after rdar://129789675 has been resolved.
         host.executive.run_command(['sh', '-c', "mkdir -m 700 -p " + "~/Library/Developer/CoreSimulator/Devices/" + device.udid + "/data/private/var/db"])
+
+        SimulatedDeviceManager._configure_launchd_before_booting(device, host)
 
         _log.debug(u"Booting device '{}'".format(device.udid))
         device.platform_device.booted_by_script = True
@@ -421,6 +462,47 @@ class SimulatedDeviceManager(object):
                 continue
             requests.remove(request)
         return requests
+
+    @classmethod
+    def _find_simulator_ui_app(cls, host):
+        """Locates the application belonging to the active Xcode which can display booted simulators.
+
+        Returns a (path, launch arguments, process name) tuple, or None if the active Xcode ships no such
+        application or the active developer directory cannot be determined."""
+        try:
+            developer_dir = host.executive.run_command(['xcode-select', '--print-path']).rstrip()
+        except (OSError, ScriptError) as error:
+            _log.warning(u'Could not determine the active developer directory, continuing without a simulator UI: {}'.format(error))
+            return None
+
+        for relative_path, arguments, process_name in cls.SIMULATOR_UI_APPS:
+            path = host.filesystem.normpath(host.filesystem.join(developer_dir, relative_path))
+            if host.filesystem.isdir(path):
+                return path, arguments, process_name
+
+        _log.warning(u'No simulator UI application found in {}, continuing without one'.format(developer_dir))
+        return None
+
+    @classmethod
+    def _launch_simulator_ui(cls, host):
+        found = cls._find_simulator_ui_app(host)
+        if not found:
+            return
+        path, arguments, process_name = found
+
+        if host.executive.run_command(['killall', '-0', process_name], return_exit_code=True) == 0:
+            _log.debug(u'{} is already running'.format(process_name))
+            return
+
+        command = ['open', '-g', '-a', path]
+        if arguments:
+            command += ['--args'] + arguments
+        if host.executive.run_command(command, return_exit_code=True):
+            _log.warning(u'Failed to launch {}, continuing without a simulator UI'.format(path))
+            return
+
+        _log.debug(u'Launched {}'.format(path))
+        SimulatedDeviceManager._managed_simulator_ui_process = process_name
 
     @classmethod
     def initialize_devices(cls, requests, host=None, name_base='Managed', simulator_ui=True, timeout=SIMULATOR_BOOT_TIMEOUT, keep_alive=False, udids=None, **kwargs):
@@ -485,8 +567,8 @@ class SimulatedDeviceManager(object):
 
             cls._boot_device(device, host)
 
-        if simulator_ui and host.executive.run_command(['killall', '-0', 'Simulator.app'], return_exit_code=True) != 0:
-            SimulatedDeviceManager._managing_simulator_app = not host.executive.run_command(['open', '-g', '-b', SimulatedDeviceManager.simulator_bundle_id, '--args', '-PasteboardAutomaticSync', '0'], return_exit_code=True)
+        if simulator_ui:
+            cls._launch_simulator_ui(host)
 
         deadline = time.time() + timeout
         for device in SimulatedDeviceManager.INITIALIZED_DEVICES:
@@ -510,7 +592,7 @@ class SimulatedDeviceManager(object):
             return 0
 
         max_supported_simulators_for_hardware = min(
-            host.executive.cpu_count() // 2,
+            host.executive.cpu_count() // SimulatedDeviceManager.CPU_ESTIMATE_PER_SIMULATOR_INSTANCE,
             host.platform.total_bytes_memory() // SimulatedDeviceManager.MEMORY_ESTIMATE_PER_SIMULATOR_INSTANCE,
             SimulatedDeviceManager.MAX_NUMBER_OF_SIMULATORS,
         )
@@ -528,14 +610,18 @@ class SimulatedDeviceManager(object):
     @staticmethod
     def tear_down(host=None, timeout=SIMULATOR_BOOT_TIMEOUT):
         host = host or SystemHost.get_default()
-        if SimulatedDeviceManager._managing_simulator_app:
-            host.executive.run_command(['killall', '-9', 'Simulator.app'], return_exit_code=True)
-            SimulatedDeviceManager._managing_simulator_app = False
+        if SimulatedDeviceManager._managed_simulator_ui_process:
+            host.executive.run_command(['killall', '-9', SimulatedDeviceManager._managed_simulator_ui_process], return_exit_code=True)
+            SimulatedDeviceManager._managed_simulator_ui_process = None
 
         if SimulatedDeviceManager.INITIALIZED_DEVICES is None:
             return
 
         deadline = time.time() + timeout
+        launchd_state_directories = [
+            SimulatedDeviceManager.launchd_state_path.format(device.udid)
+            for device in SimulatedDeviceManager.INITIALIZED_DEVICES if device
+        ]
         while SimulatedDeviceManager.INITIALIZED_DEVICES:
             device = SimulatedDeviceManager.INITIALIZED_DEVICES[0]
             if device is None:
@@ -544,6 +630,9 @@ class SimulatedDeviceManager(object):
             device.platform_device._tear_down(deadline - time.time())
 
         SimulatedDeviceManager.INITIALIZED_DEVICES = None
+
+        for directory in launchd_state_directories:
+            host.filesystem.rmtree(directory)
 
         # If we were managing the simulator, there are some cache files we need to remove
         for directory in host.filesystem.glob('/tmp/com.apple.CoreSimulator.SimDevice.*'):
@@ -589,12 +678,17 @@ class SimulatedDevice(object):
         self.filesystem = host.filesystem
         self.platform = host.platform
 
-        self.environment_extras = [
-            [SimulatedDeviceManager.xcrun, 'simctl', 'spawn', self.udid, 'launchctl', 'unload', '-w', f'{runtime_root}/System/Library/LaunchDaemons/com.apple.chronod.plist'],  # FIXME: rdar://129075664
-        ]
+        self.launchd_configuration = {
+            'disabled.plist': disabled_launchd_jobs(),
+        }
+
+        self.environment_extras = []
 
         if apple_additions():
             self.environment_extras.extend(apple_additions().environment_extras(udid))
+            additional = getattr(apple_additions(), 'launchd_configuration', lambda: {})() or {}
+            for plist_name, entries in additional.items():
+                self.launchd_configuration.setdefault(plist_name, {}).update(entries)
 
         # Determine tear down behavior
         self.booted_by_script = False

@@ -24,6 +24,7 @@ import argparse
 import os
 import re
 import sys
+import time
 
 from .command import Command
 from .commit import Commit
@@ -70,6 +71,13 @@ class PullRequest(Command):
         parser.add_argument(
             '--defaults', '--no-defaults', action=arguments.NoAction, default=None,
             help='Do not prompt the user for defaults, always use (or do not use) them',
+        )
+        parser.add_argument(
+            '--reopen-closed', '--no-reopen-closed',
+            dest='reopen_closed', default=None,
+            help='Re-use and re-open (or never re-use) an existing closed pull-request associated with the current branch. '
+                 'Without this argument, non-interactive runs always create a new pull-request.',
+            action=arguments.NoAction,
         )
         parser.add_argument(
             '--overwrite', '--amend', action='store_const', const='overwrite',
@@ -238,7 +246,7 @@ class PullRequest(Command):
         return True
 
     @classmethod
-    def pull_request_branch_point(cls, repository, args, **kwargs):
+    def pull_request_branch_point(cls, repository, args, name_prefix=None, **kwargs):
         if args.redact and len(repository.source_remotes()) <= 1:
             sys.stderr.write('No secure remotes found in the current checkout\n')
             return None
@@ -294,6 +302,7 @@ class PullRequest(Command):
                 why="'{}' is not a pull request branch".format(repository.branch),
                 redact=source_remote != repository.default_remote,
                 target_remote='fork' if source_remote == repository.default_remote else '{}-fork'.format(source_remote),
+                name_prefix=name_prefix,
                 **kwargs
             ):
                 sys.stderr.write("Abandoning pushing pull-request because '{}' could not be created\n".format(args.issue))
@@ -312,7 +321,7 @@ class PullRequest(Command):
             if not issue:
                 sys.stderr.write(error)
                 return None
-            if not repository.branch.endswith('/{}'.format(issue.id)) and not repository.branch.endswith('/{}'.format(Branch.to_branch_name(issue.title))):
+            if not Branch.branch_matches_issue(repository, repository.branch, issue):
                 sys.stderr.write(error)
                 return None
 
@@ -327,14 +336,10 @@ class PullRequest(Command):
                 if result:
                     return None
 
-                bug_urls = getattr(args, '_bug_urls', None) or ''
-                if isinstance(bug_urls, (list, tuple)):
-                    bug_urls = '\n'.join(bug_urls)
-                title = getattr(args, '_title', None) or ''
                 cls.write_branch_variables(
                     repository, repository.branch,
-                    title=title,
-                    bug=bug_urls,
+                    title=getattr(args, '_title', None) or '',
+                    bug=getattr(args, '_bug_urls', None) or [],
                 )
 
         if not repository.config().get('remote.{}.url'.format(source_remote)):
@@ -364,12 +369,32 @@ class PullRequest(Command):
             # GitHub's search apparently uses substring matching, so check for an exact match.
             if branch != pr.head:
                 continue
+            if existing_pr and existing_pr.opened and not pr.opened:
+                continue
             existing_pr = pr
             if not existing_pr.opened:
                 continue
             if user and existing_pr.author == user:
                 break
         return existing_pr
+
+    @classmethod
+    def will_reopen_closed_pull_request(cls, args, repository, existing_pr):
+        """Decide if a closed pull-request should be re-used (and re-opened) instead of creating a new one.
+
+        Non-interactive invocations never re-use a closed pull-request unless '--reopen-closed' is
+        explicitly passed, since a closed pull-request usually means the change it described is no
+        longer the change being pushed.
+        """
+        reopen_closed = getattr(args, 'reopen_closed', None)
+        if reopen_closed is not None:
+            return reopen_closed
+        if args.defaults is not None:
+            return False
+        return Terminal.choose(
+            "'{}' is already associated with '{}', which is closed.\nWould you like to create a new pull-request?".format(repository.branch, existing_pr),
+            default='No',
+        ) != 'Yes'
 
     @classmethod
     def pre_pr_checks(cls, repository, add_edits=True):
@@ -453,13 +478,18 @@ class PullRequest(Command):
     @classmethod
     def add_comment_to_issue(cls, issue, pr, commit_class=None):
         log.info('Checking issue assignee...')
+        assigned = False
         if issue.assignee != issue.tracker.me() and commit_class != 'Gardening':
             issue.assign(issue.tracker.me())
+            assigned = True
             print('Assigning associated issue to {}'.format(issue.tracker.me()))
         log.info('Checking for pull request link in associated issue...')
         pr_label = 'Test gardening pull request' if commit_class == 'Gardening' else 'Pull request'
         if pr.url and not any([pr.url in comment.content for comment in issue.comments]):
             if issue.opened:
+                # Wait until the next second so Bugzilla sends a notification for the PR opening comment
+                if assigned:
+                    time.sleep(1.1)
                 issue.add_comment('{}: {}'.format(pr_label, pr.url))
             elif commit_class != 'Gardening':
                 issue.open(why='Re-opening for {} {}'.format(pr_label.lower(), pr.url))
@@ -500,8 +530,10 @@ class PullRequest(Command):
             for issue in commit.issues
         ]
 
-        unreviewed_match = re.compile(r'(Unreviewed|Versioning.)', re.IGNORECASE)
-        bad_commits = [c for c in commits if c.message and unreviewed_match.search(c.message) and 'Reviewed by' in c.message]
+        unreviewed = re.compile(r'(Unreviewed|Versioning.)', re.IGNORECASE)
+        reviewed = re.compile(r'^Reviewed by .+', re.IGNORECASE | re.MULTILINE)
+        bad_commits = [c for c in commits if c.message and unreviewed.search(c.message) and reviewed.search(c.message)]
+
         if bad_commits:
             if len(bad_commits) > 1:
                 sys.stderr.write("Multiple commits are marked 'Unreviewed' or 'Versioning' but contain a 'Reviewed by' line, please fix before posting\n")
@@ -618,11 +650,7 @@ class PullRequest(Command):
             log.info("Checking if PR already exists...")
             existing_pr = cls.find_existing_pull_request(repository, remote_repo)
             log.info("PR #{} found.".format(existing_pr.number) if existing_pr else "PR not found.")
-            if existing_pr and not existing_pr.opened and not args.defaults and (
-                args.defaults is False or Terminal.choose(
-                    "'{}' is already associated with '{}', which is closed.\nWould you like to create a new pull-request?".format(repository.branch, existing_pr),
-                    default='No',
-            ) == 'Yes'):
+            if existing_pr and not existing_pr.opened and not cls.will_reopen_closed_pull_request(args, repository, existing_pr):
                 existing_pr = None
 
             if existing_pr and user and existing_pr.author != user and (args.defaults or Terminal.choose(

@@ -58,7 +58,6 @@ accessibility/AccessibilityRenderObject.cpp
 animation/BlendingKeyframes.cpp
 animation/KeyframeEffect.cpp
 animation/StyleOriginatedAnimation.cpp
-animation/ViewTimeline.cpp
 animation/WebAnimation.cpp
 bindings/js/DOMPromiseProxy.h
 bindings/js/JSAudioBufferSourceNodeCustom.cpp
@@ -117,7 +116,6 @@ css/FontFaceSet.cpp
 css/SelectorCheckerTestFunctions.h
 css/ShorthandSerializer.cpp
 css/StyleAttributeMutationScope.h
-css/StyleProperties.h
 css/StyleRuleImport.h
 css/StyleSheetContents.cpp
 css/typedom/numeric/CSSMathValue.h
@@ -192,7 +190,6 @@ html/canvas/PlaceholderRenderingContext.cpp
 inspector/DOMEditor.cpp
 inspector/InspectorAuditAccessibilityObject.cpp
 inspector/InspectorCanvas.cpp
-inspector/InspectorCanvas.h
 inspector/InspectorCanvasCallTracer.cpp
 inspector/InspectorOverlay.cpp
 inspector/InspectorResourceUtilities.cpp
@@ -204,20 +201,14 @@ inspector/agents/InspectorCPUProfilerAgent.cpp
 inspector/agents/InspectorCSSAgent.cpp
 inspector/agents/InspectorCanvasAgent.cpp
 inspector/agents/InspectorDOMAgent.cpp
-inspector/agents/InspectorDOMDebuggerAgent.cpp
 inspector/agents/InspectorDOMStorageAgent.cpp
-inspector/agents/InspectorLayerTreeAgent.cpp
 inspector/agents/InspectorMemoryAgent.cpp
 inspector/agents/InspectorNetworkAgent.cpp
 inspector/agents/InspectorPageAgent.cpp
-inspector/agents/InspectorTimelineAgent.cpp
-inspector/agents/InspectorWorkerAgent.cpp
 inspector/agents/page/PageConsoleAgent.cpp
-inspector/agents/page/PageDOMDebuggerAgent.cpp
 inspector/agents/page/PageNetworkAgent.cpp
 inspector/agents/page/PageRuntimeAgent.cpp
 inspector/agents/worker/ServiceWorkerAgent.cpp
-inspector/agents/worker/WorkerRuntimeAgent.cpp
 loader/ApplicationManifestLoader.cpp
 loader/DocumentLoader.cpp
 loader/FrameLoader.cpp
@@ -272,6 +263,7 @@ platform/graphics/DisplayRefreshMonitorManager.h
 platform/graphics/ImageBackingStore.h
 [ iOS ] platform/graphics/avfoundation/SampleBufferDisplayLayer.h
 platform/graphics/avfoundation/objc/MediaPlayerPrivateMediaStreamAVFObjC.mm
+platform/graphics/ca/FrameProcessIndicators.cpp
 platform/graphics/ca/GraphicsLayerCA.cpp
 platform/graphics/ca/TileGrid.cpp
 [ Mac ] platform/graphics/cocoa/ImageAdapterCocoa.mm
@@ -302,6 +294,7 @@ platform/mediastream/RealtimeOutgoingAudioSource.h
 platform/mediastream/RealtimeOutgoingVideoSource.cpp
 platform/mediastream/cocoa/RealtimeOutgoingAudioSourceCocoa.cpp
 platform/mock/MockRealtimeVideoSource.cpp
+platform/network/cf/FormDataStreamCFNet.mm
 platform/network/cocoa/ResourceHandleCocoa.mm
 platform/network/cocoa/WebCoreResourceHandleAsOperationQueueDelegate.mm
 [ macOS ] rendering/AttachmentLayout.mm
@@ -315,7 +308,6 @@ rendering/MarkedText.cpp
 rendering/RenderBlock.cpp
 rendering/RenderBox.cpp
 rendering/RenderElement.cpp
-rendering/RenderEmbeddedObject.cpp
 rendering/RenderFragmentContainer.cpp
 rendering/RenderFrameSet.cpp
 rendering/RenderGeometryMap.cpp
@@ -380,6 +372,7 @@ style/computed/StyleComputedStyleBase.cpp
 style/values/filter-effects/StyleFilterReference.cpp
 style/values/images/kinds/StyleCachedImage.cpp
 style/values/images/kinds/StyleCursorImage.cpp
+style/values/primitives/StyleLengthResolution.cpp
 style/values/primitives/StylePrimitiveData.cpp
 style/values/transforms/StyleRotate.h
 style/values/transforms/StyleScale.h
@@ -400,7 +393,6 @@ svg/SVGPathByteStream.h
 svg/SVGPathElement.cpp
 svg/SVGPatternElement.cpp
 svg/SVGPolyElement.cpp
-svg/SVGRadialGradientElement.cpp
 svg/SVGSVGElement.cpp
 svg/SVGTRefElement.cpp
 svg/SVGTextPositioningElement.cpp
@@ -425,6 +417,7 @@ testing/LegacyMockCDM.cpp
 [ Mac ] testing/MockMediaSessionCoordinator.cpp
 testing/ServiceWorkerInternals.cpp
 testing/js/WebCoreTestSupport.cpp
+workers/service/context/ServiceWorkerThread.cpp
 worklets/PaintWorkletGlobalScope.cpp
 xml/XSLImportRule.cpp
 xml/XSLTProcessorLibxslt.cpp

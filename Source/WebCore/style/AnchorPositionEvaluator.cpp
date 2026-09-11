@@ -42,6 +42,7 @@
 #include "RenderInline.h"
 #include "RenderLayer.h"
 #include "RenderLayerCompositor.h"
+#include "RenderLineBreak.h"
 #include "RenderObjectInlines.h"
 #include "RenderView.h"
 #include "StyleBuilderState.h"
@@ -475,8 +476,13 @@ static bool NODELETE anchorSideMatchesInsetProperty(CSSValueID anchorSideID, Box
 static LayoutRect boxBoundingBoxInContainer(const RenderBoxModelObject& box, const RenderLayerModelObject& container)
 {
     bool wasFixed = false;
+    auto localRect = [&]() -> LayoutRect {
+        if (CheckedPtr inlineBox = dynamicDowncast<RenderInline>(&box))
+            return inlineBox->linesBoundingBox();
+        return box.borderBoundingBox();
+    }();
     // FIXME: figure out if OverscrollClamp is still needed.
-    auto boxQuadInContainer = box.localToContainerQuad(FloatQuad { box.borderBoundingBox() }, &container, { MapCoordinatesMode::UseTransforms, MapCoordinatesMode::ClampOverscroll }, &wasFixed);
+    auto boxQuadInContainer = box.localToContainerQuad(FloatQuad { FloatRect { localRect } }, &container, { MapCoordinatesMode::UseTransforms, MapCoordinatesMode::ClampOverscroll }, &wasFixed);
     LayoutRect boundingBox { boxQuadInContainer.boundingBox() };
 
     if (wasFixed) {
@@ -484,11 +490,6 @@ static LayoutRect boxBoundingBoxInContainer(const RenderBoxModelObject& box, con
         boundingBox.moveBy(-box.frame().view()->scrollPositionRespectingCustomFixedPosition());
     }
 
-    if (CheckedPtr descendantInline = dynamicDowncast<RenderInline>(&box)) {
-        // RenderInline objects do not automatically account for their offset above,
-        // so we incorporate this offset here.
-        boundingBox.moveBy(descendantInline->linesBoundingBox().location());
-    }
     if (box.containingBlock() == container.containingBlock()) {
         // Account for 'position: relative' inline containing blocks by shifting back down into them.
         if (CheckedPtr ancestorInline = dynamicDowncast<RenderInline>(&container))
@@ -783,7 +784,7 @@ static LayoutUnit computeInsetValue(CSSPropertyID insetPropertyID, CheckedRef<co
 
 CheckedPtr<RenderBoxModelObject> AnchorPositionEvaluator::findAnchorForAnchorFunctionAndAttemptResolution(BuilderState& builderState, std::optional<ScopedName> anchorNameArgument)
 {
-    auto& style = builderState.renderStyle();
+    auto& style = builderState.style();
     style.setUsesAnchorFunctions();
 
     if (!builderState.anchorPositionedStates())
@@ -813,12 +814,14 @@ CheckedPtr<RenderBoxModelObject> AnchorPositionEvaluator::findAnchorForAnchorFun
     }).iterator->value.get();
 
     auto scopedAnchorName = [&] {
-        if (anchorNameArgument)
-            return *anchorNameArgument;
-        return defaultAnchorName(style);
-    };
+        if (!anchorNameArgument)
+            return defaultAnchorName(style);
+        return anchorNameArgument;
+    }();
+    if (!scopedAnchorName)
+        return { };
 
-    auto resolvedAnchorName = ResolvedScopedName::createFromScopedName(protect(styleable.element), scopedAnchorName());
+    auto resolvedAnchorName = ResolvedScopedName::createFromScopedName(protect(styleable.element), *scopedAnchorName);
 
     // Collect anchor names that this element refers to in anchor() or anchor-size()
     bool isNewAnchorName = anchorPositionedState.anchorNames.add(resolvedAnchorName).isNewEntry;
@@ -862,7 +865,7 @@ bool AnchorPositionEvaluator::propertyAllowsAnchorFunction(CSSPropertyID propert
 
 std::optional<double> AnchorPositionEvaluator::evaluate(BuilderState& builderState, std::optional<ScopedName> elementName, Side side)
 {
-    auto& style = builderState.renderStyle();
+    auto& style = builderState.style();
 
     auto propertyID = builderState.cssPropertyID();
     auto physicalAxis = mapInsetPropertyToPhysicalAxis(propertyID, style.writingMode());
@@ -986,7 +989,7 @@ bool AnchorPositionEvaluator::propertyAllowsAnchorSizeFunction(CSSPropertyID pro
 std::optional<double> AnchorPositionEvaluator::evaluateSize(BuilderState& builderState, std::optional<ScopedName> elementName, std::optional<AnchorSizeDimension> dimension)
 {
     auto propertyID = builderState.cssPropertyID();
-    const auto& style = builderState.renderStyle();
+    const auto& style = builderState.style();
 
     auto isValidAnchorSize = [&] {
         // It’s being used in a sizing property, an inset property, or a margin property...
@@ -1262,17 +1265,11 @@ static AnchorsForAnchorName collectAnchorsForAnchorName(const Document& document
     return anchorsForAnchorName;
 }
 
-static AnchorElements findAnchorsForAnchorPositionedElement(const Styleable& anchorPositioned, const Style::ComputedStyle& anchorPositionedStyle, const HashSet<ResolvedScopedName>& anchorNames, const AnchorsForAnchorName& anchorsForAnchorName)
+static AnchorElements findAnchorsForAnchorPositionedElement(const Styleable& anchorPositioned, const HashSet<ResolvedScopedName>& anchorNames, const AnchorsForAnchorName& anchorsForAnchorName)
 {
     AnchorElements anchorElements;
 
     for (auto& anchorName : anchorNames) {
-        auto isImplicitAnchorName = anchorName.name() == implicitAnchorElementName().name;
-        auto isDefaultAnchorNone = anchorPositionedStyle.positionAnchor().isNone()
-            || (anchorPositionedStyle.positionAnchor().isNormal() && anchorPositionedStyle.positionArea().isNone());
-        if (isImplicitAnchorName && isDefaultAnchorNone)
-            continue;
-
         auto anchor = findLastAcceptableAnchorWithName(anchorName, anchorPositioned, anchorsForAnchorName);
         anchorElements.add(anchorName, anchor);
     }
@@ -1301,7 +1298,7 @@ void AnchorPositionEvaluator::updateAnchorPositioningStatesAfterInterleavedLayou
         case AnchorPositionResolutionStage::FindAnchors: {
             if (renderer) {
                 // FIXME: Remove the redundant anchorElements member. The mappings are available in anchorPositionedToAnchorMap.
-                state->anchorElements = findAnchorsForAnchorPositionedElement(*anchorPositioned, renderer->style(), state->anchorNames, anchorsForAnchorName);
+                state->anchorElements = findAnchorsForAnchorPositionedElement(*anchorPositioned, state->anchorNames, anchorsForAnchorName);
                 if (isLayoutTimeAnchorPositioned(renderer->style()))
                     renderer->setNeedsLayout();
 
@@ -1413,12 +1410,14 @@ void AnchorPositionEvaluator::updateAnchorPositionedStateForDefaultAnchorAndPosi
     }).iterator->value.get();
 
     if (shouldResolveDefaultAnchor) {
-        // Always resolve the default anchor. Even if nothing is anchored to it we need it to compute the scroll compensation.
-        auto resolvedDefaultAnchor = ResolvedScopedName::createFromScopedName(element, defaultAnchorName(style));
-        if (state.anchorNames.add(resolvedDefaultAnchor).isNewEntry) {
-            // If anchor resolution has progressed past FindAnchors, and we pick up a new anchor name, set the
-            // stage back to FindAnchors. This restarts the resolution process to resolve newly added names.
-            state.stage = AnchorPositionResolutionStage::FindAnchors;
+        if (auto anchorName = defaultAnchorName(style)) {
+            // Always resolve the default anchor. Even if nothing is anchored to it we need it to compute the scroll compensation.
+            auto resolvedDefaultAnchor = ResolvedScopedName::createFromScopedName(element, *anchorName);
+            if (state.anchorNames.add(resolvedDefaultAnchor).isNewEntry) {
+                // If anchor resolution has progressed past FindAnchors, and we pick up a new anchor name, set the
+                // stage back to FindAnchors. This restarts the resolution process to resolve newly added names.
+                state.stage = AnchorPositionResolutionStage::FindAnchors;
+            }
         }
     }
 }
@@ -1688,7 +1687,12 @@ bool AnchorPositionEvaluator::isDefaultAnchorInvisibleOrClippedByInterveningBoxe
     auto localAnchorRect = [&] {
         if (anchorBox)
             return anchorBox->visualOverflowRect();
-        return downcast<RenderInline>(*defaultAnchor).linesVisualOverflowBoundingBox();
+        if (CheckedPtr inlineBox = dynamicDowncast<RenderInline>(*defaultAnchor))
+            return inlineBox->linesVisualOverflowBoundingBox();
+        if (CheckedPtr lineBreak = dynamicDowncast<RenderLineBreak>(*defaultAnchor))
+            return LayoutRect { lineBreak->linesBoundingBox() };
+        ASSERT_NOT_REACHED();
+        return LayoutRect { };
     }();
     auto* anchoredContainingBlock = anchoredBox.container();
 
@@ -1755,10 +1759,18 @@ bool AnchorPositionEvaluator::isImplicitAnchor(const Style::ComputedStyle& style
     return isImplicitAnchorForPseudoElement(PseudoElementType::Before) || isImplicitAnchorForPseudoElement(PseudoElementType::After);
 }
 
-ScopedName AnchorPositionEvaluator::defaultAnchorName(const Style::ComputedStyle& style)
+std::optional<ScopedName> AnchorPositionEvaluator::defaultAnchorName(const Style::ComputedStyle& style)
 {
-    if (auto name = style.positionAnchor().tryName())
+    const auto& positionAnchor = style.positionAnchor();
+
+    bool doesNotHaveDefaultAnchor = positionAnchor.isNone() || (positionAnchor.isNormal() && style.positionArea().isNone());
+    if (doesNotHaveDefaultAnchor)
+        return std::nullopt;
+
+    if (auto name = positionAnchor.tryName())
         return *name;
+
+    ASSERT(positionAnchor.isAuto() || (positionAnchor.isNormal() && !style.positionArea().isNone()));
     return implicitAnchorElementName();
 }
 
@@ -1780,10 +1792,14 @@ CheckedPtr<RenderBoxModelObject> AnchorPositionEvaluator::defaultAnchorForBox(co
     if (!anchors.allAnchorsPositioned)
         return nullptr;
 
-    auto anchorName = ResolvedScopedName::createFromScopedName(protect(styleable->element), defaultAnchorName(box.style()));
+    auto anchorName = defaultAnchorName(box.style());
+    if (!anchorName)
+        return nullptr;
+
+    auto resolvedAnchorName = ResolvedScopedName::createFromScopedName(protect(styleable->element), *anchorName);
 
     for (auto& anchor : anchors.anchors) {
-        if (anchorName == anchor.name)
+        if (resolvedAnchorName == anchor.name)
             return anchor.renderer.get();
     }
     return nullptr;

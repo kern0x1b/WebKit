@@ -114,7 +114,7 @@ void RenderSVGInlineText::styleDidChange(Style::Difference diff, const Style::Co
     updateScaledFont();
 
     bool newPreserves = style().whiteSpaceCollapse() == WhiteSpaceCollapse::Preserve;
-    bool oldPreserves = oldStyle ? oldStyle->whiteSpaceCollapse() == WhiteSpaceCollapse::Preserve : false;
+    bool oldPreserves = oldStyle && oldStyle->whiteSpaceCollapse() == WhiteSpaceCollapse::Preserve;
     if (oldPreserves && !newPreserves) {
         setText(applySVGWhitespaceRules(originalText(), false), true);
         return;
@@ -269,7 +269,7 @@ bool RenderSVGInlineText::computeNewScaledFontForStyle(const RenderObject& rende
     auto fontDescription = style.fontDescription();
 
     // FIXME: We need to better handle the case when we compute very small fonts below (below 1pt).
-    fontDescription.setComputedSize(Style::computedFontSizeFromSpecifiedSizeForSVGInlineText(fontDescription.specifiedSize(), fontDescription.isAbsoluteSize(), scalingFactor, protect(renderer.document())));
+    fontDescription.setUsedSize(Style::usedFontSizeFromComputedSizeForSVGInlineText(fontDescription.computedSize(), fontDescription.isAbsoluteSize(), scalingFactor, protect(renderer.document())));
 
     // SVG controls its own glyph orientation, so don't allow writing-mode
     // to affect it.

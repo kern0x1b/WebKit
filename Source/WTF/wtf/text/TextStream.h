@@ -41,7 +41,6 @@ namespace WTF {
 
 class Seconds;
 class MediaTime;
-class UUID;
 class URL;
 
 struct HexNumberBuffer;
@@ -87,6 +86,8 @@ public:
     WTF_EXPORT_PRIVATE TextStream& operator<<(const char*);
     WTF_EXPORT_PRIVATE TextStream& operator<<(const void*);
     WTF_EXPORT_PRIVATE TextStream& operator<<(const AtomString&);
+    // FIXME: This appends the bytes as Latin-1. It should take an encoding-aware CStringWithEncoding
+    // and decode accordingly, rather than silently reinterpreting a sliced UTF8CString.
     WTF_EXPORT_PRIVATE TextStream& operator<<(const CString&);
     WTF_EXPORT_PRIVATE TextStream& operator<<(const String&);
     WTF_EXPORT_PRIVATE TextStream& operator<<(ASCIILiteral);
@@ -407,8 +408,7 @@ TextStream& operator<<(TextStream& ts, const std::pair<T, U>& pair)
 WTF_EXPORT_PRIVATE TextStream& operator<<(TextStream&, Seconds);
 WTF_EXPORT_PRIVATE TextStream& operator<<(TextStream&, ReducedResolutionSeconds);
 WTF_EXPORT_PRIVATE TextStream& operator<<(TextStream&, const MediaTime&);
-WTF_EXPORT_PRIVATE TextStream& operator<<(TextStream&, const ObjectIdentifierGenericBase<uint64_t>&);
-WTF_EXPORT_PRIVATE TextStream& operator<<(TextStream&, const ObjectIdentifierGenericBase<UUID>&);
+WTF_EXPORT_PRIVATE TextStream& operator<<(TextStream&, const ObjectIdentifierGenericBase&);
 WTF_EXPORT_PRIVATE TextStream& operator<<(TextStream&, const URL&);
 
 #if PLATFORM(COCOA)

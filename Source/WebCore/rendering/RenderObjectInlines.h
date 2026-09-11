@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2023 Apple Inc. All rights reserved.
+ * Copyright (C) 2023-2026 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -25,6 +25,7 @@
 #include <WebCore/InspectorInstrumentationPublic.h>
 #include <WebCore/LocalFrameInlines.h>
 #include <WebCore/LocalFrameView.h>
+#include <WebCore/LocalFrameViewInlines.h>
 #include <WebCore/RenderElement.h>
 #include <WebCore/RenderIFrame.h>
 #include <WebCore/RenderObject.h>
@@ -118,9 +119,6 @@ inline bool RenderObject::isNonReplacedAtomicInlineLevelBox() const
 inline auto RenderObject::visibleRectContextForRepaint() -> VisibleRectContext
 {
     return {
-        .hasPositionFixedDescendant = false,
-        .dirtyRectIsFlipped = false,
-        .descendantNeedsEnclosingIntRect = false,
         .options = {
             VisibleRectContext::Option::ApplyContainerClip,
             VisibleRectContext::Option::ApplyCompositedContainerScrolls
@@ -132,9 +130,6 @@ inline auto RenderObject::visibleRectContextForRepaint() -> VisibleRectContext
 inline auto RenderObject::visibleRectContextForSpatialNavigation() -> VisibleRectContext
 {
     return {
-        .hasPositionFixedDescendant = false,
-        .dirtyRectIsFlipped = false,
-        .descendantNeedsEnclosingIntRect = false,
         .options = {
             VisibleRectContext::Option::ApplyContainerClip,
             VisibleRectContext::Option::ApplyCompositedContainerScrolls,
@@ -147,9 +142,6 @@ inline auto RenderObject::visibleRectContextForSpatialNavigation() -> VisibleRec
 inline auto RenderObject::visibleRectContextForRenderTreeAsText() -> VisibleRectContext
 {
     return {
-        .hasPositionFixedDescendant = false,
-        .dirtyRectIsFlipped = false,
-        .descendantNeedsEnclosingIntRect = false,
         .options = {
             VisibleRectContext::Option::ApplyContainerClip,
             VisibleRectContext::Option::ApplyCompositedContainerScrolls,

@@ -38,8 +38,10 @@
 #include "ContextMenuController.h"
 #include "ContextMenuItem.h"
 #include "ContextMenuProvider.h"
+#include "DOMRect.h"
 #include "DocumentPage.h"
 #include "DocumentQuirks.h"
+#include "DocumentView.h"
 #include "Event.h"
 #include "EventListener.h"
 #include "EventNames.h"
@@ -51,6 +53,8 @@
 #include "HTMLVideoElement.h"
 #include "JSValueInWrappedObjectInlines.h"
 #include "LocalDOMWindow.h"
+#include "LocalFrame.h"
+#include "LocalFrameView.h"
 #include "LocalizedStrings.h"
 #include "Logging.h"
 #include "MediaControlTextTrackContainerElement.h"
@@ -70,12 +74,16 @@
 #include "TextTrackList.h"
 #include "UserGestureIndicator.h"
 #include "VTTCue.h"
+#include "VideoTrack.h"
+#include "VideoTrackConfiguration.h"
+#include "VideoTrackList.h"
 #include "VoidCallback.h"
 #include <JavaScriptCore/JSCJSValueInlines.h>
 #include <wtf/Function.h>
 #include <wtf/JSONValues.h>
 #include <wtf/Scope.h>
 #include <wtf/UUID.h>
+#include <wtf/text/TextStream.h>
 
 namespace WebCore {
 
@@ -354,6 +362,48 @@ bool MediaControlsHost::isMediaControlsMacInlineSizeSpecsEnabled() const
 #endif
 }
 
+bool MediaControlsHost::spatialVideoRenderingEnabled() const
+{
+    return m_mediaElement->document().settings().spatialVideoRenderingEnabled();
+}
+
+static RefPtr<VideoTrackConfiguration> selectedVideoTrackConfiguration(HTMLMediaElement& mediaElement)
+{
+    RefPtr videoTracks = mediaElement.videoTracks();
+    if (!videoTracks)
+        return nullptr;
+    RefPtr selectedTrack = videoTracks->selectedItem();
+    if (!selectedTrack)
+        return nullptr;
+    return &selectedTrack->configuration();
+}
+
+String MediaControlsHost::spatialVideoProjectionKind() const
+{
+    RefPtr configuration = selectedVideoTrackConfiguration(protect(m_mediaElement));
+    if (!configuration)
+        return emptyString();
+
+    auto metadata = configuration->immersiveVideoMetadata();
+    if (!metadata)
+        return emptyString();
+
+    return convertEnumerationToString(metadata->kind);
+}
+
+std::optional<int32_t> MediaControlsHost::spatialVideoHorizontalFieldOfView() const
+{
+    RefPtr configuration = selectedVideoTrackConfiguration(protect(m_mediaElement));
+    if (!configuration)
+        return std::nullopt;
+
+    auto metadata = configuration->immersiveVideoMetadata();
+    if (!metadata)
+        return std::nullopt;
+
+    return metadata->horizontalFieldOfView;
+}
+
 bool MediaControlsHost::isAVExperienceControllerFullscreenEnabled() const
 {
 #if HAVE(AVEXPERIENCECONTROLLER)
@@ -373,7 +423,7 @@ String MediaControlsHost::externalDeviceDisplayName() const
     }
 
     String name = player->wirelessPlaybackTargetName();
-    LOG(Media, "MediaControlsHost::externalDeviceDisplayName - returning \"%s\"", name.utf8().data());
+    LOG_WITH_STREAM(Media, stream << "MediaControlsHost::externalDeviceDisplayName - returning \""_s << name << "\""_s);
     return name;
 #else
     return emptyString();
@@ -385,7 +435,7 @@ String MediaControlsHost::externalDeviceRouteName() const
 #if ENABLE(WIRELESS_PLAYBACK_TARGET)
     if (RefPtr player = m_mediaElement->player()) {
         String name = player->wirelessPlaybackRouteName();
-        LOG(Media, "MediaControlsHost::externalDeviceRouteName - returning \"%s\"", name.utf8().data());
+        LOG_WITH_STREAM(Media, stream << "MediaControlsHost::externalDeviceRouteName - returning \""_s << name << "\""_s);
         return name;
     }
 
@@ -556,6 +606,26 @@ enum class MediaControlsHost::PlaybackSpeed {
 enum class MediaControlsHost::PictureInPictureTag { IncludePictureInPicture };
 enum class MediaControlsHost::ShowMediaStatsTag { IncludeShowMediaStats };
 
+static FloatRect contextMenuAnchorRect(HTMLElement& target)
+{
+    auto bounds = FloatRect { target.boundsInRootViewSpace() };
+
+    RefPtr localFrame = target.document().frame();
+    if (!localFrame)
+        return bounds;
+
+    RefPtr localRootView = localFrame->rootFrame().view();
+    if (!localRootView)
+        return bounds;
+
+    return localRootView->convertToRootViewAcrossIsolatedFrames(bounds);
+}
+
+Ref<DOMRect> MediaControlsHost::mediaControlsContextMenuAnchorRectForBindings(HTMLElement& target)
+{
+    return DOMRect::create(contextMenuAnchorRect(target));
+}
+
 auto MediaControlsHost::mediaControlsContextMenuItems(String&& optionsJSONString) -> std::pair<Vector<MenuItem>, MenuDataMap>
 {
 #if USE(UICONTEXTMENU) || (ENABLE(CONTEXT_MENUS) && USE(ACCESSIBILITY_CONTEXT_MENUS))
@@ -644,16 +714,8 @@ auto MediaControlsHost::mediaControlsContextMenuItems(String&& optionsJSONString
                 // captions are "Off" which track would be chosen if
                 // captions are turned on.
                 RefPtr<TextTrack> bestTrackToEnable;
-                if (allTracksDisabled) {
-                    int bestScore = 0;
-                    for (auto& track : sortedTextTracks) {
-                        auto score = captionPreferences->textTrackSelectionScore(track, CaptionUserPreferences::CaptionDisplayMode::AlwaysOn);
-                        if (score <= bestScore)
-                            continue;
-                        bestTrackToEnable = track.ptr();
-                        bestScore = score;
-                    }
-                }
+                if (allTracksDisabled)
+                    bestTrackToEnable = captionPreferences->bestTextTrackToEnable(*textTracks);
 
                 Vector<MenuItem> subtitleMenuItems;
                 subtitleMenuItems.append(createMenuItem(TextTrack::captionMenuOnItemSingleton(), captionPreferences->displayNameForTrack(TextTrack::captionMenuOnItemSingleton()), !allTracksDisabled));
@@ -822,9 +884,11 @@ bool MediaControlsHost::showMediaControlsContextMenu(HTMLElement& target, String
             },
             [&] (Ref<TextTrack>& selectedTextTrack) {
                 protectedThis->savePreviouslySelectedTextTrackIfNecessary();
-                for (auto& track : idMap.values()) {
-                    if (auto* textTrack = std::get_if<Ref<TextTrack>>(&track))
-                        (*textTrack)->setMode(TextTrack::Mode::Disabled);
+                if (selectedTextTrack.ptr() != &TextTrack::captionMenuOnItemSingleton()) {
+                    for (auto& track : idMap.values()) {
+                        if (auto* textTrack = std::get_if<Ref<TextTrack>>(&track))
+                            (*textTrack)->setMode(TextTrack::Mode::Disabled);
+                    }
                 }
                 mediaElement->setSelectedTextTrack(selectedTextTrack.ptr());
             },
@@ -868,12 +932,11 @@ bool MediaControlsHost::showMediaControlsContextMenu(HTMLElement& target, String
 
     };
 
-    auto bounds = target.boundsInRootViewSpace();
 #if USE(UICONTEXTMENU)
-    page->chrome().client().showMediaControlsContextMenu(bounds, WTF::move(items), mediaElement.get(), WTF::move(handleItemSelected));
+    page->chrome().client().showMediaControlsContextMenu(contextMenuAnchorRect(target), WTF::move(items), mediaElement.get(), WTF::move(handleItemSelected));
 #elif ENABLE(CONTEXT_MENUS) && USE(ACCESSIBILITY_CONTEXT_MENUS)
     target.addEventListener(eventNames().contextmenuEvent, MediaControlsContextMenuEventListener::create(MediaControlsContextMenuProvider::create(mediaElement->identifier(), WTF::move(items), WTF::move(handleItemSelected))), { { /*capture */ true }, /* passive */ std::nullopt, /* once */ true, nullptr, false });
-    page->contextMenuController().showContextMenuAt(*protect(target.document().frame()), bounds.center());
+    page->contextMenuController().showContextMenuAt(*protect(target.document().frame()), target.boundsInRootViewSpace().center());
 #endif
 
     return true;

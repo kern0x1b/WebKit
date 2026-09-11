@@ -25,6 +25,8 @@ headers: "NetworkProcessCreationParameters.h" "AuxiliaryProcessCreationParameter
 [RValue] struct WebKit::NetworkProcessCreationParameters {
     WebKit::AuxiliaryProcessCreationParameters auxiliaryProcessParameters
 
+    WebKit::SecurityFlags securityFlags
+
     WebKit::CacheModel cacheModel
 
 #if PLATFORM(MAC) || PLATFORM(MACCATALYST)
@@ -47,7 +49,7 @@ headers: "NetworkProcessCreationParameters.h" "AuxiliaryProcessCreationParameter
 #if USE(SOUP)
     WebCore::HTTPCookieAcceptPolicy cookieAcceptPolicy
     Vector<String> languages
-    std::optional<MemoryPressureHandler::Configuration> memoryPressureHandlerConfiguration
+    std::optional<MemoryPressureHandlerConfiguration> memoryPressureHandlerConfiguration
 #endif
 
     Vector<String> urlSchemesRegisteredAsSecure
@@ -80,3 +82,4 @@ enum class WebKit::ContentAsStringIncludesChildFrames : bool
 enum class WebKit::CallDownloadDidStart : bool
 enum class WebKit::AllowOverwrite : bool
 enum class WebKit::UseDownloadPlaceholder : bool
+enum class WebKit::ShouldFreezeLayerTree : bool

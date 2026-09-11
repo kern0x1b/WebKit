@@ -43,12 +43,12 @@
 #include "BroadcastChannelRegistry.h"
 #include "CacheStorageProvider.h"
 #include "CachedImage.h"
+#include "CanvasRenderingContext.h"
 #include "CaptionDisplaySettingsClient.h"
 #include "Chrome.h"
 #include "ChromeClient.h"
 #include "CommonAtomStrings.h"
 #include "CommonVM.h"
-#include "ConstantPropertyMap.h"
 #include "ContainerNodeInlines.h"
 #include "ContextMenuClient.h"
 #include "ContextMenuController.h"
@@ -119,6 +119,7 @@
 #include "LayoutDisallowedScope.h"
 #include "LegacySchemeRegistry.h"
 #include "LoaderStrategy.h"
+#include "LocalDOMWindow.h"
 #include "LocalFrameLoaderClient.h"
 #include "LocalFrameViewInlines.h"
 #include "LogInitialization.h"
@@ -131,6 +132,7 @@
 #include "ModelPlayerProvider.h"
 #include "NavigationScheduler.h"
 #include "Navigator.h"
+#include "NavigatorAudioSession.h"
 #include "NavigatorGamepad.h"
 #include "NavigatorMediaSession.h"
 #include "OpportunisticTaskScheduler.h"
@@ -192,6 +194,7 @@
 #include "StringCallback.h"
 #include "StyleAdjuster.h"
 #include "StyleDocumentScope.h"
+#include "StyleEnvironmentVariables.h"
 #include "StyleResolver.h"
 #include "SubframeLoader.h"
 #include "SubresourceLoader.h"
@@ -365,7 +368,6 @@ static constexpr OptionSet<ActivityState> pageInitialActivityState()
 
 GCC_MAYBE_NO_INLINE static Ref<Frame> createMainFrame(Page& page, PageConfiguration::MainFrameCreationParameters&& clientCreator, RefPtr<Frame> mainFrameOpener, FrameIdentifier identifier, Ref<FrameTreeSyncData>&& frameTreeSyncData)
 {
-    page.relaxAdoptionRequirement();
     return switchOn(WTF::move(clientCreator), [&] (PageConfiguration::LocalMainFrameCreationParameters&& creationParameters) -> Ref<Frame> {
         return LocalFrame::createMainFrame(page, WTF::move(creationParameters.clientCreator), identifier, creationParameters.effectiveSandboxFlags, creationParameters.effectiveReferrerPolicy, mainFrameOpener.get(), WTF::move(frameTreeSyncData));
     }, [&] (CompletionHandler<UniqueRef<RemoteFrameClient>(RemoteFrame&)>&& remoteFrameClientCreator) -> Ref<Frame> {
@@ -554,6 +556,8 @@ Page::Page(PageConfiguration&& pageConfiguration)
     if (pageConfiguration.imageTranslationLanguageIdentifiers)
         protect(imageAnalysisQueue())->setTranslationLanguageIdentifiers(WTF::move(*pageConfiguration.imageTranslationLanguageIdentifiers));
 #endif
+
+    m_displayedTranslationLocaleIdentifier = WTF::move(pageConfiguration.displayedTranslationLocaleIdentifier);
 }
 
 Page::~Page()
@@ -651,7 +655,7 @@ void Page::destroyRenderTrees()
         if (!localFrame->document())
             continue;
         Ref document = *localFrame->document();
-        if (document->hasLivingRenderTree())
+        if (document->renderTreeState() == Document::RenderTreeState::Built)
             document->destroyRenderTree();
     }
 }
@@ -921,6 +925,21 @@ DOMAudioSessionType Page::audioSessionType() const
 {
     return m_topDocumentSyncData->audioSessionType;
 }
+
+void Page::setAudioSessionState(DOMAudioSessionState audioSessionState)
+{
+    if (m_topDocumentSyncData->audioSessionState == audioSessionState)
+        return;
+
+    m_topDocumentSyncData->audioSessionState = audioSessionState;
+    if (settings().siteIsolationEnabled())
+        documentSyncClient().broadcastAudioSessionStateToOtherProcesses(audioSessionState);
+}
+
+DOMAudioSessionState Page::audioSessionState() const
+{
+    return m_topDocumentSyncData->audioSessionState;
+}
 #endif
 
 void Page::setUserDidInteractWithPage(bool didInteract)
@@ -985,17 +1004,39 @@ void Page::updateTopDocumentSyncData(const DocumentSyncSerializationData& data)
     case DocumentSyncDataType::IsAutofocusProcessed:
     case DocumentSyncDataType::IsClosing:
     case DocumentSyncDataType::UserDidInteractWithPage:
-#if ENABLE(DOM_AUDIO_SESSION)
-    case DocumentSyncDataType::AudioSessionType:
-#endif
         protect(m_topDocumentSyncData)->update(data);
         break;
+#if ENABLE(DOM_AUDIO_SESSION)
+    case DocumentSyncDataType::AudioSessionType:
+        protect(m_topDocumentSyncData)->update(data);
+        // The type was set by a document in another process. Each process computes its own audio
+        // session category, so apply the override the type implies here too.
+        DOMAudioSession::applyTypeToAudioSessionCategoryOverride(m_topDocumentSyncData->audioSessionType);
+        break;
+    case DocumentSyncDataType::AudioSessionState:
+        protect(m_topDocumentSyncData)->update(data);
+        forEachDocument([](Document& document) {
+            RefPtr window = document.window();
+            RefPtr navigator = window ? window->optionalNavigator() : nullptr;
+            if (!navigator)
+                return;
+            if (RefPtr audioSession = NavigatorAudioSession::audioSessionIfExists(*navigator))
+                audioSession->topDocumentAudioSessionStateChanged();
+        });
+        break;
+#endif
     }
 }
 
 void Page::updateTopDocumentSyncData(Ref<DocumentSyncData>&& data)
 {
     m_topDocumentSyncData = WTF::move(data);
+
+#if ENABLE(DOM_AUDIO_SESSION)
+    // This path carries the whole state at once, when a remote page is set up in this process. Apply
+    // the override the type implies, as the per-field path does for later changes.
+    DOMAudioSession::applyTypeToAudioSessionCategoryOverride(m_topDocumentSyncData->audioSessionType);
+#endif
 }
 
 void Page::setMainFrameURLFragment(String&& fragment)
@@ -1007,6 +1048,11 @@ void Page::setMainFrameURLFragment(String&& fragment)
 const URL& Page::mainFrameURL() const
 {
     return m_topDocumentSyncData->documentURL;
+}
+
+void Page::didObserveFirstPartyUserGesture()
+{
+    chrome().client().didObserveFirstPartyUserGesture();
 }
 
 SecurityOrigin& Page::mainFrameOrigin() const
@@ -1313,6 +1359,13 @@ Vector<CueMatch> Page::findCueMatches(const String& target, FindOptions options)
 
     return results;
 }
+
+void Page::clearFindCaptionTracks()
+{
+    forEachMediaElement([](HTMLMediaElement& element) {
+        element.clearFindCaptionTrack();
+    });
+}
 #endif // ENABLE(VIDEO)
 
 std::optional<SimpleRange> Page::rangeOfString(const String& target, const std::optional<SimpleRange>& referenceRange, FindOptions options)
@@ -1361,9 +1414,11 @@ unsigned Page::findMatchesForText(const String& target, FindOptions options, uns
             frame = incrementFrame(frame.get(), true, CanWrap::No);
             continue;
         }
-        if (shouldMarkMatches == MarkMatches)
+        if (shouldMarkMatches == MarkMatches) {
             protect(localFrame->editor())->setMarkedTextMatchesAreHighlighted(shouldHighlightMatches == HighlightMatches);
-        matchCount += protect(localFrame->editor())->countMatchesForText(target, std::nullopt, options, maxMatchCount ? (maxMatchCount - matchCount) : 0, shouldMarkMatches == MarkMatches, nullptr);
+            matchCount += protect(localFrame->editor())->markAllMatchesForText(target, options, maxMatchCount ? (maxMatchCount - matchCount) : 0);
+        } else
+            matchCount += protect(localFrame->editor())->countMatchesForText(target, std::nullopt, options, maxMatchCount ? (maxMatchCount - matchCount) : 0, false, nullptr);
         frame = incrementFrame(frame.get(), true, CanWrap::No);
     } while (frame);
 
@@ -1489,6 +1544,8 @@ void Page::unmarkAllTextMatches()
     forEachDocument([] (Document& document) {
         if (CheckedPtr markers = document.markersIfExists())
             markers->removeMarkers(DocumentMarkerType::TextMatch);
+        if (RefPtr frame = document.frame())
+            protect(frame->editor())->textMatchMarkersWereCleared();
     });
 }
 
@@ -2207,24 +2264,94 @@ unsigned NODELETE Page::renderingUpdateCount() const
 
 void Page::syncLocalFrameInfoToRemote()
 {
+    ASSERT(mainFrame().tree().containsRemoteFrame());
+
     forEachLocalFrame([] (LocalFrame& frame) {
         RefPtr<LocalFrameView> frameView = frame.view();
 
-        frameView->updateLayoutViewportRect();
-
         HashMap<FrameIdentifier, Ref<RemoteFrameLayoutInfo>> childrenFrameLayoutInfo;
+        auto windowClipRectInContentCoordinates = [&frameView, rect = std::optional<LayoutRect> { }]() mutable {
+            if (!rect)
+                rect = LayoutRect { frameView->windowToContents(frameView->windowClipRect()) };
+            return *rect;
+        };
+#if PLATFORM(IOS_FAMILY)
+        auto exposedContentRect = [&frameView, rect = std::optional<LayoutRect> { }]() mutable {
+            if (!rect)
+                rect = LayoutRect { frameView->exposedContentRect() };
+            return *rect;
+        };
+#endif
+
         for (RefPtr child = frame.tree().firstChild(); child; child = child->tree().nextSibling()) {
+            if (!child->tree().containsRemoteFrame())
+                continue;
+
+            auto absoluteToChildFrameOwnerLocalTransform = frameView->absoluteToChildFrameOwnerLocalTransform(*child);
+            auto contentBoxLocation = frameView->childFrameOwnerContentBoxLocation(*child);
+
+            // We could use the mapAbsoluteToChildFrameViewRect member function here, but use the
+            // static version instead to reuse absoluteToChildFrameOwnerLocalTransform across
+            // multiple calls.
+            auto mapParentAbsoluteToChildFrameViewRect = [&] (const LayoutRect& rect) {
+                return LocalFrameView::mapAbsoluteToChildFrameViewRect(FloatRect { rect }, absoluteToChildFrameOwnerLocalTransform, contentBoxLocation);
+            };
+
+            auto visibleRectInParent = frameView->visibleRectOfChild(*child.get());
+
+            auto onScreenRectInChildView = [&] {
+                if (!visibleRectInParent)
+                    return IntRect { };
+
+                auto onScreenRectInParent = *visibleRectInParent;
+                onScreenRectInParent.intersect(windowClipRectInContentCoordinates());
+                if (onScreenRectInParent.isEmpty())
+                    return IntRect { };
+
+                return enclosingIntRect(mapParentAbsoluteToChildFrameViewRect(onScreenRectInParent));
+            }();
+
+#if PLATFORM(IOS_FAMILY)
+            auto exposedContentRectInChildView = [&]() -> FloatRect {
+                auto exposedContentRectInParent = visibleRectInParent;
+                if (exposedContentRectInParent)
+                    exposedContentRectInParent->intersect(exposedContentRect());
+                if (!exposedContentRectInParent || exposedContentRectInParent->isEmpty())
+                    return FloatRect { };
+
+                auto rectInChildView = mapParentAbsoluteToChildFrameViewRect(*exposedContentRectInParent);
+                if (rectInChildView.isEmpty())
+                    return FloatRect { };
+
+                return rectInChildView;
+            }();
+#endif
+
             childrenFrameLayoutInfo.add(child->frameID(), RemoteFrameLayoutInfo::create(
-                frameView->visibleRectOfChild(*child.get()),
+                visibleRectInParent,
+                onScreenRectInChildView,
+#if PLATFORM(IOS_FAMILY)
+                exposedContentRectInChildView,
+#endif
+                !!child->ownerRenderer(),
                 frameView->childFrameOwnerToRootContentTransform(*child),
-                frameView->absoluteToChildFrameOwnerLocalTransform(*child),
+                WTF::move(absoluteToChildFrameOwnerLocalTransform),
                 frame.usedZoomForChild(*child),
-                frameView->childFrameOwnerContentBoxLocation(*child),
+                contentBoxLocation,
                 frameView->appearanceOfOwnerElementOfChildFrame(*child)
             ));
         }
 
-        frame.loader().client().broadcastChildrenFrameLayoutInfoToOtherProcesses(childrenFrameLayoutInfo);
+        if (childrenFrameLayoutInfo.isEmpty()) {
+            ASSERT(!frame.tree().containsRemoteFrame());
+            return;
+        }
+
+        frame.loader().client().broadcastFrameGeometryToOtherProcesses({
+            frameView->layoutViewportRect(),
+            frameView->contentsSize(),
+            WTF::move(childrenFrameLayoutInfo)
+        });
     });
 }
 
@@ -2338,8 +2465,7 @@ void Page::updateRendering()
         document.evaluateMediaQueriesAndReportChanges();
     });
 
-    // FIXME: This suppression shouldn't be needed.
-    SUPPRESS_UNCOUNTED_LAMBDA_CAPTURE runProcessingStep(RenderingUpdateStep::AdjustVisibility, [&] (auto& document) {
+    runProcessingStep(RenderingUpdateStep::AdjustVisibility, [&] (auto& document) {
         m_elementTargetingController->adjustVisibilityInRepeatedlyTargetedRegions(document);
     });
 
@@ -2375,8 +2501,7 @@ void Page::updateRendering()
 
     layoutIfNeeded();
 
-    // FIXME: This suppression shouldn't be needed.
-    SUPPRESS_UNCOUNTED_LAMBDA_CAPTURE runProcessingStep(RenderingUpdateStep::ResizeObservations, [&] (Document& document) {
+    runProcessingStep(RenderingUpdateStep::ResizeObservations, [&] (Document& document) {
         document.updateResizeObservations(*this);
     });
 
@@ -2605,7 +2730,7 @@ void Page::doAfterUpdateRendering()
 #if defined(WEBKIT_IOS6)
     ASSERT(!settings().siteIsolationEnabled());
 #else
-    if (settings().siteIsolationEnabled())
+    if (mainFrame().tree().containsRemoteFrame())
         syncLocalFrameInfoToRemote();
 #endif
 }
@@ -2802,8 +2927,6 @@ bool Page::shouldUpdateAccessibilityRegions() const
                 protectedMainDocument = owner->document();
         }
 
-        // If accessibility is enabled and we have a main document, that document should have an AX object cache.
-        ASSERT(!protectedMainDocument || protectedMainDocument->existingAXObjectCache());
         if (CheckedPtr topAxObjectCache = protectedMainDocument ? protectedMainDocument->existingAXObjectCache() : nullptr)
             topAxObjectCache->scheduleObjectRegionsUpdate();
         return false;
@@ -2931,6 +3054,13 @@ std::optional<FramesPerSecond> Page::preferredRenderingUpdateFramesPerSecond(Opt
         }
     });
 
+    for (Ref canvasContext : m_gpuCanvasesRequestingPacing) {
+        if (auto canvasPreferredFrameRate = canvasContext->preferredRenderingUpdateFramesPerSecond()) {
+            if (!frameRate || *canvasPreferredFrameRate < *frameRate)
+                frameRate = *canvasPreferredFrameRate;
+        }
+    }
+
     return frameRate;
 #endif
 }
@@ -2944,6 +3074,16 @@ Seconds Page::preferredRenderingUpdateInterval() const
         return cappedInterval;
 #endif
     return interval;
+}
+
+void Page::addGPUCanvasRequestingRenderingUpdatePacing(CanvasRenderingContext& context)
+{
+    m_gpuCanvasesRequestingPacing.add(context);
+}
+
+void Page::removeGPUCanvasRequestingRenderingUpdatePacing(CanvasRenderingContext& context)
+{
+    m_gpuCanvasesRequestingPacing.remove(context);
 }
 
 void Page::setIsVisuallyIdleInternal(bool isVisuallyIdle)
@@ -3536,9 +3676,9 @@ void Page::resumeAnimatingImages()
 {
     // Drawing models which cache painted content while out-of-window (WebKit2's composited drawing areas, etc.)
     // require that we repaint animated images to kickstart the animation loop.
-    RefPtr localMainFrame = this->localMainFrame();
-    if (RefPtr view = localMainFrame ? localMainFrame->view() : nullptr)
-        view->resumeVisibleImageAnimationsIncludingSubframes();
+    forEachRootFrameView([] (LocalFrameView& view) {
+        view.resumeVisibleImageAnimationsIncludingSubframes();
+    });
 }
 
 void Page::setActivityState(OptionSet<ActivityState> activityState)
@@ -3652,9 +3792,9 @@ void Page::setIsVisibleInternal(bool isVisible)
         });
 #endif
 
-        RefPtr localMainFrame = this->localMainFrame();
-        if (RefPtr view = localMainFrame ? localMainFrame->view() : nullptr)
-            view->show();
+        forEachRootFrameView([] (LocalFrameView& view) {
+            view.show();
+        });
 
         if (m_settings->hiddenPageCSSAnimationSuspensionEnabled()) {
             forEachDocument([] (Document& document) {
@@ -3696,9 +3836,9 @@ void Page::setIsVisibleInternal(bool isVisible)
 #endif
 
         suspendScriptedAnimations();
-        RefPtr localMainFrame = this->localMainFrame();
-        if (RefPtr view = localMainFrame ? localMainFrame->view() : nullptr)
-            view->hide();
+        forEachRootFrameView([] (LocalFrameView& view) {
+            view.hide();
+        });
     }
 
     forEachDocument([] (Document& document) {
@@ -4252,17 +4392,18 @@ void Page::removePlaybackTargetPickerClient(PlaybackTargetClientContextIdentifie
     chrome().client().removePlaybackTargetPickerClient(contextId);
 }
 
-void Page::showPlaybackTargetPicker(PlaybackTargetClientContextIdentifier contextId, const WebCore::IntPoint& location, bool isVideo, RouteSharingPolicy routeSharingPolicy, const String& routingContextUID)
+void Page::showPlaybackTargetPicker(PlaybackTargetClientContextIdentifier contextId, FrameIdentifier frameID, const WebCore::IntPoint& location, bool isVideo, RouteSharingPolicy routeSharingPolicy, const String& routingContextUID)
 {
 #if PLATFORM(IOS_FAMILY)
     // FIXME: refactor iOS implementation.
     UNUSED_PARAM(contextId);
+    UNUSED_PARAM(frameID);
     UNUSED_PARAM(location);
     chrome().client().showPlaybackTargetPicker(isVideo, routeSharingPolicy, routingContextUID);
 #else
     UNUSED_PARAM(routeSharingPolicy);
     UNUSED_PARAM(routingContextUID);
-    chrome().client().showPlaybackTargetPicker(contextId, location, isVideo);
+    chrome().client().showPlaybackTargetPicker(contextId, frameID, location, isVideo);
 #endif
 }
 
@@ -4284,6 +4425,11 @@ void Page::setMockMediaPlaybackTargetPickerState(const String& name, MediaPlayba
 void Page::mockMediaPlaybackTargetPickerDismissPopup()
 {
     chrome().client().mockMediaPlaybackTargetPickerDismissPopup();
+}
+
+void Page::mockMediaPlaybackTargetPickerRect(CompletionHandler<void(FloatRect)>&& completionHandler)
+{
+    chrome().client().mockMediaPlaybackTargetPickerRect(WTF::move(completionHandler));
 }
 
 void Page::setPlaybackTarget(PlaybackTargetClientContextIdentifier contextId, Ref<MediaPlaybackTarget>&& target)
@@ -4469,7 +4615,7 @@ void Page::setUnobscuredSafeAreaInsets(const FloatBoxExtent& insets)
     m_unobscuredSafeAreaInsets = insets;
 
     forEachDocument([&] (Document& document) {
-        document.constantProperties().didChangeSafeAreaInsets();
+        document.styleScope().environmentVariables().didChangeSafeAreaInsets();
     });
 }
 
@@ -4524,19 +4670,19 @@ bool Page::useDarkAppearance() const
     if (m_useDarkAppearanceOverride)
         return m_useDarkAppearanceOverride.value();
 
+    if (mainFrame().isPrinting())
+        return false;
+
     if (RefPtr localMainFrame = this->localMainFrame()) {
-        // Printed page should always use light appearance (i.e return false)
-        // FIXME: implement this logic for remote main frames.
+        // Media type can be non-screen without printing (Inspector emulation, client override).
         RefPtr view = localMainFrame->view();
         if (!view || view->mediaType() != screenAtom())
             return false;
-
-        if (auto* documentLoader = localMainFrame->loader().documentLoader()) {
-            auto colorSchemePreference = documentLoader->colorSchemePreference();
-            if (colorSchemePreference != ColorSchemePreference::NoPreference)
-                return colorSchemePreference == ColorSchemePreference::Dark;
-        }
     }
+
+    auto colorSchemePreference = protect(mainFrame())->colorSchemePreference();
+    if (colorSchemePreference != ColorSchemePreference::NoPreference)
+        return colorSchemePreference == ColorSchemePreference::Dark;
 
     return m_useDarkAppearance;
 #else
@@ -4562,7 +4708,7 @@ void Page::setFullscreenInsets(const FloatBoxExtent& insets)
     m_fullscreenInsets = insets;
 
     forEachDocument([] (Document& document) {
-        document.constantProperties().didChangeFullscreenInsets();
+        document.styleScope().environmentVariables().didChangeFullscreenInsets();
     });
 }
 
@@ -4574,7 +4720,7 @@ void Page::setFullscreenAutoHideDuration(Seconds duration)
     m_fullscreenAutoHideDuration = duration;
 
     forEachDocument([&] (Document& document) {
-        document.constantProperties().setFullscreenAutoHideDuration(duration);
+        document.styleScope().environmentVariables().setFullscreenAutoHideDuration(duration);
     });
 }
 
@@ -4624,6 +4770,21 @@ void Page::enableICECandidateFiltering()
 LocalFrame* Page::localMainFrame() const
 {
     return dynamicDowncast<LocalFrame>(mainFrame());
+}
+
+LocalFrame* Page::localMainOrRootFrame() const
+{
+    if (auto* localMainFrame = this->localMainFrame())
+        return localMainFrame;
+
+    // Under Site Isolation the main frame can be remote in this process; fall back to the first
+    // live local root frame (normally exactly one per WebContent process for a given page).
+    for (auto& rootFrame : m_rootFrames) {
+        if (rootFrame->view())
+            return rootFrame.ptr();
+    }
+
+    return nullptr;
 }
 
 Document* Page::localTopDocument() const
@@ -4728,6 +4889,11 @@ void Page::clearDeviceOrientationAndMotionPermissions()
 }
 #endif
 
+void Page::orientationDidChange()
+{
+    m_lastOrientationChangeTime = MonotonicTime::now();
+}
+
 bool Page::findMatchingLocalDocument(NOESCAPE const Function<bool(Document&)>& functor) const
 {
     for (RefPtr frame = mainFrame(); frame; frame = frame->tree().traverseNext()) {
@@ -4805,6 +4971,17 @@ void Page::forEachLocalFrame(NOESCAPE const Function<void(LocalFrame&)>& functor
 
     for (auto& frame : frames)
         functor(frame);
+}
+
+void Page::forEachRootFrameView(NOESCAPE const Function<void(LocalFrameView&)>& functor)
+{
+    auto views = WTF::compactMap<1>(m_rootFrames, [](auto& rootFrame) -> RefPtr<LocalFrameView> {
+        ASSERT(rootFrame->isRootFrame());
+        return rootFrame->view();
+    });
+
+    for (auto& view : views)
+        functor(view);
 }
 
 void Page::forEachWindowEventLoop(NOESCAPE const Function<void(WindowEventLoop&)>& functor)
@@ -5071,8 +5248,6 @@ void Page::didFinishLoadingImageForSVGImage(SVGImageElement& element)
     chrome().client().didFinishLoadingImageForSVGImage(element);
 }
 
-#if ENABLE(TEXT_AUTOSIZING)
-
 void Page::recomputeTextAutoSizingInAllFrames()
 {
     ASSERT(settings().textAutosizingEnabled() && settings().textAutosizingUsesIdempotentMode());
@@ -5093,8 +5268,6 @@ void Page::recomputeTextAutoSizingInAllFrames()
         }
     });
 }
-
-#endif
 
 OptionSet<FilterRenderingMode> Page::preferredFilterRenderingModes(const GraphicsContext& context) const
 {
@@ -5385,7 +5558,7 @@ ModelPlayerProvider& Page::modelPlayerProvider()
     return m_modelPlayerProvider.get();
 }
 
-void Page::setupForRemoteWorker(const URL& scriptURL, const SecurityOriginData& topOrigin, const String& referrerPolicy, OptionSet<AdvancedPrivacyProtections> advancedPrivacyProtections)
+void Page::setupForRemoteWorker(const URL& scriptURL, const SecurityOriginData& topOrigin, const String& referrerPolicy, OptionSet<AdvancedPrivacyProtections> advancedPrivacyProtections, std::optional<bool> globalPrivacyControlEnabled)
 {
     RefPtr localMainFrame = this->localMainFrame();
     if (!localMainFrame)
@@ -5403,6 +5576,8 @@ void Page::setupForRemoteWorker(const URL& scriptURL, const SecurityOriginData& 
 
     if (auto* documentLoader = localMainFrame->loader().documentLoader())
         documentLoader->setAdvancedPrivacyProtections(advancedPrivacyProtections);
+
+    settings().setGlobalPrivacyControlEnabled(globalPrivacyControlEnabled);
 
     document->setStorageBlockingPolicy(document->settings().storageBlockingPolicy());
 
@@ -5768,6 +5943,11 @@ void Page::setDefaultSpatialTrackingLabel(const String& label)
     });
 }
 #endif
+
+void Page::setDisplayedTranslationLocaleIdentifier(String&& localeIdentifier)
+{
+    m_displayedTranslationLocaleIdentifier = WTF::move(localeIdentifier);
+}
 
 #if ENABLE(GAMEPAD)
 void Page::gamepadsRecentlyAccessed()

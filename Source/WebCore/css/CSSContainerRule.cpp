@@ -53,7 +53,8 @@ String CSSContainerRule::cssText() const
 {
     StringBuilder builder;
     builder.append("@container "_s);
-    CQ::serialize(builder, styleRuleContainer().containerQuery());
+    builder.append(conditionText());
+
     appendCSSTextForItems(builder);
     return builder.toString();
 }
@@ -67,20 +68,45 @@ String CSSContainerRule::conditionText() const
 
 String CSSContainerRule::containerName() const
 {
+    const auto& query = styleRuleContainer().containerQuery();
+    if (query.size() > 1)
+        return ""_s;
+
+    ASSERT(query.size() == 1);
+    const auto& onlyCondition = query.first();
+
     StringBuilder builder;
-
-    auto name = styleRuleContainer().containerQuery().name;
-    if (!name.isEmpty())
-        serializeIdentifier(builder, name);
-
+    if (!onlyCondition.name.isEmpty())
+        serializeIdentifier(builder, onlyCondition.name);
     return builder.toString();
 }
 
 String CSSContainerRule::containerQuery() const
 {
+    const auto& query = styleRuleContainer().containerQuery();
+    if (query.size() > 1)
+        return ""_s;
+
+    ASSERT(query.size() == 1);
+    const auto& onlyCondition = query.first();
+
     StringBuilder builder;
-    MQ::serialize(builder, styleRuleContainer().containerQuery().condition);
+    MQ::serialize(builder, onlyCondition.condition);
     return builder.toString();
+}
+
+Vector<CSSContainerRule::Condition> CSSContainerRule::conditions() const
+{
+    return WTF::map(styleRuleContainer().containerQuery(), [](const auto& condition) {
+        StringBuilder nameBuilder, queryBuilder;
+        serializeIdentifier(nameBuilder, condition.name);
+        MQ::serialize(queryBuilder, condition.condition);
+
+        return Condition {
+            .name = nameBuilder.toString(),
+            .query = queryBuilder.toString()
+        };
+    });
 }
 
 } // namespace WebCore

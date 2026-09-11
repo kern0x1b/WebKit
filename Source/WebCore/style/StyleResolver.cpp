@@ -59,6 +59,7 @@
 #include "NodeInlinesLight.h"
 #include "NodeRenderStyle.h"
 #include "PageRuleCollector.h"
+#include "PseudoElementIdentifier.h"
 #include "RenderScrollbar.h"
 #include "RenderStyleConstants.h"
 #include "RenderView.h"
@@ -75,6 +76,7 @@
 #include "SharedStringHash.h"
 #include "StyleAdjuster.h"
 #include "StyleBuilder.h"
+#include "StyleBuilderStateInlines.h"
 #include "StyleComputedStyle+GettersInlines.h"
 #include "StyleComputedStyle+SettersInlines.h"
 #include "StyleEasingFunction.h"
@@ -114,9 +116,10 @@ WTF_MAKE_TZONE_ALLOCATED_IMPL(Resolver);
 class Resolver::State {
 public:
     State() = default;
-    State(const Element& element, const Style::ComputedStyle* parentStyle, const Style::ComputedStyle* documentElementStyle, TreeResolutionState* treeResolutionState)
+    State(const Element& element, const Style::ComputedStyle* parentStyle, const Style::ComputedStyle* documentElementStyle, TreeResolutionState* treeResolutionState, const Style::ComputedStyle* parentHighlightStyle = nullptr)
         : m_element(&element)
         , m_parentStyle(parentStyle)
+        , m_parentHighlightStyle(parentHighlightStyle)
         , m_treeResolutionState(treeResolutionState)
     {
         ASSERT(element.isConnected());
@@ -147,6 +150,7 @@ public:
         m_parentStyle = m_ownedParentStyle.get();
     }
     const Style::ComputedStyle* NODELETE parentStyle() const { return m_parentStyle; }
+    const Style::ComputedStyle* NODELETE parentHighlightStyle() const { return m_parentHighlightStyle; }
     const Style::ComputedStyle* NODELETE rootElementStyle() const { return m_rootElementStyle; }
 
     TreeResolutionState* NODELETE treeResolutionState() const { return m_treeResolutionState; }
@@ -155,6 +159,7 @@ private:
     const Element* m_element { };
     std::unique_ptr<Style::ComputedStyle> m_style;
     const Style::ComputedStyle* m_parentStyle { };
+    const Style::ComputedStyle* m_parentHighlightStyle { };
     std::unique_ptr<const Style::ComputedStyle> m_ownedParentStyle;
     const Style::ComputedStyle* m_rootElementStyle { };
 
@@ -288,11 +293,12 @@ auto Resolver::initializeStateAndStyle(const Element& element, const ResolutionC
 BuilderContext Resolver::builderContext(State& state) const
 {
     return {
-        document(),
-        state.parentStyle(),
-        state.rootElementStyle(),
-        state.element(),
-        state.treeResolutionState()
+        .document = document(),
+        .parentStyle = state.parentStyle(),
+        .parentHighlightStyle = state.parentHighlightStyle(),
+        .rootElementStyle = state.rootElementStyle(),
+        .element = state.element(),
+        .treeResolutionState = state.treeResolutionState()
     };
 }
 
@@ -307,8 +313,14 @@ UnadjustedStyle Resolver::unadjustedStyleForElement(Element& element, const Reso
     collector.setMedium(m_mediaQueryEvaluator);
     collector.matchAllRules(m_matchAuthorAndUserStyles, matchingBehavior != RuleMatchingBehavior::MatchAllRulesExcludingSMIL);
 
-    if (collector.matchedPseudoElements())
-        style.setHasPseudoStyles(collector.matchedPseudoElements());
+    auto matchedPseudoElements = collector.matchedPseudoElements();
+    // https://drafts.csswg.org/css-pseudo-4/#highlight-cascade
+    // A highlight pseudo-element exists whenever it exists for the parent element, since it inherits
+    // from it even with no rules of its own.
+    if (state.parentStyle())
+        matchedPseudoElements.add(state.parentStyle()->highlightPseudoElementTypes());
+    if (matchedPseudoElements)
+        style.setHasPseudoStyles(matchedPseudoElements);
 
     // With no relations the callee walks nothing and returns null, so skip the out-of-line call.
     std::unique_ptr<Relations> elementStyleRelations;
@@ -566,9 +578,38 @@ bool Resolver::keyframeStylesForAnimation(Element& element, const Style::Compute
     return true;
 }
 
+// Resolves the chain lazily, one level per style, each cached in the ancestor's style. Meant for
+// callers outside style resolution, where the ancestor styles are current. During resolution the
+// parent highlight style comes in with the ResolutionContext.
+// FIXME: It is still reached during tree resolution when the parent has no highlight style cached
+// for this identifier, and then reads and caches into the style being replaced.
+static const Style::ComputedStyle* parentHighlightStyleIgnoringPendingUpdate(const Element& element, const PseudoElementIdentifier& pseudoElementIdentifier)
+{
+    RefPtr parentElement = element.parentElementInComposedTree();
+    if (!parentElement)
+        return nullptr;
+
+    CheckedPtr parentStyle = parentElement->existingComputedStyle();
+    if (!parentStyle)
+        return nullptr;
+
+    if (auto* highlightStyle = parentStyle->pseudoElementStyle(pseudoElementIdentifier))
+        return highlightStyle;
+
+    auto resolvedStyle = protect(parentElement->styleResolver())->styleForPseudoElement(*parentElement, pseudoElementIdentifier, { .parentStyle = parentStyle.get() });
+    if (!resolvedStyle)
+        return nullptr;
+
+    return const_cast<Style::ComputedStyle&>(*parentStyle).addPseudoElementStyle(WTF::move(resolvedStyle->style));
+}
+
 std::optional<ResolvedStyle> Resolver::styleForPseudoElement(Element& element, const PseudoElementRequest& pseudoElementRequest, const ResolutionContext& context)
 {
-    auto state = State(element, context.parentStyle, context.documentElementStyle, context.treeResolutionState.get());
+    auto parentHighlightStyle = context.parentHighlightStyle;
+    if (!parentHighlightStyle && isHighlightPseudoElement(pseudoElementRequest.type()))
+        parentHighlightStyle = parentHighlightStyleIgnoringPendingUpdate(element, pseudoElementRequest.identifier());
+
+    auto state = State(element, context.parentStyle, context.documentElementStyle, context.treeResolutionState.get(), parentHighlightStyle);
 
     if (state.parentStyle()) {
         state.setStyle(Style::ComputedStyle::createPtrWithRegisteredInitialValues(document().customPropertyRegistry()));
@@ -590,7 +631,9 @@ std::optional<ResolvedStyle> Resolver::styleForPseudoElement(Element& element, c
 
     ASSERT(!collector.matchedPseudoElements());
 
-    if (collector.matchResult().isEmpty())
+    // A highlight pseudo-element with no rules of its own still needs a style to pass the inherited
+    // values down to the highlight pseudo-elements of its descendants.
+    if (collector.matchResult().isEmpty() && !state.parentHighlightStyle())
         return { };
 
     state.style()->setPseudoElementIdentifier(pseudoElementRequest.identifier());
@@ -637,9 +680,9 @@ std::unique_ptr<Style::ComputedStyle> Resolver::defaultStyleForElement(const Ele
     fontDescription.setKeywordSizeFromIdentifier(CSSValueMedium);
 
     auto size = fontSizeForKeyword(CSSValueMedium, false, protect(document()));
-    fontDescription.setSpecifiedSize(size);
-    auto computedFontSize = computedFontSizeFromSpecifiedSize(size, fontDescription.isAbsoluteSize(), is<SVGElement>(element), *style, protect(document()));
-    fontDescription.setComputedSize(computedFontSize.size, computedFontSize.usedZoomFactor);
+    fontDescription.setComputedSize(size);
+    auto usedFontSize = usedFontSizeFromComputedSize(size, fontDescription.isAbsoluteSize(), is<SVGElement>(element), *style, protect(document()));
+    fontDescription.setUsedSize(usedFontSize.size, usedFontSize.zoomFactor);
 
     fontDescription.setShouldAllowUserInstalledFonts(settings().shouldAllowUserInstalledFonts() ? AllowUserInstalledFonts::Yes : AllowUserInstalledFonts::No);
     style->setFontDescription(WTF::move(fontDescription));
@@ -737,6 +780,9 @@ void Resolver::applyMatchedProperties(State& state, const MatchResult& matchResu
 
     Builder builder(style, builderContext(state), matchResult, WTF::move(includedProperties));
 
+    if (builder.state().isBuildingHighlightStyle())
+        builder.applyHighlightInheritance();
+
     // Top priority properties may affect resolution of high priority ones.
     builder.applyTopPriorityProperties();
 
@@ -762,23 +808,20 @@ void Resolver::applyMatchedProperties(State& state, const MatchResult& matchResu
 void Resolver::setGlobalStateAfterApplyingProperties(const BuilderState& builderState)
 {
     // FIXME: This stuff should be somewhere else.
-    // Scope::forNode() walks to the containing shadow root; only elements that actually used attr()
-    // have anything to register, so nothing below is reachable for the overwhelming majority.
-    auto& registeredSubstitutionAttributes = builderState.registeredSubstitutionAttributes();
-    if (!registeredSubstitutionAttributes.isEmpty()) [[unlikely]] {
-        auto* currentScope = builderState.element() ? &Scope::forNode(*builderState.element()) : nullptr;
-        auto& features = ruleSets().mutableFeatures();
-        for (auto& entry : registeredSubstitutionAttributes) {
-            features.registerSubstitutionAttribute(entry.name);
-            // For attr() applied to a pseudo-element, the originating element's scope may be
-            // different from this resolver's (e.g. ::placeholder styled in a UA shadow scope, with
-            // the originating <input> in the document scope). Register there too so attribute
-            // changes on the originating element trigger AttributeChangeInvalidation; mark the entry
-            // as shadow-tree-affecting on the originating scope so we only invalidate the host's
-            // shadow subtree when a shadow-piercing rule is the source of the dependency.
-            if (const Scope* targetScope = entry.targetScope.get(); targetScope && targetScope != currentScope)
-                const_cast<Scope&>(*targetScope).resolver().ruleSets().mutableFeatures().registerSubstitutionAttribute(entry.name, RuleFeatureSet::AffectsShadowTree::Yes);
-        }
+    auto* currentScope = builderState.element() ? &Scope::forNode(*builderState.element()) : nullptr;
+    for (auto& entry : builderState.registeredSubstitutionAttributes()) {
+        // Register on the scope of the element the attribute is read from, which is where
+        // AttributeChangeInvalidation looks when that attribute changes. For attr() applied to a
+        // pseudo-element that may differ from the scope being styled (e.g. ::placeholder styled in
+        // a UA shadow scope, with the originating <input> in the document scope); remember that so
+        // we only invalidate the host's shadow subtree when a shadow-piercing rule is the source of
+        // the dependency.
+        CheckedPtr targetScope = entry.targetScope.get();
+        auto* scope = targetScope ? targetScope.get() : currentScope;
+        if (!scope)
+            continue;
+        auto affectsShadowTree = scope != currentScope ? AttributeAffectsShadowTree::Yes : AttributeAffectsShadowTree::No;
+        scope->registerSubstitutionAttribute(entry.name, affectsShadowTree);
     }
     if (builderState.style().usesViewportUnits())
         document().setHasStyleWithViewportUnits();

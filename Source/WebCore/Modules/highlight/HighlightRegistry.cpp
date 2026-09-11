@@ -26,26 +26,112 @@
 #include "config.h"
 #include "HighlightRegistry.h"
 
+#include "Document.h"
+#include "FloatRect.h"
+#include "HighlightHitResult.h"
+#include "HighlightsFromPointOptions.h"
 #include "IDLTypes.h"
 #include "JSDOMMapLike.h"
 #include "JSHighlight.h"
+#include "NodeDocument.h"
+#include "RenderObject.h"
+#include "ShadowRoot.h"
+#include "SimpleRange.h"
+#include "StaticRange.h"
+#include <algorithm>
 
 namespace WebCore {
     
 void HighlightRegistry::initializeMapLike(DOMMapAdapter& map)
 {
-    for (auto& keyValue : m_map)
-        map.set<IDLDOMString, IDLInterface<Highlight>>(keyValue.key, keyValue.value);
+    for (auto& name : m_highlightNames) {
+        if (RefPtr highlight = m_map.get(name))
+            map.set<IDLDOMString, IDLInterface<Highlight>>(name, *highlight);
+    }
+}
+
+Vector<HighlightHitResult> HighlightRegistry::highlightsFromPoint(Document& document, float x, float y, HighlightsFromPointOptions&& options)
+{
+    document.updateLayout();
+
+    FloatPoint point { x, y };
+
+    auto reachableGivenShadowRoots = [&](const Ref<Node>& node) {
+        for (RefPtr shadowRoot = node->containingShadowRoot(); shadowRoot;) {
+            if (!options.shadowRoots.containsIf([&](auto& allowed) { return allowed.ptr() == shadowRoot.get(); }))
+                return false;
+            RefPtr host = shadowRoot->host();
+            shadowRoot = host ? host->containingShadowRoot() : nullptr;
+        }
+        return true;
+    };
+
+    struct HitCandidate {
+        int priority { 0 };
+        size_t registrationIndex { 0 };
+        Vector<Ref<AbstractRange>> ranges;
+        RefPtr<Highlight> highlight;
+    };
+    Vector<HitCandidate> candidates;
+
+    for (size_t index = 0; index < m_highlightNames.size(); ++index) {
+        RefPtr highlight = m_map.get(m_highlightNames[index]);
+        if (!highlight)
+            continue;
+
+        Vector<Ref<AbstractRange>> matchingRanges;
+        auto highlightRanges = highlight->highlightRanges();
+        for (auto& highlightRange : highlightRanges) {
+            Ref abstractRange = highlightRange->range();
+            if (abstractRange->collapsed())
+                continue;
+
+            Ref startContainer = abstractRange->startContainer();
+            if (&startContainer->document() != &document)
+                continue;
+
+            if (!reachableGivenShadowRoots(startContainer))
+                continue;
+
+            if (RefPtr staticRange = dynamicDowncast<StaticRange>(abstractRange.get()); staticRange && !staticRange->computeValidity())
+                continue;
+
+            for (auto& rect : RenderObject::clientTextRects(makeSimpleRange(abstractRange))) {
+                if (rect.contains(point)) {
+                    matchingRanges.append(WTF::move(abstractRange));
+                    break;
+                }
+            }
+        }
+
+        if (!matchingRanges.isEmpty())
+            candidates.append({ highlight->priority(), index, WTF::move(matchingRanges), WTF::move(highlight) });
+    }
+
+    std::ranges::sort(candidates, [](auto& a, auto& b) {
+        if (a.priority != b.priority)
+            return a.priority > b.priority;
+        return a.registrationIndex > b.registrationIndex;
+    });
+
+    return WTF::map(WTF::move(candidates), [](auto&& candidate) {
+        return HighlightHitResult { WTF::move(candidate.highlight), WTF::move(candidate.ranges) };
+    });
 }
 
 void HighlightRegistry::setFromMapLike(AtomString&& key, Ref<Highlight>&& value)
 {
+    if (RefPtr previousHighlight = m_map.get(key))
+        previousHighlight->repaint();
+
     auto addResult = m_map.set(key, WTF::move(value));
     if (addResult.isNewEntry) {
         ASSERT(!m_highlightNames.contains(key));
         m_highlightNames.append(WTF::move(key));
-        protect(addResult.iterator->value)->repaint();
     }
+    Ref<Highlight> highlight = addResult.iterator->value;
+    highlight->setAllRangesNeedPositionUpdate();
+    highlight->repaint();
 }
 
 void HighlightRegistry::clear()
@@ -80,17 +166,20 @@ void HighlightRegistry::setHighlightVisibility(HighlightVisibility highlightVisi
 }
 #endif
 
-static ASCIILiteral annotationHighlightKey()
+static const AtomString& annotationHighlightKey()
 {
-    return "annotationHighlightKey"_s;
+    static MainThreadNeverDestroyed<const AtomString> key { "annotationHighlightKey"_s };
+    return key.get();
 }
 
 void HighlightRegistry::addAnnotationHighlightWithRange(Ref<StaticRange>&& value)
 {
-    if (m_map.contains(annotationHighlightKey()))
-        protect(*m_map.get(annotationHighlightKey()))->addToSetLike(value);
-    else
-        setFromMapLike(annotationHighlightKey(), Highlight::create({ std::ref<AbstractRange>(value.get()) }));
+    auto& key = annotationHighlightKey();
+    if (RefPtr highlight = m_map.get(key)) {
+        highlight->addToSetLike(value);
+        return;
+    }
+    setFromMapLike(AtomString { key }, Highlight::create({ std::ref<AbstractRange>(value.get()) }));
 }
 
 }

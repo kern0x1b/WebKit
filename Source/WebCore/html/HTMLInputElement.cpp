@@ -1405,6 +1405,11 @@ bool HTMLInputElement::willRespondToMouseClickEventsWithEditability(Editability 
     return HTMLTextFormControlElement::willRespondToMouseClickEventsWithEditability(editability);
 }
 
+bool HTMLInputElement::hasActivationBehavior() const
+{
+    return true;
+}
+
 bool HTMLInputElement::isURLAttribute(const Attribute& attribute) const
 {
     return attribute.name() == srcAttr || attribute.name() == formactionAttr || HTMLTextFormControlElement::isURLAttribute(attribute);
@@ -1519,8 +1524,10 @@ void HTMLInputElement::setAutofilled(bool autoFilled)
     if (autoFilled == m_isAutoFilled)
         return;
 
-    if (autoFilled)
+    if (autoFilled) {
         logUserInteraction();
+        didCompleteAutofill();
+    }
 
     Style::PseudoClassChangeInvalidation styleInvalidation(*this, CSSSelector::PseudoClass::Autofill, autoFilled);
     m_isAutoFilled = autoFilled;
@@ -1594,6 +1601,12 @@ void HTMLInputElement::setAutofillVisibility(AutofillVisibility state)
         setAutofilledAndObscured(true);
         break;
     }
+}
+
+void HTMLInputElement::didCompleteAutofill()
+{
+    if (RefPtr page = document().page())
+        page->chrome().client().didCompleteAutofill(*this);
 }
 
 bool HTMLInputElement::alpha()
@@ -2256,7 +2269,7 @@ bool HTMLInputElement::shouldTruncateText(const Style::ComputedStyle& style) con
 {
     if (!isTextField())
         return false;
-    return document().focusedElement() != this && style.textOverflow() == TextOverflow::Ellipsis;
+    return document().focusedElement() != this && !style.textOverflow().isClip();
 }
 
 void HTMLInputElement::invalidateStyleOnFocusChangeIfNeeded()
@@ -2264,7 +2277,7 @@ void HTMLInputElement::invalidateStyleOnFocusChangeIfNeeded()
     if (!isTextField())
         return;
     // Focus change may affect the result of shouldTruncateText().
-    if (CheckedPtr style = renderStyle(); style && style->textOverflow() == TextOverflow::Ellipsis)
+    if (CheckedPtr style = renderStyle(); style && !style->textOverflow().isClip())
         invalidateStyleForSubtree();
 }
 
@@ -2355,7 +2368,10 @@ Style::ComputedStyle HTMLInputElement::createInnerTextStyle(const Style::Compute
     textBlockStyle.setOverflowWrap(OverflowWrap::Normal);
     textBlockStyle.setOverflowX(Overflow::Hidden);
     textBlockStyle.setOverflowY(Overflow::Hidden);
-    textBlockStyle.setTextOverflow(shouldTruncateText(style) ? TextOverflow::Ellipsis : TextOverflow::Clip);
+    if (shouldTruncateText(style))
+        textBlockStyle.setTextOverflow(Style::TextOverflow { style.textOverflow() });
+    else
+        textBlockStyle.setTextOverflow(CSS::Keyword::Clip { });
 
     textBlockStyle.setDisplay(Style::DisplayType::BlockFlow);
 
@@ -2363,7 +2379,7 @@ Style::ComputedStyle HTMLInputElement::createInnerTextStyle(const Style::Compute
         textBlockStyle.setDisplay(Style::DisplayType::InlineFlowRoot);
         textBlockStyle.setLogicalMaxWidth(100_css_percentage);
         textBlockStyle.setColor(Color::black.colorWithAlphaByte(153));
-        textBlockStyle.setTextOverflow(TextOverflow::Clip);
+        textBlockStyle.setTextOverflow(CSS::Keyword::Clip { });
         textBlockStyle.setMaskLayers(Style::MaskLayer { autoFillStrongPasswordMaskImage() });
         // A stacking context is needed for the mask.
         if (textBlockStyle.usedZIndex().isAuto())
@@ -2372,12 +2388,14 @@ Style::ComputedStyle HTMLInputElement::createInnerTextStyle(const Style::Compute
 
     auto shouldUseInitialLineHeight = [&] {
         // Do not allow line-height to be smaller than our default.
-        if (textBlockStyle.metricsOfPrimaryFont().intLineSpacing() > style.computedLineHeight())
+        if (textBlockStyle.metricsOfPrimaryFont().intLineSpacing() > style.usedLineHeight())
             return true;
         return isText() && !style.logicalHeight().isAuto() && !hasAutofillStrongPasswordButton();
     };
-    if (shouldUseInitialLineHeight())
+    if (shouldUseInitialLineHeight()) {
         textBlockStyle.setLineHeight(Style::ComputedStyle::initialLineHeight());
+        textBlockStyle.setTextAutosizingAdjustedLineHeight(Style::ComputedStyle::initialLineHeight());
+    }
 
     return textBlockStyle;
 }

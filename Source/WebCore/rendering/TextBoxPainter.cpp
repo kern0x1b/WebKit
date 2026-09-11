@@ -34,9 +34,11 @@
 #include "GraphicsContext.h"
 #include "HTMLAnchorElement.h"
 #include "InlineIteratorBoxInlines.h"
+#include "InlineIteratorInlineBox.h"
 #include "InlineIteratorLineBox.h"
 #include "InlineIteratorTextBoxInlines.h"
 #include "InlineTextBoxStyle.h"
+#include "LayoutInlineTextBox.h"
 #include "LineSelection.h"
 #include "PaintInfo.h"
 #include "PaintInfoInlines.h"
@@ -251,6 +253,16 @@ void TextBoxPainter::paint()
     if (m_paintInfo.phase == PaintPhase::Selection && m_paintInfo.paintBehavior.contains(PaintBehavior::IncludeDocumentMarkers))
         paintPlatformDocumentMarkers();
 
+    if (hasSynthesizedGlyph()) {
+        if (m_paintInfo.phase == PaintPhase::Foreground)
+            paintSynthesizedGlyph();
+        if (glyphRotation) {
+            auto backRotation = *glyphRotation == RotationDirection::Clockwise ? RotationDirection::Counterclockwise : RotationDirection::Clockwise;
+            m_paintInfo.context().concatCTM(rotation(m_paintRect, backRotation));
+        }
+        return;
+    }
+
     if (m_paintInfo.phase == PaintPhase::Foreground) {
         auto shouldPaintBackgroundFill = [&] {
             if (m_isPrinting)
@@ -400,7 +412,7 @@ void TextBoxPainter::paintForegroundAndDecorations()
     auto hasSelectionDecoration = [&] {
         if (!shouldPaintSelectionForeground)
             return false;
-        auto selectionStyle = m_renderer->selectionPseudoStyle();
+        CheckedPtr selectionStyle = m_renderer->selectionPseudoStyle();
         return selectionStyle && !selectionStyle->textDecorationLineInEffect().isNone();
     };
 
@@ -634,6 +646,11 @@ void TextBoxPainter::paintBackgroundFillForRange(unsigned startOffset, unsigned 
 
     // FIXME: Support painting combined text. See <https://bugs.webkit.org/show_bug.cgi?id=180993>.
     auto backgroundRect = snapRectToDevicePixels(selectionRect, m_document->deviceScaleFactor());
+    if (!writingMode().isHorizontal()) {
+        auto ctm = context.getCTM();
+        if (auto inverseCTM = ctm.inverse())
+            backgroundRect = inverseCTM->mapRect(snapRectToDevicePixels(LayoutRect { ctm.mapRect(FloatRect { selectionRect }) }, 1));
+    }
     if (backgroundStyle == BackgroundStyle::Rounded) {
         backgroundRect.expand(-1, -1);
         backgroundRect.move(0.5, 0.5);
@@ -655,6 +672,37 @@ static bool NODELETE isTransparent(const StyledMarkedText& markedText)
     default:
         return false;
     }
+}
+
+bool TextBoxPainter::hasSynthesizedGlyph() const
+{
+    CheckedPtr inlineTextBox = dynamicDowncast<Layout::InlineTextBox>(m_textBox.box().layoutBox());
+    return inlineTextBox && inlineTextBox->hasSynthesizedGlyph();
+}
+
+void TextBoxPainter::paintSynthesizedGlyph()
+{
+    // Drawn from the font metrics rather than from the character the counter style produced, matching the width TextUtil::width reserved for it.
+    auto& fontMetrics = m_style->metricsOfPrimaryFont();
+    auto ascent = fontMetrics.ascent();
+    auto bulletWidth = (ascent * 2 / 3 + 1) / 2;
+    auto markerRect = FloatRect { 1, 3 * (ascent - ascent * 2 / 3) / 2, bulletWidth, bulletWidth };
+    markerRect.moveBy(m_paintRect.location());
+
+    auto& context = m_paintInfo.context();
+    auto color = m_style->visitedDependentTextFillColorApplyingColorFilter();
+    context.setStrokeColor(color);
+    context.setStrokeStyle(StrokeStyle::SolidStroke);
+    context.setStrokeThickness(1.0f);
+    context.setFillColor(color);
+
+    auto listStyleType = m_style->listStyleType();
+    if (listStyleType.isDisc())
+        context.fillEllipse(markerRect);
+    else if (listStyleType.isCircle())
+        context.strokeEllipse(markerRect);
+    else
+        context.fillRect(markerRect);
 }
 
 void TextBoxPainter::paintForeground(const StyledMarkedText& markedText)
@@ -691,6 +739,29 @@ void TextBoxPainter::paintForeground(const StyledMarkedText& markedText)
 
     if (isInsideShapedContent() && paintForegroundForShapeRange(textPainter))
         return;
+
+    // Backgrounds paint before all text, so clip a stroked partial segment to its forward edge to keep its stroke overflow off a following highlight's background (adjacent inline boxes composite this way); the slack leaves the other edges effectively unclipped.
+    GraphicsContextStateSaver clipStateSaver(context, false);
+    if (markedText.style.textStyles.strokeWidth > 0 && markedText.endOffset < m_paintTextRun.length()) {
+        LayoutRect segmentRect { m_paintRect };
+        fontCascade().adjustSelectionRectForText(m_renderer->canUseSimplifiedTextMeasuring().value_or(false), m_paintTextRun, segmentRect, markedText.startOffset, markedText.endOffset);
+        auto snapped = snapRectToDevicePixelsWithWritingDirection(segmentRect, m_document->deviceScaleFactor(), m_paintTextRun.ltr());
+        static constexpr float overflowSlack = 4096;
+        bool ltr = m_paintTextRun.ltr();
+        FloatRect clipRect;
+        if (writingMode().isHorizontal()) {
+            float minX = ltr ? m_paintRect.x() - overflowSlack : snapped.x();
+            float maxX = ltr ? snapped.maxX() : m_paintRect.maxX() + overflowSlack;
+            clipRect = { minX, m_paintRect.y() - overflowSlack, maxX - minX, m_paintRect.height() + 2 * overflowSlack };
+        } else {
+            float minY = ltr ? m_paintRect.y() - overflowSlack : snapped.y();
+            float maxY = ltr ? snapped.maxY() : m_paintRect.maxY() + overflowSlack;
+            clipRect = { m_paintRect.x() - overflowSlack, minY, m_paintRect.width() + 2 * overflowSlack, maxY - minY };
+        }
+        clipStateSaver.save();
+        context.clip(clipRect);
+    }
+
     textPainter.setGlyphDisplayListIfNeeded(textBox().box(), m_paintInfo, m_style, m_paintTextRun);
     // TextPainter wants the box rectangle and text origin of the entire line box.
     textPainter.paintRange(m_paintTextRun, m_paintRect, textOriginFromPaintRect(m_paintRect), markedText.startOffset, markedText.endOffset);
@@ -920,7 +991,24 @@ static float autoTextDecorationInset(const Style::ComputedStyle& style)
     // A small UA-chosen inset (relative to font size) so that two adjacent identical underlined
     // elements do not appear to share a single continuous underline (important for e.g. Chinese,
     // where underlining is a form of punctuation).
-    return style.computedFontSize() / 8;
+    return style.usedFontSize() / 8;
+}
+
+struct DecoratingBoxFragmentInlineSizes {
+    float preceding { 0.f };
+    float current { 0.f };
+    float following { 0.f };
+
+    float total() const { return preceding + current + following; }
+};
+static DecoratingBoxFragmentInlineSizes decoratingBoxFragmentInlineSizes(const InlineIterator::InlineBox& decoratingInlineBox)
+{
+    auto inlineSizes = DecoratingBoxFragmentInlineSizes { .current = decoratingInlineBox.logicalWidth() };
+    for (auto fragment = decoratingInlineBox.nextInlineBoxLineLeftward(); fragment; fragment.traverseInlineBoxLineLeftward())
+        inlineSizes.preceding += fragment->logicalWidth();
+    for (auto fragment = decoratingInlineBox.nextInlineBoxLineRightward(); fragment; fragment.traverseInlineBoxLineRightward())
+        inlineSizes.following += fragment->logicalWidth();
+    return inlineSizes;
 }
 
 std::pair<FloatPoint, float> TextBoxPainter::insetAdjustedDecorationLocationAndWidth(const DecoratingBox& decoratingBox, const StyledMarkedText& markedText) const
@@ -938,55 +1026,54 @@ std::pair<FloatPoint, float> TextBoxPainter::insetAdjustedDecorationLocationAndW
     auto& inset = *insetStyles.inset;
 
     auto& style = decoratingBox.style.get();
-    auto autoValue = inset.isAuto() ? autoTextDecorationInset(style) : 0.f;
-    auto startInset = inset.resolvedStart(style, autoValue);
-    auto endInset = inset.resolvedEnd(style, autoValue);
-    if (!startInset && !endInset)
-        return { boxOrigin, width };
-
     auto writingMode = style.writingMode();
     auto decoratingInlineBox = decoratingBox.inlineBox;
+    auto isSliced = insetStyles.boxDecorationBreak != BoxDecorationBreak::Clone;
+
+    auto fragmentInlineSizes = isSliced ? decoratingBoxFragmentInlineSizes(*decoratingInlineBox) : DecoratingBoxFragmentInlineSizes { .current = decoratingInlineBox->logicalWidth() };
+    auto autoValue = inset.isAuto() ? autoTextDecorationInset(style) : 0.f;
+    auto percentageBasis = fragmentInlineSizes.total();
+    auto startInset = inset.resolvedStart(style, autoValue, percentageBasis);
+    auto endInset = inset.resolvedEnd(style, autoValue, percentageBasis);
+    if (!startInset && !endInset)
+        return { boxOrigin, width };
 
     // box-decoration-break: the start inset applies only to the first fragment's start edge and the
     // end inset only to the last fragment's end edge; for box-decoration-break: clone every fragment is
     // a complete box, so both endpoints are inset on every line.
-    auto closedEdges = [&]() -> RectEdges<bool> {
-        if (!decoratingInlineBox)
-            return { true };
-        if (insetStyles.boxDecorationBreak == BoxDecorationBreak::Clone)
-            return { true };
-        return decoratingInlineBox->closedEdges();
-    }();
+    auto closedEdges = isSliced ? decoratingInlineBox->closedEdges() : RectEdges<bool>(true);
+    auto hasLogicalStartEdge = closedEdges.start(writingMode);
+    auto hasLogicalEndEdge = closedEdges.end(writingMode);
+
+    auto insetForFragment = [](float inset, float inlineSizeToBoxEdge, bool ownsEdge) {
+        if (inset > 0)
+            return std::max(0.f, inset - inlineSizeToBoxEdge);
+        return ownsEdge ? inset : 0.f;
+    };
+    startInset = insetForFragment(startInset, fragmentInlineSizes.preceding, hasLogicalStartEdge);
+    endInset = insetForFragment(endInset, fragmentInlineSizes.following, hasLogicalEndEdge);
+    auto startEdgeOnFragment = hasLogicalStartEdge || startInset > 0;
+    auto endEdgeOnFragment = hasLogicalEndEdge || endInset > 0;
 
     bool isLTR = writingMode.isBidiLTR();
 
-    // A decorating box can span several leaf boxes on a line (its bidi runs), each split into marked-text
-    // sub-ranges. Map the logical start/end insets onto the decoration's visual left/right edges;
-    // displacements below are measured rightward (a positive inset trims inward, a negative one extends
-    // outward). box-decoration-break decides which of the decoration's edges live on this line fragment,
-    // and firstLeafBox/lastLeafBox + the marked-text offsets decide which painted piece actually reaches
-    // that visual edge.
     auto textBox = makeIterator();
     bool ownsLineLeftEdge = !decoratingInlineBox || textBox == decoratingInlineBox->firstLeafBox();
     bool ownsLineRightEdge = !decoratingInlineBox || textBox == decoratingInlineBox->lastLeafBox();
     bool ownsLogicalStart = !markedText.startOffset;
     bool ownsLogicalEnd = markedText.endOffset == m_paintTextRun.length();
 
-    float visualLeftInset = isLTR ? startInset : endInset;
-    float visualRightInset = isLTR ? endInset : startInset;
-    bool leftEdgeOnFragment = isLTR ? closedEdges.start(writingMode) : closedEdges.end(writingMode);
-    bool rightEdgeOnFragment = isLTR ? closedEdges.end(writingMode) : closedEdges.start(writingMode);
+    auto visualLeftInset = isLTR ? startInset : endInset;
+    auto visualRightInset = isLTR ? endInset : startInset;
+    auto leftEdgeOnFragment = isLTR ? startEdgeOnFragment : endEdgeOnFragment;
+    auto rightEdgeOnFragment = isLTR ? endEdgeOnFragment : startEdgeOnFragment;
     float leftEdgeMove = leftEdgeOnFragment ? visualLeftInset : 0.f;
     float rightEdgeMove = rightEdgeOnFragment ? -visualRightInset : 0.f;
 
-    // When the whole decoration lives on this fragment, the part of the inset that moves both visual
-    // edges the same way is an inline-axis shift of the decoration as a whole. Applying that shift to
-    // every painted piece keeps a symmetric inset a rigid shift of the decoration - including the seam
-    // between bidi runs - instead of pinning that interior seam. The remaining per-edge movement is the
-    // extend/trim overhang, applied only at the piece that actually reaches that visual edge; interior
-    // pieces (e.g. superscripts/subscripts at other baselines) get only the whole-decoration shift, so
-    // they stay put for a pure extend/trim. (skip-ink needs no adjustment: its gaps are measured relative
-    // to the underline's bounding box, which already tracks boxOrigin.)
+    // The part of the inset that moves both visual edges the same way is a shift of the whole decoration,
+    // so every painted piece gets it and a symmetric inset stays rigid across bidi runs.
+    // The rest is the extend/trim overhang, which only the piece reaching that visual edge gets, leaving
+    // interior pieces (e.g. a superscript at another baseline) where they are for a pure extend/trim.
     float decorationInlineShift = (leftEdgeOnFragment && rightEdgeOnFragment) ? (leftEdgeMove + rightEdgeMove) / 2.f : 0.f;
     bool reachesVisualLeft = leftEdgeOnFragment && ownsLineLeftEdge && (isLTR ? ownsLogicalStart : ownsLogicalEnd);
     bool reachesVisualRight = rightEdgeOnFragment && ownsLineRightEdge && (isLTR ? ownsLogicalEnd : ownsLogicalStart);
@@ -1046,7 +1133,7 @@ void TextBoxPainter::paintBackgroundDecorations(TextDecorationPainter& decoratio
                 overlineOffset(),
                 computedLinethroughCenter(decoratingBox.style.get(), textDecorationThickness, autoTextDecorationThickness),
                 decoratingBox.style->metricsOfPrimaryFont().ascent() + 2.f,
-                wavyStrokeParameters(decoratingBox.style->computedFontSize())
+                wavyStrokeParameters(decoratingBox.style->usedFontSize())
             };
         };
 
@@ -1132,7 +1219,7 @@ void TextBoxPainter::paintForegroundDecorations(TextDecorationPainter& decoratio
             , insetWidth
             , textDecorationThickness
             , linethroughCenter
-            , wavyStrokeParameters(decoratingBox.style->computedFontSize()) }, decoratingBox.textDecorationStyles);
+            , wavyStrokeParameters(decoratingBox.style->usedFontSize()) }, decoratingBox.textDecorationStyles);
     }
 
     if (m_isCombinedText)

@@ -25,7 +25,7 @@
 
 #pragma once
 
-#ifdef __cplusplus
+#if defined(__cplusplus) && !defined(__swift__)
 
 #if USE(APPKIT)
 OBJC_CLASS NSImage;
@@ -37,12 +37,14 @@ using CocoaImage = UIImage;
 using CocoaColor = UIColor;
 #endif
 
+OBJC_CLASS NSData;
+
 namespace TestWebKitAPI::Util {
 
 CocoaColor *pixelColor(CocoaImage *, CGPoint = CGPointZero);
-CocoaColor *toSRGBColor(CocoaColor *);
+NSData *makePDFData(CGSize, SEL colorSelector);
 bool compareColors(CocoaColor *, CocoaColor *, float tolerance = 0.01);
 
 } // namespace TestWebKitAPI::Util
 
-#endif // __cplusplus
+#endif // defined(__cplusplus) && !defined(__swift__)

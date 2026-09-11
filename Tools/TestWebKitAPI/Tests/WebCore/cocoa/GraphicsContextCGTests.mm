@@ -30,11 +30,12 @@
 #import "Helpers/Test.h"
 #import <Metal/Metal.h>
 #import <QuartzCore/QuartzCore.h>
-#import <WebCore/DestinationColorSpace.h>
+#import <WebCore/ColorSpace.h>
 #import <WebCore/FloatRoundedRect.h>
 #import <WebCore/GraphicsContextCG.h>
 #import <WebCore/IOSurface.h>
 #import <WebCore/NativeImage.h>
+#import <WebCore/Path.h>
 #import <pal/spi/cocoa/QuartzCoreSPI.h>
 
 @interface TestDrawingLayer : CALayer
@@ -61,7 +62,7 @@ constexpr CGFloat contextHeight = 1;
 
 RetainPtr<CGImageRef> greenImage()
 {
-    auto colorSpace = DestinationColorSpace::SRGB();
+    auto colorSpace = ColorSpace::SRGB();
     RetainPtr cgContext = adoptCF(CGBitmapContextCreate(nullptr, contextWidth, contextHeight, 8, 4 * contextWidth, colorSpace.platformColorSpace(), kCGImageAlphaPremultipliedLast));
     GraphicsContextCG ctx(cgContext.get());
     ctx.fillRect(FloatRect(0, 0, contextWidth, contextHeight), Color::green);
@@ -70,7 +71,7 @@ RetainPtr<CGImageRef> greenImage()
 
 TEST(GraphicsContextTests, DrawNativeImageDoesNotLeakCompositeOperator)
 {
-    auto colorSpace = DestinationColorSpace::SRGB();
+    auto colorSpace = ColorSpace::SRGB();
     RetainPtr cgContext = adoptCF(CGBitmapContextCreate(nullptr, contextWidth, contextHeight, 8, 4 * contextWidth, colorSpace.platformColorSpace(), kCGImageAlphaPremultipliedLast));
     GraphicsContextCG ctx(cgContext.get());
 
@@ -99,7 +100,7 @@ TEST(GraphicsContextTests, DrawNativeImageDoesNotLeakCompositeOperator)
 
 TEST(GraphicsContextTests, FillRoundedRectPreservesActiveBlendMode)
 {
-    auto colorSpace = DestinationColorSpace::SRGB();
+    auto colorSpace = ColorSpace::SRGB();
     RetainPtr cgContext = adoptCF(CGBitmapContextCreate(nullptr, contextWidth, contextHeight, 8, 4 * contextWidth, colorSpace.platformColorSpace(), kCGImageAlphaPremultipliedLast));
     GraphicsContextCG ctx(cgContext.get());
 
@@ -119,7 +120,7 @@ TEST(GraphicsContextTests, FillRoundedRectPreservesActiveBlendMode)
 
 TEST(GraphicsContextTests, FillRectWithBlendModePreservesActiveBlendMode)
 {
-    auto colorSpace = DestinationColorSpace::SRGB();
+    auto colorSpace = ColorSpace::SRGB();
     RetainPtr cgContext = adoptCF(CGBitmapContextCreate(nullptr, contextWidth, contextHeight, 8, 4 * contextWidth, colorSpace.platformColorSpace(), kCGImageAlphaPremultipliedLast));
     GraphicsContextCG ctx(cgContext.get());
 
@@ -134,9 +135,65 @@ TEST(GraphicsContextTests, FillRectWithBlendModePreservesActiveBlendMode)
     EXPECT_EQ(ctx.blendMode(), BlendMode::Multiply);
 }
 
+TEST(GraphicsContextTests, StrokeRectPreservesStrokeThickness)
+{
+    auto colorSpace = ColorSpace::SRGB();
+    RetainPtr cgContext = adoptCF(CGBitmapContextCreate(nullptr, contextWidth, contextHeight, 8, 4 * contextWidth, colorSpace.platformColorSpace(), kCGImageAlphaPremultipliedLast));
+    GraphicsContextCG ctx(cgContext.get());
+
+    // strokeRect() strokes with the width it is passed rather than the context's, which it used to do
+    // by calling setStrokeThickness() inside a CGContextStateSaver. That restored the CGContext's line
+    // width but left the new value in the context's own state, so the two disagreed from then on and
+    // every later stroke used the wrong width.
+    ctx.setStrokeThickness(3);
+    EXPECT_EQ(3, ctx.strokeThickness());
+
+    ctx.strokeRect(FloatRect(0, 0, contextWidth, contextHeight), 7);
+
+    EXPECT_EQ(3, ctx.strokeThickness());
+}
+
+TEST(GraphicsContextTests, StrokeRectDoesNotDesynchroniseLineWidth)
+{
+    auto colorSpace = ColorSpace::SRGB();
+    constexpr int width = 16;
+    constexpr int height = 16;
+    RetainPtr cgContext = adoptCF(CGBitmapContextCreate(nullptr, width, height, 8, 4 * width, colorSpace.platformColorSpace(), kCGImageAlphaPremultipliedLast));
+    GraphicsContextCG ctx(cgContext.get());
+
+    // The same desynchronisation as above, observed through what actually gets drawn. strokeRect()
+    // used to leave its line width in the context's state while the CGContext kept the old one, and
+    // the damage only shows up later: asking for the width the state wrongly believes it already has
+    // is then a no-op, so the CGContext never gets it and the stroke comes out at the old width.
+    ctx.setStrokeColor(Color::green);
+    ctx.setStrokeThickness(2);
+    ctx.strokeRect(FloatRect(2, 2, 12, 12), 10);
+
+    // Discard whatever the stroked rect drew; only the line below should be visible.
+    ctx.clearRect(FloatRect(0, 0, width, height));
+
+    ctx.setStrokeThickness(10);
+    Path linePath;
+    linePath.moveTo({ 0, height / 2 });
+    linePath.addLineTo({ width, height / 2 });
+    ctx.strokePath(linePath);
+    CGContextFlush(cgContext.get());
+
+    auto* data = static_cast<uint8_t*>(CGBitmapContextGetData(cgContext.get()));
+    auto isGreenAtRow = [&](int row) {
+        auto* pixel = data + row * CGBitmapContextGetBytesPerRow(cgContext.get()) + (width / 2) * 4;
+        return pixel[1] > 128;
+    };
+    // A 10 unit wide horizontal line down the middle covers rows 3 to 12 but not row 1. If the line
+    // width had stayed at 2 it would only cover rows 7 and 8.
+    EXPECT_TRUE(isGreenAtRow(4));
+    EXPECT_TRUE(isGreenAtRow(8));
+    EXPECT_FALSE(isGreenAtRow(1));
+}
+
 TEST(GraphicsContextTests, CGBitmapRenderingModeIsUnaccelerated)
 {
-    auto srgb = DestinationColorSpace::SRGB();
+    auto srgb = ColorSpace::SRGB();
     RetainPtr cgContext = adoptCF(CGBitmapContextCreate(nullptr, 3, 3, 8, 4 * 3, srgb.platformColorSpace(), kCGImageAlphaPremultipliedLast));
     ASSERT_NE(cgContext.get(), nullptr);
     GraphicsContextCG context(cgContext.get());
@@ -145,7 +202,7 @@ TEST(GraphicsContextTests, CGBitmapRenderingModeIsUnaccelerated)
 
 TEST(GraphicsContextTests, IOSurfaceRenderingModeIsAccelerated)
 {
-    auto srgb = DestinationColorSpace::SRGB();
+    auto srgb = ColorSpace::SRGB();
     IntSize size { 3, 3 };
     auto surface = WebCore::IOSurface::create(nullptr, size, srgb);
     ASSERT_NE(surface, nullptr);
@@ -229,7 +286,7 @@ TEST(GraphicsContextTests, LargeLayerRenderingModeIsExpected)
 
 TEST(GraphicsContextTests, DrawsReportHasDrawn)
 {
-    auto srgb = DestinationColorSpace::SRGB();
+    auto srgb = ColorSpace::SRGB();
     IntSize size { 3, 3 };
     auto surface = WebCore::IOSurface::create(nullptr, size, srgb);
     ASSERT_NE(surface, nullptr);
@@ -250,7 +307,7 @@ TEST(GraphicsContextTests, DrawsReportHasDrawn)
 
 TEST(GraphicsContextTests, OutOfGamutSRGBNotDrawn)
 {
-    auto colorSpace = DestinationColorSpace::ExtendedSRGB();
+    auto colorSpace = ColorSpace::ExtendedSRGB();
     auto bitmapInfo = static_cast<CGBitmapInfo>(kCGImageAlphaPremultipliedLast) | static_cast<CGBitmapInfo>(kCGBitmapByteOrder16Host) | static_cast<CGBitmapInfo>(kCGBitmapFloatComponents);
     RetainPtr cgContext = adoptCF(CGBitmapContextCreate(nullptr, contextWidth, contextHeight, 16, 8 * contextWidth, colorSpace.platformColorSpace(), bitmapInfo));
     GraphicsContextCG ctx(cgContext.get());

@@ -23,7 +23,7 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-import {buildGitWebkitRevertCommand, extractRevisionsAndReason, extractTextIfMentioned, extractCommandAndArgs} from "../src/WebKitBot.mjs";
+import {buildGitWebkitRevertCommand, extractRevisionsAndReason, extractTextIfMentioned, extractCommandAndArgs} from "../src/CommandParser.mjs";
 const WebKitBotID = 42;
 
 test("buildGitWebkitRevertCommand skips style checks with a reason", () => {
@@ -148,6 +148,72 @@ test("multiple revisions with spaces", () => {
     expect(revisions).toEqual(["263483", "263484", "263485", "263486"]);
 });
 
+test("identifier linkified by Slack as an email address", () => {
+    let message = `<@${WebKitBotID}> revert <mailto:319186@main|319186@main> Causes MotionMark regression`;
+
+    let text = extractTextIfMentioned(message, WebKitBotID);
+    expect(text).toBe(" revert 319186@main Causes MotionMark regression");
+
+    let {command, args} = extractCommandAndArgs(text);
+    expect(command).toBe("revert");
+    expect(args).toEqual(["319186@main", "Causes", "MotionMark", "regression"]);
+
+    let {revisions, reason} = extractRevisionsAndReason(args);
+    expect(reason).toBe("Causes MotionMark regression");
+    expect(revisions).toEqual(["319186@main"]);
+});
+
+test("multiple identifiers linkified by Slack as email addresses", () => {
+    let message = `<@${WebKitBotID}> revert <mailto:319186@main|319186@main>, <mailto:319187@main|319187@main>: testing revert`;
+
+    let text = extractTextIfMentioned(message, WebKitBotID);
+    expect(text).toBe(" revert 319186@main, 319187@main: testing revert");
+
+    let {command, args} = extractCommandAndArgs(text);
+    expect(command).toBe("revert");
+    expect(args).toEqual(["319186@main,", "319187@main:", "testing", "revert"]);
+
+    let {revisions, reason} = extractRevisionsAndReason(args);
+    expect(reason).toBe("testing revert");
+    expect(revisions).toEqual(["319186@main", "319187@main"]);
+});
+
+test("identifier pasted as a commits.webkit.org link", () => {
+    let message = `<@${WebKitBotID}> revert <https://commits.webkit.org/319186@main> testing revert`;
+
+    let text = extractTextIfMentioned(message, WebKitBotID);
+    expect(text).toBe(" revert https://commits.webkit.org/319186@main testing revert");
+
+    let {command, args} = extractCommandAndArgs(text);
+    expect(command).toBe("revert");
+
+    let {revisions, reason} = extractRevisionsAndReason(args);
+    expect(reason).toBe("testing revert");
+    expect(revisions).toEqual(["319186@main"]);
+});
+
+test("revision pasted as a labelled commits.webkit.org link", () => {
+    let message = `<@${WebKitBotID}> revert <https://commits.webkit.org/r263483|r263483> testing revert`;
+
+    let text = extractTextIfMentioned(message, WebKitBotID);
+    expect(text).toBe(" revert https://commits.webkit.org/r263483 testing revert");
+
+    let {revisions, reason} = extractRevisionsAndReason(extractCommandAndArgs(text).args);
+    expect(reason).toBe("testing revert");
+    expect(revisions).toEqual(["263483"]);
+});
+
+test("user mentions in the reason are left intact", () => {
+    let message = `<@${WebKitBotID}> revert 263483 breaks the build, see <@U12345678>`;
+
+    let text = extractTextIfMentioned(message, WebKitBotID);
+    expect(text).toBe(" revert 263483 breaks the build, see <@U12345678>");
+
+    let {revisions, reason} = extractRevisionsAndReason(extractCommandAndArgs(text).args);
+    expect(reason).toBe("breaks the build, see <@U12345678>");
+    expect(revisions).toEqual(["263483"]);
+});
+
 test("mention in different place", () => {
     let message = `revert 263483, 263484, r263485, r263486: testing revert <@${WebKitBotID}>`;
 
@@ -161,4 +227,72 @@ test("mention in different place", () => {
     let {revisions, reason} = extractRevisionsAndReason(args);
     expect(reason).toBe("testing revert");
     expect(revisions).toEqual(["263483", "263484", "263485", "263486"]);
+});
+
+test("identifier followed by trailing sentence punctuation", () => {
+    let message = `<@${WebKitBotID}> revert 319904@main. Broke Simulator and Catalyst builds.`;
+
+    let text = extractTextIfMentioned(message, WebKitBotID);
+    let {command, args} = extractCommandAndArgs(text);
+    expect(command).toBe("revert");
+
+    let {revisions, reason} = extractRevisionsAndReason(args);
+    expect(revisions).toEqual(["319904@main"]);
+    expect(reason).toBe("Broke Simulator and Catalyst builds.");
+});
+
+test("identifier without trailing punctuation still works", () => {
+    let message = `<@${WebKitBotID}> revert 319904@main reason`;
+
+    let text = extractTextIfMentioned(message, WebKitBotID);
+    let {command, args} = extractCommandAndArgs(text);
+    expect(command).toBe("revert");
+
+    let {revisions} = extractRevisionsAndReason(args);
+    expect(revisions).toEqual(["319904@main"]);
+});
+
+test("branch name containing periods is preserved", () => {
+    let message = `<@${WebKitBotID}> revert 319904@safari-7620.1.16-branch reason`;
+
+    let text = extractTextIfMentioned(message, WebKitBotID);
+    let {command, args} = extractCommandAndArgs(text);
+    expect(command).toBe("revert");
+
+    let {revisions} = extractRevisionsAndReason(args);
+    expect(revisions).toEqual(["319904@safari-7620.1.16-branch"]);
+});
+
+test("bare svn revision with trailing period", () => {
+    let message = `<@${WebKitBotID}> revert 263483. reason`;
+
+    let text = extractTextIfMentioned(message, WebKitBotID);
+    let {command, args} = extractCommandAndArgs(text);
+    expect(command).toBe("revert");
+
+    let {revisions} = extractRevisionsAndReason(args);
+    expect(revisions).toEqual(["263483"]);
+});
+
+test("identifier wrapped in parentheses", () => {
+    let message = `<@${WebKitBotID}> revert (319904@main) reason`;
+
+    let text = extractTextIfMentioned(message, WebKitBotID);
+    let {command, args} = extractCommandAndArgs(text);
+    expect(command).toBe("revert");
+
+    let {revisions} = extractRevisionsAndReason(args);
+    expect(revisions).toEqual(["319904@main"]);
+});
+
+test("identifier wrapped in parentheses followed by a period", () => {
+    let message = `<@${WebKitBotID}> revert (319904@main). Broke the build.`;
+
+    let text = extractTextIfMentioned(message, WebKitBotID);
+    let {command, args} = extractCommandAndArgs(text);
+    expect(command).toBe("revert");
+
+    let {revisions, reason} = extractRevisionsAndReason(args);
+    expect(revisions).toEqual(["319904@main"]);
+    expect(reason).toBe("Broke the build.");
 });

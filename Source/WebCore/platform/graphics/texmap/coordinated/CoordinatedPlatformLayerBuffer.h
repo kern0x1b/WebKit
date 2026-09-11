@@ -27,9 +27,13 @@
 
 #if USE(COORDINATED_GRAPHICS)
 #include "GLFence.h"
+#include "IntSize.h"
 #include "TextureMapperFlags.h"
-#include "TextureMapperPlatformLayer.h"
 #include <wtf/OptionSet.h>
+
+#if USE(TEXTURE_MAPPER)
+#include "TextureMapperPlatformLayer.h"
+#endif
 
 #if USE(SKIA)
 WTF_IGNORE_WARNINGS_IN_THIRD_PARTY_CODE_BEGIN
@@ -39,20 +43,28 @@ WTF_IGNORE_WARNINGS_IN_THIRD_PARTY_CODE_END
 
 namespace WebCore {
 
-class CoordinatedPlatformLayerBuffer : public TextureMapperPlatformLayer {
+class CoordinatedPlatformLayerBuffer
+#if USE(TEXTURE_MAPPER)
+    : public TextureMapperPlatformLayer
+#endif
+{
     WTF_MAKE_NONCOPYABLE(CoordinatedPlatformLayerBuffer);
     WTF_DEPRECATED_MAKE_FAST_ALLOCATED(CoordinatedPlatformLayerBuffer);
 public:
     enum class Type : uint8_t {
         RGB,
+#if USE(TEXTURE_MAPPER)
         YUV,
+#endif
         ExternalOES,
         HolePunch,
         Video,
         DMABuf,
+#if USE(TEXTURE_MAPPER)
         NativeImage,
-#if USE(SKIA)
-        SkiaImage
+#else
+        SkiaImage,
+        SkiaDeferredImage
 #endif
     };
 
@@ -68,7 +80,7 @@ public:
             fence->serverWait();
     }
 
-#if USE(SKIA)
+#if !USE(TEXTURE_MAPPER)
     virtual sk_sp<SkImage> skiaImage() { return nullptr; }
 #endif
 

@@ -96,7 +96,7 @@ static void sqliteDatabaseApplyPragma(SQLiteDatabase& database, ASCIILiteral pra
 static void unauthorizedSQLFunction(sqlite3_context *context, int, sqlite3_value **)
 {
     auto* functionName = static_cast<const char*>(sqlite3_user_data(context));
-    sqlite3_result_error(context, makeString("Function "_s, unsafeSpan(functionName), " is unauthorized"_s).utf8().data(), -1);
+    sqlite3_result_error(context, makeString("Function "_s, unsafeSpan(functionName), " is unauthorized"_s).utf8().legacyCStringPointer(), -1);
 }
 
 static void initializeSQLiteIfNecessary()
@@ -140,7 +140,7 @@ void SQLiteDatabase::useFastMalloc()
 
     static sqlite3_mem_methods fastMallocMethods = {
         [](int n) { return fastMalloc(n); },
-        fastFree,
+        fastFreeCallback,
         [](void *p, int n) { return fastRealloc(p, n); },
         [](void *p) { return static_cast<int>(fastMallocSize(p)); },
         [](int n) { return static_cast<int>(fastMallocGoodSize(n)); },
@@ -246,7 +246,7 @@ bool SQLiteDatabase::open(const String& filename, OpenMode openMode, OptionSet<O
 
         auto shmFileName = makeString(filename, "-shm"_s);
         if (FileSystem::fileExists(shmFileName) && !FileSystem::isSafeToUseMemoryMapForPath(shmFileName)) {
-            RELEASE_LOG_FAULT(SQLDatabase, "Opened an SQLite database with a Class A -shm file. This may trigger a crash when the user locks the device. (%s)", shmFileName.latin1().data());
+            RELEASE_LOG_FAULT(SQLDatabase, "Opened an SQLite database with a Class A -shm file. This may trigger a crash when the user locks the device. (%s)", shmFileName.utf8().legacyCStringPointer());
             if (!FileSystem::makeSafeToUseMemoryMapForPath(shmFileName))
                 return false;
         }
@@ -331,7 +331,7 @@ bool SQLiteDatabase::useWALJournalMode()
 #ifndef NDEBUG
         String mode = statement->columnText(0);
         if (!equalLettersIgnoringASCIICase(mode, "wal"_s)) {
-            LOG_ERROR("SQLite database journal_mode should be 'WAL', but is '%s'", mode.utf8().data());
+            LOG_ERROR("SQLite database journal_mode should be 'WAL', but is '%s'", mode.utf8().legacyCStringPointer());
             return false;
         }
 #endif
@@ -812,7 +812,7 @@ static int callCollationFunction(void* arg, int aLength, const void* a, int bLen
 void SQLiteDatabase::setCollationFunction(const String& collationName, Function<int(int, const void*, int, const void*)>&& collationFunction)
 {
     auto functionObject = new Function<int(int, const void*, int, const void*)>(WTF::move(collationFunction));
-    sqlite3_create_collation_v2(m_db, collationName.utf8().data(), SQLITE_UTF8, functionObject, callCollationFunction, destroyCollationFunction);
+    sqlite3_create_collation_v2(m_db, collationName.utf8().legacyCStringPointer(), SQLITE_UTF8, functionObject, callCollationFunction, destroyCollationFunction);
 }
 
 void SQLiteDatabase::releaseMemory()
@@ -823,7 +823,7 @@ void SQLiteDatabase::releaseMemory()
     sqlite3_db_release_memory(m_db);
 }
 
-static Expected<sqlite3_stmt*, int> constructAndPrepareStatement(SQLiteDatabase& database, std::span<const char> queryIncludingNullTerminator)
+static std::expected<sqlite3_stmt*, int> constructAndPrepareStatement(SQLiteDatabase& database, std::span<const char> queryIncludingNullTerminator)
 {
     Locker databaseLock { database.databaseMutex() };
     LOG(SQLDatabase, "SQL - prepare - %s", queryIncludingNullTerminator.data());
@@ -855,9 +855,9 @@ static Expected<sqlite3_stmt*, int> constructAndPrepareStatement(SQLiteDatabase&
 std::unique_ptr<SQLiteStatement> SQLiteDatabase::prepareStatementSlow(StringView queryString)
 {
     auto query = queryString.trim(isUnicodeCompatibleASCIIWhitespace<char16_t>).utf8();
-    auto sqlStatement = constructAndPrepareStatement(*this, query.spanIncludingNullTerminator());
+    auto sqlStatement = constructAndPrepareStatement(*this, byteCast<char>(query.spanIncludingNullTerminator()));
     if (!sqlStatement) {
-        RELEASE_LOG_ERROR(SQLDatabase, "SQLiteDatabase::prepareStatement: Failed to prepare statement %" PUBLIC_LOG_STRING, query.data());
+        RELEASE_LOG_ERROR(SQLDatabase, "SQLiteDatabase::prepareStatement: Failed to prepare statement %" PUBLIC_LOG_STRING, query.legacyCStringPointer());
         return nullptr;
     }
     return std::unique_ptr<SQLiteStatement>(new SQLiteStatement(*this, sqlStatement.value()));

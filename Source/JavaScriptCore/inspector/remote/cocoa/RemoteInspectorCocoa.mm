@@ -127,7 +127,7 @@ RemoteInspector& RemoteInspector::singleton()
 }
 
 RemoteInspector::RemoteInspector()
-    : m_xpcQueue(adoptOSObject(dispatch_queue_create("com.apple.JavaScriptCore.remote-inspector-xpc", DISPATCH_QUEUE_SERIAL)))
+    : m_xpcQueue(adoptOSObject(dispatch_queue_create("com.apple.JavaScriptCore.remote-inspector-xpc", serialQueueWithAutoreleasePoolAttrSingleton())))
 {
 }
 
@@ -337,8 +337,7 @@ void RemoteInspector::setupXPCConnectionIfNeeded()
         return;
     }
 
-    // FIXME: This is a false positive. <rdar://164843889>
-    SUPPRESS_RETAINPTR_CTOR_ADOPT auto connection = adoptOSObject(xpc_connection_create_mach_service(WIRXPCMachPortName, m_xpcQueue.get(), 0));
+    OSObjectPtr connection = adoptOSObject(xpc_connection_create_mach_service(WIRXPCMachPortName, m_xpcQueue.get(), 0));
     if (!connection) {
         WTFLogAlways("RemoteInspector failed to create XPC connection.");
         return;
@@ -869,6 +868,11 @@ void RemoteInspector::receivedAutomationSessionRequestMessage(NSDictionary *user
     if (NSNumber *value = forwardedCapabilities[WIRSiteIsolationEnabled]) {
         if ([value isKindOfClass:NSNumber.class])
             sessionCapabilities.siteIsolationEnabled = value.boolValue;
+    }
+
+    if (NSNumber *value = forwardedCapabilities[WIRControlledByExternalAgent]) {
+        if ([value isKindOfClass:NSNumber.class])
+            sessionCapabilities.controlledByExternalAgent = value.boolValue;
     }
 
     if (!m_client)

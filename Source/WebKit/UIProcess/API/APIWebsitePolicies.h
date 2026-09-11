@@ -156,6 +156,14 @@ public:
     void setOverrideTouchEventDOMAttributesEnabled(bool value) { m_data.overrideTouchEventDOMAttributesEnabled = value; }
 #endif
 
+#if ENABLE(IOS_TOUCH_EVENTS)
+    void setOverrideShouldReportZeroMaxTouchPoints(bool value) { m_data.overrideShouldReportZeroMaxTouchPoints = value; }
+#endif
+
+    void setOverrideShouldReportViewportSizeAsScreenSize(bool value) { m_data.overrideShouldReportViewportSizeAsScreenSize = value; }
+
+    void setOverrideShouldReportDesktopClassPointingDevice(bool value) { m_data.overrideShouldReportDesktopClassPointingDevice = value; }
+
     WebKit::WebsiteInlineMediaPlaybackPolicy inlineMediaPlaybackPolicy() const { return m_data.inlineMediaPlaybackPolicy; }
     void setInlineMediaPlaybackPolicy(WebKit::WebsiteInlineMediaPlaybackPolicy policy) { m_data.inlineMediaPlaybackPolicy = policy; }
 

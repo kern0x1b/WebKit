@@ -52,8 +52,10 @@ DECLARE_SYSTEM_HEADER
 #endif
 
 #import <AppKit/NSGestureRecognizer_Private.h>
+#import <AppKit/NSMagnificationGestureRecognizer_Private.h>
 #import <AppKit/NSPanGestureRecognizer_Private.h>
 #import <AppKit/NSPressGestureRecognizer_Private.h>
+#import <AppKit/NSRotationGestureRecognizer_Private.h>
 
 #if HAVE(NSVIEW_CORNER_CONFIGURATION)
 #import <AppKit/NSViewCornerConfiguration_Private.h>
@@ -65,6 +67,10 @@ DECLARE_SYSTEM_HEADER
 
 #if HAVE(LIQUID_GLASS)
 #import <AppKit/NSGlassEffectView_Private.h>
+#endif
+
+#if HAVE(APPKIT_SIRI_AFFORDANCE)
+#import <AppKit/NSCampoLightweightUIController.h>
 #endif
 
 #if HAVE(NSREFRESHCONTROLLER)
@@ -222,6 +228,16 @@ typedef NS_ENUM(NSInteger, _NSGlassEffectViewAdaptiveAppearance) {
 
 #endif
 
+#if HAVE(APPKIT_SIRI_AFFORDANCE)
+
+@interface NSCampoLightweightUIController : NSObject
++ (instancetype)sharedInstance;
+- (void)dismiss;
+@property (nonatomic, readonly) BOOL isVisible;
+@end
+
+#endif
+
 #endif
 
 @interface NSPopover (IPI)
@@ -259,6 +275,10 @@ NS_HEADER_AUDIT_BEGIN(nullability, sendability)
 
 NS_HEADER_AUDIT_END(nullability, sendability)
 
+@interface NSGestureRecognizer (IPI)
+@property (setter=_setIsScrollGestureRecognizer:) BOOL _isScrollGestureRecognizer;
+@end
+
 #endif // HAVE(APPKIT_GESTURES_SUPPORT)
 
 #if HAVE(NSREFRESHCONTROLLER)
@@ -281,7 +301,9 @@ NS_HEADER_AUDIT_END(nullability, sendability)
 @property (nonatomic, readonly) CGFloat refreshControlDynamicDampeningThreshold;
 @end
 
-// We need to spell out the protocol here for Swift/C++ interop support in WebKit-Swift-Generated.h
+// WebKit-Swift-Generated.h references this protocol, and AppKit declares it only in Swift, so
+// Objective-C needs it spelled out here. The Swift conformance uses AppKit_SPI, which cannot
+// replace this declaration.
 @protocol NSRefreshControlHosting <NSObject>
 @required
 @property (nonatomic, readonly) CGFloat refreshControlVisibleHeight;
@@ -289,6 +311,9 @@ NS_HEADER_AUDIT_END(nullability, sendability)
 
 - (void)applyWithVerticalInset:(CGFloat)verticalInset animated:(BOOL)animated completion:(void (^ _Nullable)(void))completion;
 - (void)removeWithVerticalInset:(CGFloat)verticalInset animated:(BOOL)animated completion:(void (^ _Nullable)(void))completion;
+
+@optional
+@property (nonatomic, readonly) BOOL refreshControlHostIsTracking;
 @end
 
 #endif

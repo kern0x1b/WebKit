@@ -1128,7 +1128,10 @@ void CommandEncoder::copyBufferToTexture(const WGPUImageCopyBuffer& source, cons
 
     NSUInteger maxSourceBytesPerRow = textureDimension == WGPUTextureDimension_3D ? (2048 * blockSize.value()) : sourceBytesPerRow;
 
-    if (textureDimension == WGPUTextureDimension_3D && copySize.depthOrArrayLayers <= 1 && copySize.height <= 1)
+    auto blockHeight = Texture::texelBlockHeight(aspectSpecificFormat);
+    if (!blockHeight)
+        return;
+    if (textureDimension == WGPUTextureDimension_3D && copySize.depthOrArrayLayers <= 1 && copySize.height <= blockHeight)
         sourceBytesPerRow = 0;
 
     if (sourceBytesPerRow > maxSourceBytesPerRow) {
@@ -1137,11 +1140,11 @@ void CommandEncoder::copyBufferToTexture(const WGPUImageCopyBuffer& source, cons
             auto zTimesSourceBytesPerImage = checkedProduct<uint32_t>(z, sourceBytesPerImage);
             if (zTimesSourceBytesPerImage.hasOverflowed())
                 return;
-            for (uint32_t y = 0; y < copySize.height; ++y) {
-                auto yTimesSourceBytesPerImage = checkedProduct<uint32_t>(y, sourceBytesPerRow);
-                if (yTimesSourceBytesPerImage.hasOverflowed())
+            for (uint32_t y = 0; y < copySize.height; y += blockHeight) {
+                auto blockRowTimesSourceBytesPerRow = checkedProduct<uint32_t>(y / blockHeight, sourceBytesPerRow);
+                if (blockRowTimesSourceBytesPerRow.hasOverflowed())
                     return;
-                auto tripleSum = checkedSum<uint64_t>(zTimesSourceBytesPerImage.value(), yTimesSourceBytesPerImage.value(), source.layout.offset);
+                auto tripleSum = checkedSum<uint64_t>(zTimesSourceBytesPerImage.value(), blockRowTimesSourceBytesPerRow.value(), source.layout.offset);
                 if (tripleSum.hasOverflowed())
                     return;
                 WGPUImageCopyBuffer newSource {
@@ -1164,7 +1167,7 @@ void CommandEncoder::copyBufferToTexture(const WGPUImageCopyBuffer& source, cons
 
                 copyBufferToTexture(newSource, newDestination, {
                     .width = copySize.width,
-                    .height = 1,
+                    .height = blockHeight,
                     .depthOrArrayLayers = 1
                 });
             }
@@ -1449,10 +1452,22 @@ void CommandEncoder::clearTextureIfNeeded(Texture& texture, NSUInteger mipLevel,
 
 bool CommandEncoder::waitForCommandBufferCompletion()
 {
-    if (RefPtr cachedCommandBuffer = m_cachedCommandBuffer.get())
-        return cachedCommandBuffer->waitForCompletion();
+    if (RefPtr cachedCommandBuffer = m_cachedCommandBuffer.get()) {
+        bool completed = cachedCommandBuffer->waitForCompletion();
+        if (double duration = cachedCommandBuffer->gpuExecutionDurationSeconds())
+            recordGPUExecutionWindowOnCanvasTextures(0, duration);
+        return completed;
+    }
 
     return true;
+}
+
+void CommandEncoder::recordGPUExecutionWindowOnCanvasTextures(double startTime, double endTime) const
+{
+    for (auto& texture : m_trackedTextures) {
+        if (texture->isCanvasBacking())
+            texture->recordGPUExecutionWindow(startTime, endTime);
+    }
 }
 
 bool CommandEncoder::encoderIsCurrent(id<MTLCommandEncoder> commandEncoder) const
@@ -1627,7 +1642,10 @@ void CommandEncoder::copyTextureToBuffer(const WGPUImageCopyTexture& source, con
     }
 
     destinationBytesPerRow = roundUpToMultipleOfNonPowerOfTwo(blockSize, destinationBytesPerRow);
-    if (textureDimension == WGPUTextureDimension_3D && copySize.depthOrArrayLayers <= 1 && copySize.height <= 1)
+    auto blockHeight = Texture::texelBlockHeight(aspectSpecificFormat);
+    if (!blockHeight)
+        return;
+    if (textureDimension == WGPUTextureDimension_3D && copySize.depthOrArrayLayers <= 1 && copySize.height <= blockHeight)
         destinationBytesPerRow = 0;
 
     auto rowsPerImage = destination.layout.rowsPerImage;
@@ -1645,10 +1663,10 @@ void CommandEncoder::copyTextureToBuffer(const WGPUImageCopyTexture& source, con
             auto zTimesDestinationBytesPerImage = checkedProduct<uint32_t>(z, destinationBytesPerImage);
             if (zPlusOriginZ.hasOverflowed() || zTimesDestinationBytesPerImage.hasOverflowed())
                 return;
-            for (uint32_t y = 0; y < copySize.height; ++y) {
+            for (uint32_t y = 0; y < copySize.height; y += blockHeight) {
                 auto yPlusOriginY = checkedSum<uint32_t>(source.origin.y, y);
-                auto yTimesDestinationBytesPerImage = checkedProduct<uint32_t>(y, destinationBytesPerRow);
-                if (yPlusOriginY.hasOverflowed() || yTimesDestinationBytesPerImage.hasOverflowed())
+                auto blockRowTimesDestinationBytesPerRow = checkedProduct<uint32_t>(y / blockHeight, destinationBytesPerRow);
+                if (yPlusOriginY.hasOverflowed() || blockRowTimesDestinationBytesPerRow.hasOverflowed())
                     return;
                 WGPUImageCopyTexture newSource {
                     .texture = source.texture,
@@ -1656,7 +1674,7 @@ void CommandEncoder::copyTextureToBuffer(const WGPUImageCopyTexture& source, con
                     .origin = { .x = source.origin.x, .y = yPlusOriginY, .z = zPlusOriginZ },
                     .aspect = source.aspect
                 };
-                auto tripleSum = checkedSum<uint64_t>(zTimesDestinationBytesPerImage.value(), yTimesDestinationBytesPerImage.value(), destination.layout.offset);
+                auto tripleSum = checkedSum<uint64_t>(zTimesDestinationBytesPerImage.value(), blockRowTimesDestinationBytesPerRow.value(), destination.layout.offset);
                 if (tripleSum.hasOverflowed())
                     return;
                 WGPUImageCopyBuffer newDestination {
@@ -1669,7 +1687,7 @@ void CommandEncoder::copyTextureToBuffer(const WGPUImageCopyTexture& source, con
                 };
                 copyTextureToBuffer(newSource, newDestination, {
                     .width = copySize.width,
-                    .height = 1,
+                    .height = blockHeight,
                     .depthOrArrayLayers = 1
                 });
             }
@@ -2409,7 +2427,8 @@ void CommandEncoder::trackEncoder(CommandEncoder& commandEncoder, HashSet<uint64
 
 void CommandEncoder::addOnCommitHandler(Function<bool(CommandBuffer&, CommandEncoder&)>&& onCommitHandler)
 {
-    ASSERT(m_commandBuffer);
+    if (!m_commandBuffer)
+        return;
     m_onCommitHandlers.append(WTF::move(onCommitHandler));
 }
 
@@ -2431,7 +2450,7 @@ bool CommandEncoder::useResidencySet(id<MTLResidencySet> residencySet)
 
 void CommandEncoder::skippedDrawIndexedValidation(uint64_t bufferIdentifier, DrawIndexCacheContainerIterator it)
 {
-    m_skippedDrawIndexedValidationKeys.add(bufferIdentifier, Vector<std::pair<DrawIndexCacheContainerValue, uint32_t>> { }).iterator->value.append(std::make_pair(DrawIndexCacheContainerValue(it->key.key()), it->value));
+    m_skippedDrawIndexedValidationKeys.add(bufferIdentifier, Vector<std::pair<DrawIndexCacheContainerValue, uint32_t>> { }).iterator->value.append(std::make_pair(DrawIndexCacheContainerValue(it->key.key()), it->value.vertexCount));
 }
 
 void CommandEncoder::rebindSamplersPreCommit(const BindGroup& group)

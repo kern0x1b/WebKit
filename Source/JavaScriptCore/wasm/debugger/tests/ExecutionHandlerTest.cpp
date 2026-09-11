@@ -43,6 +43,8 @@
 #include "WasmModule.h"
 #include "WasmModuleInformation.h"
 #include "WasmModuleManager.h"
+#include <wtf/HashMap.h>
+#include <wtf/HashSet.h>
 #include <wtf/MonotonicTime.h>
 #include <wtf/Seconds.h>
 #include <wtf/Threading.h>
@@ -75,7 +77,7 @@ static uint32_t failuresFound = 0;
 static uint32_t expectedVMCount = 0;
 static DebugServer* debugServer = nullptr;
 static ExecutionHandler* executionHandler = nullptr;
-static const TestScript* currentScript = nullptr;
+UNUSED_FUNCTION static const TestScript* currentScript = nullptr;
 UNUSED_FUNCTION bool doneTesting = false;
 
 #define VLOG(...) dataLogLnIf(verboseLogging, __VA_ARGS__)
@@ -90,7 +92,7 @@ UNUSED_FUNCTION bool doneTesting = false;
         }                                                       \
     } while (false)
 
-static void waitForConditionAndCheck(const char* errorMessage, std::function<bool()> predicate)
+static void waitForConditionAndCheck(ASCIILiteral errorMessage, std::function<bool()> predicate)
 {
     bool result = waitForCondition(predicate);
     CHECK(result, errorMessage);
@@ -134,7 +136,7 @@ static void resume()
 
 static void switchTarget(VM* newDebuggee)
 {
-    executionHandler->switchTarget(newDebuggee->identifier().toRawValue());
+    executionHandler->switchTarget(newDebuggee->identifier().toUInt64());
     validateStop();
     CHECK(executionHandler->debuggeeVM() == newDebuggee, "Switch to new debuggee failed");
 }
@@ -147,12 +149,18 @@ static void setBreakpointsAtAllFunctionEntries(Breakpoint::Type type)
     ModuleManager& moduleManager = debugServer->moduleManager();
     uint32_t maxInstanceId = moduleManager.nextInstanceId();
 
+    // Breakpoints patch module bytecode, which all instances of a module share, so visit each once.
+    UncheckedKeyHashSet<uint32_t, DefaultHash<uint32_t>, WTF::UnsignedWithZeroKeyHashTraits<uint32_t>> patchedModuleIds;
+
     for (uint32_t instanceId = 0; instanceId < maxInstanceId; ++instanceId) {
         JSWebAssemblyInstance* instance = moduleManager.jsInstance(instanceId);
         if (!instance)
             continue;
 
         auto& module = instance->module();
+        if (!patchedModuleIds.add(module.debugId()).isNewEntry)
+            continue;
+
         auto& moduleInfo = module.moduleInformation();
         uint32_t internalCount = moduleInfo.internalFunctionCount();
 
@@ -225,7 +233,7 @@ static void testBreakpointContinueCycles()
         unsigned expectedReplyCount = getReplyCount() + 1;
         executionHandler->resume();
 
-        waitForConditionAndCheck("VMs did not stop at breakpoint in continue cycle", [&]() {
+        waitForConditionAndCheck("VMs did not stop at breakpoint in continue cycle"_s, [&]() {
             return getReplyCount() == expectedReplyCount;
         });
 
@@ -256,7 +264,7 @@ static void testBreakpointSingleStepping()
     unsigned expectedReplyCount = getReplyCount() + 1;
     executionHandler->resume();
 
-    waitForConditionAndCheck("Did not hit breakpoint after resume", [&]() {
+    waitForConditionAndCheck("Did not hit breakpoint after resume"_s, [&]() {
         bool stopped = getReplyCount() == expectedReplyCount;
         if (!stopped)
             return false;
@@ -278,11 +286,11 @@ static void testBreakpointSingleStepping()
         // Simulate lldb behavior:
         // 1. If at Regular breakpoint: remove it, step, then re-insert it
         // 2. If at one-time breakpoint: just step directly
-        Breakpoint* breakpoint = executionHandler->breakpointManager()->findBreakpoint(beforeStepAddress);
-        Breakpoint breakpointCopy;
+        RefPtr<Breakpoint> breakpoint = executionHandler->breakpointManager()->findBreakpoint(beforeStepAddress);
+        RefPtr<Breakpoint> breakpointCopy;
 
         if (breakpoint) {
-            breakpointCopy = *breakpoint;
+            breakpointCopy = Breakpoint::create(*breakpoint);
             CHECK(breakpoint->type == Breakpoint::Type::Regular, "One-time breakpoints are cleared before stop. So, this must be a regular breakpoint");
             executionHandler->breakpointManager()->removeBreakpoint(beforeStepAddress);
         }
@@ -290,12 +298,12 @@ static void testBreakpointSingleStepping()
         unsigned expectedReplyCount = getReplyCount() + 1;
         executionHandler->step();
 
-        waitForConditionAndCheck("VMs did not stop after step", [&]() {
+        waitForConditionAndCheck("VMs did not stop after step"_s, [&]() {
             return getReplyCount() == expectedReplyCount;
         });
 
         if (breakpoint)
-            executionHandler->breakpointManager()->setBreakpoint(beforeStepAddress, WTF::move(breakpointCopy));
+            executionHandler->breakpointManager()->setBreakpoint(beforeStepAddress, breakpointCopy.releaseNonNull());
 
         state = executionHandler->debuggeeStateForTest();
         CHECK(state->isStoppedAtBytecode(), "Should be at breakpoint after step");
@@ -312,8 +320,56 @@ static void testBreakpointSingleStepping()
     TEST_LOG(failuresFound == initialFailures ? "PASS" : "FAIL");
 }
 
-// ========== TEST ORCHESTRATION HELPERS ==========
+static void testSoleInstanceOfModule()
+{
+    TEST_LOG("\n=== Sole Instance Of Module Lookup ===");
 
+    interrupt();
+
+    ModuleManager& moduleManager = debugServer->moduleManager();
+    uint32_t maxInstanceId = moduleManager.nextInstanceId();
+
+    // Derive the expectation from what is registered, so this holds for every test script.
+    using ModuleIdToCount = UncheckedKeyHashMap<uint32_t, unsigned, DefaultHash<uint32_t>, WTF::UnsignedWithZeroKeyHashTraits<uint32_t>>;
+    using ModuleIdToInstance = UncheckedKeyHashMap<uint32_t, JSWebAssemblyInstance*, DefaultHash<uint32_t>, WTF::UnsignedWithZeroKeyHashTraits<uint32_t>>;
+    ModuleIdToCount liveInstanceCount;
+    ModuleIdToInstance firstLiveInstance;
+    uint32_t highestModuleId = 0;
+
+    for (uint32_t instanceId = 0; instanceId < maxInstanceId; ++instanceId) {
+        JSWebAssemblyInstance* instance = moduleManager.jsInstance(instanceId);
+        if (!instance)
+            continue;
+
+        uint32_t moduleId = instance->module().debugId();
+        liveInstanceCount.add(moduleId, 0).iterator->value++;
+        firstLiveInstance.add(moduleId, instance);
+        highestModuleId = std::max(highestModuleId, moduleId);
+    }
+
+    CHECK(!liveInstanceCount.isEmpty(), "Expected at least one live instance while stopped");
+
+    unsigned soleModules = 0;
+    unsigned ambiguousModules = 0;
+    for (const auto& pair : liveInstanceCount) {
+        JSWebAssemblyInstance* resolved = moduleManager.soleInstanceOfModule(pair.key);
+        if (pair.value == 1) {
+            soleModules++;
+            CHECK(resolved == firstLiveInstance.get(pair.key), "Module ", pair.key, " has one live instance and should resolve to it");
+        } else {
+            ambiguousModules++;
+            CHECK(!resolved, "Module ", pair.key, " has ", pair.value, " live instances and should not resolve");
+        }
+    }
+
+    CHECK(!moduleManager.soleInstanceOfModule(highestModuleId + 1), "An unregistered module ID should not resolve");
+
+    resume();
+
+    TEST_LOG("PASS (", soleModules, " module(s) with one live instance, ", ambiguousModules, " with several)");
+}
+
+// ========== TEST ORCHESTRATION HELPERS ==========
 static void waitForVMCleanupFromPreviousTest()
 {
     TEST_LOG("Waiting for VMs from previous test to be destroyed...");
@@ -331,7 +387,7 @@ static bool setupScriptAndWaitForVMs(const TestScript& script, RefPtr<Thread>& o
 {
     ModuleManager& moduleManager = debugServer->moduleManager();
     unsigned initialInstanceId = moduleManager.nextInstanceId();
-    unsigned expectedInstanceId = initialInstanceId + script.expectedVMs;
+    unsigned expectedInstanceId = initialInstanceId + script.expectedInstances;
 
     TEST_LOG("\nStarting worker thread with ", script.name, "...");
     outWorkerThread = Thread::create(WORKER_THREAD_NAME, [&script] {
@@ -416,6 +472,7 @@ UNUSED_FUNCTION static int runTests()
         testVMContextSwitching();
         testBreakpointContinueCycles();
         testBreakpointSingleStepping();
+        testSoleInstanceOfModule();
 
         cleanupAfterScript(script, workerThread);
 

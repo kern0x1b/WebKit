@@ -254,7 +254,7 @@ static void dumpChangedLayers(TextStream& ts, const LayerPropertiesMap& changedL
 
 void RemoteLayerTreeTransaction::dump() const
 {
-    WTFLogAlways("%s", description().utf8().data());
+    WTFLogAlways("%s", description().utf8().legacyCStringPointer());
 }
 
 String RemoteLayerTreeTransaction::description() const
@@ -380,7 +380,7 @@ uint32_t RemoteLayerTreeTransaction::LayerCreationProperties::hostingContextID()
 {
 #if ENABLE(MODEL_PROCESS)
     if (auto* modelContext = std::get_if<Ref<WebCore::ModelContext>>(&additionalData))
-        return (*modelContext)->modelContentsLayerHostingContextIdentifier().toRawValue();
+        return (*modelContext)->modelContentsLayerHostingContextIdentifier().toUInt64();
 #endif
 
     if (auto* customData = std::get_if<CustomData>(&additionalData))

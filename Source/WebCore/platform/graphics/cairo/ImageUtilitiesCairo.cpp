@@ -60,11 +60,11 @@ static cairo_status_t writeFunction(void* output, const unsigned char* data, uns
 Vector<uint8_t> platformEncodeData(const NativeImage& nativeImage, const String& mimeType, std::optional<double>)
 {
     ASSERT_UNUSED(mimeType, mimeType == "image/png"_s); // Only PNG output is supported for now.
-    auto* image = nativeImage.platformImage().get();
-    if (!image)
+    auto platformImage = nativeImage.platformImage();
+    if (!platformImage)
         return { };
     Vector<uint8_t> output;
-    if (cairo_surface_write_to_png_stream(image, writeFunction, &output) != CAIRO_STATUS_SUCCESS)
+    if (cairo_surface_write_to_png_stream(platformImage.get(), writeFunction, &output) != CAIRO_STATUS_SUCCESS)
         return { };
     return output;
 }
@@ -95,9 +95,9 @@ Vector<uint8_t> platformEncodeData(const NativeImage& image, const String& mimeT
     GUniqueOutPtr<GError> error;
     if (type == "jpeg"_s && quality && *quality >= 0.0 && *quality <= 1.0) {
         String qualityString = String::number(static_cast<int>(*quality * 100.0 + 0.5));
-        gdk_pixbuf_save_to_buffer(pixbuf.get(), &buffer.outPtr(), &bufferSize, type.utf8().data(), &error.outPtr(), "quality", qualityString.utf8().data(), NULL);
+        gdk_pixbuf_save_to_buffer(pixbuf.get(), &buffer.outPtr(), &bufferSize, type.utf8().legacyCStringPointer(), &error.outPtr(), "quality", qualityString.utf8().legacyCStringPointer(), NULL);
     } else
-        gdk_pixbuf_save_to_buffer(pixbuf.get(), &buffer.outPtr(), &bufferSize, type.utf8().data(), &error.outPtr(), NULL);
+        gdk_pixbuf_save_to_buffer(pixbuf.get(), &buffer.outPtr(), &bufferSize, type.utf8().legacyCStringPointer(), &error.outPtr(), NULL);
     if (error)
         return { };
     return std::span { reinterpret_cast<const uint8_t*>(buffer.get()), bufferSize };

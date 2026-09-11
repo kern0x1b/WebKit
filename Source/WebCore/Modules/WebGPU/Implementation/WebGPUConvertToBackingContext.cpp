@@ -305,6 +305,25 @@ WGPUPowerPreference ConvertToBackingContext::convertToBacking(PowerPreference po
     }
 }
 
+WGPUColorSpace ConvertToBackingContext::convertToBacking(PredefinedColorSpace colorSpace)
+{
+    switch (colorSpace) {
+    case PredefinedColorSpace::SRGB:
+        return WGPUColorSpace::SRGB;
+    case PredefinedColorSpace::SRGBLinear:
+        return WGPUColorSpace::SRGBLinear;
+#if ENABLE(PREDEFINED_COLOR_SPACE_DISPLAY_P3)
+    case PredefinedColorSpace::DisplayP3:
+        return WGPUColorSpace::DisplayP3;
+    case PredefinedColorSpace::DisplayP3Linear:
+        return WGPUColorSpace::DisplayP3Linear;
+#endif
+    }
+
+    ASSERT_NOT_REACHED();
+    return WGPUColorSpace::SRGB;
+}
+
 WGPUPrimitiveTopology ConvertToBackingContext::convertToBacking(PrimitiveTopology primitiveTopology)
 {
     switch (primitiveTopology) {
@@ -734,6 +753,8 @@ WGPUVertexFormat ConvertToBackingContext::convertToBacking(VertexFormat vertexFo
         return WGPUVertexFormat_Sint32x3;
     case VertexFormat::Sint32x4:
         return WGPUVertexFormat_Sint32x4;
+    case VertexFormat::Snorm1010102:
+        return WGPUVertexFormat_Snorm1010102;
     case VertexFormat::Unorm1010102:
         return WGPUVertexFormat_Unorm1010102;
     case VertexFormat::Unorm8x4Bgra:

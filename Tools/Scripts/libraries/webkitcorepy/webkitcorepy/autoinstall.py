@@ -287,7 +287,7 @@ class Package(object):
             return False
         if not manifest.get('version'):
             return False
-        if self.version and Version(*manifest.get('version').split('.')) not in self.version:
+        if self.version and Version(*manifest.get('version').split('.')) != self.version:
             return False
         if not all(pkg.is_cached() for dep in self.implicit_deps for pkg in AutoInstall.packages[dep]):
             return False
@@ -475,7 +475,13 @@ def _pypi_indices_from_file(file):
                     if url:
                         parsed = urlparse(url)
                         if parsed.hostname:
-                            result.append(parsed.hostname)
+                            # AutoInstall appends 'simple/<package>/' to the index, but
+                            # index-url values conventionally end with '/simple/' and may
+                            # contain a path prefix (e.g. a proxy at https://host/pypi/simple/).
+                            # Keep the prefix, dropping the trailing '/simple' component.
+                            host = parsed.netloc.rpartition('@')[2]
+                            path = parsed.path.rstrip('/').removesuffix('/simple')
+                            result.append(host + path)
     return result
 
 

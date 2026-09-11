@@ -38,8 +38,13 @@
 #include <wtf/HashMap.h>
 #include <wtf/RunLoop.h>
 #include <wtf/RuntimeApplicationChecks.h>
+#include <wtf/Threading.h>
 #include <wtf/text/StringHash.h>
 #include <wtf/text/WTFString.h>
+
+#if ENABLE(LOGD_BLOCKING_IN_WEBCONTENT)
+#include "LogStreamIdentifier.h"
+#endif
 
 #if PLATFORM(COCOA)
 #include <wtf/RetainPtr.h>
@@ -50,6 +55,10 @@ OBJC_CLASS NSDictionary;
 
 namespace IPC {
 class SharedBufferReference;
+#if ENABLE(LOGD_BLOCKING_IN_WEBCONTENT)
+class Semaphore;
+struct StreamServerConnectionHandle;
+#endif
 }
 
 namespace WebKit {
@@ -76,14 +85,12 @@ public:
     void removeMessageReceiver(IPC::ReceiverName);
     void removeMessageReceiver(IPC::MessageReceiver&);
     
-    template<typename RawValue>
-    void addMessageReceiver(IPC::ReceiverName messageReceiverName, const ObjectIdentifierGenericBase<RawValue>& destinationID, IPC::MessageReceiver& receiver)
+    void addMessageReceiver(IPC::ReceiverName messageReceiverName, const ObjectIdentifierGenericBase& destinationID, IPC::MessageReceiver& receiver)
     {
         addMessageReceiver(messageReceiverName, destinationID.toUInt64(), receiver);
     }
     
-    template<typename RawValue>
-    void removeMessageReceiver(IPC::ReceiverName messageReceiverName, const ObjectIdentifierGenericBase<RawValue>& destinationID)
+    void removeMessageReceiver(IPC::ReceiverName messageReceiverName, const ObjectIdentifierGenericBase& destinationID)
     {
         removeMessageReceiver(messageReceiverName, destinationID.toUInt64());
     }
@@ -116,10 +123,6 @@ public:
 #endif
     static void setNotifyOptions();
 
-#if PLATFORM(MAC) || PLATFORM(MACCATALYST)
-    static String getHomeDirectory();
-#endif
-
 protected:
     explicit AuxiliaryProcess();
     virtual ~AuxiliaryProcess();
@@ -128,6 +131,19 @@ protected:
     virtual void initializeProcessName(const AuxiliaryProcessInitializationParameters&);
     virtual void initializeSandbox(const AuxiliaryProcessInitializationParameters&, SandboxInitializationParameters&);
     virtual void initializeConnection(IPC::Connection*);
+
+    // Should match the QoS this process gives its main thread, so that the IPC receive queue is
+    // not demoted below the thread it delivers messages to.
+    virtual Thread::QOS connectionReceiveQueueQOS() const { return Thread::QOS::UserInitiated; }
+
+#if ENABLE(LOGD_BLOCKING_IN_WEBCONTENT)
+    void initializeLogForwarding(bool isDebugLoggingEnabled);
+#if ENABLE(STREAMING_IPC_IN_LOG_FORWARDING)
+    virtual void sendCreateLogStreamToParent(IPC::Connection&, IPC::StreamServerConnectionHandle&&, LogStreamIdentifier, CompletionHandler<void()>&&) { ASSERT_NOT_REACHED(); }
+#else
+    virtual void sendCreateLogStreamToParent(IPC::Connection&, LogStreamIdentifier, CompletionHandler<void()>&&) { ASSERT_NOT_REACHED(); }
+#endif
+#endif
 
     virtual bool shouldTerminate() = 0;
     virtual void terminate();

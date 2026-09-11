@@ -309,7 +309,7 @@ inline static bool hasScrollbarPseudoElement(EnumSet<PseudoElementType> collecte
     return collectedPseudoElements.contains(PseudoElementType::WebKitResizer);
 }
 
-static void moveContextToParent(SelectorChecker::LocalContext& context)
+static SelectorChecker::LocalContext localContextForParent(const SelectorChecker::LocalContext& context)
 {
     // Disable :visited matching when we see the first link.
     if (context.element->isLink())
@@ -874,7 +874,12 @@ bool SelectorChecker::checkOne(CheckingContext& checkingContext, LocalContext& c
     case CSSSelector::Match::Tag:
         return tagMatches(element, selector, m_documentIsHTML);
 
-    case CSSSelector::Match::Id:
+    if (selector.isEquivalentToClassSelector()) {
+        ASSERT(m_strictParsing);
+        return element->hasClassName(selector.value());
+    }
+
+    if (selector.match() == CSSSelector::Match::Id) {
         ASSERT(!selector.value().isNull());
         return element.idForStyleResolution() == selector.value();
 

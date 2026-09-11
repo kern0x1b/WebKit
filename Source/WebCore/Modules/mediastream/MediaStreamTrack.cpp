@@ -63,6 +63,7 @@
 #include "Quirks.h"
 #include "RealtimeMediaSourceCenter.h"
 #include "ScriptExecutionContext.h"
+#include "ScriptExecutionContextInlines.h"
 #include "Settings.h"
 #include "WebAudioSourceProvider.h"
 #include <JavaScriptCore/ConsoleTypes.h>
@@ -92,7 +93,6 @@ MediaStreamTrack::MediaStreamTrack(ScriptExecutionContext& context, Ref<MediaStr
     , m_muted(m_private->muted())
     , m_isCaptureTrack(is<Document>(context) && m_private->isCaptureTrack())
 {
-    relaxAdoptionRequirement();
     ALWAYS_LOG(LOGIDENTIFIER);
 
     m_private->addObserver(*this);
@@ -547,7 +547,18 @@ void MediaStreamTrack::trackMutedChanged(MediaStreamTrackPrivate&)
     if (scriptExecutionContext()->activeDOMObjectsAreStopped() || m_ended)
         return;
 
-    Function<void()> updateMuted = [this, protectedThis = Ref { *this }, muted = m_private->muted()] {
+    bool muted = m_private->muted();
+    RefPtr<GenericPromise> sessionActivated;
+    if (isAudio() && isCaptureTrack()) {
+        if (RefPtr manager = mediaSessionManager()) {
+            Ref stateChanged = manager->audioCaptureSourceStateChanged(muted ? MediaSessionManagerInterface::IsCaptureStarting::No : MediaSessionManagerInterface::IsCaptureStarting::Yes);
+            // Only unmuting has something to wait for: muting requests deactivation without waiting.
+            if (!muted)
+                sessionActivated = WTF::move(stateChanged);
+        }
+    }
+
+    Function<void()> updateMuted = [this, protectedThis = Ref { *this }, muted] {
         RefPtr context = scriptExecutionContext();
         if (!context || context->activeDOMObjectsAreStopped())
             return;
@@ -556,10 +567,6 @@ void MediaStreamTrack::trackMutedChanged(MediaStreamTrackPrivate&)
             return;
 
         m_muted = muted;
-
-        if (isAudio() && isCaptureTrack())
-            if (RefPtr manager = mediaSessionManager())
-                manager->audioCaptureSourceStateChanged(muted ? MediaSessionManagerInterface::IsCaptureStarting::No : MediaSessionManagerInterface::IsCaptureStarting::Yes);
 
         dispatchEvent(Event::create(muted ? eventNames().muteEvent : eventNames().unmuteEvent, Event::CanBubble::No, Event::IsCancelable::No));
 
@@ -571,7 +578,13 @@ void MediaStreamTrack::trackMutedChanged(MediaStreamTrackPrivate&)
 
     if (m_shouldFireMuteEventImmediately)
         updateMuted();
-    else {
+    else if (sessionActivated) {
+        // Unmuting an audio capture track activates the audio session asynchronously. Delay the event
+        // until it has, so listeners observe an active session.
+        context->enqueueTaskWhenSettled(sessionActivated.releaseNonNull(), TaskSource::Networking, [updateMuted = WTF::move(updateMuted)](auto&&) mutable {
+            updateMuted();
+        });
+    } else {
         queueTaskKeepingObjectAlive(*this, TaskSource::Networking, [updateMuted = WTF::move(updateMuted)](auto&) {
             updateMuted();
         });
@@ -651,13 +664,13 @@ RefPtr<WebAudioSourceProvider> MediaStreamTrack::createAudioSourceProvider()
 bool MediaStreamTrack::isCapturingAudio() const
 {
     ASSERT(isCaptureTrack() && m_private->isAudio());
-    return !ended() && !muted();
+    return !ended() && !m_private->muted();
 }
 
 bool MediaStreamTrack::wantsToCaptureAudio() const
 {
     ASSERT(isCaptureTrack() && m_private->isAudio());
-    return !ended() && (!muted() || m_private->interrupted());
+    return !ended() && (!m_private->muted() || m_private->interrupted());
 }
 
 UniqueRef<MediaStreamTrackDataHolder> MediaStreamTrack::detach()

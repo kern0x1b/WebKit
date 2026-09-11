@@ -34,6 +34,7 @@
 #include "CSSCustomIdentValue.h"
 #include "CSSCustomPropertySyntax.h"
 #include "CSSCustomPropertyValue.h"
+#include "CSSKeywordValueInlines.h"
 #include "CSSMarkup.h"
 #include "CSSParserContext.h"
 #include "CSSParserFastPaths.h"
@@ -66,6 +67,8 @@
 #include "CSSTokenizer.h"
 #include "CSSTransformListValue.h"
 #include "CSSURLValue.h"
+#include "CSSValueKeywords.h"
+#include "CSSValuePair.h"
 #include "CSSWideKeyword.h"
 #include "ComputedStyleDependencies.h"
 #include "StyleBuilder.h"
@@ -239,6 +242,7 @@ bool CSSPropertyParser::parseValue(CSSPropertyID property, IsImportant important
     int initialParsedPropertiesSize = parsedProperties.size();
 
     range.consumeWhitespace();
+    range.trimTrailingWhitespace();
 
     CSS::PropertyParserResult result { parsedProperties };
 
@@ -286,7 +290,7 @@ bool CSSPropertyParser::parseValue(CSSPropertyID property, IsImportant important
     return parseSuccess;
 }
 
-RefPtr<CSSValue> CSSPropertyParser::parseStylePropertyLonghand(CSSPropertyID property, const String& string, const CSSParserContext& context)
+RefPtr<CSSValue> CSSPropertyParser::parseStylePropertyLonghand(CSSPropertyID property, StringView string, const CSSParserContext& context)
 {
     ASSERT(!WebCore::isShorthand(property));
 
@@ -340,7 +344,7 @@ RefPtr<CSSValue> CSSPropertyParser::parseStylePropertyLonghand(CSSPropertyID pro
     return value;
 }
 
-RefPtr<CSSValue> CSSPropertyParser::parseCounterStyleDescriptor(CSSPropertyID property, const String& string, const CSSParserContext& context)
+RefPtr<CSSValue> CSSPropertyParser::parseCounterStyleDescriptor(CSSPropertyID property, StringView string, const CSSParserContext& context)
 {
     auto tokenizer = CSSTokenizer(string);
     auto range = tokenizer.tokenRange();
@@ -376,7 +380,9 @@ std::optional<Variant<Ref<const Style::CustomProperty>, CSSWideKeyword>> CSSProp
         .context = context,
         .currentRule = StyleRuleType::Style,
         .currentProperty = CSSPropertyCustom,
+        .currentCustomPropertyName = name,
         .important = IsImportant::No,
+        .randomFunctionsDisallowed = builderState.isResolvingContainerQueries(),
     };
 
     auto value = consumeTypedCustomPropertyValue(range, state, name, syntax, builderState, isAttrTainted);
@@ -395,6 +401,7 @@ RefPtr<const Style::CustomProperty> CSSPropertyParser::parseTypedCustomPropertyI
         .currentRule = StyleRuleType::Style,
         .currentProperty = CSSPropertyCustom,
         .important = IsImportant::No,
+        .randomFunctionsDisallowed = true,
     };
 
     auto value = consumeTypedCustomPropertyValue(range, state, name, syntax, builderState);
@@ -484,9 +491,9 @@ std::pair<RefPtr<CSSValue>, CSSCustomPropertySyntax::Type> consumeCustomProperty
         case CSSCustomPropertySyntax::Type::CustomIdent:
             return consumeCustomIdent(range, state);
         case CSSCustomPropertySyntax::Type::Length:
-            return CSSPrimitiveValueResolver<CSS::Length<CSS::AllUnzoomed>>::consumeAndResolve(range, state);
+            return CSSPrimitiveValueResolver<CSS::Length<>>::consumeAndResolve(range, state);
         case CSSCustomPropertySyntax::Type::LengthPercentage:
-            return CSSPrimitiveValueResolver<CSS::LengthPercentage<CSS::AllUnzoomed>>::consumeAndResolve(range, state);
+            return CSSPrimitiveValueResolver<CSS::LengthPercentage<>>::consumeAndResolve(range, state);
         case CSSCustomPropertySyntax::Type::Percentage:
             return CSSPrimitiveValueResolver<CSS::Percentage<>>::consumeAndResolve(range, state);
         case CSSCustomPropertySyntax::Type::Integer:
@@ -564,9 +571,9 @@ std::optional<Variant<Ref<const Style::CustomProperty>, CSSWideKeyword>> consume
     auto resolveSyntaxValue = [&, syntaxType = syntaxType](const CSSValue& value) -> std::optional<Style::CustomProperty::Value> {
         switch (syntaxType) {
         case CSSCustomPropertySyntax::Type::LengthPercentage:
-            return Style::toStyleFromCSSValue<Style::LengthPercentage<CSS::AllUnzoomed>>(builderState, downcast<CSSPrimitiveValue>(value));
+            return Style::toStyleFromCSSValue<Style::LengthPercentage<>>(builderState, downcast<CSSPrimitiveValue>(value));
         case CSSCustomPropertySyntax::Type::Length:
-            return Style::toStyleFromCSSValue<Style::Length<CSS::AllUnzoomed>>(builderState, downcast<CSSPrimitiveValue>(value));
+            return Style::toStyleFromCSSValue<Style::Length<>>(builderState, downcast<CSSPrimitiveValue>(value));
         case CSSCustomPropertySyntax::Type::Integer:
         case CSSCustomPropertySyntax::Type::Number:
             return Style::toStyleFromCSSValue<Style::Number<>>(builderState, downcast<CSSPrimitiveValue>(value));
@@ -765,9 +772,20 @@ bool consumePageDescriptor(CSSParserTokenRange& range, const CSSParserContext& c
         if (!range.atEnd())
             return false;
 
+        // Portrait is the default and should not be serialized.
+        if (property == CSSPropertyPageSize) {
+            RefPtr pair = dynamicDowncast<CSSValuePair>(parsedValue);
+            if (pair && valueID(pair->second()) == CSSValuePortrait)
+                parsedValue = &pair->first();
+        }
+
         result.addProperty(state, property, CSSPropertyInvalid, WTF::move(parsedValue), IsImportant::No);
         return true;
     }
+
+    // Don't fall back to parsing `size` as the width/height shorthand inside @page.
+    if (property == CSSPropertyPageSize)
+        return false;
 
     return consumeStyleProperty(range, context, property, important, StyleRuleType::Page, result);
 }
@@ -821,8 +839,6 @@ static bool propertyAllowedInPositionTryRule(CSSPropertyID property)
 
 bool consumePositionTryDescriptor(CSSParserTokenRange& range, const CSSParserContext& context, CSSPropertyID property, IsImportant important, CSS::PropertyParserResult& result)
 {
-    ASSERT(context.propertySettings.cssAnchorPositioningEnabled);
-
     // Per spec, !important is not allowed and makes the whole declaration invalid.
     if (important == IsImportant::Yes)
         return false;

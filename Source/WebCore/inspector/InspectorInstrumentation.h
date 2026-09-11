@@ -39,6 +39,9 @@
 #include "EventTarget.h"
 #include "FormData.h"
 #include "Frame.h"
+#include "GPUComputePipeline.h"
+#include "GPUDevice.h"
+#include "GPURenderPipeline.h"
 #include "HitTestResult.h"
 #include "InspectorInstrumentationPublic.h"
 #include "InstrumentingAgents.h"
@@ -83,6 +86,7 @@ class Document;
 class DocumentLoader;
 class DocumentThreadableLoader;
 class EventListener;
+class GPUDevice;
 class HTTPHeaderMap;
 class InspectorTimelineAgent;
 class InstrumentingAgents;
@@ -284,7 +288,9 @@ public:
     static void stopProfiling(LocalFrame&, const String& title);
     static void stopProfiling(WorkerOrWorkletGlobalScope&, const String& title);
     static void consoleStartRecordingCanvas(CanvasRenderingContext&, JSC::JSGlobalObject&, JSC::JSObject* options);
+    static void consoleStartRecordingCanvas(GPUDevice&, JSC::JSGlobalObject&, JSC::JSObject* options);
     static void consoleStopRecordingCanvas(CanvasRenderingContext&);
+    static void consoleStopRecordingCanvas(GPUDevice&);
 
     static void performanceMark(ScriptExecutionContext&, const String&, std::optional<MonotonicTime>);
 
@@ -330,6 +336,16 @@ public:
     static bool isWebGLProgramDisabled(WebGLRenderingContextBase&, WebGLProgram&);
     static bool isWebGLProgramHighlighted(WebGLRenderingContextBase&, WebGLProgram&);
 #endif
+    static void didCreateWebGPUDevice(GPUDevice&);
+    static void willDestroyWebGPUDevice(GPUDevice&);
+    static void didChangeGPUDeviceClientNodes(GPUDevice&);
+    static void didChangeWebGPUMemory(GPUDevice&);
+    static void didCreateWebGPUComputePipeline(GPUDevice&, GPUComputePipeline&);
+    static void willDestroyWebGPUComputePipeline(GPUComputePipeline&);
+    static void didCreateWebGPURenderPipeline(GPUDevice&, GPURenderPipeline&);
+    static void willDestroyWebGPURenderPipeline(GPURenderPipeline&);
+    static bool isWebGPURenderPipelineDisabled(GPURenderPipeline&);
+    static RefPtr<WebGPU::RenderPipeline> renderPipelineForWebGPUHighlighting(GPURenderPipeline&, unsigned canvasColorAttachmentMask);
 
     static void willApplyKeyframeEffect(const Styleable&, KeyframeEffect&, const ComputedEffectTiming&);
     static void didChangeWebAnimationName(WebAnimation&);
@@ -497,7 +513,9 @@ private:
     static void startProfilingImpl(InstrumentingAgents&, const String& title);
     static void stopProfilingImpl(InstrumentingAgents&, const String& title);
     static void consoleStartRecordingCanvasImpl(InstrumentingAgents&, CanvasRenderingContext&, JSC::JSGlobalObject&, JSC::JSObject* options);
+    static void consoleStartRecordingCanvasImpl(InstrumentingAgents&, GPUDevice&, JSC::JSGlobalObject&, JSC::JSObject* options);
     static void consoleStopRecordingCanvasImpl(InstrumentingAgents&, CanvasRenderingContext&);
+    static void consoleStopRecordingCanvasImpl(InstrumentingAgents&, GPUDevice&);
 
     static void performanceMarkImpl(InstrumentingAgents&, const String& label, std::optional<MonotonicTime>);
     static void didEnqueueFirstContentfulPaintImpl(InstrumentingAgents&);
@@ -542,6 +560,16 @@ private:
     static bool isWebGLProgramDisabledImpl(InstrumentingAgents&, WebGLProgram&);
     static bool isWebGLProgramHighlightedImpl(InstrumentingAgents&, WebGLProgram&);
 #endif
+    static void didCreateWebGPUDeviceImpl(InstrumentingAgents&, GPUDevice&);
+    static void willDestroyWebGPUDeviceImpl(InstrumentingAgents&, GPUDevice&);
+    static void didChangeGPUDeviceClientNodesImpl(InstrumentingAgents&, GPUDevice&);
+    static void didChangeWebGPUMemoryImpl(InstrumentingAgents&, GPUDevice&);
+    static void didCreateWebGPUComputePipelineImpl(InstrumentingAgents&, GPUDevice&, GPUComputePipeline&);
+    static void willDestroyWebGPUComputePipelineImpl(InstrumentingAgents&, GPUComputePipeline&);
+    static void didCreateWebGPURenderPipelineImpl(InstrumentingAgents&, GPUDevice&, GPURenderPipeline&);
+    static void willDestroyWebGPURenderPipelineImpl(InstrumentingAgents&, GPURenderPipeline&);
+    static bool isWebGPURenderPipelineDisabledImpl(InstrumentingAgents&, GPURenderPipeline&);
+    static RefPtr<WebGPU::RenderPipeline> renderPipelineForWebGPUHighlightingImpl(InstrumentingAgents&, GPURenderPipeline&, unsigned canvasColorAttachmentMask);
 
     static void willApplyKeyframeEffectImpl(InstrumentingAgents&, const Styleable&, KeyframeEffect&, const ComputedEffectTiming&);
     static void didChangeWebAnimationNameImpl(InstrumentingAgents&, WebAnimation&);
@@ -1560,6 +1588,86 @@ inline bool InspectorInstrumentation::isWebGLProgramHighlighted(WebGLRenderingCo
 }
 #endif
 
+inline void InspectorInstrumentation::didCreateWebGPUDevice(GPUDevice& device)
+{
+    FAST_RETURN_IF_NO_FRONTENDS(void());
+    if (RefPtr agents = instrumentingAgents(protect(device.scriptExecutionContext())))
+        didCreateWebGPUDeviceImpl(*agents, device);
+}
+
+inline void InspectorInstrumentation::willDestroyWebGPUDevice(GPUDevice& device)
+{
+    FAST_RETURN_IF_NO_FRONTENDS(void());
+    if (RefPtr agents = instrumentingAgents(protect(device.scriptExecutionContext())))
+        willDestroyWebGPUDeviceImpl(*agents, device);
+}
+
+inline void InspectorInstrumentation::didChangeGPUDeviceClientNodes(GPUDevice& device)
+{
+    FAST_RETURN_IF_NO_FRONTENDS(void());
+    if (RefPtr agents = instrumentingAgents(protect(device.scriptExecutionContext())))
+        didChangeGPUDeviceClientNodesImpl(*agents, device);
+}
+
+inline void InspectorInstrumentation::didChangeWebGPUMemory(GPUDevice& device)
+{
+    FAST_RETURN_IF_NO_FRONTENDS(void());
+    if (RefPtr agents = instrumentingAgents(protect(device.scriptExecutionContext())))
+        didChangeWebGPUMemoryImpl(*agents, device);
+}
+
+inline void InspectorInstrumentation::didCreateWebGPUComputePipeline(GPUDevice& device, GPUComputePipeline& pipeline)
+{
+    FAST_RETURN_IF_NO_FRONTENDS(void());
+    if (RefPtr agents = instrumentingAgents(protect(device.scriptExecutionContext())))
+        didCreateWebGPUComputePipelineImpl(*agents, device, pipeline);
+}
+
+inline void InspectorInstrumentation::willDestroyWebGPUComputePipeline(GPUComputePipeline& pipeline)
+{
+    FAST_RETURN_IF_NO_FRONTENDS(void());
+    if (RefPtr device = pipeline.device()) {
+        if (RefPtr agents = instrumentingAgents(protect(device->scriptExecutionContext())))
+            willDestroyWebGPUComputePipelineImpl(*agents, pipeline);
+    }
+}
+
+inline void InspectorInstrumentation::didCreateWebGPURenderPipeline(GPUDevice& device, GPURenderPipeline& pipeline)
+{
+    FAST_RETURN_IF_NO_FRONTENDS(void());
+    if (RefPtr agents = instrumentingAgents(protect(device.scriptExecutionContext())))
+        didCreateWebGPURenderPipelineImpl(*agents, device, pipeline);
+}
+
+inline void InspectorInstrumentation::willDestroyWebGPURenderPipeline(GPURenderPipeline& pipeline)
+{
+    FAST_RETURN_IF_NO_FRONTENDS(void());
+    if (RefPtr device = pipeline.device()) {
+        if (RefPtr agents = instrumentingAgents(protect(device->scriptExecutionContext())))
+            willDestroyWebGPURenderPipelineImpl(*agents, pipeline);
+    }
+}
+
+inline bool InspectorInstrumentation::isWebGPURenderPipelineDisabled(GPURenderPipeline& pipeline)
+{
+    FAST_RETURN_IF_NO_FRONTENDS(false);
+    if (RefPtr device = pipeline.device()) {
+        if (RefPtr agents = instrumentingAgents(protect(device->scriptExecutionContext())))
+            return isWebGPURenderPipelineDisabledImpl(*agents, pipeline);
+    }
+    return false;
+}
+
+inline RefPtr<WebGPU::RenderPipeline> InspectorInstrumentation::renderPipelineForWebGPUHighlighting(GPURenderPipeline& pipeline, unsigned canvasColorAttachmentMask)
+{
+    FAST_RETURN_IF_NO_FRONTENDS(nullptr);
+    if (RefPtr device = pipeline.device()) {
+        if (RefPtr agents = instrumentingAgents(protect(device->scriptExecutionContext())))
+            return renderPipelineForWebGPUHighlightingImpl(*agents, pipeline, canvasColorAttachmentMask);
+    }
+    return nullptr;
+}
+
 inline void InspectorInstrumentation::willApplyKeyframeEffect(const Styleable& target, KeyframeEffect& effect, const ComputedEffectTiming& computedTiming)
 {
     FAST_RETURN_IF_NO_FRONTENDS(void());
@@ -1776,6 +1884,12 @@ inline void InspectorInstrumentation::consoleStartRecordingCanvas(CanvasRenderin
 #endif
 }
 
+inline void InspectorInstrumentation::consoleStartRecordingCanvas(GPUDevice& device, JSC::JSGlobalObject& exec, JSC::JSObject* options)
+{
+    if (RefPtr agents = instrumentingAgents(protect(device.scriptExecutionContext())))
+        consoleStartRecordingCanvasImpl(*agents, device, exec, options);
+}
+
 inline void InspectorInstrumentation::consoleStopRecordingCanvas(CanvasRenderingContext& context)
 {
 #if defined(WEBKIT_IOS6)
@@ -1784,6 +1898,12 @@ inline void InspectorInstrumentation::consoleStopRecordingCanvas(CanvasRendering
     if (RefPtr agents = instrumentingAgents(protect(protect(context.canvasBase())->scriptExecutionContext())))
         consoleStopRecordingCanvasImpl(*agents, context);
 #endif
+}
+
+inline void InspectorInstrumentation::consoleStopRecordingCanvas(GPUDevice& device)
+{
+    if (RefPtr agents = instrumentingAgents(protect(device.scriptExecutionContext())))
+        consoleStopRecordingCanvasImpl(*agents, device);
 }
 
 inline void InspectorInstrumentation::performanceMark(ScriptExecutionContext& context, const String& label, std::optional<MonotonicTime> startTime)

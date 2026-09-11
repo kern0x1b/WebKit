@@ -31,30 +31,33 @@ if (SWIFT_REQUIRED)
         cmake_policy(SET CMP0157 NEW)
     endif ()
 
-    # CMake omits -target for swiftc during iOS cross-compilation.
-    if (PORT STREQUAL "IOS")
-        if (CMAKE_IOS_SIMULATOR OR CMAKE_OSX_SYSROOT MATCHES "[Ss]imulator")
-            set(CMAKE_Swift_COMPILER_TARGET "${CMAKE_OSX_ARCHITECTURES}-apple-ios${CMAKE_OSX_DEPLOYMENT_TARGET}-simulator" CACHE STRING "Swift target triple" FORCE)
-        else ()
-            set(CMAKE_Swift_COMPILER_TARGET "${CMAKE_OSX_ARCHITECTURES}-apple-ios${CMAKE_OSX_DEPLOYMENT_TARGET}" CACHE STRING "Swift target triple" FORCE)
-        endif ()
-    endif ()
-
     enable_language(Swift)
 
     # -F causes Swift to find C++23 framework headers in implicit module builds.
-    if (PORT STREQUAL "IOS")
+    if (WEBKIT_SDK_IS_IOS_FAMILY)
         set(CMAKE_Swift_FRAMEWORK_SEARCH_FLAG "-Xcc -iquote")
     endif ()
 
     if (APPLE)
-        WEBKIT_XCRUN(ORIGINAL_Swift_COMPILER --find swiftc)
-    else ()
-        set(ORIGINAL_Swift_COMPILER "${CMAKE_Swift_COMPILER}")
+        WEBKIT_XCRUN(CMAKE_Swift_COMPILER --find swiftc)
     endif ()
-    set(CMAKE_Swift_COMPILER "${CMAKE_SOURCE_DIR}/Tools/Scripts/swift/swiftc-wrapper.sh")
+    set(ORIGINAL_Swift_COMPILER "${CMAKE_Swift_COMPILER}")
+
+    if (WIN32)
+        # Avoid cmd.exe due to command-line length limits.
+        set(CMAKE_Swift_COMPILER "${Python_EXECUTABLE}")
+        set(CMAKE_Swift_COMPILER_ARG1 "${CMAKE_SOURCE_DIR}/Tools/Scripts/swift/swiftc-wrapper.py")
+    else ()
+        set(CMAKE_Swift_COMPILER "${CMAKE_SOURCE_DIR}/Tools/Scripts/swift/swiftc-wrapper.py")
+    endif ()
     add_compile_options($<$<COMPILE_LANGUAGE:Swift>:--original-swift-compiler=${ORIGINAL_Swift_COMPILER}>)
     add_link_options($<$<LINK_LANGUAGE:Swift>:--original-swift-compiler=${ORIGINAL_Swift_COMPILER}>)
+
+    if (APPLE)
+        # When Swift is used as a linker frontend, disable dSYM generation. The
+        # objects being linked still contain debug info.
+        add_link_options("$<$<LINK_LANGUAGE:Swift>:-gnone>")
+    endif ()
     # The static archive rule (<CMAKE_Swift_CREATE_STATIC_LIBRARY>) uses neither
     # <FLAGS> nor link options, so inject the flag directly into the template.
     string(REPLACE "<CMAKE_Swift_COMPILER>"

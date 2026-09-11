@@ -63,10 +63,6 @@
 #import <wtf/darwin/DispatchExtras.h>
 #import <wtf/text/MakeString.h>
 
-@interface WKWebView ()
-- (void)copy:(id)sender;
-@end
-
 #if PLATFORM(IOS_FAMILY)
 @interface UIPrintInteractionController ()
 - (BOOL)_setupPrintPanel:(void (^)(UIPrintInteractionController *printInteractionController, BOOL completed, NSError *error))completion;
@@ -463,6 +459,146 @@ UNIFIED_PDF_TEST(SelectionHighlightColorDoesNotAdaptToColorScheme)
 
 #endif // PLATFORM(MAC)
 
+enum class PDFEmbedElement : uint8_t { IFrame, Embed, Object };
+
+using EmbeddedPDFFitsToFrameParams = std::tuple<PDFEmbedElement, bool, bool, bool>;
+
+class EmbeddedPDFFitsToFrame : public testing::TestWithParam<EmbeddedPDFFitsToFrameParams> {
+public:
+    PDFEmbedElement embedElement() const { return std::get<0>(GetParam()); }
+    bool crossOrigin() const { return std::get<1>(GetParam()); }
+    bool siteIsolationEnabled() const { return std::get<2>(GetParam()); }
+    bool siteIsolationSharedProcessEnabled() const { return std::get<3>(GetParam()); }
+
+    void SetUp() override
+    {
+        server = makeUnique<HTTPServer>(std::initializer_list<std::pair<String, HTTPResponse>> {
+            { "/test.pdf"_s, HTTPResponse { { { "Content-Type"_s, "application/pdf"_s } }, testPDFDataWithLink() } },
+        }, HTTPServer::Protocol::HttpsProxy);
+
+        configuration = configurationForWebViewTestingUnifiedPDF();
+        [configuration setWebsiteDataStore:[server->httpsProxyConfiguration() websiteDataStore]];
+        for (_WKFeature *feature in [WKPreferences _features]) {
+            NSString *key = feature.key;
+            if ([key isEqualToString:@"SiteIsolationEnabled"])
+                [[configuration preferences] _setEnabled:siteIsolationEnabled() forFeature:feature];
+            else if ([key isEqualToString:@"SiteIsolationSharedProcessEnabled"])
+                [[configuration preferences] _setEnabled:siteIsolationSharedProcessEnabled() forFeature:feature];
+        }
+
+        navigationDelegate = adoptNS([TestNavigationDelegate new]);
+        [navigationDelegate allowAnyTLSCertificate];
+        webView = adoptNS([[TestWKWebView alloc] initWithFrame:CGRectMake(0, 0, 800, 600) configuration:configuration addToWindow:YES]);
+        [webView setNavigationDelegate:navigationDelegate];
+    }
+
+    static std::string testNameGenerator(testing::TestParamInfo<EmbeddedPDFFitsToFrameParams> info)
+    {
+        std::string element = [embedElement = std::get<0>(info.param)] {
+            switch (embedElement) {
+            case PDFEmbedElement::IFrame:
+                return "IFrame";
+            case PDFEmbedElement::Embed:
+                return "Embed";
+            case PDFEmbedElement::Object:
+                return "Object";
+            }
+            ASSERT_NOT_REACHED();
+            return "";
+        }();
+        return element
+            + (std::get<1>(info.param) ? "_CrossOrigin" : "_SameOrigin")
+            + "_SiteIsolation" + (std::get<2>(info.param) ? "Enabled" : "Disabled")
+            + "_SiteIsolationSharedProcess" + (std::get<3>(info.param) ? "Enabled" : "Disabled");
+    }
+
+    std::unique_ptr<HTTPServer> server;
+    RetainPtr<WKWebViewConfiguration> configuration;
+    RetainPtr<TestNavigationDelegate> navigationDelegate;
+    RetainPtr<TestWKWebView> webView;
+};
+
+TEST_P(EmbeddedPDFFitsToFrame, Test)
+{
+    // FIXME: Replace with GTEST_SKIP() after webkit.org/b/321271 is resolved.
+#if PLATFORM(IOS_FAMILY)
+        if (embedElement() == PDFEmbedElement::IFrame)
+            return;
+#endif
+
+    auto mainHTML = [crossOrigin = crossOrigin(), embedElement = embedElement()] {
+        auto layout = "style='position:absolute; left:0; top:0; border:0; width:600px; height:0'"_s;
+        auto pdfURL = makeString("https://"_s, crossOrigin ? "webkit.org"_s : "example.com"_s, "/test.pdf"_s);
+        switch (embedElement) {
+        case PDFEmbedElement::IFrame:
+            return makeString("<iframe id='pdf' "_s, layout, " src='"_s, pdfURL, "'></iframe>"_s);
+        case PDFEmbedElement::Embed:
+            return makeString("<embed id='pdf' "_s, layout, " src='"_s, pdfURL, "'>"_s);
+        case PDFEmbedElement::Object:
+            return makeString("<object id='pdf' "_s, layout, " type='application/pdf' data='"_s, pdfURL, "'></object>"_s);
+        }
+        ASSERT_NOT_REACHED();
+        return String { };
+    }();
+    server->addResponse("/main"_s, HTTPResponse { { { "Content-Type"_s, "text/html"_s } }, mainHTML });
+
+    [webView loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:@"https://example.com/main"]]];
+    [navigationDelegate waitForDidFinishNavigation];
+
+    static constexpr double pluginWidth = 120;
+    static constexpr double tolerance = 4;
+
+    bool inSubframe = embedElement() == PDFEmbedElement::IFrame;
+    RetainPtr<NSString> pluginSelector = inSubframe ? @"document.querySelector('embed')" : @"document.getElementById('pdf')";
+    RetainPtr<NSString> readStateJS = adoptNS([[NSString alloc] initWithFormat:@"(() => {"
+        "  const plugin = %@;"
+        "  if (!plugin) return { count: -1 };"
+        "  const box = plugin.getBoundingClientRect();"
+        "  const rects = internals.pdfAnnotationRectsForTesting(plugin);"
+        "  if (!rects || !rects.length) return { count: 0, innerWidth: window.innerWidth, elementWidth: box.width };"
+        "  let maxX = 0;"
+        "  for (const r of rects) maxX = Math.max(maxX, r.x + r.width);"
+        "  return { count: rects.length, innerWidth: window.innerWidth, elementWidth: box.width, maxX };"
+        "})()", pluginSelector.get()]);
+
+    auto readState = [webView = RetainPtr { this->webView }, readStateJS, inSubframe] {
+        return dynamic_objc_cast<NSDictionary>([webView objectByEvaluatingJavaScript:readStateJS inFrame:(inSubframe ? [webView firstChildFrame] : nil)]);
+    };
+
+    // The PDF installed and fit against the provisional (wide) size.
+    bool installedWhileWide = TestWebKitAPI::Util::waitFor([&readState] {
+        RetainPtr result = readState();
+        return result
+            && [[result objectForKey:@"count"] intValue] > 0
+            && [[result objectForKey:@"elementWidth"] doubleValue] > 400;
+    });
+    EXPECT_TRUE(installedWhileWide);
+
+    [webView objectByEvaluatingJavaScript:@"const pdf = document.getElementById('pdf'); pdf.style.width = '120px'; pdf.style.height = '90px';"];
+
+    // Wait until the resize reaches the plugin's frame (true whether or not the PDF re-fits, so the
+    // failing case doesn't burn a fit-timeout), then assert the PDF re-fit to the new width.
+    bool narrowed = TestWebKitAPI::Util::waitFor([&readState] {
+        RetainPtr result = readState();
+        if (!result || [[result objectForKey:@"count"] intValue] <= 0)
+            return false;
+
+        return [[result objectForKey:@"innerWidth"] doubleValue] < 200
+            || [[result objectForKey:@"elementWidth"] doubleValue] < 200
+            || [[result objectForKey:@"maxX"] doubleValue] <= pluginWidth + tolerance;
+    });
+    EXPECT_TRUE(narrowed);
+    [webView waitForNextPresentationUpdate];
+
+    RetainPtr finalState = readState();
+    EXPECT_GT([[finalState objectForKey:@"count"] intValue], 0);
+
+    // Ensure that the annotation bounds are within the plugin frame.
+    EXPECT_LE([[finalState objectForKey:@"maxX"] doubleValue], pluginWidth + tolerance);
+}
+
+INSTANTIATE_TEST_SUITE_P(UnifiedPDF, EmbeddedPDFFitsToFrame, testing::Combine(testing::Values(PDFEmbedElement::IFrame, PDFEmbedElement::Embed, PDFEmbedElement::Object), testing::Bool(), testing::Bool(), testing::Bool()), &EmbeddedPDFFitsToFrame::testNameGenerator);
+
 #if ENABLE(PDF_HUD)
 
 UNIFIED_PDF_TEST(SetPageZoomFactorDoesNotBailIncorrectly)
@@ -487,6 +623,68 @@ UNIFIED_PDF_TEST(SetPageZoomFactorDoesNotBailIncorrectly)
     double scaleAfterResetting = [webView _pageZoomFactor];
     EXPECT_LT(scaleAfterResetting, scaleAfterZooming);
     EXPECT_EQ(scaleAfterResetting, 1.0);
+}
+
+UNIFIED_PDF_TEST(PDFHUDMultiplePluginsDoNotInterceptHitTesting)
+{
+    RetainPtr handler = adoptNS([TestURLSchemeHandler new]);
+    [handler setStartURLSchemeTaskHandler:^(WKWebView *, id<WKURLSchemeTask> task) {
+        if ([task.request.URL.path isEqualToString:@"/main.html"]) {
+            RetainPtr response = adoptNS([[NSURLResponse alloc] initWithURL:task.request.URL MIMEType:@"text/html" expectedContentLength:0 textEncodingName:nil]);
+            const char* html = "<embed src='test.pdf' width='300' height='200'><embed src='test.pdf' width='300' height='200'>";
+            [task didReceiveResponse:response];
+            [task didReceiveData:[NSData dataWithBytes:html length:strlen(html)]];
+            [task didFinish];
+        } else {
+            EXPECT_WK_STREQ(task.request.URL.path, "/test.pdf");
+            RetainPtr data = testPDFData();
+            RetainPtr response = adoptNS([[NSURLResponse alloc] initWithURL:task.request.URL MIMEType:@"application/pdf" expectedContentLength:[data length] textEncodingName:nil]);
+            [task didReceiveResponse:response];
+            [task didReceiveData:data];
+            [task didFinish];
+        }
+    }];
+
+    RetainPtr configuration = configurationForWebViewTestingUnifiedPDF(true);
+    [configuration setURLSchemeHandler:handler forURLScheme:@"test"];
+    RetainPtr webView = adoptNS([[TestWKWebView alloc] initWithFrame:NSMakeRect(0, 0, 800, 600) configuration:configuration]);
+    [webView _setWindowOcclusionDetectionEnabled:NO];
+    [webView loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:@"test:///main.html"]]];
+    [webView _test_waitForDidFinishNavigation];
+    [webView waitForNextPresentationUpdate];
+
+    // HUDs for <embed> plugins are created asynchronously after navigation, so wait for both to appear.
+    bool hudsReady = TestWebKitAPI::Util::waitFor([webView] {
+        [webView waitForNextPresentationUpdate];
+        RetainPtr currentHUDs = [[webView _pdfHUDs] allObjects];
+        if ([currentHUDs count] < 2)
+            return false;
+        for (NSView *hud in currentHUDs.get()) {
+            RetainPtr bar = [[hud subviews] firstObject];
+            if (!bar || NSIsEmptyRect([bar frame]))
+                return false;
+        }
+        return true;
+    });
+    EXPECT_TRUE(hudsReady);
+
+    RetainPtr huds = [[webView _pdfHUDs] allObjects];
+
+    for (NSView *hud in huds.get()) {
+        RetainPtr bar = [[hud subviews] firstObject];
+        NSRect barInSuperview = [bar convertRect:[bar bounds] toView:[hud superview]];
+        NSPoint barCenter = NSMakePoint(NSMidX(barInSuperview), NSMidY(barInSuperview));
+
+        // The HUD claims a point on its own bar.
+        EXPECT_NOT_NULL([hud hitTest:barCenter]);
+
+        // No other HUD intercepts it (the front-most HUD must not swallow siblings' bar clicks).
+        for (NSView *otherHUD in huds.get()) {
+            if (otherHUD == hud)
+                continue;
+            EXPECT_NULL([otherHUD hitTest:barCenter]);
+        }
+    }
 }
 
 static void checkFrame(NSRect frame, CGFloat x, CGFloat y, CGFloat width, CGFloat height, std::optional<CGFloat> frameOriginTolerance = { })
@@ -706,6 +904,134 @@ UNIFIED_PDF_TEST(PDFHUDMultipleIFrames)
     EXPECT_TRUE(hadRightFrame);
 }
 
+using EmbeddedPDFHUDSiteIsolationParams = std::tuple<PDFEmbedElement, bool, bool, bool>;
+
+class EmbeddedPDFHUDSiteIsolation : public testing::TestWithParam<EmbeddedPDFHUDSiteIsolationParams> {
+public:
+    PDFEmbedElement embedElement() const { return std::get<0>(GetParam()); }
+    bool crossOrigin() const { return std::get<1>(GetParam()); }
+    bool siteIsolationEnabled() const { return std::get<2>(GetParam()); }
+    bool siteIsolationSharedProcessEnabled() const { return std::get<3>(GetParam()); }
+
+    String mainHTML() const
+    {
+        auto pdfURL = makeString("https://"_s, crossOrigin() ? "webkit.org"_s : "example.com"_s, "/test.pdf"_s);
+        auto layout = "width='300' height='150' style='position:absolute; left:10px; top:28px; border:0'"_s;
+        switch (embedElement()) {
+        case PDFEmbedElement::IFrame:
+            return makeString("<iframe "_s, layout, " src='"_s, pdfURL, "'></iframe>"_s);
+        case PDFEmbedElement::Embed:
+            return makeString("<embed "_s, layout, " src='"_s, pdfURL, "'>"_s);
+        case PDFEmbedElement::Object:
+            return makeString("<object "_s, layout, " type='application/pdf' data='"_s, pdfURL, "'></object>"_s);
+        }
+        ASSERT_NOT_REACHED();
+        return { };
+    }
+
+    String scrollableMainHTML() const
+    {
+        // Same embedded PDF, but tall enough that the main frame actually scrolls.
+        return makeString(mainHTML(), "<div style='height:2000px'></div>"_s);
+    }
+
+    void SetUp() override
+    {
+        server = makeUnique<HTTPServer>(std::initializer_list<std::pair<String, HTTPResponse>> {
+            { "/main"_s, HTTPResponse { { { "Content-Type"_s, "text/html"_s } }, mainHTML() } },
+            { "/test.pdf"_s, HTTPResponse { { { "Content-Type"_s, "application/pdf"_s } }, testPDFData() } },
+        }, HTTPServer::Protocol::HttpsProxy);
+
+        configuration = server->httpsProxyConfiguration();
+        for (_WKFeature *feature in [WKPreferences _features]) {
+            NSString *key = feature.key;
+            if ([key isEqualToString:@"UnifiedPDFEnabled"] || [key isEqualToString:@"PDFPluginHUDEnabled"])
+                [[configuration preferences] _setEnabled:YES forFeature:feature];
+            else if ([key isEqualToString:@"SiteIsolationEnabled"])
+                [[configuration preferences] _setEnabled:siteIsolationEnabled() forFeature:feature];
+            else if ([key isEqualToString:@"SiteIsolationSharedProcessEnabled"])
+                [[configuration preferences] _setEnabled:siteIsolationSharedProcessEnabled() forFeature:feature];
+        }
+
+        navigationDelegate = adoptNS([TestNavigationDelegate new]);
+        [navigationDelegate allowAnyTLSCertificate];
+        webView = adoptNS([[TestWKWebView alloc] initWithFrame:NSMakeRect(0, 0, 800, 600) configuration:configuration addToWindow:YES]);
+        [webView _setWindowOcclusionDetectionEnabled:NO];
+        [[webView window] makeKeyAndOrderFront:nil];
+        [[webView window] orderFrontRegardless];
+        [webView setNavigationDelegate:navigationDelegate];
+    }
+
+    RetainPtr<NSView> loadAndWaitForHUD()
+    {
+        [webView loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:@"https://example.com/main"]]];
+        [navigationDelegate waitForDidFinishNavigation];
+        TestWebKitAPI::Util::waitFor([this] {
+            return [webView _pdfHUDs].count;
+        });
+        RetainPtr<NSView> hud = [webView _pdfHUDs].anyObject;
+        TestWebKitAPI::Util::waitFor([hud] {
+            return !NSEqualPoints([hud frame].origin, NSZeroPoint);
+        });
+        return hud;
+    }
+
+    static std::string testNameGenerator(testing::TestParamInfo<EmbeddedPDFHUDSiteIsolationParams> info)
+    {
+        std::string element = [embedElement = std::get<0>(info.param)] {
+            switch (embedElement) {
+            case PDFEmbedElement::IFrame:
+                return "IFrame";
+            case PDFEmbedElement::Embed:
+                return "Embed";
+            case PDFEmbedElement::Object:
+                return "Object";
+            }
+            ASSERT_NOT_REACHED();
+            return "";
+        }();
+        return element
+            + (std::get<1>(info.param) ? "_CrossOrigin" : "_SameOrigin")
+            + "_SiteIsolation" + (std::get<2>(info.param) ? "Enabled" : "Disabled")
+            + "_SiteIsolationSharedProcess" + (std::get<3>(info.param) ? "Enabled" : "Disabled");
+    }
+
+    std::unique_ptr<HTTPServer> server;
+    RetainPtr<WKWebViewConfiguration> configuration;
+    RetainPtr<TestNavigationDelegate> navigationDelegate;
+    RetainPtr<TestWKWebView> webView;
+};
+
+TEST_P(EmbeddedPDFHUDSiteIsolation, HUDMatchesOffset)
+{
+    RetainPtr hud = loadAndWaitForHUD();
+    checkFrame([hud frame], 10, 28, 300, 150);
+}
+
+TEST_P(EmbeddedPDFHUDSiteIsolation, HUDTracksMainFrameScroll)
+{
+    server->setResponse("/main"_s, HTTPResponse { { { "Content-Type"_s, "text/html"_s } }, scrollableMainHTML() });
+
+    RetainPtr hud = loadAndWaitForHUD();
+
+    checkFrame([hud frame], 10, 28, 300, 150);
+
+    bool scrolled = TestWebKitAPI::Util::waitFor([this] {
+        [webView objectByEvaluatingJavaScript:@"window.scrollTo(0, 20)"];
+        return [[webView objectByEvaluatingJavaScript:@"window.scrollY"] integerValue] == 20;
+    });
+    EXPECT_TRUE(scrolled);
+
+    TestWebKitAPI::Util::waitFor([this] {
+        [webView waitForNextPresentationUpdate];
+        RetainPtr<NSView> currentHUD = [webView _pdfHUDs].anyObject;
+        return currentHUD && [currentHUD frame].origin.y < 10;
+    });
+    checkFrame([webView _pdfHUDs].anyObject.frame, 10, 8, 300, 150, 1);
+}
+
+INSTANTIATE_TEST_SUITE_P(UnifiedPDF, EmbeddedPDFHUDSiteIsolation, testing::Combine(testing::Values(PDFEmbedElement::IFrame, PDFEmbedElement::Embed, PDFEmbedElement::Object), testing::Bool(), testing::Bool(), testing::Bool()), &EmbeddedPDFHUDSiteIsolation::testNameGenerator);
+
 UNIFIED_PDF_TEST(PDFHUDLoadPDFTypeWithPluginsBlocked)
 {
     RetainPtr configuration = configurationForWebViewTestingUnifiedPDF(true);
@@ -922,6 +1248,28 @@ UNIFIED_PDF_TEST(CopySelectedText)
     EXPECT_WK_STREQ(@"Test", [[UIPasteboard generalPasteboard] string]);
 }
 
+static void doCopyEditActionTest(String resourceName, bool copyAllowed)
+{
+    RetainPtr webView = adoptNS([[TestWKWebView alloc] initWithFrame:CGRectMake(0, 0, 600, 600) configuration:configurationForWebViewTestingUnifiedPDF()]);
+    [webView synchronouslyLoadRequest:[NSURLRequest requestWithURL:[NSBundle.test_resourcesBundle URLForResource:resourceName.createNSString() withExtension:@"pdf"]]];
+    [webView waitForNextPresentationUpdate];
+
+    [webView selectTextInGranularity:UITextGranularityDocument atPoint:CGPointMake(100, 100)];
+    [webView waitForNextPresentationUpdate];
+
+    EXPECT_EQ([webView canPerformAction:@selector(copy:) withSender:nil], copyAllowed);
+}
+
+UNIFIED_PDF_TEST(CopyEditActionOnRegularContent)
+{
+    doCopyEditActionTest("test"_s, true);
+}
+
+UNIFIED_PDF_TEST(CopyEditActionOnDisallowedContent)
+{
+    doCopyEditActionTest("copying-disabled"_s, false);
+}
+
 UNIFIED_PDF_TEST(SelectTextInRotatedPage)
 {
     RetainPtr webView = adoptNS([[TestWKWebView alloc] initWithFrame:CGRectMake(0, 0, 600, 600) configuration:configurationForWebViewTestingUnifiedPDF().get()]);
@@ -1117,7 +1465,13 @@ UNIFIED_PDF_TEST(KeepRelativeScrollPositionAfterZoomingAndViewportUpdate)
     [webView waitForNextVisibleContentRectUpdate];
     [webView waitForNextPresentationUpdate];
 
-    EXPECT_EQ([webView scrollView].contentOffset, CGPointMake(600, 8002));
+    // The PDF is hosted in a PluginDocument whose <embed> is an inline replaced
+    // element, so the document's scrollable height carries a sub-pixel dependency
+    // on the surrounding line box's font-metric descent. Round away that fraction
+    // (magnified here by the 3x zoom) so the check stays metric-independent.
+    CGPoint contentOffset = [webView scrollView].contentOffset;
+    EXPECT_EQ(contentOffset.x, 600);
+    EXPECT_EQ(std::lround(contentOffset.y), 8002);
 }
 
 UNIFIED_PDF_TEST(ScrollOffsetResetWhenChangingPDF)
@@ -1363,7 +1717,7 @@ static HTTPServer pdfServerWithSandboxCSPDirective()
 {
     RetainPtr pdfURL = [NSBundle.test_resourcesBundle URLForResource:@"test" withExtension:@"pdf"];
     HTTPResponse response { [NSData dataWithContentsOfURL:pdfURL.get()] };
-    response.headerFields.set("Content-Security-Policy"_s, "sandbox allow-scripts;"_s);
+    response.setHeaderField("Content-Security-Policy"_s, "sandbox allow-scripts;"_s);
     return { { { "/"_s, response } } };
 }
 

@@ -42,6 +42,7 @@
 #include "PictureInPictureWindow.h"
 #include "UserGestureIndicator.h"
 #include "VideoTrackList.h"
+#include <wtf/Scope.h>
 #include <wtf/TZoneMallocInlines.h>
 
 namespace WebCore {
@@ -121,6 +122,12 @@ void HTMLVideoElementPictureInPicture::requestPictureInPicture(HTMLVideoElement&
         return;
     }
 
+    // Consumed on exit rather than here because MediaElementSession::fullscreenPermitted(), reached through webkitSetPresentationMode() below, accepts this transient activation as the user gesture.
+    auto consumeUserActivation = makeScopeExit([&] {
+        if (userActivationRequired)
+            window->consumeTransientActivation();
+    });
+
     Ref videoElementPictureInPicture = HTMLVideoElementPictureInPicture::from(videoElement);
     if (protect(videoElement)->document().pictureInPictureElement() == &videoElement) {
         promise->resolve<IDLInterface<PictureInPictureWindow>>(videoElementPictureInPicture->m_pictureInPictureWindow);
@@ -137,26 +144,6 @@ void HTMLVideoElementPictureInPicture::requestPictureInPicture(HTMLVideoElement&
         videoElement.webkitSetPresentationMode(HTMLVideoElement::VideoPresentationMode::PictureInPicture);
     } else
         promise->reject(ExceptionCode::NotSupportedError, "The video element does not support the Picture-in-Picture mode."_s);
-}
-
-bool HTMLVideoElementPictureInPicture::autoPictureInPicture(HTMLVideoElement& videoElement)
-{
-    return HTMLVideoElementPictureInPicture::from(videoElement).m_autoPictureInPicture;
-}
-
-void HTMLVideoElementPictureInPicture::setAutoPictureInPicture(HTMLVideoElement& videoElement, bool autoPictureInPicture)
-{
-    HTMLVideoElementPictureInPicture::from(videoElement).m_autoPictureInPicture = autoPictureInPicture;
-}
-
-bool HTMLVideoElementPictureInPicture::disablePictureInPicture(HTMLVideoElement& videoElement)
-{
-    return HTMLVideoElementPictureInPicture::from(videoElement).m_disablePictureInPicture;
-}
-
-void HTMLVideoElementPictureInPicture::setDisablePictureInPicture(HTMLVideoElement& videoElement, bool disablePictureInPicture)
-{
-    HTMLVideoElementPictureInPicture::from(videoElement).m_disablePictureInPicture = disablePictureInPicture;
 }
 
 void HTMLVideoElementPictureInPicture::exitPictureInPicture(Ref<DeferredPromise>&& promise)

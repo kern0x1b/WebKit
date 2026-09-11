@@ -48,6 +48,7 @@
 namespace WebKit {
 
 struct RemoteGraphicsContextGLInitializationState;
+class RemoteSharedResourceCacheProxy;
 #if ENABLE(VIDEO)
 class RemoteVideoFrameObjectHeapProxy;
 #endif
@@ -77,6 +78,7 @@ public:
     void reshape(int width, int height) final;
     bool supportsExtension(WebCore::GCGLExtension) final;
     bool enableExtension(WebCore::GCGLExtension) final;
+    std::optional<size_t> NODELETE estimatedMemoryCost() final;
 
     GCGLint maxCombinedTextureImageUnits() final { return m_maxCombinedTextureImageUnits; }
     GCGLint maxVertexAttribs() final { return m_maxVertexAttribs; }
@@ -91,14 +93,14 @@ public:
     GCGLint max3DTextureSize() final { return m_max3DTextureSize; }
     GCGLint maxArrayTextureLayers() final { return m_maxArrayTextureLayers; }
 
-    RefPtr<WebCore::NativeImage> copyNativeImageYFlipped(SurfaceBuffer) final;
+    RefPtr<WebCore::NativeImage> copyNativeImage(SurfaceBuffer) final;
 #if ENABLE(MEDIA_STREAM) || ENABLE(WEB_CODECS)
     RefPtr<WebCore::VideoFrame> surfaceBufferToVideoFrame(SurfaceBuffer) final;
 #endif
     GCGLErrorCodeSet getErrors() final;
 #if ENABLE(VIDEO)
     bool copyTextureFromVideoFrame(WebCore::VideoFrame&, PlatformGLObject texture, GCGLenum target, GCGLint level, GCGLenum internalFormat, GCGLenum format, GCGLenum type , bool premultiplyAlpha, bool flipY) final;
-    RefPtr<WebCore::Image> videoFrameToImage(WebCore::VideoFrame&) final;
+    RefPtr<WebCore::NativeImage> videoFrameToNativeImage(WebCore::VideoFrame&) final;
 #endif
 
     void simulateEventForTesting(WebCore::GraphicsContextGLSimulatedEventForTesting) final;
@@ -117,12 +119,12 @@ public:
 #if ENABLE(WEBXR)
     void framebufferDiscard(GCGLenum target, std::span<const GCGLenum> attachments) final;
 #endif
-    void setDrawingBufferColorSpace(const WebCore::DestinationColorSpace&) final;
+    void setDrawingBufferColorSpace(const WebCore::ColorSpace&) final;
 
     // Functions with a generated implementation. This list is used by generate-gpup-webgl script.
     void activeTexture(GCGLenum texture) final;
     void attachShader(PlatformGLObject program, PlatformGLObject shader) final;
-    void bindAttribLocation(PlatformGLObject arg0, GCGLuint index, const CString& name) final;
+    void bindAttribLocation(PlatformGLObject arg0, GCGLuint index, const UTF8CString& name) final;
     void bindBuffer(GCGLenum target, PlatformGLObject arg1) final;
     void bindFramebuffer(GCGLenum target, PlatformGLObject arg1) final;
     void bindRenderbuffer(GCGLenum target, PlatformGLObject arg1) final;
@@ -173,7 +175,7 @@ public:
     Vector<WebCore::GCGLAttribActiveInfo> activeAttribs(PlatformGLObject program) final;
     Vector<WebCore::GCGLUniformActiveInfo> activeUniforms(PlatformGLObject program) final;
     GCGLint getBufferParameteri(GCGLenum target, GCGLenum pname) final;
-    CString getString(GCGLenum name) final;
+    UTF8CString getString(GCGLenum name) final;
     void getFloatv(GCGLenum pname, std::span<GCGLfloat> value) final;
     void getIntegerv(GCGLenum pname, std::span<GCGLint> value) final;
     void getIntegeri_v(GCGLenum pname, GCGLuint index, std::span<GCGLint, 4> value) final; // NOLINT
@@ -182,10 +184,10 @@ public:
     GCGLint getProgrami(PlatformGLObject program, GCGLenum pname) final;
     void getBooleanv(GCGLenum pname, std::span<GCGLboolean> value) final;
     GCGLint getFramebufferAttachmentParameteri(GCGLenum target, GCGLenum attachment, GCGLenum pname) final;
-    CString getProgramInfoLog(PlatformGLObject arg0) final;
+    UTF8CString getProgramInfoLog(PlatformGLObject arg0) final;
     GCGLint getRenderbufferParameteri(GCGLenum target, GCGLenum pname) final;
     GCGLint getShaderi(PlatformGLObject arg0, GCGLenum pname) final;
-    CString getShaderInfoLog(PlatformGLObject arg0) final;
+    UTF8CString getShaderInfoLog(PlatformGLObject arg0) final;
     void getShaderPrecisionFormat(GCGLenum shaderType, GCGLenum precisionType, std::span<GCGLint, 2> range, GCGLint* precision) final;
     GCGLfloat getTexParameterf(GCGLenum target, GCGLenum pname) final;
     GCGLint getTexParameteri(GCGLenum target, GCGLenum pname) final;
@@ -208,7 +210,7 @@ public:
     void renderbufferStorage(GCGLenum target, GCGLenum internalformat, GCGLsizei width, GCGLsizei height) final;
     void sampleCoverage(GCGLclampf value, GCGLboolean invert) final;
     void scissor(GCGLint x, GCGLint y, GCGLsizei width, GCGLsizei height) final;
-    void shaderSource(PlatformGLObject arg0, const CString&) final;
+    void shaderSource(PlatformGLObject arg0, const UTF8CString&) final;
     void stencilFunc(GCGLenum func, GCGLint ref, GCGLuint mask) final;
     void stencilFuncSeparate(GCGLenum face, GCGLenum func, GCGLint ref, GCGLuint mask) final;
     void stencilMask(GCGLuint mask) final;
@@ -283,7 +285,7 @@ public:
     void compressedTexImage3D(GCGLenum target, GCGLint level, GCGLenum internalformat, GCGLsizei width, GCGLsizei height, GCGLsizei depth, GCGLint border, GCGLsizei imageSize, GCGLintptr offset) final;
     void compressedTexSubImage3D(GCGLenum target, GCGLint level, GCGLint xoffset, GCGLint yoffset, GCGLint zoffset, GCGLsizei width, GCGLsizei height, GCGLsizei depth, GCGLenum format, std::span<const uint8_t> data) final;
     void compressedTexSubImage3D(GCGLenum target, GCGLint level, GCGLint xoffset, GCGLint yoffset, GCGLint zoffset, GCGLsizei width, GCGLsizei height, GCGLsizei depth, GCGLenum format, GCGLsizei imageSize, GCGLintptr offset) final;
-    GCGLint getFragDataLocation(PlatformGLObject program, const CString& name) final;
+    GCGLint getFragDataLocation(PlatformGLObject program, const UTF8CString& name) final;
     void uniform1ui(GCGLint location, GCGLuint v0) final;
     void uniform2ui(GCGLint location, GCGLuint v0, GCGLuint v1) final;
     void uniform3ui(GCGLint location, GCGLuint v0, GCGLuint v1, GCGLuint v2) final;
@@ -335,17 +337,17 @@ public:
     void bindTransformFeedback(GCGLenum target, PlatformGLObject id) final;
     void beginTransformFeedback(GCGLenum primitiveMode) final;
     void endTransformFeedback() final;
-    void transformFeedbackVaryings(PlatformGLObject program, const Vector<CString>& varyings, GCGLenum bufferMode) final;
+    void transformFeedbackVaryings(PlatformGLObject program, const Vector<UTF8CString>& varyings, GCGLenum bufferMode) final;
     std::optional<WebCore::GCGLTransformFeedbackActiveInfo> getTransformFeedbackVarying(PlatformGLObject program, GCGLuint index) final;
     void pauseTransformFeedback() final;
     void resumeTransformFeedback() final;
     void bindBufferBase(GCGLenum target, GCGLuint index, PlatformGLObject buffer) final;
     void bindBufferRange(GCGLenum target, GCGLuint index, PlatformGLObject buffer, GCGLintptr offset, GCGLsizeiptr) final;
-    GCGLuint getUniformBlockIndex(PlatformGLObject program, const CString& uniformBlockName) final;
-    CString getActiveUniformBlockName(PlatformGLObject program, GCGLuint uniformBlockIndex) final;
+    GCGLuint getUniformBlockIndex(PlatformGLObject program, const UTF8CString& uniformBlockName) final;
+    UTF8CString getActiveUniformBlockName(PlatformGLObject program, GCGLuint uniformBlockIndex) final;
     void uniformBlockBinding(PlatformGLObject program, GCGLuint uniformBlockIndex, GCGLuint uniformBlockBinding) final;
     void getActiveUniformBlockiv(PlatformGLObject program, GCGLuint uniformBlockIndex, GCGLenum pname, std::span<GCGLint> params) final;
-    CString getTranslatedShaderSourceANGLE(PlatformGLObject arg0) final;
+    UTF8CString getTranslatedShaderSourceANGLE(PlatformGLObject arg0) final;
     PlatformGLObject createQueryEXT() final;
     void deleteQueryEXT(PlatformGLObject query) final;
     GCGLboolean isQueryEXT(PlatformGLObject query) final;
@@ -412,9 +414,10 @@ private:
     static Ref<RemoteGraphicsContextGLProxy> platformCreate(const WebCore::GraphicsContextGLAttributes&, RemoteRenderingBackendProxy&);
     void initializeIPC(Ref<IPC::StreamClientConnection>&&, RemoteRenderingBackendIdentifier, IPC::StreamServerConnection::Handle&&, SerialFunctionDispatcher&);
     // Messages to be received.
-    void wasCreated(IPC::Semaphore&&, IPC::Semaphore&&, std::optional<RemoteGraphicsContextGLInitializationState>&&);
+    void wasCreated(std::optional<RemoteGraphicsContextGLInitializationState>&&);
     void wasLost();
-    void addDebugMessage(GCGLenum, GCGLenum, GCGLenum, CString&&);
+    void addDebugMessage(GCGLenum, GCGLenum, GCGLenum, UTF8CString&&);
+    void memoryCostChanged(std::optional<uint64_t>);
 
     void NODELETE initialize(const RemoteGraphicsContextGLInitializationState&);
     void waitUntilInitialized();
@@ -443,9 +446,11 @@ private:
     GCGLint m_uniformBufferOffsetAlignment { 0 };
     GCGLint m_max3DTextureSize { 0 };
     GCGLint m_maxArrayTextureLayers { 0 };
+    std::optional<size_t> m_estimatedMemoryCost;
     uint32_t m_nextObjectName { 0 };
-    WebCore::DestinationColorSpace m_drawingBufferColorSpace { WebCore::DestinationColorSpace::SRGB() };
+    WebCore::ColorSpace m_drawingBufferColorSpace { WebCore::ColorSpace::SRGB() };
     WeakPtr<RemoteRenderingBackendProxy> m_renderingBackend;
+    RefPtr<RemoteSharedResourceCacheProxy> m_sharedResourceCache;
 };
 
 // The GCGL types map to following WebKit IPC types. The list is used by generate-gpup-webgl script.

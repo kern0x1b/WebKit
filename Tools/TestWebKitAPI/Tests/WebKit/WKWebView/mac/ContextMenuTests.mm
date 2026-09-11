@@ -40,6 +40,7 @@
 #import <WebKit/WKMenuItemIdentifiersPrivate.h>
 #import <WebKit/WKUIDelegatePrivate.h>
 #import <WebKit/WKWebViewConfigurationPrivate.h>
+#import <WebKit/WKWebViewPrivate.h>
 #import <WebKit/WKWebViewPrivateForTesting.h>
 #import <WebKit/_WKContextMenuElementInfo.h>
 #import <WebKit/_WKHitTestResult.h>
@@ -791,7 +792,7 @@ TEST(ContextMenuTests, HitTestResultImageSuggestedFilename)
     Util::run(&gotProposedMenu);
 }
 
-static RetainPtr<NSString> imageSuggestedFilenameFromCollidingImageURL(HashMap<String, String> imageResponseHeaders)
+static RetainPtr<NSString> imageSuggestedFilenameFromCollidingImageURL(Vector<WTF::KeyValuePair<String, String>> imageResponseHeaders)
 {
     using namespace TestWebKitAPI;
 
@@ -802,7 +803,7 @@ static RetainPtr<NSString> imageSuggestedFilenameFromCollidingImageURL(HashMap<S
             connection.send(HTTPResponse({ { "Content-Type"_s, "text/html"_s } },
                 "<img id='collision' src='collision.gifv' style='width:300px;height:300px'>"_s).serialize(), [connection, imageData, imageResponseHeaders] {
                 connection.receiveHTTPRequest([connection, imageData, imageResponseHeaders](Vector<char>&&) {
-                    HashMap<String, String> headers = imageResponseHeaders;
+                    Vector<WTF::KeyValuePair<String, String>> headers = imageResponseHeaders;
                     connection.send(HTTPResponse(WTF::move(headers), imageData).serialize());
                 });
             });
@@ -958,6 +959,52 @@ TEST(ContextMenuTests, CopyLinkUsesPathComponentAsTitleForLinkWithPath)
         TestWebKitAPI::Util::runFor(0.1_s);
 
     EXPECT_WK_STREQ(@"something-cool", readTitleFromPasteboard());
+}
+
+TEST(ContextMenuTests, MenuTrackingCancelledWhenPageCloses)
+{
+    RetainPtr webView = adoptNS([[TestWKWebView alloc] initWithFrame:NSMakeRect(0, 0, 400, 400)]);
+    [webView synchronouslyLoadTestPageNamed:@"simple"];
+
+    __block bool didEndTracking = false;
+    RetainPtr observer = [NSNotificationCenter.defaultCenter addObserverForName:NSMenuDidEndTrackingNotification object:nil queue:nil usingBlock:^(NSNotification *) {
+        didEndTracking = true;
+    }];
+
+    bool didClosePage = false;
+    bool menuStayedOpenAfterPageClose = false;
+    RetainPtr<NSTimer> menuWatchdogTimer;
+    RetainPtr closePageTimer = [NSTimer timerWithTimeInterval:0.25 repeats:YES block:[&didClosePage, &menuStayedOpenAfterPageClose, &menuWatchdogTimer, strongWebView = webView](NSTimer *timer) {
+        // This timer only fires while AppKit is tracking the context menu.
+        RetainPtr activeMenu = [strongWebView _activeMenu];
+        if (!activeMenu)
+            return;
+
+        [timer invalidate];
+        [strongWebView _close];
+        didClosePage = true;
+
+        // This timer only fires if AppKit is still tracking the menu long after the page was closed.
+        // Dismiss the menu ourselves so the test fails instead of hanging.
+        menuWatchdogTimer = [NSTimer timerWithTimeInterval:2 repeats:NO block:[&menuStayedOpenAfterPageClose, activeMenu](NSTimer *) {
+            menuStayedOpenAfterPageClose = true;
+            [activeMenu cancelTrackingWithoutAnimation];
+        }];
+        [NSRunLoop.mainRunLoop addTimer:menuWatchdogTimer.get() forMode:NSEventTrackingRunLoopMode];
+    }];
+
+    [NSRunLoop.mainRunLoop addTimer:closePageTimer.get() forMode:NSEventTrackingRunLoopMode];
+    [[webView window] orderFrontRegardless];
+    [webView rightClickAtPoint:NSMakePoint(200, 200)];
+    Util::run(&didEndTracking);
+    [closePageTimer invalidate];
+    [menuWatchdogTimer invalidate];
+
+    EXPECT_TRUE(didClosePage);
+    EXPECT_FALSE(menuStayedOpenAfterPageClose);
+    EXPECT_NULL([webView _activeMenu]);
+
+    [NSNotificationCenter.defaultCenter removeObserver:observer.get()];
 }
 
 } // namespace TestWebKitAPI

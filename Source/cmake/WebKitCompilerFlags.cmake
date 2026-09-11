@@ -161,13 +161,14 @@ set(WEBKIT_UNSAFE_BUFFER_WARNING_FLAGS
 )
 option(ENABLE_UNSAFE_BUFFER_USAGE_WARNING "Build with -Wunsafe-buffer-usage" OFF)
 
+option(ENABLE_THREAD_SAFETY_WARNING "Build with -Wthread-safety" OFF)
+
 option(DEVELOPER_MODE_FATAL_WARNINGS "Build with warnings as errors if DEVELOPER_MODE is also enabled" ON)
-set(DEVELOPER_MODE_CXX_FLAGS)
 if (DEVELOPER_MODE AND DEVELOPER_MODE_FATAL_WARNINGS)
     if (MSVC)
-        set(DEVELOPER_MODE_CXX_FLAGS "/WX")
+        WEBKIT_PREPEND_GLOBAL_COMPILER_FLAGS(/WX)
     elseif (COMPILER_IS_GCC_OR_CLANG)
-        set(DEVELOPER_MODE_CXX_FLAGS "-Werror")
+        WEBKIT_PREPEND_GLOBAL_COMPILER_FLAGS(-Werror)
     endif ()
 endif ()
 
@@ -250,12 +251,6 @@ if (COMPILER_IS_GCC_OR_CLANG)
             $<$<COMPILE_LANGUAGE:CXX>:-D__cpp_concepts=202002>
             $<$<COMPILE_LANGUAGE:CXX>:-Wno-builtin-macro-redefined>
         )
-    endif ()
-
-    # GCC < 12.0 gives false warnings for mismatched-new-delete <https://webkit.org/b/241516>
-    if ((CMAKE_CXX_COMPILER_ID MATCHES "GNU") AND (CMAKE_CXX_COMPILER_VERSION VERSION_LESS "12.0.0"))
-        WEBKIT_PREPEND_GLOBAL_COMPILER_FLAGS(-Wno-mismatched-new-delete)
-        WEBKIT_PREPEND_GLOBAL_COMPILER_FLAGS(-Wno-uninitialized)
     endif ()
 
     # GCC gives false warnings for subobject-linkage <https://gcc.gnu.org/bugzilla/show_bug.cgi?id=105595>
@@ -348,7 +343,7 @@ string(TOLOWER ${CMAKE_HOST_SYSTEM_PROCESSOR} LOWERCASE_CMAKE_HOST_SYSTEM_PROCES
 if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU" AND NOT "${LOWERCASE_CMAKE_HOST_SYSTEM_PROCESSOR}" MATCHES "x86_64")
     # To avoid out of memory when building with debug option in 32bit system.
     # See https://bugs.webkit.org/show_bug.cgi?id=77327
-    set(CMAKE_SHARED_LINKER_FLAGS_DEBUG "-Wl,--no-keep-memory ${CMAKE_SHARED_LINKER_FLAGS_DEBUG}")
+    add_link_options("$<$<CONFIG:Debug>:LINKER:--no-keep-memory>")
 endif ()
 
 if (LTO_MODE AND COMPILER_IS_CLANG AND NOT MSVC)
@@ -357,9 +352,9 @@ if (LTO_MODE AND COMPILER_IS_CLANG AND NOT MSVC)
     # Mirror to OBJC/OBJCXX for Apple ports — see compiler-flag macro comments.
     set(CMAKE_OBJC_FLAGS "-flto=${LTO_MODE} ${CMAKE_OBJC_FLAGS}")
     set(CMAKE_OBJCXX_FLAGS "-flto=${LTO_MODE} ${CMAKE_OBJCXX_FLAGS}")
-    set(CMAKE_EXE_LINKER_FLAGS "-flto=${LTO_MODE} ${CMAKE_EXE_LINKER_FLAGS}")
-    set(CMAKE_SHARED_LINKER_FLAGS "-flto=${LTO_MODE} ${CMAKE_SHARED_LINKER_FLAGS}")
-    set(CMAKE_MODULE_LINKER_FLAGS "-flto=${LTO_MODE} ${CMAKE_MODULE_LINKER_FLAGS}")
+    # FIXME: consider passing LTO for Swift (it has never been toggled in Xcode
+    # either).
+    add_link_options("$<$<NOT:$<LINK_LANGUAGE:Swift>>:-flto=${LTO_MODE}>")
 elseif (LTO_MODE AND COMPILER_IS_CLANG AND MSVC AND NOT DEVELOPER_MODE)
     set(CMAKE_C_FLAGS "-flto=${LTO_MODE} ${CMAKE_C_FLAGS}")
     set(CMAKE_CXX_FLAGS "-flto=${LTO_MODE} ${CMAKE_CXX_FLAGS}")
@@ -368,11 +363,20 @@ elseif (LTO_MODE AND COMPILER_IS_CLANG AND MSVC AND NOT DEVELOPER_MODE)
     set(CMAKE_MODULE_LINKER_FLAGS "/opt:lldlto=2 ${CMAKE_MODULE_LINKER_FLAGS}")
 endif ()
 
+# PRESERVE_MOST is only profitable under LTO: without it, hot/cold splitting gives the extracted
+# cold region the default calling convention, so the preserve_most parent saves X9-X15 on its hot
+# path. See rdar://183555125.
+if (LTO_MODE AND COMPILER_IS_CLANG)
+    webkit_add_compile_definitions(HAVE_PRESERVE_MOST=1)
+endif ()
+
 if (COMPILER_IS_CLANG)
     foreach (_lang C CXX OBJC OBJCXX)
         set(CMAKE_${_lang}_COMPILE_OPTIONS_INSTANTIATE_TEMPLATES_PCH -fpch-instantiate-templates)
     endforeach ()
 endif ()
+
+option(USE_PCH_CODEGEN "Emit the inline functions a prefix header defines once into a per-target PCH object file" ON)
 
 if (COMPILER_IS_GCC_OR_CLANG)
     # Careful: this needs to be above where ENABLED_COMPILER_SANITIZERS is set.
@@ -383,59 +387,63 @@ if (COMPILER_IS_GCC_OR_CLANG)
         if (MSVC AND WTF_CPU_X86_64)
             find_library(CLANG_ASAN_LIBRARY clang_rt.asan_dynamic_runtime_thunk-x86_64 ${CLANG_LIB_PATH})
             find_library(CLANG_ASAN_RT_LIBRARY clang_rt.asan_dynamic-x86_64 PATHS ${CLANG_LIB_PATH})
-            set(SANITIZER_LINK_FLAGS "\"${CLANG_ASAN_LIBRARY}\" \"${CLANG_ASAN_RT_LIBRARY}\"")
+            add_link_options(${CLANG_ASAN_LIBRARY} ${CLANG_ASAN_RT_LIBRARY})
         else ()
-            set(SANITIZER_LINK_FLAGS "-lpthread")
+            add_link_options(-lpthread)
         endif ()
 
+        set(_ld_sanitize "$<IF:$<LINK_LANGUAGE:Swift>,-sanitize,-fsanitize>")
+        set(_cc_sanitize "$<IF:$<COMPILE_LANGUAGE:Swift>,-sanitize,-fsanitize>")
         foreach (SANITIZER ${ENABLE_SANITIZERS})
             if (${SANITIZER} MATCHES "address")
                 WEBKIT_PREPEND_GLOBAL_COMPILER_FLAGS("-fno-omit-frame-pointer -fno-optimize-sibling-calls")
-                set(SANITIZER_COMPILER_FLAGS "-fsanitize=address ${SANITIZER_COMPILER_FLAGS}")
-                set(SANITIZER_LINK_FLAGS "-fsanitize=address ${SANITIZER_LINK_FLAGS}")
-
+                add_compile_options("${_cc_sanitize}=address")
+                add_link_options("${_ld_sanitize}=address")
+                list(APPEND ENABLED_COMPILER_SANITIZERS "-fsanitize=address")
+                # C++ compilers already predefine __SANITIZE_ADDRESS__ under
+                # -fsanitize=address; define it explicitly so it also reaches
+                # Swift's clang importer.
+                # FIXME: Consider passing -sanitize=address to swift.
+                webkit_add_compile_definitions(__SANITIZE_ADDRESS__)
             elseif (${SANITIZER} MATCHES "undefined")
                 # Please keep these options synchronized with Tools/sanitizer/ubsan.xcconfig
                 WEBKIT_PREPEND_GLOBAL_COMPILER_FLAGS("-fno-omit-frame-pointer -fno-delete-null-pointer-checks -fno-optimize-sibling-calls")
-                # -fsanitize=vptr is disabled because incompatible with -fno-rtti
-                set(SANITIZER_COMPILER_FLAGS "-fsanitize=undefined -fno-sanitize=vptr ${SANITIZER_COMPILER_FLAGS}")
-                set(SANITIZER_LINK_FLAGS "-fsanitize=undefined ${SANITIZER_LINK_FLAGS}")
+                # -fsanitize=vptr is disabled because incompatible with -fno-rtti.
+                # swiftc rejects -fno-sanitize=, so that one is C-family only.
+                add_compile_options("${_cc_sanitize}=undefined"
+                                    "$<$<NOT:$<COMPILE_LANGUAGE:Swift>>:-fno-sanitize=vptr>")
+                add_link_options("${_ld_sanitize}=undefined")
+                list(APPEND ENABLED_COMPILER_SANITIZERS "-fsanitize=undefined")
 
             elseif (${SANITIZER} MATCHES "thread" AND NOT MSVC)
-                set(SANITIZER_COMPILER_FLAGS "-fsanitize=thread ${SANITIZER_COMPILER_FLAGS}")
-                set(SANITIZER_LINK_FLAGS "-fsanitize=thread ${SANITIZER_LINK_FLAGS}")
+                add_compile_options("${_cc_sanitize}=thread")
+                add_link_options("${_ld_sanitize}=thread")
+                list(APPEND ENABLED_COMPILER_SANITIZERS "-fsanitize=thread")
+                webkit_add_compile_definitions(__SANITIZE_THREAD__)
 
             elseif (${SANITIZER} MATCHES "memory" AND COMPILER_IS_CLANG AND NOT MSVC)
-                set(SANITIZER_COMPILER_FLAGS "-fsanitize=memory ${SANITIZER_COMPILER_FLAGS}")
-                set(SANITIZER_LINK_FLAGS "-fsanitize=memory ${SANITIZER_LINK_FLAGS}")
+                add_compile_options("${_cc_sanitize}=memory")
+                add_link_options("${_ld_sanitize}=memory")
+                list(APPEND ENABLED_COMPILER_SANITIZERS "-fsanitize=memory")
 
             elseif (${SANITIZER} MATCHES "leak" AND NOT MSVC)
-                set(SANITIZER_COMPILER_FLAGS "-fsanitize=leak ${SANITIZER_COMPILER_FLAGS}")
-                set(SANITIZER_LINK_FLAGS "-fsanitize=leak ${SANITIZER_LINK_FLAGS}")
+                add_compile_options("${_cc_sanitize}=leak")
+                add_link_options("${_ld_sanitize}=leak")
+                list(APPEND ENABLED_COMPILER_SANITIZERS "-fsanitize=leak")
 
             else ()
                 message(FATAL_ERROR "Unsupported sanitizer: ${SANITIZER}")
             endif ()
         endforeach ()
-
-        set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${SANITIZER_COMPILER_FLAGS}")
-        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${SANITIZER_COMPILER_FLAGS}")
-        # Apple ports also enable OBJC/OBJCXX so .m/.mm sources need the same flags.
-        # On ports where these languages are not enabled, setting these variables is harmless.
-        set(CMAKE_OBJC_FLAGS "${CMAKE_OBJC_FLAGS} ${SANITIZER_COMPILER_FLAGS}")
-        set(CMAKE_OBJCXX_FLAGS "${CMAKE_OBJCXX_FLAGS} ${SANITIZER_COMPILER_FLAGS}")
-        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${SANITIZER_LINK_FLAGS}")
-        set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} ${SANITIZER_LINK_FLAGS}")
-        set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} ${SANITIZER_LINK_FLAGS}")
+        unset(_ld_sanitize)
+        unset(_cc_sanitize)
     endif ()
 endif ()
 
-if (NOT MSVC)
-    string(REGEX MATCHALL "-fsanitize=[^ ]*" ENABLED_COMPILER_SANITIZERS ${CMAKE_CXX_FLAGS})
-endif ()
-
 if (UNIX AND NOT APPLE AND NOT ENABLED_COMPILER_SANITIZERS)
-    set(CMAKE_SHARED_LINKER_FLAGS "-Wl,--no-undefined ${CMAKE_SHARED_LINKER_FLAGS}")
+    # Shared/module libraries only.
+    add_link_options(
+        "$<$<OR:$<STREQUAL:$<TARGET_PROPERTY:TYPE>,SHARED_LIBRARY>,$<STREQUAL:$<TARGET_PROPERTY:TYPE>,MODULE_LIBRARY>>:LINKER:--no-undefined>")
 endif ()
 
 

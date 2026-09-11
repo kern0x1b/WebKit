@@ -32,6 +32,7 @@
 #include "MemoryIndex.h"
 #include <wtf/TZoneMallocInlines.h>
 #include <wtf/text/StringBuilder.h>
+#include <wtf/text/TextStream.h>
 
 namespace WebCore {
 namespace IDBServer {
@@ -142,20 +143,14 @@ void IndexValueStore::removeRecord(const IDBKeyData& indexKey)
 
 void IndexValueStore::removeEntriesWithValueKey(MemoryIndex& index, const IDBKeyData& valueKey)
 {
-    Vector<IDBKeyData> entryKeysToRemove;
-    entryKeysToRemove.reserveInitialCapacity(m_records.size());
-
-    for (auto& entry : m_records) {
+    m_records.removeIf([&](auto& entry) {
         if (entry.value->removeKey(valueKey))
             index.notifyCursorsOfValueChange(entry.key, valueKey);
-        if (!entry.value->getCount())
-            entryKeysToRemove.append(entry.key);
-    }
-
-    for (auto& entry : entryKeysToRemove) {
-        m_orderedKeys.erase(entry);
-        m_records.remove(entry);
-    }
+        if (entry.value->getCount())
+            return false;
+        m_orderedKeys.erase(entry.key);
+        return true;
+    });
 }
 
 Vector<IDBKeyData> IndexValueStore::findKeysWithValueKey(const IDBKeyData& valueKey)
@@ -171,7 +166,7 @@ Vector<IDBKeyData> IndexValueStore::findKeysWithValueKey(const IDBKeyData& value
 
 IDBKeyData IndexValueStore::lowestKeyWithRecordInRange(const IDBKeyRangeData& range) const
 {
-    LOG(IndexedDB, "IndexValueStore::lowestKeyWithRecordInRange - %s", range.loggingString().utf8().data());
+    LOG_WITH_STREAM(IndexedDB, stream << "IndexValueStore::lowestKeyWithRecordInRange - "_s << range.loggingString());
 
     if (range.isExactlyOneKey())
         return m_records.contains(range.lowerKey) ? range.lowerKey : IDBKeyData();

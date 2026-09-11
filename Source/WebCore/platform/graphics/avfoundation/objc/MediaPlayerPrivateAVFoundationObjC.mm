@@ -165,13 +165,6 @@ static void setPlayerScreenReserved(AVPlayer *, bool) { }
 @property (assign, nonatomic) BOOL preventsAutomaticBackgroundingDuringVideoPlayback;
 @end
 
-#if HAVE(AVPLAYER_PARTICIPATESINAUDIOSESSION)
-@interface AVPlayer (Staging_168303606)
-- (void)setParticipatesInAudioSession:(BOOL)participates completionHandler:(nullable void (^)(void))completionHandler;
-- (void)setDisconnectedFromSystemAudio:(BOOL)disconnected completionHandler:(nullable void (^)(void))completionHandler;
-@end
-#endif
-
 #import <pal/cf/CoreMediaSoftLink.h>
 #import <pal/cocoa/AVFoundationSoftLink.h>
 
@@ -263,7 +256,7 @@ static NSArray *playerKVOProperties();
 
 static dispatch_queue_t globalLoaderDelegateQueue()
 {
-    static NeverDestroyed<OSObjectPtr<dispatch_queue_t>> globalQueue = adoptOSObject(dispatch_queue_create("WebCoreAVFLoaderDelegate queue", DISPATCH_QUEUE_SERIAL));
+    static NeverDestroyed<OSObjectPtr<dispatch_queue_t>> globalQueue = adoptOSObject(dispatch_queue_create("WebCoreAVFLoaderDelegate queue", serialQueueWithAutoreleasePoolAttrSingleton()));
     return globalQueue.get().get();
 }
 
@@ -1129,8 +1122,8 @@ void MediaPlayerPrivateAVFoundationObjC::createAVPlayer()
     if (m_isVideoPlayer)
         [m_avPlayer _setSuppressesAudioRendering:!m_isAudible];
 
-#if HAVE(AVPLAYER_PARTICIPATESINAUDIOSESSION)
-    setParticipatesInAudioSession(m_isAudible);
+#if HAVE(AVPLAYER_DISCONNECTEDFROMSYSTEMAUDIO)
+    [m_avPlayer setDisconnectedFromSystemAudio:!m_isAudible completionHandler:nil];
 #endif
 
 #if HAVE(SPATIAL_TRACKING_LABEL)
@@ -2321,7 +2314,7 @@ void MediaPlayerPrivateAVFoundationObjC::updateIsAudible()
         return;
 
     // Only change the state of suppressesAudioRendering and
-    // participatesInAudioSession when playback is paused, to
+    // disconnectedFromSystemAudio when playback is paused, to
     // avoid the reconfiguring of video playback that AVFoundation
     // performs when these properties are changed. However,
     // ignore this check if becoming audible to ensure audio
@@ -2339,8 +2332,8 @@ void MediaPlayerPrivateAVFoundationObjC::updateIsAudible()
     if (m_isVideoPlayer)
         [m_avPlayer _setSuppressesAudioRendering:!m_isAudible];
 
-#if HAVE(AVPLAYER_PARTICIPATESINAUDIOSESSION)
-    setParticipatesInAudioSession(m_isAudible);
+#if HAVE(AVPLAYER_DISCONNECTEDFROMSYSTEMAUDIO)
+    [m_avPlayer setDisconnectedFromSystemAudio:!m_isAudible completionHandler:nil];
 #endif
 }
 
@@ -2859,7 +2852,7 @@ void MediaPlayerPrivateAVFoundationObjC::updateLastImage(NOESCAPE UpdateCompleti
 
     MonotonicTime start = MonotonicTime::now();
 
-    m_lastImage = NativeImage::create(m_pixelBufferConformer->createImageFromPixelBuffer(m_lastPixelBuffer.get()));
+    m_lastImage = m_pixelBufferConformer->createImageFromPixelBuffer(m_lastPixelBuffer.get());
 
     INFO_LOG(LOGIDENTIFIER, "creating buffer took ", (MonotonicTime::now() - start).seconds());
 
@@ -2908,12 +2901,12 @@ RefPtr<NativeImage> MediaPlayerPrivateAVFoundationObjC::nativeImageForCurrentTim
     return returnValue;
 }
 
-DestinationColorSpace MediaPlayerPrivateAVFoundationObjC::colorSpace()
+ColorSpace MediaPlayerPrivateAVFoundationObjC::colorSpace()
 {
-    DestinationColorSpace colorSpace = DestinationColorSpace::SRGB();
+    ColorSpace colorSpace = ColorSpace::SRGB();
     updateLastImage([&] {
         if (m_lastPixelBuffer)
-            colorSpace = DestinationColorSpace(createCGColorSpaceForCVPixelBuffer(m_lastPixelBuffer.get()));
+            colorSpace = ColorSpace(createCGColorSpaceForCVPixelBuffer(m_lastPixelBuffer.get()));
     });
     return colorSpace;
 }
@@ -2990,23 +2983,18 @@ void MediaPlayerPrivateAVFoundationObjC::keyAdded()
     if (!player)
         return;
 
-    Vector<String> fulfilledKeyIds;
-
     ALWAYS_LOG(LOGIDENTIFIER);
-    for (auto& pair : m_keyURIToRequestMap) {
+    m_keyURIToRequestMap.removeIf([&](auto& pair) {
         const String& keyId = pair.key;
         const RetainPtr<AVAssetResourceLoadingRequest>& request = pair.value;
 
         auto keyData = player->cachedKeyForKeyId(keyId);
         if (!keyData)
-            continue;
+            return false;
 
         fulfillRequestWithKeyData(request.get(), keyData.get());
-        fulfilledKeyIds.append(keyId);
-    }
-
-    for (auto& keyId : fulfilledKeyIds)
-        m_keyURIToRequestMap.remove(keyId);
+        return true;
+    });
 }
 
 RefPtr<LegacyCDMSession> MediaPlayerPrivateAVFoundationObjC::createSession(const String& keySystem, LegacyCDMSessionClient& client)
@@ -4303,16 +4291,6 @@ RefPtr<WebCoreAVFResourceLoader> MediaPlayerPrivateAVFoundationObjC::takeResourc
     return m_resourceLoaderMap.take(key);
 }
 
-#if HAVE(AVPLAYER_PARTICIPATESINAUDIOSESSION)
-void MediaPlayerPrivateAVFoundationObjC::setParticipatesInAudioSession(bool participatesInAudioSession)
-{
-    if ([m_avPlayer respondsToSelector:@selector(setDisconnectedFromSystemAudio:completionHandler:)])
-        [m_avPlayer setDisconnectedFromSystemAudio:!participatesInAudioSession completionHandler:nil];
-    else
-        [m_avPlayer setParticipatesInAudioSession:participatesInAudioSession completionHandler:nil];
-}
-#endif
-
 void MediaPlayerPrivateAVFoundationObjC::updateLayerAttachment()
 {
     assertIsMainThread();
@@ -4331,6 +4309,12 @@ bool MediaPlayerPrivateAVFoundationObjC::shouldAttachLayerToPlayer()
     if (m_videoTarget && m_isInFullscreenOrPictureInPicture)
         return false;
 #endif
+
+    // 311380@main started detaching the video layer from the player when the page or the
+    // element became non-visible. Some clients keep displaying the video layer they host
+    // after hiding their web view, so for those keep the layer attached as it was before.
+    if (m_disableTeardownOnVisibilityChange)
+        return true;
 
     if (!pageIsVisible())
         return false;

@@ -66,15 +66,18 @@ class GPUConnectionToWebProcess;
 class RemoteVideoFrameObjectHeap;
 struct SharedPreferencesForWebProcess;
 
-class RemoteAudioVideoRendererProxyManager final : public IPC::MessageReceiver {
+// Destroyed on the main thread like the GPUConnectionToWebProcess that owns it, since it holds media
+// objects that expect to be torn down there.
+class RemoteAudioVideoRendererProxyManager final : public IPC::MessageReceiver, public ThreadSafeRefCountedAndCanMakeThreadSafeWeakPtr<RemoteAudioVideoRendererProxyManager, WTF::DestructionThread::Main> {
     WTF_MAKE_TZONE_ALLOCATED(RemoteAudioVideoRendererProxyManager);
 public:
-    RemoteAudioVideoRendererProxyManager(GPUConnectionToWebProcess&);
+    static Ref<RemoteAudioVideoRendererProxyManager> create(GPUConnectionToWebProcess&);
     ~RemoteAudioVideoRendererProxyManager();
 
-    void ref() const final;
-    void deref() const final;
-    ThreadSafeWeakPtrControlBlock& controlBlock() const;
+    void ref() const final { ThreadSafeRefCountedAndCanMakeThreadSafeWeakPtr::ref(); }
+    void deref() const final { ThreadSafeRefCountedAndCanMakeThreadSafeWeakPtr::deref(); }
+
+    void connectionToWebProcessClosed();
 
     // IPC::MessageReceiver
     void didReceiveMessage(IPC::Connection&, IPC::Decoder&) final;
@@ -87,8 +90,10 @@ public:
     RefPtr<WebCore::AudioVideoRenderer> rendererFor(std::optional<WebCore::MediaPlayerIdentifier>) const;
 
 private:
+    explicit RemoteAudioVideoRendererProxyManager(GPUConnectionToWebProcess&);
+
     // Messages
-    void create(RemoteAudioVideoRendererIdentifier, WebCore::HTMLMediaElementIdentifier, WebCore::MediaPlayerIdentifier, CompletionHandler<void(std::optional<WebCore::SharedTimebaseHandle>)>&&);
+    void createManager(RemoteAudioVideoRendererIdentifier, WebCore::HTMLMediaElementIdentifier, WebCore::MediaPlayerIdentifier, CompletionHandler<void(std::optional<WebCore::SharedTimebaseHandle>)>&&);
     void shutdown(RemoteAudioVideoRendererIdentifier);
 
     void setPreferences(RemoteAudioVideoRendererIdentifier, WebCore::VideoRendererPreferences);
@@ -97,7 +102,7 @@ private:
     // TracksRendererInterface
     using TrackIdentifier = WebCore::AudioVideoRenderer::TrackIdentifier;
 
-    void addTrack(RemoteAudioVideoRendererIdentifier, WebCore::TrackInfo::TrackType, CompletionHandler<void(Expected<TrackIdentifier, WebCore::PlatformMediaError>)>&&);
+    void addTrack(RemoteAudioVideoRendererIdentifier, WebCore::TrackInfo::TrackType, CompletionHandler<void(std::expected<TrackIdentifier, WebCore::PlatformMediaError>)>&&);
     void removeTrack(RemoteAudioVideoRendererIdentifier, TrackIdentifier);
 
     void newTrackInfoForTrack(RemoteAudioVideoRendererIdentifier, TrackIdentifier, Ref<WebCore::TrackInfo>&&);
@@ -162,7 +167,7 @@ private:
 #endif
 #if ENABLE(ENCRYPTED_MEDIA)
     void setCDMInstance(RemoteAudioVideoRendererIdentifier, std::optional<RemoteCDMInstanceIdentifier>);
-    void setInitData(RemoteAudioVideoRendererIdentifier, Ref<WebCore::SharedBuffer>, CompletionHandler<void(Expected<void, WebCore::PlatformMediaError>)>&&);
+    void setInitData(RemoteAudioVideoRendererIdentifier, Ref<WebCore::SharedBuffer>, CompletionHandler<void(std::expected<void, WebCore::PlatformMediaError>)>&&);
     void attemptToDecrypt(RemoteAudioVideoRendererIdentifier);
 #endif
 

@@ -32,18 +32,12 @@
 #include <wtf/StdLibExtras.h>
 #include <wtf/text/WTFString.h>
 
-#define TEXT_MARKER_ASSERT(assertion) do { \
-    std::string debugString = "Text marker origin: " + originToString(origin()).utf8().toStdString(); \
-    ASSERT_WITH_MESSAGE(assertion, "%s", debugString.c_str()); \
-} while (0)
-#define TEXT_MARKER_ASSERT_SINGLE(assertion, marker) do { \
-    std::string debugString = "Text marker origin: " + originToString(marker.origin()).utf8().toStdString(); \
-    ASSERT_WITH_MESSAGE(assertion, "%s", debugString.c_str()); \
-} while (0)
-#define TEXT_MARKER_ASSERT_DOUBLE(assertion, marker1, marker2) do { \
-    std::string debugString = "Text marker origins: " + originToString(marker1.origin()).utf8().toStdString() + ", " + originToString(marker2.origin()).utf8().data(); \
-    ASSERT_WITH_MESSAGE(assertion, "%s", debugString.c_str()); \
-} while (0)
+#define TEXT_MARKER_ASSERT(assertion) \
+    ASSERT_WITH_MESSAGE(assertion, "Text marker origin: %s", originToString(origin()).utf8().legacyCStringPointer())
+#define TEXT_MARKER_ASSERT_SINGLE(assertion, marker) \
+    ASSERT_WITH_MESSAGE(assertion, "Text marker origin: %s", originToString(marker.origin()).utf8().legacyCStringPointer())
+#define TEXT_MARKER_ASSERT_DOUBLE(assertion, marker1, marker2) \
+    ASSERT_WITH_MESSAGE(assertion, "Text marker origins: %s, %s", originToString(marker1.origin()).utf8().legacyCStringPointer(), originToString(marker2.origin()).utf8().legacyCStringPointer())
 
 namespace WebCore {
 
@@ -342,8 +336,10 @@ public:
     AXTextMarker findLastBefore(std::optional<AXID>) const;
     AXTextMarker findLast() const { return findLastBefore(std::nullopt); }
     // The index of the line this text marker is on relative to the nearest editable ancestor (or start of the page if there are no editable ancestors).
+    // Pass |rootID| to count from the start of that object's text instead. This is required for computing
+    // the correct line index for nested text controls (e.g. a textarea inside a contenteditable).
     // Returns -1 if the line couldn't be computed (i.e. because `this` is invalid).
-    int lineIndex() const;
+    int lineIndex(std::optional<AXID> rootID = std::nullopt) const;
     // After resolving this marker to a text-run marker, what line does the offset point to?
     AXTextRunLineID lineID() const;
     // Returns the line number for the character index within the descendants of this marker's object.
@@ -421,6 +417,8 @@ public:
     String toString(IncludeListMarkerText = IncludeListMarkerText::Yes, IncludeImageAltText = IncludeImageAltText::No) const;
 
 #if ENABLE(ACCESSIBILITY_ISOLATED_TREE)
+    // The length of what toString returns, computed without building the string. AX-thread only.
+    unsigned length(IncludeListMarkerText = IncludeListMarkerText::Yes) const;
     std::optional<std::pair<AXTextMarker, AXTextMarker>> toValidTextRunMarkers() const;
     // Returns the bounds (frame) of the text in this range relative to the viewport.
     // Analagous to AXCoreObject::relativeFrame().
@@ -434,6 +432,16 @@ public:
     String description() const;
     String debugDescription() const;
 private:
+#if ENABLE(ACCESSIBILITY_ISOLATED_TREE)
+    // Hands each piece of this range's text to |append| in document order: the text of every run the
+    // range spans, plus the characters emitted between them (see auxiliaryTextForObject). toString
+    // and length both walk a range through here, so a string and its length can never disagree, and
+    // length never has to build the string. Each piece is a StringView into storage that outlives
+    // the |append| call.
+    template<typename AppendFunction>
+    void forEachTextPiece(IncludeListMarkerText, IncludeImageAltText, NOESCAPE const AppendFunction&) const;
+#endif // ENABLE(ACCESSIBILITY_ISOLATED_TREE)
+
     AXTextMarker m_start;
     AXTextMarker m_end;
 };
@@ -464,12 +472,55 @@ inline bool operator>=(const AXTextMarkerRange& range1, const AXTextMarkerRange&
 
 #if ENABLE(ACCESSIBILITY_ISOLATED_TREE)
 String listMarkerTextOnSameLine(const AXTextMarker&);
+
+// The text the AX-thread text walks emit for an object with no text runs of its own, e.g. a newline
+// at a block boundary. See auxiliaryTextForObject, which is the only thing that creates these; the
+// view is always over static storage, so it outlives any caller.
+struct EmittedAuxiliaryText {
+    StringView text;
+
+    char16_t lastCharacter() const { return text.length() ? text[text.length() - 1] : 0; }
+};
 #endif
 
 namespace Accessibility {
 
 #if ENABLE(ACCESSIBILITY_ISOLATED_TREE)
-AXIsolatedObject* findObjectWithRuns(AXIsolatedObject& start, AXDirection direction, std::optional<AXID> stopAtID = std::nullopt, const std::function<void(AXIsolatedObject&)>& exitObject = [] (AXIsolatedObject&) { });
+// Where a traversal is relative to an object it visits, mirroring the two places TextIterator emits
+// text for a non-text node:
+//   ReachedInPreOrder — we just reached this object in pre-order and are about to move past it (or
+//     into its children), like TextIterator::handleNonTextNode / handleReplacedElement.
+//   AscendedOutOf — we processed this object's children and are moving beyond it, like
+//     TextIterator::exitNode.
+enum class TraversalPoint : bool { ReachedInPreOrder, AscendedOutOf };
+// Whether the traversal may descend from an object into user-agent shadow content, e.g. from an
+// <input> into the text it renders its value with. Walks over document text must not (TextIterator
+// walks the light DOM), but walks resolving a marker within a text control must.
+enum class EnterUserAgentShadowContent : bool { No, Yes };
+
+AXIsolatedObject* findObjectWithRuns(AXIsolatedObject& start, AXDirection direction, std::optional<AXID> stopAtID = std::nullopt, const std::function<void(AXIsolatedObject&, TraversalPoint)>& visitObject = [] (AXIsolatedObject&, TraversalPoint) { }, EnterUserAgentShadowContent = EnterUserAgentShadowContent::Yes);
+
+// The characters the AX-thread text walks emit for an object that has no text runs of its own,
+// mirroring TextIterator: a U+FFFC in place of replaced content (form controls, plugins, and other
+// nodes TextIterator considers replaced), a tab after every table cell but the last one in its row,
+// and newlines at block boundaries. `lastEmittedCharacter` is the most recently emitted character
+// (0 if none), used to avoid doubling newlines like TextIterator does.
+//
+// AXTextMarkerRange::toString, AXTextMarkerRange::toAttributedString and the index / length walk
+// (forEachRunObjectForward) all emit text through this function, so the strings they build and the
+// index space those strings are converted to can't drift apart.
+//
+// The index walk passes EmitObjectReplacementCharacters::No, because unlike the string walks it does
+// traverse into text controls (a text marker inside a text field needs an index of its own, and the
+// main thread gives it one by counting from the enclosing editable root; see makeNSRange). Counting
+// both the control's U+FFFC and its content would count it twice.
+enum class EmitObjectReplacementCharacters : bool { No, Yes };
+EmittedAuxiliaryText auxiliaryTextForObject(AXIsolatedObject&, TraversalPoint, char16_t lastEmittedCharacter, EmitObjectReplacementCharacters = EmitObjectReplacementCharacters::Yes);
+
+// The offset of the trailing newline a native text control renders for the empty final line of a value
+// ending in a line break — a newline the value itself doesn't contain — or nullopt when this object
+// doesn't hold that newline.
+std::optional<unsigned> offsetOfCollapsedTrailingNewline(AXIsolatedObject&, const AXTextRuns* textRunsForObject);
 #endif // ENABLE(ACCESSIBILITY_ISOLATED_TREE)
 
 } // namespace Accessibility

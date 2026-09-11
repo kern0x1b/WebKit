@@ -34,6 +34,7 @@ class CachedImage;
 class Document;
 class IsolatedSVGDocumentContext;
 class Element;
+class SVGDocument;
 class SVGElement;
 class SVGFontFaceElement;
 class SVGResourcesCache;
@@ -59,6 +60,7 @@ public:
     void unpauseAnimations();
     void dispatchLoadEventToOutermostSVGElements();
     bool areAnimationsPaused() const { return m_areAnimationsPaused; }
+    bool hasActiveSMILAnimations() const;
 
     void reportWarning(const String&);
     void reportError(const String&);
@@ -79,6 +81,12 @@ public:
     void addExternalSVGResource(const URL&, CachedImage&, Document&);
     IsolatedSVGDocumentContext* isolatedSVGDocumentContext(const URL&) const;
 
+    // The return value is tri-state because callers need to distinguish whether the reference is external
+    // at all, and if so whether it's loaded yet: nullopt = not an external/data reference (resolve
+    // locally); null RefPtr = external but not loaded yet (resolve to nothing); non-null = the isolated
+    // document to resolve in. Requires the SVGExternalResourcesEnabled setting.
+    std::optional<RefPtr<SVGDocument>> externalResourceDocument(const URL&) const;
+
 private:
     WeakRef<Document, WeakPtrImplWithEventTargetData> m_document;
     WeakHashSet<SVGSVGElement, WeakPtrImplWithEventTargetData> m_timeContainers; // For SVG 1.2 support this will need to be made more general.
@@ -86,7 +94,7 @@ private:
     const UniqueRef<SVGResourcesCache> m_resourcesCache;
 
     Vector<Ref<SVGElement>> m_rebuildElements;
-    bool m_areAnimationsPaused;
+    bool m_areAnimationsPaused { false };
 
     HashMap<URL, Ref<IsolatedSVGDocumentContext>> m_externalSVGDocuments;
 };

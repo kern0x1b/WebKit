@@ -55,6 +55,7 @@ WTF_ALLOW_UNSAFE_BUFFER_USAGE_BEGIN
 #endif
 #include <wtf/Assertions.h>
 #include <wtf/DataLog.h>
+#include <wtf/HexNumber.h>
 #include <wtf/TZoneMallocInlines.h>
 #include <wtf/text/StringBuilder.h>
 #include <wtf/text/WTFString.h>
@@ -137,7 +138,7 @@ DebuggerTrapStatus ExecutionHandler::handleDebuggerTrapIfNeeded(CallFrame* callF
     VM& debuggee = instance->vm();
     if (exceptionType == Wasm::ExceptionType::Unreachable && hasBreakpoints()) {
         VirtualAddress address = VirtualAddress::toVirtual(instance, callee->functionIndex(), pc);
-        if (auto* breakpoint = m_breakpointManager->findBreakpoint(address)) {
+        if (RefPtr breakpoint = m_breakpointManager->findBreakpoint(address)) {
             debuggee.debugState()->setBreakpointStopData(breakpoint->type, address, breakpoint->originalBytecode, pc, mc, stack, callee, instance, callFrame);
             dataLogLnIf(Options::verboseWasmDebugger(), "[Code][handleDebuggerTrapIfNeeded] Breakpoint at ", *breakpoint, " with ", *debuggee.debugState()->stopData);
             stopTheWorld(debuggee, StopTheWorldEvent::WasmProgramStop);
@@ -345,7 +346,7 @@ static inline VM* findVM(uint64_t vmId)
 {
     VM* result = nullptr;
     VMManager::forEachVM([&](VM& vm) {
-        if (vm.debugState()->isStopped && vmId == vm.identifier().toRawValue()) {
+        if (vm.debugState()->isStopped && vmId == vm.identifier().toUInt64()) {
             result = &vm;
             return IterationStatus::Done;
         }
@@ -453,14 +454,14 @@ bool ExecutionHandler::stepAtBytecode(Locker<Lock>& locker, DebugState* state)
         dataLogLnIf(Options::verboseWasmDebugger(), "[Debugger][Step][SetOneTimeBreakpoint] current PC=", RawPointer(currentPC), "(", stopData.address, "), next PC=", RawPointer(nextPC), "(", nextAddress, ")");
         if (m_breakpointManager->findBreakpoint(nextAddress))
             return;
-        m_breakpointManager->setBreakpoint(nextAddress, Breakpoint(const_cast<uint8_t*>(nextPC), Breakpoint::Type::Step));
+        m_breakpointManager->setBreakpoint(nextAddress, Breakpoint::create(const_cast<uint8_t*>(nextPC), Breakpoint::Type::Step));
     };
 
     auto setStepBreakpointAtCaller = [&]() WTF_REQUIRES_LOCK(m_lock) {
         uint8_t* returnPC = nullptr;
         VirtualAddress virtualReturnPC;
         if (getWasmReturnPC(stopData.callFrame, returnPC, virtualReturnPC))
-            m_breakpointManager->setBreakpoint(virtualReturnPC, Breakpoint(const_cast<uint8_t*>(returnPC), Breakpoint::Type::Step));
+            m_breakpointManager->setBreakpoint(virtualReturnPC, Breakpoint::create(const_cast<uint8_t*>(returnPC), Breakpoint::Type::Step));
     };
 
     auto setStepBreakpointsFromDebugInfo = [&]() WTF_REQUIRES_LOCK(m_lock) {
@@ -611,7 +612,7 @@ void ExecutionHandler::setBreakpointAtPC(JSWebAssemblyInstance* instance, Functi
     VirtualAddress address = VirtualAddress::toVirtual(instance, functionIndex, pc);
     if (m_breakpointManager->findBreakpoint(address))
         return;
-    m_breakpointManager->setBreakpoint(address, Breakpoint(const_cast<uint8_t*>(pc), type));
+    m_breakpointManager->setBreakpoint(address, Breakpoint::create(const_cast<uint8_t*>(pc), type));
 }
 
 void ExecutionHandler::setBreakpoint(StringView packet)
@@ -665,7 +666,7 @@ void ExecutionHandler::setBreakpoint(StringView packet)
         return;
     }
 
-    m_breakpointManager->setBreakpoint(address, Breakpoint(pc, Breakpoint::Type::Regular));
+    m_breakpointManager->setBreakpoint(address, Breakpoint::create(pc, Breakpoint::Type::Regular));
     dataLogLnIf(Options::verboseWasmDebugger(), "[Debugger][SetBreakpoint] Successfully set breakpoint at ", address, " (physical: ", RawPointer(pc), ", original: 0x", hex(*pc, 2, Lowercase), ")");
     sendReplyOK();
 }
@@ -753,7 +754,7 @@ struct ThreadInfo {
 
 void ExecutionHandler::sendStopReply(AbstractLocker& locker) WTF_REQUIRES_LOCK(m_lock)
 {
-    sendStopReplyForThread(locker, m_debuggee->identifier().toRawValue());
+    sendStopReplyForThread(locker, m_debuggee->identifier().toUInt64());
 }
 
 void ExecutionHandler::sendStopReplyForThread(AbstractLocker& locker, uint64_t vmId) WTF_REQUIRES_LOCK(m_lock)
@@ -780,7 +781,7 @@ void ExecutionHandler::sendStopReplyForThread(AbstractLocker& locker, uint64_t v
         auto* state = vm.debugState();
         if (!state->isStopped)
             return IterationStatus::Continue;
-        uint64_t tid = vm.identifier().toRawValue();
+        uint64_t tid = vm.identifier().toUInt64();
         allThreads.append({ tid, getStopPC(*state), getThreadName(*state, tid), stopReasonToInfo(*state).reasonSuffix });
         if (tid == vmId)
             std::swap(allThreads[0], allThreads.last());
@@ -792,7 +793,7 @@ void ExecutionHandler::sendStopReplyForThread(AbstractLocker& locker, uint64_t v
     // actually triggered the stop event (breakpoint/step/trap/interrupt/new-module-load).
     // Passive threads get signal 0 so LLDB's ShouldSelect() returns false for them, allowing
     // the event thread to win thread selection in HandleProcessStateChangedEvent.
-    bool isPassiveThread = state->stopReason == DebugState::Reason::Interrupted && m_debuggee && vmId != m_debuggee->identifier().toRawValue();
+    bool isPassiveThread = state->stopReason == DebugState::Reason::Interrupted && m_debuggee && vmId != m_debuggee->identifier().toUInt64();
     auto stopInfo = isPassiveThread
         ? StopReasonInfo { signalStopString(0), "signal"_s }
         : stopReasonToInfo(*state);
@@ -887,13 +888,13 @@ void ExecutionHandler::sendReplyImpl(AbstractLocker&, StringView reply) WTF_REQU
     }
 #endif
 
-    CString packetData = packet.utf8();
-    int sent = static_cast<int>(send(m_debugServer.m_clientSocket, packetData.data(), packetData.length(), 0));
+    auto packetData = packet.utf8();
+    int sent = static_cast<int>(send(m_debugServer.m_clientSocket, packetData.legacyCStringPointer(), packetData.length(), 0));
     if (sent < 0)
-        dataLogLnIf(Options::verboseWasmDebugger(), "[Debugger] Failed to send packet: ", packetData.data(), " sent: ", sent);
+        dataLogLnIf(Options::verboseWasmDebugger(), "[Debugger] Failed to send packet: ", packetData.legacyCStringPointer(), " sent: ", sent);
     else {
         m_debuggerState = DebuggerState::Replied;
-        dataLogLnIf(Options::verboseWasmDebugger(), "[Debugger] Sent reply: ", packetData.data());
+        dataLogLnIf(Options::verboseWasmDebugger(), "[Debugger] Sent reply: ", packetData.legacyCStringPointer());
     }
 }
 
@@ -938,7 +939,7 @@ String ExecutionHandler::callStackStringFor(uint64_t vmId)
 
     VM* targetVM = m_debuggee;
     RELEASE_ASSERT(targetVM);
-    if (targetVM->identifier().toRawValue() != vmId)
+    if (targetVM->identifier().toUInt64() != vmId)
         targetVM = findVM(vmId);
 
     if (!targetVM) {

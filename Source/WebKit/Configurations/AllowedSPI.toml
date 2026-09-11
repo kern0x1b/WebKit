@@ -94,6 +94,7 @@ symbols = [
     "nw_connection_abort_reads",
     "nw_connection_abort_writes",
     "nw_http_fields_access_value_by_name",
+    "nw_http_fields_enumerate",
     "nw_parameters_create_webtransport_http",
     "nw_protocol_copy_webtransport_definition",
     "nw_webtransport_create_options",
@@ -107,6 +108,8 @@ symbols = [
     "nw_webtransport_metadata_set_remote_drain_handler",
     "nw_webtransport_metadata_set_remote_receive_error_handler",
     "nw_webtransport_metadata_set_remote_send_error_handler",
+    "nw_protocol_copy_quic_connection_definition",
+    "nw_quic_connection_copy_sec_protocol_metadata",
     "nw_webtransport_metadata_copy_connect_response",
     "nw_webtransport_metadata_get_transport_mode",
     "nw_webtransport_options_add_connect_request_header",
@@ -262,13 +265,6 @@ selectors = [
     { name = "requestProofreadingReviewOfString:range:language:options:completionHandler:", class = "UITextChecker" },
 ]
 
- [[temporary-usage]]
- request = "rdar://165789536"
- cleanup = "rdar://179184814"
- selectors = [
-     { name = "requestGrammarCheckingOfString:range:waitForAllResults:completionHandler:", class = "UITextChecker" },
- ]
-
 [[temporary-usage]]
 request = "rdar://165789536"
 cleanup = "rdar://165842824"
@@ -299,14 +295,6 @@ selectors = [
     { name = "_setUseVisionAlternateScrollIndicatorRendering:", class = "UIScrollView" },
 ]
 requires = ["PLATFORM_VISION"]
-
-[[staging]]
-request = "rdar://170178645"
-selectors = [
-    { name = "screenCaptureWithEnvironment:", class = "BEProcessCapability" },
-]
-requires = ["ENABLE_EXTENSION_CAPABILITIES"]
-requires-sdk = ["iOS <= 26.*"]
 
 [[temporary-usage]]
 request = "rdar://171730075"
@@ -346,3 +334,18 @@ request = "rdar://171940190"
 selectors = [
     { name = "endSessionWithCompletion:", class = "NFSession" },
 ]
+
+[[staging]]
+request = "rdar://166719636"
+symbols = [
+    "SecQWACTLSBindingVerify"
+]
+
+[[not-web-essential]]
+request = "rdar://185838347"
+selectors = [
+    { name = "invalidateWithReason:", class = "BEWebContentProcess" },
+    { name = "invalidateWithReason:", class = "BENetworkingProcess" },
+    { name = "invalidateWithReason:", class = "BERenderingProcess" },
+]
+requires = ["USE_EXTENSIONKIT"]

@@ -254,6 +254,7 @@ header: <WebCore/MediaPlayer.h>
     WebCore::ContentType contentType;
     bool requiresRemotePlayback;
     bool supportsLimitedMatroska;
+    bool disableTeardownOnVisibilityChange;
     std::optional<bool> supportsProgressMonitoringOverride;
     OptionSet<WebCore::VideoRendererPreference> videoRendererPreferences;
 };
@@ -270,8 +271,7 @@ enum class WebCore::VideoFrameRotation : uint16_t {
 };
 #endif
 
-#if USE(AUDIO_SESSION)
-header: <WebCore/AudioSession.h>
+header: <WebCore/PlatformMediaSessionTypes.h>
 [CustomHeader] enum class WebCore::RouteSharingPolicy : uint8_t {
     Default,
     LongFormAudio,
@@ -295,6 +295,8 @@ enum class WebCore::AudioSessionMode : uint8_t {
     MoviePlayback,
 };
 
+#if USE(AUDIO_SESSION)
+header: <WebCore/AudioSession.h>
 enum class WebCore::AudioSessionSoundStageSize : uint8_t {
     Automatic,
     Small,
@@ -995,7 +997,7 @@ header: <WebCore/SourceBufferPrivateClient.h>
     uint64_t numMediaSamples;
 };
 
-using WebCore::SourceBufferPrivate::SamplesPromise::Result = Expected<Vector<String>, WebCore::PlatformMediaError>
+using WebCore::SourceBufferPrivate::SamplesPromise::Result = std::expected<Vector<String>, WebCore::PlatformMediaError>
 
 header: <WebCore/MediaSourceConfiguration.h>
 struct WebCore::MediaSourceConfiguration {
@@ -1102,6 +1104,12 @@ enum class WebCore::DOMAudioSessionType : uint8_t {
     TransientSolo,
     Ambient,
     PlayAndRecord
+};
+
+enum class WebCore::DOMAudioSessionState : uint8_t {
+    Inactive,
+    Active,
+    Interrupted
 };
 #endif
 

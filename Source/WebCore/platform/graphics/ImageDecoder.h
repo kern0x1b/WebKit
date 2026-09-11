@@ -44,7 +44,9 @@
 
 namespace WebCore {
 
+class AsyncImageDecoder;
 class FragmentedSharedBuffer;
+class ImageDecoderClient;
 class ImageFrame;
 class NativeImage;
 
@@ -67,22 +69,6 @@ public:
     };
 
     static bool supportsMediaType(MediaType);
-
-#if ENABLE(GPU_PROCESS)
-    using SupportsMediaTypeFunc = Function<bool(MediaType)>;
-    using CanDecodeTypeFunc = Function<bool(const String&)>;
-    using CreateImageDecoderFunc = Function<RefPtr<ImageDecoder>(FragmentedSharedBuffer&, const String&, AlphaOption, GammaAndColorProfileOption)>;
-
-    struct ImageDecoderFactory {
-        SupportsMediaTypeFunc supportsMediaType;
-        CanDecodeTypeFunc canDecodeType;
-        CreateImageDecoderFunc createImageDecoder;
-    };
-
-    WEBCORE_EXPORT static void installFactory(ImageDecoderFactory&&);
-    WEBCORE_EXPORT static void resetFactories();
-    WEBCORE_EXPORT static void clearFactories();
-#endif
 
     virtual size_t bytesDecodedToDetermineProperties() const = 0;
 

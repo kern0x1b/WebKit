@@ -38,6 +38,7 @@ OBJC_CLASS NSURLSessionDataTask;
 OBJC_CLASS NSMutableURLRequest;
 
 namespace WebCore {
+class PendingStreamState;
 class RegistrableDomain;
 class SharedBuffer;
 enum class AdvancedPrivacyProtections : uint16_t;
@@ -90,11 +91,8 @@ public:
 
     String description() const override;
 
-    void setH2PingCallback(const URL&, CompletionHandler<void(Expected<WTF::Seconds, WebCore::ResourceError>&&)>&&) override;
+    void setH2PingCallback(const URL&, CompletionHandler<void(std::expected<WTF::Seconds, WebCore::ResourceError>&&)>&&) override;
     void setPriority(WebCore::ResourceLoadPriority) override;
-#if ENABLE(INSPECTOR_NETWORK_THROTTLING)
-    void setEmulatedConditions(const std::optional<int64_t>& bytesPerSecondLimit) override;
-#endif
 
     void checkTAO(const WebCore::ResourceResponse&);
 
@@ -110,6 +108,8 @@ private:
     WebCore::StoredCredentialsPolicy storedCredentialsPolicy() const final { return m_storedCredentialsPolicy; }
 
     void setTimingAllowFailedFlag() final;
+
+    void installPendingStreamProbe(WebCore::PendingStreamState&);
 
     WeakPtr<SessionWrapper> m_sessionWrapper;
     RefPtr<SandboxExtension> m_sandboxExtension;

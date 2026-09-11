@@ -67,6 +67,7 @@ public:
     virtual void load(const URL&, const LoadOptions&, MediaSourcePrivateClient&) = 0;
     virtual void readyStateFromMediaSourceChanged() { }
     virtual void characteristicsFromMediaSourceChanged() { }
+    virtual void seekableRangesFromMediaSourceChanged() { }
 #endif
 #if ENABLE(MEDIA_STREAM)
     virtual void load(MediaStreamPrivate&) = 0;
@@ -212,7 +213,7 @@ public:
     WEBCORE_EXPORT virtual RefPtr<ShareableBitmap> bitmapImageForCurrentTimeSync();
     using BitmapImagePromise = MediaPlayer::BitmapImagePromise;
     WEBCORE_EXPORT virtual Ref<BitmapImagePromise> bitmapImageForCurrentTime();
-    virtual DestinationColorSpace colorSpace() = 0;
+    virtual ColorSpace colorSpace() = 0;
     virtual bool shouldGetNativeImageForCanvasDrawing() const { return true; }
 
     virtual void setShouldDisableHDR(bool) { }
@@ -296,6 +297,10 @@ public:
 
 #if USE(GSTREAMER)
     virtual void simulateAudioInterruption() { }
+#if USE(COORDINATED_GRAPHICS)
+    virtual void setPlatformLayerBufferProxy(Ref<CoordinatedPlatformLayerBufferProxy>&&);
+    virtual RefPtr<CoordinatedPlatformLayerBufferProxy> platformLayerBufferProxy() const;
+#endif
 #endif
 
     virtual String languageOfPrimaryAudioTrack() const { return emptyString(); }

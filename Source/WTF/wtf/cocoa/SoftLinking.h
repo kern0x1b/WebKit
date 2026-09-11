@@ -269,8 +269,7 @@ static void* lib##Library(bool = false) \
     _Pragma("clang diagnostic ignored \"-Wunused-function\"") \
     static className *alloc##className##Instance() NS_RETURNS_RETAINED \
     { \
-        /* FIXME: This is a static analysis false positive (rdar://160259918). */ \
-        SUPPRESS_UNRETAINED_ARG return [get##className##ClassSingleton() alloc]; \
+        return [get##className##ClassSingleton() alloc]; \
     } \
     _Pragma("clang diagnostic pop")
 
@@ -298,8 +297,7 @@ static void* lib##Library(bool = false) \
     _Pragma("clang diagnostic ignored \"-Wunused-function\"") \
     static className *alloc##className##Instance() NS_RETURNS_RETAINED \
     { \
-        /* FIXME: This is a static analysis false positive (rdar://160259918). */ \
-        SUPPRESS_UNRETAINED_ARG return [get##className##ClassSingleton() alloc]; \
+        return [get##className##ClassSingleton() alloc]; \
     } \
     _Pragma("clang diagnostic pop")
 

@@ -112,7 +112,7 @@ bool HTMLAnchorElement::isMouseFocusable() const
 {
 #if !(PLATFORM(GTK) || PLATFORM(WPE))
     // Only allow links with tabIndex or contentEditable to be mouse focusable.
-    if (isLink() && !protect(document())->quirks().needsAnchorToBeMouseFocusable())
+    if (isLink() && !protect(document())->quirks().needsAnchorToBeMouseFocusable(*this))
         return HTMLElement::supportsFocus();
 #endif
 
@@ -129,8 +129,8 @@ bool HTMLAnchorElement::isKeyboardFocusable(const FocusEventData& focusEventData
     if (!isFocusable())
         return false;
 
-    // Anchor is focusable if the base element supports focus and is focusable.
-    if (isFocusable() && Element::supportsFocus())
+    // Anchor is keyboard focusable if the base element supports focus.
+    if (Element::supportsFocus())
         return HTMLElement::isKeyboardFocusable(focusEventData);
 
     RefPtr frame = document().frame();
@@ -690,6 +690,11 @@ bool shouldProhibitLinks(Element* element)
 bool HTMLAnchorElement::willRespondToMouseClickEventsWithEditability(Editability editability) const
 {
     return isLink() || HTMLElement::willRespondToMouseClickEventsWithEditability(editability);
+}
+
+bool HTMLAnchorElement::hasActivationBehavior() const
+{
+    return isLink();
 }
 
 static auto& NODELETE rootEditableElementMap()

@@ -35,6 +35,7 @@
 #include "Logging.h"
 #include "MessageSenderInlines.h"
 #include "RemotePageProxy.h"
+#include "ShouldFreezeLayerTree.h"
 #include "WebBackForwardCache.h"
 #include "WebBackForwardList.h"
 #include "WebBackForwardListFrameItem.h"
@@ -43,6 +44,7 @@
 #include "WebPageMessages.h"
 #include "WebPageProxy.h"
 #include "WebPageProxyMessages.h"
+#include "WebProcessActivityState.h"
 #include "WebProcessMessages.h"
 #include "WebProcessPool.h"
 #include <wtf/CallbackAggregator.h>
@@ -51,6 +53,7 @@
 #include <wtf/TZoneMallocInlines.h>
 #include <wtf/URL.h>
 #include <wtf/text/MakeString.h>
+#include <wtf/text/TextStream.h>
 
 namespace WebKit {
 using namespace WebCore;
@@ -64,6 +67,21 @@ static WeakHashSet<SuspendedPageProxy>& NODELETE allSuspendedPages()
 }
 
 WTF_MAKE_TZONE_ALLOCATED_IMPL(SuspendedPageProxy);
+
+unsigned SuspendedPageProxy::remotePagesWithNetworkActivityCountForTesting()
+{
+    unsigned count = 0;
+    for (Ref suspendedPage : allSuspendedPages()) {
+        RefPtr page = suspendedPage->page();
+        if (!page)
+            continue;
+        suspendedPage->m_browsingContextGroup->forEachRemotePage(*page, [&count](auto& remotePage) {
+            if (remotePage.processActivityState().hasValidNetworkActivity())
+                ++count;
+        });
+    }
+    return count;
+}
 
 RefPtr<WebProcessProxy> SuspendedPageProxy::findReusableSuspendedPageProcess(WebProcessPool& processPool, const RegistrableDomain& registrableDomain, WebsiteDataStore& dataStore, WebProcessProxy::LockdownMode lockdownMode, EnhancedSecurity enhancedSecurity, const API::PageConfiguration& pageConfiguration)
 {
@@ -168,6 +186,10 @@ void SuspendedPageProxy::startSuspension(std::optional<BackForwardFrameItemIdent
         suspendSubframeProcesses(*mainFrameItemID);
     } else
         m_allSubframesSuspended = true;
+
+    // FIXME: unify page load activity management between main frame and remote frame processes so
+    // this isn't necessary.
+    dropNetworkActivityOnRemotePages();
 
     m_messageReceiverRegistration.startReceivingMessages(m_process, m_webPageID, *this, *this);
     m_suspensionTimeoutTimer.startOneShot(suspensionTimeout);
@@ -293,7 +315,7 @@ void SuspendedPageProxy::unsuspend(WebCore::BackForwardFrameItemIdentifier mainF
         if (!suspendedPage->hasSubframeInProcess(process->coreProcessIdentifier()))
             return;
         RELEASE_LOG(ProcessSwapping, "%p - SuspendedPageProxy::unsuspend: Sending RestoreWithFrameItem to pid %i", &suspendedPage, process->processID());
-        process->sendWithAsyncReply(Messages::WebPage::RestoreWithFrameItem(mainFrameItemID, mainFrameURLAndOrigin), aggregator->chain(), remotePage.identifierInSiteIsolatedProcess());
+        process->sendWithAsyncReply(Messages::WebPage::RestoreWithFrameItem(mainFrameItemID, mainFrameURLAndOrigin, ShouldFreezeLayerTree::Yes), aggregator->chain(), remotePage.identifierInSiteIsolatedProcess());
     });
 }
 
@@ -337,7 +359,7 @@ void SuspendedPageProxy::closeWithoutFlashing()
 
 void SuspendedPageProxy::didProcessRequestToSuspend(SuspensionState newSuspensionState)
 {
-    LOG(ProcessSwapping, "SuspendedPageProxy %s from process %i finished transition to suspended", loggingString().utf8().data(), m_process->processID());
+    LOG_WITH_STREAM(ProcessSwapping, stream << "SuspendedPageProxy "_s << loggingString() << " from process "_s << m_process->processID() << " finished transition to suspended"_s);
     RELEASE_LOG(ProcessSwapping, "%p - SuspendedPageProxy::didProcessRequestToSuspend() success? %d", this, newSuspensionState == SuspensionState::Suspended);
 
     ASSERT(newSuspensionState == SuspensionState::Suspended || newSuspensionState == SuspensionState::FailedToSuspend);
@@ -371,6 +393,16 @@ void SuspendedPageProxy::suspensionTimedOut()
 
     RELEASE_LOG_ERROR(ProcessSwapping, "%p - SuspendedPageProxy::suspensionTimedOut() destroying the suspended page because it failed to suspend in time", this);
     protect(backForwardCache())->removeEntry(*this); // Will destroy |this|.
+}
+
+void SuspendedPageProxy::dropNetworkActivityOnRemotePages()
+{
+    RefPtr page = m_page.get();
+    if (!page)
+        return;
+    m_browsingContextGroup->forEachRemotePage(*page, [](auto& remotePage) {
+        remotePage.processActivityState().dropNetworkActivity();
+    });
 }
 
 void SuspendedPageProxy::suspendSubframeProcesses(BackForwardFrameItemIdentifier mainFrameItemID)

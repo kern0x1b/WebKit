@@ -48,6 +48,7 @@ class RenderBlock;
 class RenderBlockFlow;
 class RenderBox;
 class RenderLayoutState;
+class RenderListOutsideMarker;
 class RenderView;
 namespace Layout {
 class LayoutState;
@@ -111,6 +112,7 @@ public:
     bool isSkippedContentRootForLayout(const RenderBox&) const;
 
     bool NODELETE isPercentHeightResolveDisabledFor(const RenderBox& flexItem);
+    bool NODELETE isComputingIntrinsicLogicalHeightFor(const RenderBox&) const;
 
     struct TextBoxTrim {
         bool trimFirstFormattedLine { false };
@@ -196,12 +198,17 @@ public:
 
     bool repaintsBlocked() const { return m_repaintsBlocked; }
 
+    using ExcludedMarkerList = Vector<SingleThreadWeakPtr<RenderListOutsideMarker>>;
+    const ExcludedMarkerList& excludedMarkers() const LIFETIME_BOUND { return m_excludedMarkers; }
+
 private:
+    friend class ListItemExcludedMarkerScope;
     friend class LayoutFrameScope;
     friend class LayoutStateMaintainer;
     friend class LayoutStateDisabler;
     friend class SubtreeLayoutStateMaintainer;
     friend class FlexPercentResolveDisabler;
+    friend class IntrinsicLogicalHeightComputationScope;
     friend class ContentVisibilityOverrideScope;
     friend class RepaintBlocker;
 
@@ -220,9 +227,8 @@ private:
 
     void NODELETE setSubtreeLayoutRoot(RenderElement&);
 
-#if ENABLE(TEXT_AUTOSIZING)
     void applyTextSizingIfNeeded(RenderElement& layoutRoot);
-#endif
+
     void updateStyleForLayout();
 
     // These functions may only be accessed by LayoutStateMaintainer.
@@ -251,6 +257,9 @@ private:
     void disablePercentHeightResolveFor(const RenderBox& flexItem);
     void enablePercentHeightResolveFor(const RenderBox& flexItem);
 
+    void addIntrinsicLogicalHeightComputationFor(const RenderBox&);
+    void removeIntrinsicLogicalHeightComputationFor(const RenderBox&);
+
     void allowRepaints() { m_repaintsBlocked = false; }
     void blockRepaints() { m_repaintsBlocked = true; }
 
@@ -274,6 +283,7 @@ private:
     bool m_revealedWhenFoundIgnored { false };
     bool m_updateCompositingLayersIsPending { false };
     bool m_repaintsBlocked { false };
+    ExcludedMarkerList m_excludedMarkers;
     LayoutPhase m_layoutPhase { LayoutPhase::OutsideLayout };
     enum class LayoutNestedState : uint8_t  { NotInLayout, NotNested, Nested };
     LayoutNestedState m_layoutNestedState { LayoutNestedState::NotInLayout };
@@ -285,6 +295,7 @@ private:
     std::unique_ptr<UpdateScrollInfoAfterLayoutTransaction> m_updateScrollInfoAfterLayoutTransaction;
     SingleThreadWeakHashMap<RenderBlock, Vector<SingleThreadWeakPtr<RenderBox>>> m_containersWithDescendantsNeedingTransformUpdate;
     SingleThreadWeakHashSet<RenderBox> m_percentHeightIgnoreList;
+    SingleThreadWeakHashSet<RenderBox> m_intrinsicLogicalHeightComputationList;
     Vector<AnchorScrollAdjuster> m_anchorScrollAdjusters;
     std::optional<TextBoxTrim> m_textBoxTrim;
     std::optional<SubtreeScrollbarChangesState> m_subtreeScrollbarChangesState;
@@ -342,6 +353,15 @@ public:
 
 private:
     const Ref<Document> m_document;
+};
+
+class ListItemExcludedMarkerScope {
+public:
+    ListItemExcludedMarkerScope(LocalFrameViewLayoutContext&, RenderListOutsideMarker&);
+    ~ListItemExcludedMarkerScope();
+
+private:
+    const CheckedRef<LocalFrameViewLayoutContext> m_layoutContext;
 };
 
 } // namespace WebCore

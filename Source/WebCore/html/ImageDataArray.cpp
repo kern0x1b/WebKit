@@ -52,14 +52,6 @@ ImageDataArray::ImageDataArray(Ref<JSC::ArrayBufferView>&& arrayBufferView)
     ASSERT(isSupported(m_arrayBufferView.get()));
 }
 
-ImageDataArray::ImageDataArray(Ref<JSC::Uint8ClampedArray>&& data)
-    : ImageDataArray(Ref<JSC::ArrayBufferView>(WTF::move(data)))
-{ }
-
-ImageDataArray::ImageDataArray(Ref<JSC::Float16Array>&& data)
-    : ImageDataArray(Ref<JSC::ArrayBufferView>(WTF::move(data)))
-{ }
-
 ImageDataArray::ImageDataArray(ImageDataArray&& original, std::optional<ImageDataPixelFormat> overridingPixelFormat)
     : m_arrayBufferView(WTF::move(original).extractBufferViewWithPixelFormat(overridingPixelFormat))
 { }
@@ -84,12 +76,14 @@ std::optional<ImageDataArray> ImageDataArray::tryCreate(size_t length, ImageData
             array.emplace(typedArray.releaseNonNull());
         }
         break;
+#if ENABLE(PIXEL_FORMAT_RGBA16F)
     case ImageDataPixelFormat::RgbaFloat16:
         if (RefPtr typedArray = JSC::Float16Array::tryCreateUninitialized(length)) {
             fillTypedArray(*typedArray, optionalBytes);
             array.emplace(typedArray.releaseNonNull());
         }
         break;
+#endif
     }
     return array;
 }
@@ -188,8 +182,10 @@ Ref<ArrayBufferView> ImageDataArray::extractBufferViewWithPixelFormat(std::optio
 
     switch (*overridingPixelFormat) {
     case ImageDataPixelFormat::RgbaUnorm8: return asUint8ClampedArray();
+#if ENABLE(PIXEL_FORMAT_RGBA16F)
     case ImageDataPixelFormat::RgbaFloat16: return asFloat16Array();
-    }
+#endif
+}
     RELEASE_ASSERT_NOT_REACHED("Unexpected ImageDataPixelFormat value");
 }
 

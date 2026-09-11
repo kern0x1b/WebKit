@@ -29,6 +29,7 @@
 #import "Helpers/PlatformUtilities.h"
 #import "Helpers/Test.h"
 #import "Helpers/cocoa/TestScriptMessageHandler.h"
+#import "TestNavigationDelegate.h"
 #import "TestURLSchemeHandler.h"
 #import <WebKit/WKProcessPoolPrivate.h>
 #import <WebKit/WKUserContentControllerPrivate.h>
@@ -439,4 +440,366 @@ TEST(IndexedDB, UncontendedTransactionOfSuspendedProcessIsNotAborted)
     [firstWebView _setThrottleStateForTesting:2];
     [firstWebView evaluateJavaScript:@"stopTransaction = true;" completionHandler:nil];
     EXPECT_WK_STREQ([firstHandler waitForMessage].body, @"first transaction completed");
+}
+
+TEST(IndexedDB, AbortMultipleTransactionsOfSuspendedProcess)
+{
+    static NSString *firstClientString = @"<script> \
+        function post(message) { \
+            window.webkit.messageHandlers.testHandler.postMessage(message); \
+        } \
+        var storeCount = 10; \
+        var startedCount = 0; \
+        var abortedCount = 0; \
+        var request = indexedDB.open('ManySuspendedTransactionsDatabase'); \
+        request.onupgradeneeded = function(event) { \
+            var db = event.target.result; \
+            for (var i = 0; i < storeCount; i++) \
+                db.createObjectStore('Store' + i); \
+        }; \
+        request.onerror = function() { \
+            post('first database error'); \
+        }; \
+        request.onsuccess = function(event) { \
+            var db = event.target.result; \
+            for (var i = 0; i < storeCount; i++) { \
+                (function(storeName) { \
+                    var transaction = db.transaction(storeName, 'readonly'); \
+                    transaction.onabort = function() { \
+                        abortedCount++; \
+                        if (abortedCount === storeCount) \
+                            post('all first transactions aborted'); \
+                    }; \
+                    var objectStore = transaction.objectStore(storeName); \
+                    var started = false; \
+                    function keepTransactionAlive() { \
+                        var getRequest = objectStore.get('TestKey'); \
+                        getRequest.onsuccess = function() { \
+                            if (!started) { \
+                                started = true; \
+                                if (++startedCount === storeCount) \
+                                    post('first transactions started'); \
+                            } \
+                            keepTransactionAlive(); \
+                        }; \
+                    } \
+                    keepTransactionAlive(); \
+                })('Store' + i); \
+            } \
+        }; \
+        </script>";
+
+    static NSString *secondClientString = @"<script> \
+        function post(message) { \
+            window.webkit.messageHandlers.testHandler.postMessage(message); \
+        } \
+        var storeCount = 10; \
+        var storeNames = []; \
+        for (var i = 0; i < storeCount; i++) \
+            storeNames.push('Store' + i); \
+        var request = indexedDB.open('ManySuspendedTransactionsDatabase'); \
+        request.onerror = function() { \
+            post('second database error'); \
+        }; \
+        request.onsuccess = function(event) { \
+            var transaction = event.target.result.transaction(storeNames, 'readwrite'); \
+            transaction.oncomplete = function() { \
+                post('second transaction completed'); \
+            }; \
+            transaction.objectStore(storeNames[0]).put('OtherValue', 'OtherKey'); \
+        }; \
+        </script>";
+
+    readyToContinue = false;
+    [[WKWebsiteDataStore defaultDataStore] removeDataOfTypes:[WKWebsiteDataStore allWebsiteDataTypes] modifiedSince:[NSDate distantPast] completionHandler:^() {
+        readyToContinue = true;
+    }];
+    TestWebKitAPI::Util::run(&readyToContinue);
+
+    RetainPtr firstHandler = adoptNS([TestScriptMessageHandler new]);
+    RetainPtr firstConfiguration = adoptNS([[WKWebViewConfiguration alloc] init]);
+    [firstConfiguration setProcessPool:adoptNS([[WKProcessPool alloc] init]).get()];
+    [[firstConfiguration userContentController] addScriptMessageHandler:firstHandler.get() name:@"testHandler"];
+    RetainPtr firstWebView = adoptNS([[WKWebView alloc] initWithFrame:CGRectMake(0, 0, 800, 600) configuration:firstConfiguration.get()]);
+    [firstWebView loadHTMLString:firstClientString baseURL:[NSURL URLWithString:@"http://webkit.org"]];
+    EXPECT_WK_STREQ([firstHandler waitForMessage].body, @"first transactions started");
+
+    [firstWebView _setThrottleStateForTesting:0];
+
+    RetainPtr secondHandler = adoptNS([TestScriptMessageHandler new]);
+    RetainPtr secondConfiguration = adoptNS([[WKWebViewConfiguration alloc] init]);
+    [secondConfiguration setProcessPool:adoptNS([[WKProcessPool alloc] init]).get()];
+    [[secondConfiguration userContentController] addScriptMessageHandler:secondHandler.get() name:@"testHandler"];
+    RetainPtr secondWebView = adoptNS([[WKWebView alloc] initWithFrame:CGRectMake(0, 0, 800, 600) configuration:secondConfiguration.get()]);
+    [secondWebView loadHTMLString:secondClientString baseURL:[NSURL URLWithString:@"http://webkit.org"]];
+
+    EXPECT_WK_STREQ([secondHandler waitForMessage].body, @"second transaction completed");
+    EXPECT_WK_STREQ([firstHandler waitForMessage].body, @"all first transactions aborted");
+}
+
+TEST(IndexedDB, ManyQueuedTransactionsOfSuspendedProcessAreDeferredNotAborted)
+{
+    static NSString *firstClientString = @"<script> \
+        var transactionCount = 100; \
+        var completedCount = 0; \
+        var abortedCount = 0; \
+        function post(message) { \
+            window.webkit.messageHandlers.testHandler.postMessage(message); \
+        } \
+        function checkQueuedTransactionsSettled() { \
+            if (completedCount + abortedCount === transactionCount - 1) \
+                post('queued transactions settled completed=' + completedCount + ' aborted=' + abortedCount); \
+        } \
+        var request = indexedDB.open('ManyQueuedSuspendedTransactionsDatabase'); \
+        request.onupgradeneeded = function(event) { \
+            event.target.result.createObjectStore('Store'); \
+        }; \
+        request.onerror = function() { \
+            post('first database error'); \
+        }; \
+        request.onsuccess = function(event) { \
+            var db = event.target.result; \
+            var firstTransaction = db.transaction('Store', 'readwrite'); \
+            firstTransaction.onabort = function() { \
+                post('first transaction aborted'); \
+            }; \
+            var objectStore = firstTransaction.objectStore('Store'); \
+            function keepTransactionAlive() { \
+                objectStore.get('TestKey').onsuccess = keepTransactionAlive; \
+            } \
+            keepTransactionAlive(); \
+            for (var i = 1; i < transactionCount; i++) { \
+                var transaction = db.transaction('Store', 'readwrite'); \
+                transaction.onabort = function() { \
+                    abortedCount++; \
+                    checkQueuedTransactionsSettled(); \
+                }; \
+                transaction.oncomplete = function() { \
+                    completedCount++; \
+                    checkQueuedTransactionsSettled(); \
+                }; \
+                transaction.objectStore('Store').put('Value' + i, 'Key' + i); \
+            } \
+            objectStore.get('TestKey').onsuccess = function() { \
+                post('first transactions queued'); \
+            }; \
+        }; \
+        </script>";
+
+    static NSString *secondClientString = @"<script> \
+        function post(message) { \
+            window.webkit.messageHandlers.testHandler.postMessage(message); \
+        } \
+        var request = indexedDB.open('ManyQueuedSuspendedTransactionsDatabase'); \
+        request.onerror = function() { \
+            post('second database error'); \
+        }; \
+        request.onsuccess = function(event) { \
+            var transaction = event.target.result.transaction('Store', 'readwrite'); \
+            transaction.oncomplete = function() { \
+                post('second transaction completed'); \
+            }; \
+            transaction.objectStore('Store').put('OtherValue', 'OtherKey'); \
+        }; \
+        </script>";
+
+    readyToContinue = false;
+    [[WKWebsiteDataStore defaultDataStore] removeDataOfTypes:[WKWebsiteDataStore allWebsiteDataTypes] modifiedSince:[NSDate distantPast] completionHandler:^() {
+        readyToContinue = true;
+    }];
+    TestWebKitAPI::Util::run(&readyToContinue);
+
+    RetainPtr firstHandler = adoptNS([TestScriptMessageHandler new]);
+    RetainPtr firstConfiguration = adoptNS([[WKWebViewConfiguration alloc] init]);
+    [firstConfiguration setProcessPool:adoptNS([[WKProcessPool alloc] init]).get()];
+    [[firstConfiguration userContentController] addScriptMessageHandler:firstHandler.get() name:@"testHandler"];
+    RetainPtr firstWebView = adoptNS([[WKWebView alloc] initWithFrame:CGRectMake(0, 0, 800, 600) configuration:firstConfiguration.get()]);
+    [firstWebView loadHTMLString:firstClientString baseURL:[NSURL URLWithString:@"http://webkit.org"]];
+    // This request is issued after every transaction, so its reply means the server has them all.
+    EXPECT_WK_STREQ([firstHandler waitForMessage].body, @"first transactions queued");
+    pid_t networkProcessIdentifier = [[WKWebsiteDataStore defaultDataStore] _networkProcessIdentifier];
+    EXPECT_NE(networkProcessIdentifier, 0);
+
+    [firstWebView _setThrottleStateForTesting:0];
+
+    RetainPtr secondHandler = adoptNS([TestScriptMessageHandler new]);
+    RetainPtr secondConfiguration = adoptNS([[WKWebViewConfiguration alloc] init]);
+    [secondConfiguration setProcessPool:adoptNS([[WKProcessPool alloc] init]).get()];
+    [[secondConfiguration userContentController] addScriptMessageHandler:secondHandler.get() name:@"testHandler"];
+    RetainPtr secondWebView = adoptNS([[WKWebView alloc] initWithFrame:CGRectMake(0, 0, 800, 600) configuration:secondConfiguration.get()]);
+    [secondWebView loadHTMLString:secondClientString baseURL:[NSURL URLWithString:@"http://webkit.org"]];
+
+    EXPECT_WK_STREQ([secondHandler waitForMessage].body, @"second transaction completed");
+    EXPECT_WK_STREQ([firstHandler waitForMessage].body, @"first transaction aborted");
+
+    // The network process must not have crashed and relaunched.
+    EXPECT_EQ(networkProcessIdentifier, [[WKWebsiteDataStore defaultDataStore] _networkProcessIdentifier]);
+
+    [firstWebView _setThrottleStateForTesting:2];
+    EXPECT_WK_STREQ([firstHandler waitForMessage].body, @"queued transactions settled completed=99 aborted=0");
+}
+
+TEST(IndexedDB, TransactionOfSuspendedProcessIsNotAbortedByItsOwnQueuedTransaction)
+{
+    static NSString *clientString = @"<script> \
+        var stopFirstTransaction = false; \
+        function post(message) { \
+            window.webkit.messageHandlers.testHandler.postMessage(message); \
+        } \
+        var request = indexedDB.open('OwnQueuedTransactionDatabase'); \
+        request.onupgradeneeded = function(event) { \
+            event.target.result.createObjectStore('Store'); \
+        }; \
+        request.onerror = function() { \
+            post('database error'); \
+        }; \
+        request.onsuccess = function(event) { \
+            var db = event.target.result; \
+            var firstTransaction = db.transaction('Store', 'readwrite'); \
+            firstTransaction.onabort = function() { \
+                post('first transaction aborted'); \
+            }; \
+            firstTransaction.oncomplete = function() { \
+                post('first transaction completed'); \
+            }; \
+            var objectStore = firstTransaction.objectStore('Store'); \
+            function keepTransactionAlive() { \
+                if (stopFirstTransaction) \
+                    return; \
+                objectStore.get('TestKey').onsuccess = keepTransactionAlive; \
+            } \
+            keepTransactionAlive(); \
+            var secondTransaction = db.transaction('Store', 'readwrite'); \
+            secondTransaction.onabort = function() { \
+                post('second transaction aborted'); \
+            }; \
+            secondTransaction.oncomplete = function() { \
+                post('second transaction completed'); \
+            }; \
+            secondTransaction.objectStore('Store').put('OtherValue', 'OtherKey'); \
+            objectStore.get('TestKey').onsuccess = function() { \
+                post('second transaction queued'); \
+            }; \
+        }; \
+        </script>";
+
+    readyToContinue = false;
+    [[WKWebsiteDataStore defaultDataStore] removeDataOfTypes:[WKWebsiteDataStore allWebsiteDataTypes] modifiedSince:[NSDate distantPast] completionHandler:^() {
+        readyToContinue = true;
+    }];
+    TestWebKitAPI::Util::run(&readyToContinue);
+
+    // Keep another WebView's process (a separate WebView always uses a separate WebProcess) alive
+    // and foregrounded, so that network process won't be suspended and trigger transaction abort
+    // in a different path.
+    RetainPtr holderWebView = adoptNS([[WKWebView alloc] initWithFrame:CGRectMake(0, 0, 800, 600) configuration:adoptNS([[WKWebViewConfiguration alloc] init]).get()]);
+    [holderWebView loadHTMLString:@"<script></script>" baseURL:[NSURL URLWithString:@"http://webkit.org"]];
+    [holderWebView _test_waitForDidFinishNavigation];
+
+    RetainPtr handler = adoptNS([TestScriptMessageHandler new]);
+    RetainPtr configuration = adoptNS([[WKWebViewConfiguration alloc] init]);
+    [configuration setProcessPool:adoptNS([[WKProcessPool alloc] init]).get()];
+    [[configuration userContentController] addScriptMessageHandler:handler.get() name:@"testHandler"];
+    RetainPtr webView = adoptNS([[WKWebView alloc] initWithFrame:CGRectMake(0, 0, 800, 600) configuration:configuration.get()]);
+    [webView loadHTMLString:clientString baseURL:[NSURL URLWithString:@"http://webkit.org"]];
+    // This request is issued after the second transaction, so its reply means the server has it.
+    EXPECT_WK_STREQ([handler waitForMessage].body, @"second transaction queued");
+
+    // The in-progress transaction only blocks a transaction of the same, suspended client, so there
+    // is no live client waiting on it and it must be left alone.
+    [webView _setThrottleStateForTesting:0];
+    [webView _setThrottleStateForTesting:2];
+
+    [webView evaluateJavaScript:@"stopFirstTransaction = true;" completionHandler:nil];
+    EXPECT_WK_STREQ([handler waitForMessage].body, @"first transaction completed");
+    EXPECT_WK_STREQ([handler waitForMessage].body, @"second transaction completed");
+}
+
+TEST(IndexedDB, TransactionOfSuspendedProcessIsAbortedWhenAnotherSuspendedProcessResumes)
+{
+    static NSString *holderString = @"<script> \
+        function post(message) { \
+            window.webkit.messageHandlers.testHandler.postMessage(message); \
+        } \
+        var request = indexedDB.open('SuspendedContentionOnResumeDatabase', 1); \
+        request.onupgradeneeded = function(event) { \
+            event.target.result.createObjectStore('Store'); \
+            event.target.result.createObjectStore('Sync'); \
+        }; \
+        request.onerror = function() { \
+            post('holder database error'); \
+        }; \
+        request.onsuccess = function(event) { \
+            var transaction = event.target.result.transaction('Store', 'readwrite'); \
+            transaction.onabort = function() { \
+                post('holder transaction aborted'); \
+            }; \
+            var objectStore = transaction.objectStore('Store'); \
+            var started = false; \
+            function keepTransactionAlive() { \
+                objectStore.put('HolderValue', 'HolderKey').onsuccess = function() { \
+                    if (!started) { \
+                        started = true; \
+                        post('holder transaction started'); \
+                    } \
+                    keepTransactionAlive(); \
+                }; \
+            } \
+            keepTransactionAlive(); \
+        }; \
+        </script>";
+
+    static NSString *waiterString = @"<script> \
+        function post(message) { \
+            window.webkit.messageHandlers.testHandler.postMessage(message); \
+        } \
+        var request = indexedDB.open('SuspendedContentionOnResumeDatabase'); \
+        request.onerror = function() { \
+            post('waiter database error'); \
+        }; \
+        request.onsuccess = function(event) { \
+            var db = event.target.result; \
+            var blockedTransaction = db.transaction('Store', 'readwrite'); \
+            blockedTransaction.oncomplete = function() { \
+                post('waiter transaction completed'); \
+            }; \
+            blockedTransaction.objectStore('Store').put('WaiterValue', 'WaiterKey'); \
+            var syncTransaction = db.transaction('Sync', 'readonly'); \
+            syncTransaction.oncomplete = function() { \
+                post('waiter transaction queued'); \
+            }; \
+            syncTransaction.objectStore('Sync').get('TestKey'); \
+        }; \
+        </script>";
+
+    readyToContinue = false;
+    [[WKWebsiteDataStore defaultDataStore] removeDataOfTypes:[WKWebsiteDataStore allWebsiteDataTypes] modifiedSince:[NSDate distantPast] completionHandler:^() {
+        readyToContinue = true;
+    }];
+    TestWebKitAPI::Util::run(&readyToContinue);
+
+    RetainPtr holderHandler = adoptNS([TestScriptMessageHandler new]);
+    RetainPtr holderConfiguration = adoptNS([[WKWebViewConfiguration alloc] init]);
+    [holderConfiguration setProcessPool:adoptNS([[WKProcessPool alloc] init]).get()];
+    [[holderConfiguration userContentController] addScriptMessageHandler:holderHandler.get() name:@"testHandler"];
+    RetainPtr holderWebView = adoptNS([[WKWebView alloc] initWithFrame:CGRectMake(0, 0, 800, 600) configuration:holderConfiguration.get()]);
+    [holderWebView loadHTMLString:holderString baseURL:[NSURL URLWithString:@"http://webkit.org"]];
+    EXPECT_WK_STREQ([holderHandler waitForMessage].body, @"holder transaction started");
+
+    // The transaction on the other object store is not blocked, so its completion means the server
+    // has already received the blocked one ahead of it on the same connection.
+    RetainPtr waiterHandler = adoptNS([TestScriptMessageHandler new]);
+    RetainPtr waiterConfiguration = adoptNS([[WKWebViewConfiguration alloc] init]);
+    [waiterConfiguration setProcessPool:adoptNS([[WKProcessPool alloc] init]).get()];
+    [[waiterConfiguration userContentController] addScriptMessageHandler:waiterHandler.get() name:@"testHandler"];
+    RetainPtr waiterWebView = adoptNS([[WKWebView alloc] initWithFrame:CGRectMake(0, 0, 800, 600) configuration:waiterConfiguration.get()]);
+    [waiterWebView loadHTMLString:waiterString baseURL:[NSURL URLWithString:@"http://webkit.org"]];
+    EXPECT_WK_STREQ([waiterHandler waitForMessage].body, @"waiter transaction queued");
+
+    [waiterWebView _setThrottleStateForTesting:0];
+    [holderWebView _setThrottleStateForTesting:0];
+
+    [waiterWebView _setThrottleStateForTesting:2];
+    EXPECT_WK_STREQ([waiterHandler waitForMessage].body, @"waiter transaction completed");
+    EXPECT_WK_STREQ([holderHandler waitForMessage].body, @"holder transaction aborted");
 }

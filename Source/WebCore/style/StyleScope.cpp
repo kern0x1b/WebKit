@@ -178,6 +178,15 @@ void Scope::clearResolver()
     counterStyleRegistry().clearAuthorCounterStyles();
 }
 
+void Scope::registerSubstitutionAttribute(const AtomString& attributeName, AttributeAffectsShadowTree affectsShadowTree) const
+{
+    auto lowercaseName = attributeName.convertToASCIILowercase();
+    if (affectsShadowTree == AttributeAffectsShadowTree::Yes)
+        m_substitutionAttributes.set(lowercaseName, AttributeAffectsShadowTree::Yes);
+    else
+        m_substitutionAttributes.add(lowercaseName, AttributeAffectsShadowTree::No);
+}
+
 void Scope::releaseMemory()
 {
 #if ENABLE(CSS_SELECTOR_JIT)
@@ -621,7 +630,7 @@ void Scope::updateActiveStyleSheets(UpdateType updateType)
     RELEASE_ASSERT(!m_isUpdatingStyleResolver);
     ASSERT(!m_pendingUpdate);
 
-    if (!m_document->hasLivingRenderTree())
+    if (!m_document->canEverRender())
         return;
 
     if (m_document->inStyleRecalc() || m_document->inRenderTreeUpdate()) {
@@ -851,11 +860,23 @@ void Scope::didChangeViewportSize()
         return;
     }
 
+    // Lazily resolved pseudo-element styles are cached on the element's style and only re-resolved
+    // when the element is invalidated, so their viewport units have to be accounted for here too.
+    auto usesViewportUnits = [](const Style::ComputedStyle& style) {
+        if (style.usesViewportUnits())
+            return true;
+        for (auto& [identifier, pseudoElementStyle] : style.pseudoElementStyles()) {
+            if (pseudoElementStyle->usesViewportUnits())
+                return true;
+        }
+        return false;
+    };
+
     // FIXME: Ideally, we should save the list of elements that have viewport units and only iterate over those.
     for (RefPtr element = ElementTraversal::firstWithin(rootNode); element; element = ElementTraversal::nextIncludingPseudo(*element)) {
         bool styleableHasViewportUnitAnimation = Styleable::fromElement(*element).viewportSizeDidChange();
         auto* renderer = element->renderer();
-        if (styleableHasViewportUnitAnimation || (renderer && renderer->style().usesViewportUnits()))
+        if (styleableHasViewportUnitAnimation || (renderer && usesViewportUnits(renderer->style())))
             element->invalidateStyle();
     }
 }
@@ -879,10 +900,10 @@ void Scope::pendingUpdateTimerFired()
 const Vector<Ref<StyleSheet>>& Scope::styleSheetsForStyleSheetList()
 {
     // FIXME: StyleSheetList content should be updated separately from style resolver updates.
-    if (m_document->hasLivingRenderTree())
+    if (m_document->canEverRender())
         flushPendingUpdate();
     else if (m_pendingUpdate) {
-        // Documents without a living render tree (e.g. created by DOMParser) can't do full
+        // Documents that never make renderers (e.g. created by DOMParser) can't do full
         // style updates but should still have an accessible styleSheets collection per spec.
         m_pendingUpdate = { };
         m_styleSheetsForStyleSheetList = collectActiveStyleSheets().styleSheetsForStyleSheetList;

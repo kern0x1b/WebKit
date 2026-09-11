@@ -1,5 +1,4 @@
 //@ skip if $addressBits <= 32
-//@ runDefaultWasm("-m", "--useWasmMemory64=1", "--useOMGJIT=0")
 import { instantiate } from "../wabt-wrapper.js";
 import * as assert from "../assert.js";
 
@@ -79,7 +78,7 @@ async function testGrowByZero() {
     )
     `;
 
-    const instance = await instantiate(wat, {}, {reference_types: true});
+    const instance = await instantiate(wat, {}, {memory64: true});
     const { getSize, grow } = instance.exports;
 
     for (let i = 0; i < wasmTestLoopCount; i++) {
@@ -110,7 +109,7 @@ async function testNoMaximum() {
     )
     `;
 
-    const instance = await instantiate(wat, {}, {reference_types: true});
+    const instance = await instantiate(wat, {}, {memory64: true});
     const { getSize, grow } = instance.exports;
 
     for (let i = 0; i < wasmTestLoopCount; i++) {
@@ -143,7 +142,7 @@ async function testLargeGrowValue() {
     )
     `;
 
-    const instance = await instantiate(wat, {}, {reference_types: true});
+    const instance = await instantiate(wat, {}, {memory64: true});
     const { getSize, grow } = instance.exports;
 
     // Try to grow by a large amount at once

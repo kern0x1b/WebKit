@@ -710,36 +710,6 @@ DEFINE_TO_FROM_CSS_VALUE_ID_FUNCTIONS
 #undef TYPE
 #undef FOR_EACH
 
-constexpr CSSValueID toCSSValueID(FlexWrap e)
-{
-    switch (e) {
-    case FlexWrap::NoWrap:
-        return CSSValueNowrap;
-    case FlexWrap::Wrap:
-        return CSSValueWrap;
-    case FlexWrap::Reverse:
-        return CSSValueWrapReverse;
-    }
-    ASSERT_NOT_REACHED_UNDER_CONSTEXPR_CONTEXT();
-    return CSSValueInvalid;
-}
-
-template<> constexpr FlexWrap fromCSSValueID(CSSValueID valueID)
-{
-    switch (valueID) {
-    case CSSValueNowrap:
-        return FlexWrap::NoWrap;
-    case CSSValueWrap:
-        return FlexWrap::Wrap;
-    case CSSValueWrapReverse:
-        return FlexWrap::Reverse;
-    default:
-        break;
-    }
-    ASSERT_NOT_REACHED_UNDER_CONSTEXPR_CONTEXT();
-    return FlexWrap::NoWrap;
-}
-
 #define TYPE Float
 #define FOR_EACH(CASE) CASE(None) CASE(Left) CASE(Right) CASE(InlineStart) CASE(InlineEnd)
 DEFINE_TO_FROM_CSS_VALUE_ID_FUNCTIONS
@@ -1010,6 +980,12 @@ DEFINE_TO_FROM_CSS_VALUE_ID_FUNCTIONS
 DEFINE_TO_FROM_CSS_VALUE_ID_FUNCTIONS
 #undef TYPE
 #undef FOR_EACH
+
+#define TYPE PortalActionType
+#define FOR_EACH(CASE) CASE(None) CASE(Orbit)
+DEFINE_TO_FROM_CSS_VALUE_ID_FUNCTIONS
+#undef TYPE
+#undef FOR_EACH
 #endif
 
 constexpr CSSValueID toCSSValueID(Style::TextAlign e)
@@ -1228,6 +1204,8 @@ DEFINE_TO_FROM_CSS_VALUE_ID_FUNCTIONS
 constexpr CSSValueID toCSSValueID(UserSelect e)
 {
     switch (e) {
+    case UserSelect::Auto:
+        return CSSValueAuto;
     case UserSelect::None:
         return CSSValueNone;
     case UserSelect::Text:
@@ -1243,7 +1221,7 @@ template<> constexpr UserSelect fromCSSValueID(CSSValueID valueID)
 {
     switch (valueID) {
     case CSSValueAuto:
-        return UserSelect::Text;
+        return UserSelect::Auto;
     case CSSValueNone:
         return UserSelect::None;
     case CSSValueText:
@@ -1426,12 +1404,6 @@ DEFINE_TO_FROM_CSS_VALUE_ID_FUNCTIONS
 
 #define TYPE RubyOverhang
 #define FOR_EACH(CASE) CASE(Auto) CASE(Spaces)
-DEFINE_TO_FROM_CSS_VALUE_ID_FUNCTIONS
-#undef TYPE
-#undef FOR_EACH
-
-#define TYPE TextOverflow
-#define FOR_EACH(CASE) CASE(Clip) CASE(Ellipsis)
 DEFINE_TO_FROM_CSS_VALUE_ID_FUNCTIONS
 #undef TYPE
 #undef FOR_EACH
@@ -1928,9 +1900,8 @@ DEFINE_TO_FROM_CSS_VALUE_ID_FUNCTIONS
 #undef FOR_EACH
 
 #define TYPE DominantBaseline
-#define FOR_EACH(CASE) CASE(Auto) CASE(UseScript) CASE(NoChange) CASE(ResetSize) CASE(Central) \
-    CASE(Middle) CASE(TextBeforeEdge) CASE(TextAfterEdge) CASE(Ideographic) CASE(Alphabetic) \
-    CASE(Hanging) CASE(Mathematical)
+#define FOR_EACH(CASE) CASE(Auto) CASE(Central) CASE(Middle) CASE(TextBeforeEdge) \
+    CASE(TextAfterEdge) CASE(Ideographic) CASE(Alphabetic) CASE(Hanging) CASE(Mathematical)
 DEFINE_TO_FROM_CSS_VALUE_ID_FUNCTIONS
 #undef TYPE
 #undef FOR_EACH
@@ -2326,7 +2297,7 @@ DEFINE_TO_FROM_CSS_VALUE_ID_FUNCTIONS
 #undef FOR_EACH
 
 #define TYPE OverflowContinue
-#define FOR_EACH(CASE) CASE(Auto) CASE(Discard)
+#define FOR_EACH(CASE) CASE(Auto) CASE(Discard) CASE(WebkitLegacy)
 DEFINE_TO_FROM_CSS_VALUE_ID_FUNCTIONS
 #undef TYPE
 #undef FOR_EACH
@@ -2422,7 +2393,7 @@ DEFINE_TO_FROM_CSS_VALUE_ID_FUNCTIONS
 #undef FOR_EACH
 
 #define TYPE Style::MarginTrimSide
-#define FOR_EACH(CASE) CASE(BlockStart) CASE(InlineStart) CASE(BlockEnd) CASE(InlineEnd)
+#define FOR_EACH(CASE) CASE(BlockStart) CASE(BlockEnd)
 DEFINE_TO_FROM_CSS_VALUE_ID_FUNCTIONS
 #undef TYPE
 #undef FOR_EACH

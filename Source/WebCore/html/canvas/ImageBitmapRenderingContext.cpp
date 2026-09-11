@@ -30,6 +30,7 @@
 #include "ImageBitmap.h"
 #include "ImageBuffer.h"
 #include "InspectorInstrumentation.h"
+#include "NativeImage.h"
 #include "OffscreenCanvas.h"
 #include <wtf/TZoneMallocInlines.h>
 
@@ -77,6 +78,7 @@ ExceptionOr<void> ImageBitmapRenderingContext::transferFromImageBitmap(RefPtr<Im
         return { };
 
     Ref canvasBase = this->canvasBase();
+    canvasBase->willUpdateContents(FloatRect { { }, canvasBase->size() });
     if (originClean)
         canvasBase->setOriginClean();
     else
@@ -90,7 +92,7 @@ ExceptionOr<void> ImageBitmapRenderingContext::transferFromImageBitmap(RefPtr<Im
         m_buffer = nullptr;
         updateMemoryCost(0);
     }
-    canvasBase->didDraw(FloatRect { { }, canvasBase->size() });
+    m_bufferNativeImage = nullptr;
     return { };
 }
 
@@ -99,24 +101,36 @@ RefPtr<ImageBuffer> ImageBitmapRenderingContext::transferToImageBuffer()
     Ref canvasBase = this->canvasBase();
     auto size = canvasBase->size();
     if (!m_buffer)
-        return ImageBuffer::create(size, RenderingMode::Unaccelerated, RenderingPurpose::Unspecified, 1, DestinationColorSpace::SRGB(), PixelFormat::BGRA8);
+        return ImageBuffer::create(size, RenderingMode::Unaccelerated, RenderingPurpose::Unspecified, 1, ColorSpace::SRGB(), PixelFormat::BGRA8);
+    canvasBase->willUpdateContents(FloatRect { { }, size });
     RefPtr result = std::exchange(m_buffer, { });
+    m_bufferNativeImage = nullptr;
     updateMemoryCost(0);
     canvasBase->setOriginClean();
-    canvasBase->didDraw(FloatRect { { }, size });
     return result;
 }
 
 RefPtr<ImageBuffer> ImageBitmapRenderingContext::surfaceBufferToImageBuffer(SurfaceBuffer)
 {
     if (!m_buffer) {
-        RefPtr buffer = ImageBuffer::create(canvasBase().size(), RenderingMode::Unaccelerated, RenderingPurpose::Unspecified, 1, DestinationColorSpace::SRGB(), PixelFormat::BGRA8);
+        RefPtr buffer = ImageBuffer::create(canvasBase().size(), RenderingMode::Unaccelerated, RenderingPurpose::Unspecified, 1, ColorSpace::SRGB(), PixelFormat::BGRA8);
         if (buffer) {
             updateMemoryCost(buffer->memoryCost());
             m_buffer = WTF::move(buffer);
         }
     }
     return m_buffer;
+}
+
+RefPtr<NativeImage> ImageBitmapRenderingContext::surfaceBufferToNativeImage(SurfaceBuffer sourceBuffer)
+{
+    if (m_bufferNativeImage)
+        return m_bufferNativeImage;
+    RefPtr buffer = surfaceBufferToImageBuffer(sourceBuffer);
+    if (!buffer)
+        return nullptr;
+    m_bufferNativeImage = buffer->copyNativeImage();
+    return m_bufferNativeImage;
 }
 
 }

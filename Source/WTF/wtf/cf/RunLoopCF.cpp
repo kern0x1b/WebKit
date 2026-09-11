@@ -162,6 +162,13 @@ void RunLoop::TimerBase::stop()
 #endif
 
     releaseAssertIsCurrent(m_runLoop);
+    // An active timer must be stopped (and destroyed) on its run loop's thread: the CFRunLoopTimer
+    // holds a raw pointer to this TimerBase as its callback context, and CFRunLoopTimerInvalidate()
+    // does not synchronize with a callback already dispatching on the run loop's thread, so invalidating
+    // from another thread races with the in-flight callback and can leave it reading freed memory.
+    // (Starting a timer cross-thread is safe and supported -- that is how dispatch()/dispatchAfter()
+    // schedule work onto another run loop.)
+    assertIsCurrent(m_runLoop);
     CFRunLoopTimerInvalidate(m_timer.get());
     m_timer = nullptr;
 }

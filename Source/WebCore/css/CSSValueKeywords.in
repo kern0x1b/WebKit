@@ -836,6 +836,11 @@ fit-content
 -webkit-fit-content
 
 //
+// calc-size() basis
+//
+any
+
+//
 // CSS_PROP_TEXT_OVERFLOW
 //
 clip
@@ -1545,6 +1550,7 @@ xywh
 
 calc
 calc-mix
+calc-size
 -webkit-calc
 min
 max
@@ -1572,6 +1578,8 @@ to-zero
 no-clamp
 random
 element-scoped
+property-scoped
+property-index-scoped
 // fixed
 sibling-count
 sibling-index
@@ -1782,6 +1790,11 @@ additive
 -internal-simplified-chinese-formal
 -internal-traditional-chinese-informal
 -internal-traditional-chinese-formal
+-internal-japanese-informal
+-internal-japanese-formal
+-internal-korean-hangul-formal
+-internal-korean-hanja-informal
+-internal-korean-hanja-formal
 -internal-ethiopic-numeric
 extends
 
@@ -1797,9 +1810,19 @@ words
 // https://drafts.csswg.org/css-conditional-4/#typedef-supports-selector-fn
 // https://drafts.csswg.org/css-conditional-5/#typedef-supports-font-format-fn
 // https://drafts.csswg.org/css-conditional-5/#typedef-supports-font-tech-fn
+// https://drafts.csswg.org/css-conditional-5/#typedef-supports-at-rule-fn
 selector
 font-format
 font-tech
+at-rule
+
+// @supports named-feature
+// https://drafts.csswg.org/css-conditional-5/#funcdef-supports-named-feature
+named-feature
+// List of named features
+// https://drafts.csswg.org/css-conditional-5/#dfn-support-named-feature
+anchor-position-follows-transforms
+single-axis-scroll-container
 
 // math-depth
 auto-add
@@ -1987,3 +2010,13 @@ no-ellipsis
 
 // CSS Spatial Layout (spatial: portal)
 portal enable-if=ENABLE_SPATIAL_PORTAL
+orbit enable-if=ENABLE_SPATIAL_PORTAL
+
+// CSS Linked Parameters
+param
+
+// continue
+-webkit-legacy
+
+// palette-mix()
+palette-mix

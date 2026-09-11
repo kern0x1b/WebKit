@@ -32,6 +32,7 @@
 #include "ScopedArguments.h"
 #include "TopExceptionScope.h"
 #include "TypeError.h"
+#include "VMInlines.h"
 #include <wtf/Assertions.h>
 
 WTF_ALLOW_UNSAFE_BUFFER_USAGE_BEGIN
@@ -860,12 +861,7 @@ std::optional<bool> JSArray::fastIncludes(JSGlobalObject* globalObject, JSValue 
         if (!searchElement.isNumber())
             return false;
 
-        double searchNumber = searchElement.asNumber();
-        for (; index < length; ++index) {
-            if (data[index] == searchNumber)
-                return true;
-        }
-        return false;
+        return !!WTF::findDouble(data + index, searchElement.asNumber(), length - index);
     }
     default:
         return std::nullopt;
@@ -900,11 +896,11 @@ bool JSArray::fastCopyWithin(JSGlobalObject* globalObject, uint64_t from64, uint
     switch (type) {
     case ArrayWithInt32:
     case ArrayWithContiguous: {
-        auto data = this->butterfly()->contiguous().data();
+        Butterfly* butterfly = this->butterfly();
 
-        if (containsHole(data, length))
-            return false;
+        RELEASE_ASSERT(butterfly->vectorLength() >= length);
 
+        auto data = butterfly->contiguousInt32().data();
         std::span<WriteBarrier<Unknown>> destination { data + to, count };
         std::span<const WriteBarrier<Unknown>> source { data + from, count };
 
@@ -918,11 +914,11 @@ bool JSArray::fastCopyWithin(JSGlobalObject* globalObject, uint64_t from64, uint
         return true;
     }
     case ArrayWithDouble: {
-        auto data = this->butterfly()->contiguousDouble().data();
+        Butterfly* butterfly = this->butterfly();
 
-        if (containsHole(data, length))
-            return false;
+        RELEASE_ASSERT(butterfly->vectorLength() >= length);
 
+        auto data = butterfly->contiguousDouble().data();
         std::span<double> destination { data + to, count };
         std::span<double> source { data + from, count };
 
@@ -1053,10 +1049,13 @@ JSString* JSArray::fastToString(JSGlobalObject* globalObject)
 
     unsigned length = this->length();
 
-    StringRecursionChecker checker(globalObject, this);
-    EXCEPTION_ASSERT(!scope.exception() || checker.earlyReturnValue());
-    if (JSValue earlyReturnValue = checker.earlyReturnValue())
-        return jsEmptyString(vm);
+    // JSObject::toPrimitive and JSObject::toString call this directly instead of going through
+    // Interpreter::executeCall, so an array nested in itself recurses here without ever crossing a
+    // call frame that would perform the usual stack check.
+    if (!vm.isSafeToRecurseSoft()) [[unlikely]] {
+        throwStackOverflowError(globalObject, scope);
+        return nullptr;
+    }
 
     if (canUseFastArrayJoin(this)) [[likely]] {
         const Latin1Character comma = ',';
@@ -1284,7 +1283,9 @@ bool JSArray::setLength(JSGlobalObject* globalObject, unsigned newLength, bool t
         if (indexingType() == ArrayWithDouble) {
             for (unsigned i = butterfly->publicLength(); i-- > newLength;)
                 butterfly->contiguousDouble().at(this, i) = PNaN;
-        } else {
+        } else if (indexingType() == ArrayWithContiguous)
+            gcSafeZeroMemory(butterfly->contiguous().data() + newLength, lengthToClear * sizeof(JSValue));
+        else {
             for (unsigned i = butterfly->publicLength(); i-- > newLength;)
                 butterfly->contiguous().at(this, i).clear();
         }
@@ -1408,8 +1409,6 @@ JSValue JSArray::fastShift(VM& vm)
 
     Butterfly* butterfly = this->butterfly();
     auto indexingType = this->indexingType();
-
-    constexpr unsigned shiftThreshold = 128;
 
     switch (indexingType) {
     case ArrayClass:
@@ -1660,7 +1659,7 @@ bool JSArray::shiftCountWithArrayStorage(VM& vm, unsigned startIndex, unsigned c
     return true;
 }
 
-bool JSArray::shiftCountWithAnyIndexingType(JSGlobalObject* globalObject, unsigned& startIndex, unsigned count, unsigned shiftThreshold)
+bool JSArray::shiftCountWithAnyIndexingType(JSGlobalObject* globalObject, unsigned& startIndex, unsigned count, unsigned shiftArrayStorageThreshold)
 {
     VM& vm = globalObject->vm();
     RELEASE_ASSERT(count > 0);
@@ -1685,7 +1684,7 @@ bool JSArray::shiftCountWithAnyIndexingType(JSGlobalObject* globalObject, unsign
         
         // We may have to walk the entire array to do the shift. We're willing to do
         // so only if it's not horribly slow.
-        if (oldLength - (startIndex + count) >= MIN_SPARSE_ARRAY_INDEX || oldLength > shiftThreshold)
+        if (oldLength - (startIndex + count) >= MIN_SPARSE_ARRAY_INDEX || oldLength > shiftArrayStorageThreshold)
             return shiftCountWithArrayStorage(vm, startIndex, count, ensureArrayStorage(vm));
 
         // Storing to a hole is fine since we're still having a good time. But reading from a hole
@@ -1711,8 +1710,12 @@ bool JSArray::shiftCountWithAnyIndexingType(JSGlobalObject* globalObject, unsign
             }
         }
 
-        for (unsigned i = end; i < oldLength; ++i)
-            butterfly->contiguous().at(this, i).clear();
+        if (indexingType == ArrayWithContiguous)
+            gcSafeZeroMemory(butterfly->contiguous().data() + end, count * sizeof(JSValue));
+        else {
+            for (unsigned i = end; i < oldLength; ++i)
+                butterfly->contiguous().at(this, i).clear();
+        }
 
         butterfly->setPublicLength(oldLength - count);
 
@@ -1730,7 +1733,7 @@ bool JSArray::shiftCountWithAnyIndexingType(JSGlobalObject* globalObject, unsign
         
         // We may have to walk the entire array to do the shift. We're willing to do
         // so only if it's not horribly slow.
-        if (oldLength - (startIndex + count) >= MIN_SPARSE_ARRAY_INDEX || oldLength > shiftThreshold)
+        if (oldLength - (startIndex + count) >= MIN_SPARSE_ARRAY_INDEX || oldLength > shiftArrayStorageThreshold)
             return shiftCountWithArrayStorage(vm, startIndex, count, ensureArrayStorage(vm));
 
         // Storing to a hole is fine since we're still having a good time. But reading from a hole 
@@ -1963,29 +1966,32 @@ bool JSArray::unshiftCountWithAnyIndexingType(JSGlobalObject* globalObject, unsi
 
 void JSArray::fillArgList(JSGlobalObject* globalObject, MarkedArgumentBuffer& args)
 {
+    VM& vm = globalObject->vm();
+    auto scope = DECLARE_THROW_SCOPE(vm);
+
     unsigned i = 0;
     unsigned vectorEnd;
     WriteBarrier<Unknown>* vector;
 
     Butterfly* butterfly = this->butterfly();
-    
+
     switch (indexingType()) {
     case ArrayClass:
         return;
-        
+
     case ArrayWithUndecided: {
         vector = nullptr;
         vectorEnd = 0;
         break;
     }
-        
+
     case ArrayWithInt32:
     case ArrayWithContiguous: {
         vectorEnd = butterfly->publicLength();
         vector = butterfly->contiguous().data();
         break;
     }
-        
+
     case ArrayWithDouble: {
         vector = nullptr;
         vectorEnd = 0;
@@ -1997,15 +2003,15 @@ void JSArray::fillArgList(JSGlobalObject* globalObject, MarkedArgumentBuffer& ar
         }
         break;
     }
-    
+
     case ARRAY_WITH_ARRAY_STORAGE_INDEXING_TYPES: {
         ArrayStorage* storage = butterfly->arrayStorage();
-        
+
         vector = storage->m_vector;
         vectorEnd = std::min(storage->length(), storage->vectorLength());
         break;
     }
-        
+
     default:
         CRASH();
 #if COMPILER_QUIRK(CONSIDERS_UNREACHABLE_CODE)
@@ -2014,7 +2020,7 @@ void JSArray::fillArgList(JSGlobalObject* globalObject, MarkedArgumentBuffer& ar
         break;
 #endif
     }
-    
+
     for (; i < vectorEnd; ++i) {
         JSValue v = loadElementUnordered(vector[i]);
         if (!v)
@@ -2023,8 +2029,11 @@ void JSArray::fillArgList(JSGlobalObject* globalObject, MarkedArgumentBuffer& ar
     }
 
     // FIXME: What prevents this from being called with a RuntimeArray? The length function will always return 0 in that case.
-    for (; i < length(); ++i)
-        args.append(get(globalObject, i));
+    for (; i < length(); ++i) {
+        JSValue value = get(globalObject, i);
+        RETURN_IF_EXCEPTION(scope, void());
+        args.append(value);
+    }
 }
 
 void JSArray::copyToArguments(JSGlobalObject* globalObject, JSValue* firstElementDest, unsigned offset, unsigned length)
@@ -2433,7 +2442,7 @@ static uint64_t calculateFlattenedLength(JSGlobalObject* globalObject, JSArray* 
 }
 
 template<typename T>
-static uint64_t fastFlatIntoBuffer(JSGlobalObject* globalObject, T* resultBuffer, uint64_t& resultIndex, JSArray* sourceArray, uint64_t sourceLength, uint64_t depth, uint64_t vectorLength)
+static uint64_t fastFlatIntoBuffer(JSGlobalObject* globalObject, T* resultBuffer, uint64_t startIndex, JSArray* sourceArray, uint64_t sourceLength, uint64_t depth, uint64_t vectorLength)
 {
     VM& vm = globalObject->vm();
     auto scope = DECLARE_THROW_SCOPE(vm);
@@ -2445,6 +2454,7 @@ static uint64_t fastFlatIntoBuffer(JSGlobalObject* globalObject, T* resultBuffer
 
     IndexingType sourceType = sourceArray->indexingType();
 
+    uint64_t resultIndex = startIndex;
     switch (sourceType) {
     case ArrayWithInt32: {
         auto* sourceBuffer = sourceArray->butterfly()->contiguous().data();
@@ -2560,10 +2570,10 @@ JSArray* JSArray::fastFlat(JSGlobalObject* globalObject, uint64_t depth, uint64_
         uint64_t resultIndex = 0;
         if (indexingType == ArrayWithDouble) {
             auto* resultBuffer = butterfly->contiguousDouble().data();
-            resultIndex = fastFlatIntoBuffer(globalObject, resultBuffer, resultIndex, this, length, depth, vectorLength);
+            resultIndex = fastFlatIntoBuffer(globalObject, resultBuffer, 0, this, length, depth, vectorLength);
         } else {
             auto* resultBuffer = butterfly->contiguous().data();
-            resultIndex = fastFlatIntoBuffer(globalObject, resultBuffer, resultIndex, this, length, depth, vectorLength);
+            resultIndex = fastFlatIntoBuffer(globalObject, resultBuffer, 0, this, length, depth, vectorLength);
         }
         RETURN_IF_EXCEPTION(scope, nullptr);
         if (resultIndex == std::numeric_limits<uint64_t>::max())

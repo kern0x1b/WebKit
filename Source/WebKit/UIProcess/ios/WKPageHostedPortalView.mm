@@ -263,7 +263,7 @@
 
         if (backgroundColor && backgroundColor->isValid()) {
             auto opaqueColor = backgroundColor->opaqueColor();
-            auto [r, g, b, a] = opaqueColor.toResolvedColorComponentsInColorSpace(WebCore::ColorSpace::LinearSRGB);
+            auto [r, g, b, a] = opaqueColor.toResolvedColorComponentsInColorSpace(WebCore::ColorSpaceName::LinearSRGB);
             clearColorComponents = simd_make_float3(r, g, b);
             RELEASE_LOG_INFO(ModelElement, "WKPageHostedPortalView applyBackgroundColor: %f, %f, %f (%@)", clearColorComponents.x, clearColorComponents.y, clearColorComponents.z, self);
         }
@@ -289,14 +289,16 @@
     [self.layer setValue:(__bridge id)cachedCGColor(backgroundColor->opaqueColor()).get() forKeyPath:@"separatedOptions.material.clearColor"];
 }
 
-#if HAVE(RE_STEREO_CONTENT_SUPPORT)
 - (void)layoutSubviews
 {
     [super layoutSubviews];
 
+    [_containerView setFrame:self.bounds];
+
+#if HAVE(RE_STEREO_CONTENT_SUPPORT)
     [_stereoContentLayer setFrame:self.bounds];
-}
 #endif
+}
 
 - (void)setPortalCrossing:(BOOL)enabled
 {

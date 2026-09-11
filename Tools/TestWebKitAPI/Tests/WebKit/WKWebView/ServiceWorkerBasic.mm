@@ -2498,6 +2498,48 @@ TEST(ServiceWorkers, LockdownModeInSharedWorkerProcess)
     runJSCheck("!!self.LockManager"_s); // WebLockManager API.
 }
 
+TEST(ServiceWorkers, SharedWorkerReusesProcessAfterCOOPProcessSwap)
+{
+    TestWebKitAPI::HTTPServer server({
+        { "/no-coop.html"_s, { "<body>Hello world!</body>"_s } },
+        { "/coop.html"_s, { {{ "Cross-Origin-Opener-Policy"_s, "same-origin"_s }}, "<script>const worker = new SharedWorker('sharedWorker.js'); worker.port.start();</script>"_s } },
+        { "/sharedWorker.js"_s, { {{ "Content-Type"_s, "application/javascript"_s }}, "onconnect = e => { e.ports[0].start(); };"_s } },
+    }, TestWebKitAPI::HTTPServer::Protocol::Https);
+
+    RetainPtr webView = adoptNS([[WKWebView alloc] initWithFrame:NSMakeRect(0, 0, 800, 600)]);
+    RetainPtr navigationDelegate = adoptNS([[TestNavigationDelegate alloc] init]);
+    [navigationDelegate allowAnyTLSCertificate];
+    [webView setNavigationDelegate:navigationDelegate.get()];
+
+    // First page is loaded without COOP.
+    [webView loadRequest:server.request("/no-coop.html"_s)];
+    [navigationDelegate waitForDidFinishNavigation];
+    auto sourcePID = [webView _webProcessIdentifier];
+
+    // Second page is loaded with COOP, which triggers a BCG switch. This page also creates a
+    // SharedWorker.
+    [webView loadRequest:server.request("/coop.html"_s)];
+    [navigationDelegate waitForDidFinishNavigation];
+    auto coopPID = [webView _webProcessIdentifier];
+
+    // The BCG switch should result in a new process.
+    EXPECT_NE(sourcePID, coopPID);
+
+    // The SharedWorker should run in the same process as the second page.
+    EXPECT_TRUE(waitUntilEvaluatesToTrue([&]() -> bool {
+        bool foundSharedWorkerProcess = false;
+        bool sharedWorkerInPageProcess = false;
+        for (_WKWebContentProcessInfo *info in [WKProcessPool _webContentProcessInfoForTesting]) {
+            if (!info.runningSharedWorkers)
+                continue;
+            foundSharedWorkerProcess = true;
+            if (info.pid == coopPID)
+                sharedWorkerInPageProcess = true;
+        }
+        return foundSharedWorkerProcess && sharedWorkerInPageProcess;
+    }));
+}
+
 enum class UseSeparateServiceWorkerProcess : bool { No, Yes };
 void testSuspendServiceWorkerProcessBasedOnClientProcesses(UseSeparateServiceWorkerProcess useSeparateServiceWorkerProcess)
 {
@@ -3322,6 +3364,66 @@ TEST(ServiceWorkers, ChangeOfServerCertificate)
     }
 }
 
+TEST(ServiceWorkers, ServerTrustWithoutNetworkLoadInFrame)
+{
+    using namespace TestWebKitAPI;
+
+    __block bool removedAnyExistingData = false;
+    [[WKWebsiteDataStore defaultDataStore] removeDataOfTypes:[WKWebsiteDataStore allWebsiteDataTypes] modifiedSince:[NSDate distantPast] completionHandler:^() {
+        removedAnyExistingData = true;
+    }];
+    Util::run(&removedAnyExistingData);
+
+    static constexpr auto main =
+    "<script>"
+    "try {"
+    "    navigator.serviceWorker.register('/sw.js').then(function(reg) {"
+    "        if (reg.active) {"
+    "            alert('worker unexpectedly already active');"
+    "            return;"
+    "        }"
+    "        worker = reg.installing;"
+    "        worker.addEventListener('statechange', function() {"
+    "            if (worker.state == 'activated')"
+    "                alert('successfully registered');"
+    "        });"
+    "    }).catch(function(error) {"
+    "        alert('Registration failed with: ' + error);"
+    "    });"
+    "} catch(e) {"
+    "    alert('Exception: ' + e);"
+    "}"
+    "</script>"_s;
+    static constexpr auto js = "self.addEventListener('fetch', (event) => { event.respondWith(new Response(new Blob(['<script>alert(\"synthetic response\")</script>'], {type: 'text/html'}))); })"_s;
+
+    HTTPServer server({
+        { "/"_s, { main } },
+        { "/sw.js"_s, { { { "Content-Type"_s, "application/javascript"_s } }, js } },
+    }, HTTPServer::Protocol::Https);
+
+    RetainPtr delegate = adoptNS([TestNavigationDelegate new]);
+    [delegate setDidReceiveAuthenticationChallenge:^(WKWebView *, NSURLAuthenticationChallenge *challenge, void (^callback)(NSURLSessionAuthChallengeDisposition, NSURLCredential *)) {
+        EXPECT_WK_STREQ(challenge.protectionSpace.authenticationMethod, NSURLAuthenticationMethodServerTrust);
+        callback(NSURLSessionAuthChallengeUseCredential, [NSURLCredential credentialForTrust:challenge.protectionSpace.serverTrust]);
+    }];
+
+    RetainPtr request = server.request();
+    RetainPtr registeringWebView = adoptNS([WKWebView new]);
+    registeringWebView.get().navigationDelegate = delegate.get();
+    [registeringWebView loadRequest:request.get()];
+    EXPECT_WK_STREQ([registeringWebView _test_waitForAlert], "successfully registered");
+    EXPECT_TRUE(isTestServerTrust(registeringWebView.get().serverTrust));
+
+    server.cancel();
+
+    RetainPtr webView = adoptNS([WKWebView new]);
+    webView.get().navigationDelegate = delegate.get();
+    [webView loadRequest:request.get()];
+    EXPECT_WK_STREQ([webView _test_waitForAlert], "synthetic response");
+
+    EXPECT_TRUE(isTestServerTrust(webView.get().serverTrust));
+}
+
 TEST(ServiceWorkers, ClearDOMCacheAlsoIncludesServiceWorkerRegistrations)
 {
     [WKWebsiteDataStore _allowWebsiteDataRecordsForAllOrigins];
@@ -3712,7 +3814,7 @@ TEST(ServiceWorker, ExtensionServiceWorkerDisableCORS)
     String filenameRequestedOverHTTP;
     HTTPServer server([&] (Connection connection) {
         connection.receiveHTTPRequest([&, connection](Vector<char>&& bytes) mutable {
-            String requestString(bytes.span());
+            String requestString = String::fromLatin1(bytes.span());
             if (requestString.startsWithIgnoringASCIICase("OPTIONS"_s)) {
                 madeHTTPOptionsRequest = true;
                 connection.send(
@@ -3734,7 +3836,7 @@ TEST(ServiceWorker, ExtensionServiceWorkerDisableCORS)
     auto testJS = makeString("fetch('http://127.0.0.1:"_s, server.port(), "/bar.xml', { headers: { 'Custom-Header': 'CustomHeaderValue' } });"_s);
 
     RetainPtr schemeHandler = adoptNS([ServiceWorkerSchemeHandler new]);
-    [schemeHandler addMappingFromURLString:@"sw-ext://ABC/sw.js" toData:testJS.utf8().data()];
+    [schemeHandler addMappingFromURLString:@"sw-ext://ABC/sw.js" toData:testJS.utf8().legacyCStringPointer()];
 
     WKWebViewConfiguration *webViewConfiguration = [WKWebViewConfiguration _test_configurationWithTestPlugInClassName:@"ServiceWorkerPagePlugIn"];
     [webViewConfiguration setURLSchemeHandler:schemeHandler.get() forURLScheme:@"sw-ext"];
@@ -3760,7 +3862,7 @@ TEST(ServiceWorker, ExtensionServiceWorkerDisableCORS)
 
     // It should load bar.xml.
     Util::run(&madeHTTPGetRequest);
-    EXPECT_STREQ(filenameRequestedOverHTTP.utf8().data(), "/bar.xml");
+    EXPECT_EQ(filenameRequestedOverHTTP, "/bar.xml"_s);
 
     // It shouldn't have done a CORS preflight.
     EXPECT_FALSE(madeHTTPOptionsRequest);
@@ -5037,9 +5139,9 @@ TEST(ServiceWorkers, ServiceWorkerStorageTiming)
     [webView1 loadRequest:server.request()];
     TestWebKitAPI::Util::run(&done);
 
-    HashMap<String, String> sourceHeaders;
-    sourceHeaders.add("Cache-Control"_s, "no-cache"_s);
-    sourceHeaders.add("Content-Type"_s, "application/javascript"_s);
+    Vector<WTF::KeyValuePair<String, String>> sourceHeaders;
+    sourceHeaders.append({ "Cache-Control"_s, "no-cache"_s });
+    sourceHeaders.append({ "Content-Type"_s, "application/javascript"_s });
     server.setResponse("/sw.js"_s, TestWebKitAPI::HTTPResponse { WTF::move(sourceHeaders), serviceWorkerStorageTimingScriptBytesV2 });
 
     done = false;

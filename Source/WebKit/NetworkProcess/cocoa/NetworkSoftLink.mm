@@ -32,6 +32,8 @@
 
 SOFT_LINK_FRAMEWORK_FOR_SOURCE(WebKit, Network)
 
+#if !HAVE(WEBTRANSPORT_WITHOUT_SOFT_LINKING)
+
 SOFT_LINK_FUNCTION_MAY_FAIL_FOR_SOURCE(WebKit, Network, nw_parameters_create_webtransport_http, nw_parameters_t, (nw_parameters_configure_protocol_block_t configure_webtransport, nw_parameters_configure_protocol_block_t configure_tls, nw_parameters_configure_protocol_block_t configure_quic, nw_parameters_configure_protocol_block_t configure_tcp), (configure_webtransport, configure_tls, configure_quic, configure_tcp))
 
 SOFT_LINK_FUNCTION_MAY_FAIL_FOR_SOURCE(WebKit, Network, nw_protocol_copy_webtransport_definition, nw_protocol_definition_t, (void), ())
@@ -79,10 +81,6 @@ SOFT_LINK_FUNCTION_MAY_FAIL_FOR_SOURCE(WebKit, Network, nw_connection_abort_read
 SOFT_LINK_FUNCTION_MAY_FAIL_FOR_SOURCE(WebKit, Network, nw_connection_abort_writes, void, (nw_connection_t connection, uint64_t error_code), (connection, error_code))
 
 SOFT_LINK_FUNCTION_MAY_FAIL_FOR_SOURCE(WebKit, Network, nw_http_fields_access_value_by_name, void, (nw_http_fields_t fields, const char* name, NS_NOESCAPE nw_http_optional_string_accessor_t accessor), (fields, name, accessor))
-
-#if HAVE(NWSETTINGS_UNIFIED_HTTP_WEBKIT)
-
-SOFT_LINK_FUNCTION_MAY_FAIL_FOR_SOURCE(WebKit, Network, nw_settings_get_unified_http_enabled_webkit, bool, (), ())
 
 #endif
 

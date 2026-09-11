@@ -58,13 +58,25 @@ CachedModuleScriptLoader::~CachedModuleScriptLoader()
     }
 }
 
-bool CachedModuleScriptLoader::load(Document& document, URL&& sourceURL, std::optional<ServiceWorkersMode> serviceWorkersMode)
+bool CachedModuleScriptLoader::load(Document& document, URL&& sourceURL, std::optional<ServiceWorkersMode> serviceWorkersMode, const URL& referrer)
 {
     ASSERT(m_promise);
     ASSERT(!m_cachedScript);
     String integrity = m_parameters ? m_parameters->integrity() : String { };
-    auto destination = m_parameters && m_parameters->type() == JSC::ScriptFetchParameters::Type::JSON ? FetchOptionsDestination::Json : FetchOptionsDestination::Script;
-    m_cachedScript = protect(scriptFetcher())->requestModuleScript(document, sourceURL, destination, WTF::move(integrity), serviceWorkersMode);
+    auto destination = FetchOptionsDestination::Script;
+    if (m_parameters) {
+        switch (m_parameters->type()) {
+        case JSC::ScriptFetchParameters::Type::JSON:
+            destination = FetchOptionsDestination::Json;
+            break;
+        case JSC::ScriptFetchParameters::Type::Text:
+            destination = FetchOptionsDestination::Text;
+            break;
+        default:
+            break;
+        }
+    }
+    m_cachedScript = protect(scriptFetcher())->requestModuleScript(document, sourceURL, destination, WTF::move(integrity), serviceWorkersMode, referrer);
     if (!m_cachedScript)
         return false;
     m_sourceURL = WTF::move(sourceURL);

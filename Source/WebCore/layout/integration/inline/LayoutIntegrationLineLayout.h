@@ -50,6 +50,7 @@ class RenderBlockFlow;
 class RenderBox;
 class RenderBoxModelObject;
 class RenderInline;
+class RenderListOutsideMarker;
 struct PaintInfo;
 
 namespace Layout {
@@ -80,7 +81,9 @@ public:
     static bool shouldInvalidateLineLayoutAfterTreeMutation(const RenderBlockFlow& parent, const RenderObject& renderer, const LineLayout&, bool isRemoval);
 
     void updateFormattingContextGeometries(LayoutUnit availableLogicalWidth);
-    void updateOverflow();
+
+    std::optional<LayoutRect> updateOverflow();
+
     static void updateStyle(const RenderObject&);
 
     // Partial invalidation.
@@ -111,6 +114,7 @@ public:
 
     bool NODELETE isPaginated() const;
     size_t NODELETE lineCount() const;
+    size_t NODELETE lineCountIgnoringBlockLevelBoxes() const;
     bool hasContent() const { return !!m_inlineContent; }
     bool NODELETE hasContentfulInlineOrBlockLine() const;
     bool NODELETE hasContentfulInlineLine() const;
@@ -171,6 +175,10 @@ private:
     LayoutUnit NODELETE baselineForLine(const InlineDisplay::Line&) const;
 
     bool NODELETE isContentConsideredStale() const;
+
+    using ExcludedMarkerList = Vector<CheckedPtr<RenderListOutsideMarker>>;
+    ExcludedMarkerList excludedMarkersForFirstFormattedLine(Layout::InlineLayoutState&);
+    void setExcludedMarkerPositions(const ExcludedMarkerList&);
 
 private:
     CheckedPtr<Layout::ElementBox> m_rootLayoutBox;

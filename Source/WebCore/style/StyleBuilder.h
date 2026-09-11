@@ -32,7 +32,9 @@
 namespace WebCore {
 
 class CSSCustomPropertyValue;
+class CSSVariableData;
 enum class CSSWideKeyword : uint8_t;
+struct CSSCustomPropertySyntax;
 struct CSSRegisteredCustomProperty;
 
 namespace Style {
@@ -51,6 +53,11 @@ public:
     void applyNonHighPriorityProperties();
     void adjustAfterApplying();
 
+    // Inherits the properties that inherit in highlight pseudo-elements from the corresponding
+    // highlight pseudo-element of the originating element's parent, before applying the cascade on top.
+    // https://drafts.csswg.org/css-pseudo-4/#highlight-cascade
+    void applyHighlightInheritance();
+
     void applyProperty(CSSPropertyID propertyID) { applyProperties(propertyID, propertyID); }
     void applyCustomProperty(const AtomString& name);
 
@@ -58,6 +65,7 @@ public:
 
     RefPtr<const CustomProperty> resolveCustomPropertyForContainerQueries(const CSSCustomPropertyValue&);
     std::optional<CustomPropertyOrKeyword> resolveFunctionResult();
+    std::optional<CustomPropertyOrKeyword> computeCustomPropertyValueForSyntax(const AtomString&, const CSSCustomPropertySyntax&, const CSSVariableData&);
 
     BuilderState& state() { return m_state; }
     const MatchResult& matchResult() const { return m_cascade.matchResult(); }

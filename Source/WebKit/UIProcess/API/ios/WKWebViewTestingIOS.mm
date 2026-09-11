@@ -242,7 +242,7 @@ static void dumpUIView(TextStream& ts, UIView *view, bool traverse)
     };
 
     auto pointToString = [] (auto point) {
-        return makeString("[x: "_s, point.x, " y: "_s, point.x, ']');
+        return makeString("[x: "_s, point.x, " y: "_s, point.y, ']');
     };
 
 
@@ -445,9 +445,13 @@ static void dumpUIView(TextStream& ts, UIView *view, bool traverse)
 
 - (void)_selectionBoundingRectInMainFrameCoordinatesForTesting:(void (^)(CGRect))completionHandler
 {
-    _page->convertEditorStateSelectionRectToMainFrameCoordinates(_page->selectionBoundingRectInRootViewCoordinates(), [completionHandler = makeBlockPtr(completionHandler)](WebCore::FloatRect rect) {
-        completionHandler(rect);
-    });
+    // The editor state's selection rects are already in main-frame coordinates.
+    completionHandler(_page->selectionBoundingRectInRootViewCoordinates());
+}
+
+- (CGRect)_rectToRevealWhenZoomingToFocusedElementForTesting
+{
+    return [_contentView rectToRevealWhenZoomingToFocusedElement];
 }
 
 - (UIGestureRecognizer *)_imageAnalysisGestureRecognizer

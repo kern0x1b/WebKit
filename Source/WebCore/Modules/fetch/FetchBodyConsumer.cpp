@@ -226,10 +226,10 @@ RefPtr<DOMFormData> FetchBodyConsumer::packageFormData(ScriptExecutionContext* c
     auto mimeType = parseMIMEType(contentType);
     if (auto multipartBoundary = parseMultipartBoundary(mimeType)) {
         auto boundaryWithDashes = makeString("--"_s, *multipartBoundary);
-        CString boundary = boundaryWithDashes.utf8();
+        auto boundary = boundaryWithDashes.utf8();
         size_t boundaryLength = boundary.length();
 
-        size_t currentBoundaryIndex = find(data, boundary.span());
+        size_t currentBoundaryIndex = find(data, byteCast<uint8_t>(boundary.span()));
         if (currentBoundaryIndex == notFound)
             return nullptr;
 
@@ -243,7 +243,7 @@ RefPtr<DOMFormData> FetchBodyConsumer::packageFormData(ScriptExecutionContext* c
             return nullptr;
 
         size_t nextBoundaryIndex;
-        while ((nextBoundaryIndex = find(data, boundary.span())) != notFound) {
+        while ((nextBoundaryIndex = find(data, byteCast<uint8_t>(boundary.span()))) != notFound) {
             parseMultipartPart(data.first(nextBoundaryIndex - oneNewLine.length()), form.get());
             currentBoundaryIndex = nextBoundaryIndex;
             skip(data, nextBoundaryIndex + boundaryLength);
@@ -309,6 +309,12 @@ void FetchBodyConsumer::clean()
     }
 }
 
+void FetchBodyConsumer::cancelReadableStream()
+{
+    if (RefPtr formDataConsumer = m_formDataConsumer)
+        formDataConsumer->cancel();
+}
+
 void FetchBodyConsumer::resolveWithData(Ref<DeferredPromise>&& promise, const String& contentType, std::span<const uint8_t> data)
 {
     resolveWithTypeAndData(WTF::move(promise), m_type, contentType, data);
@@ -356,8 +362,11 @@ void FetchBodyConsumer::consumeFormDataAsStream(const FormData& formData, FetchB
     if (!context)
         return;
 
-    m_formDataConsumer = FormDataConsumer::create(formData, *context, [source = Ref { source }](auto&& result) {
-        auto protectedSource = source;
+    m_formDataConsumer = FormDataConsumer::create(formData, *context, [weakSource = WeakPtr { source }](auto&& result) {
+        RefPtr source = weakSource.get();
+        if (!source)
+            return false;
+
         if (result.hasException()) {
             source->error(result.releaseException());
             return false;
@@ -370,7 +379,10 @@ void FetchBodyConsumer::consumeFormDataAsStream(const FormData& formData, FetchB
         }
 
         return source->enqueue(ArrayBuffer::tryCreate(value));
-    });
+    }, FormDataConsumer::Mode::Pull);
+
+    source.setFormDataConsumer(*m_formDataConsumer);
+
     protect(m_formDataConsumer)->start();
 }
 

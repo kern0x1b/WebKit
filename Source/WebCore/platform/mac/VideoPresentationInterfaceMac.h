@@ -80,15 +80,17 @@ public:
     WEBCORE_EXPORT void durationChanged(double) final;
     WEBCORE_EXPORT void currentTimeChanged(double /* currentTime */, double /* anchorTime */) final;
     WEBCORE_EXPORT void rateChanged(OptionSet<PlaybackSessionModel::PlaybackState>, double playbackRate, double defaultPlaybackRate) override;
-    WEBCORE_EXPORT void externalPlaybackChanged(bool  enabled, PlaybackSessionModel::ExternalPlaybackTargetType, const String& localizedDeviceName) override;
+    WEBCORE_EXPORT void externalPlaybackChanged(bool  enabled, PlaybackSessionModel::ExternalPlaybackTargetType, const String& localizedDeviceName, const String& localizedRouteName) override;
     WEBCORE_EXPORT void ensureControlsManager() override;
 
     // VideoPresentationModelClient
     WEBCORE_EXPORT void hasVideoChanged(bool) final;
     WEBCORE_EXPORT void videoDimensionsChanged(const FloatSize&) final;
+    WEBCORE_EXPORT void hasObjectViewBoxChanged(bool) final;
     void setPlayerIdentifier(std::optional<MediaPlayerIdentifier> identifier) final { m_playerIdentifier = identifier; }
 
-    WEBCORE_EXPORT void setupFullscreen(const IntRect& initialRect, NSWindow *parentWindow, HTMLMediaElementEnums::VideoFullscreenMode, bool allowsPictureInPicturePlayback);
+    WEBCORE_EXPORT void setupFullscreen(const IntRect& initialRect, NSWindow *parentWindow, HTMLMediaElementEnums::VideoFullscreenMode, bool allowsPictureInPicturePlayback, bool hasObjectViewBox);
+    bool hasObjectViewBox() const { return m_hasObjectViewBox; }
     WEBCORE_EXPORT void enterFullscreen();
     WEBCORE_EXPORT bool exitFullscreen(const IntRect& finalRect, NSWindow *parentWindow);
     WEBCORE_EXPORT void exitFullscreenWithoutAnimationToMode(HTMLMediaElementEnums::VideoFullscreenMode);
@@ -146,6 +148,7 @@ private:
     HTMLMediaElementEnums::VideoFullscreenMode m_mode { HTMLMediaElementEnums::VideoFullscreenModeNone };
     RetainPtr<WebVideoPresentationInterfaceMacObjC> m_webVideoPresentationInterfaceObjC;
     bool m_documentIsVisible { true };
+    bool m_hasObjectViewBox { false };
     Function<void()> m_documentBecameVisibleCallback;
 
 #if HAVE(PIP_SKIP_PREROLL)

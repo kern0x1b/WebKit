@@ -106,7 +106,7 @@ public:
             notifyEncodedFrame(WTF::move(encodedFrame));
         });
         if (!result) {
-            gst_printerrln("Unable to create GStreamer video encoder: %s", result.error().utf8().data());
+            gst_printerrln("Unable to create GStreamer video encoder: %s", result.error().utf8().legacyCStringPointer());
             return;
         }
         m_internalEncoder = WTF::move(*result);
@@ -306,6 +306,7 @@ GStreamerVideoEncoderFactory::GStreamerVideoEncoderFactory(bool isSupportingVP9P
     , m_isSupportingVP9Profile2(isSupportingVP9Profile2)
 {
     ensureGStreamerInitialized();
+    registerWebKitGStreamerElements();
 
     static std::once_flag debugRegisteredFlag;
     std::call_once(debugRegisteredFlag, [] {

@@ -31,10 +31,13 @@
 #include "DocumentSettingsValues.h"
 #include "EventLoop.h"
 #include "FrameDestructionObserverInlines.h"
+#include "FrameLoader.h"
+#include "FrameLoaderClient.h"
 #include "JSDOMGlobalObject.h"
 #include "LocalDOMWindow.h"
 #include "LocalFrame.h"
 #include "LocalFrameInlines.h"
+#include "LocalFrameLoaderClient.h"
 #include "Logging.h"
 #include "Microtasks.h"
 #include "ResourceLoadObserver.h"
@@ -191,21 +194,29 @@ UserGestureIndicator::UserGestureIndicator(std::optional<IsProcessingUserGesture
 
     if (isProcessingUserGesture && document && currentToken(vm)->processingUserGesture()) {
         document->updateLastHandledUserGestureTimestamp(currentToken(vm)->startTime());
-        if (processInteractionStyle == ProcessInteractionStyle::Immediate)
+        if (processInteractionStyle == ProcessInteractionStyle::Immediate) {
             ResourceLoadObserver::singleton().logUserInteractionWithReducedTimeResolution(*document);
+            if (RefPtr page = document->page())
+                page->didObserveFirstPartyUserGesture();
+        }
 
         if (RefPtr page = document->page()) {
             page->setUserDidInteractWithPage(true);
             page->setUserDidInteractWithPageExcludingForcedUserGestures(processInteractionStyle != ProcessInteractionStyle::Never);
         }
         if (RefPtr frame = document->frame(); frame && !frame->hasHadUserInteraction()) {
-            for (RefPtr<Frame> ancestor = WTF::move(frame); ancestor; ancestor = ancestor->tree().parent()) {
+            bool hasRemoteAncestor = false;
+            for (RefPtr<Frame> ancestor = frame; ancestor; ancestor = ancestor->tree().parent()) {
                 if (RefPtr localAncestor = dynamicDowncast<LocalFrame>(ancestor)) {
                     localAncestor->setHasHadUserInteraction();
                     if (RefPtr ancestorDocument = localAncestor->document())
                         ancestorDocument->updateLastHandledUserGestureTimestamp(currentToken(vm)->startTime());
-                }
+                } else
+                    hasRemoteAncestor = true;
             }
+
+            if (hasRemoteAncestor)
+                frame->loader().client().didHandleFirstUserGesture(currentToken(vm)->startTime());
         }
 
         // https://html.spec.whatwg.org/multipage/interaction.html#user-activation-processing-model

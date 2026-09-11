@@ -52,25 +52,29 @@ enum class ReceiverName : uint8_t {
     , TestWithImageData = 8
     , TestWithLegacyReceiver = 9
     , TestWithMultiLineExtendedAttributes = 10
-    , TestWithSemaphore = 11
-    , TestWithSpanOfConst = 12
-    , TestWithStream = 13
-    , TestWithStreamBatched = 14
-    , TestWithStreamBuffer = 15
-    , TestWithStreamServerConnectionHandle = 16
-    , TestWithSuperclass = 17
-    , TestWithSuperclassAndWantsAsyncDispatch = 18
-    , TestWithSuperclassAndWantsDispatch = 19
-    , TestWithSwift = 20
-    , TestWithSwiftConditionally = 21
-    , TestWithValidator = 22
-    , TestWithWantsAsyncDispatch = 23
-    , TestWithWantsDispatch = 24
-    , TestWithWantsDispatchNoSyncMessages = 25
-    , TestWithoutAttributes = 26
-    , TestWithoutUsingIPCConnection = 27
-    , IPC = 28
-    , Invalid = 29
+    , TestWithMultipleDispatchedFrom = 11
+    , TestWithSemaphore = 12
+    , TestWithSpanOfConst = 13
+    , TestWithStream = 14
+    , TestWithStreamBatched = 15
+    , TestWithStreamBuffer = 16
+    , TestWithStreamServerConnectionHandle = 17
+    , TestWithStreamSwift = 18
+    , TestWithStreamSwiftEnabledBy = 19
+    , TestWithSuperclass = 20
+    , TestWithSuperclassAndWantsAsyncDispatch = 21
+    , TestWithSuperclassAndWantsDispatch = 22
+    , TestWithSwift = 23
+    , TestWithSwiftConditionally = 24
+    , TestWithSwiftConditionallyAndEnabledBy = 25
+    , TestWithValidator = 26
+    , TestWithWantsAsyncDispatch = 27
+    , TestWithWantsDispatch = 28
+    , TestWithWantsDispatchNoSyncMessages = 29
+    , TestWithoutAttributes = 30
+    , TestWithoutUsingIPCConnection = 31
+    , IPC = 32
+    , Invalid = 33
 };
 
 enum class MessageName : uint16_t {
@@ -84,6 +88,7 @@ enum class MessageName : uint16_t {
     TestWithDeferSendingOption_NoOptions,
     TestWithDeferSendingOption_OneIndex,
     TestWithDispatchedFromAndTo_AlwaysEnabled,
+    TestWithDispatchedFromAndTo_UntrustedOrigin,
     TestWithEnabledByAndConjunction_AlwaysEnabled,
     TestWithEnabledByOrConjunction_AlwaysEnabled,
     TestWithEnabledBy_AlwaysEnabled,
@@ -137,6 +142,7 @@ enum class MessageName : uint16_t {
     TestWithLegacyReceiver_TouchEvent,
 #endif
     TestWithMultiLineExtendedAttributes_AlwaysEnabled,
+    TestWithMultipleDispatchedFrom_AlwaysEnabled,
     TestWithSemaphore_ReceiveSemaphore,
     TestWithSemaphore_ReceiveSemaphoreReply,
     TestWithSemaphore_SendSemaphore,
@@ -145,6 +151,8 @@ enum class MessageName : uint16_t {
     TestWithStreamBatched_SendString,
     TestWithStreamBuffer_SendStreamBuffer,
     TestWithStreamServerConnectionHandle_SendStreamServerConnection,
+    TestWithStreamSwiftEnabledBy_SendString,
+    TestWithStreamSwift_SendString,
     TestWithStream_CallWithIdentifier,
     TestWithStream_CallWithIdentifierReply,
 #if PLATFORM(COCOA)
@@ -168,6 +176,9 @@ enum class MessageName : uint16_t {
     TestWithSuperclass_TestAsyncMessageWithNoArguments,
     TestWithSuperclass_TestAsyncMessageWithNoArgumentsReply,
 #endif
+    TestWithSuperclass_TestMessageWithMessageName,
+    TestWithSwiftConditionallyAndEnabledBy_TestAsyncMessage,
+    TestWithSwiftConditionallyAndEnabledBy_TestAsyncMessageReply,
     TestWithSwiftConditionally_TestAsyncMessage,
     TestWithSwiftConditionally_TestAsyncMessageReply,
     TestWithSwift_TestAsyncMessage,
@@ -234,6 +245,7 @@ enum class MessageName : uint16_t {
 #if PLATFORM(COCOA)
     InitializeConnection,
 #endif
+    InitializeStreamClientConnection,
     LegacySessionState,
     ProcessOutOfStreamMessage,
     SetStreamDestinationID,
@@ -242,6 +254,7 @@ enum class MessageName : uint16_t {
     LastAsynchronous = FirstSynchronous - 1,
     TestWithLegacyReceiver_GetPluginProcessConnection,
     TestWithLegacyReceiver_TestMultipleAttributes,
+    TestWithStreamSwift_SendStringSync,
 #if PLATFORM(COCOA)
     TestWithStream_ReceiveMachSendRight,
     TestWithStream_SendAndReceiveMachSendRight,
@@ -251,6 +264,7 @@ enum class MessageName : uint16_t {
     TestWithSuperclassAndWantsDispatch_TestSyncMessage,
     TestWithSuperclass_TestSyncMessage,
     TestWithSuperclass_TestSynchronousMessage,
+    TestWithSwiftConditionallyAndEnabledBy_TestSyncMessage,
     TestWithSwiftConditionally_TestSyncMessage,
     TestWithSwift_TestSyncMessage,
     TestWithWantsAsyncDispatch_TestSyncMessage,

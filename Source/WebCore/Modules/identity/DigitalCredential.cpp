@@ -41,6 +41,8 @@
 #include "JSDOMConvertDictionary.h"
 #include "JSDOMConvertJSON.h"
 #include "JSDOMPromiseDeferred.h"
+#include "JSOpenID4VPMultisignedRequest.h"
+#include "JSOpenID4VPSignedRequest.h"
 #include "LocalDOMWindow.h"
 #include "LocalFrame.h"
 #include "MediationRequirement.h"
@@ -72,31 +74,45 @@ DigitalCredential::DigitalCredential(JSC::Strong<JSC::JSObject>&& data, DigitalC
 
 bool DigitalCredential::userAgentAllowsProtocol(const Document& document, const String& protocol)
 {
-    if (protocol == "org-iso-mdoc"_s)
+    auto parsed = digitalCredentialPresentationProtocolFromString(protocol);
+    if (!parsed)
+        return false;
+
+    using enum DigitalCredentialPresentationProtocol;
+    switch (*parsed) {
+    case OrgIsoMdoc:
         return true;
-
-    // The OpenID4VP protocols are gated behind an off-by-default setting while their request
-    // validation and wallet plumbing are still under development, so that the API does not
-    // advertise support for a protocol it cannot yet fulfill.
-    if (document.settings().digitalCredentialsOpenID4VPEnabled()) {
-        return protocol == "openid4vp-v1-unsigned"_s
-            || protocol == "openid4vp-v1-signed"_s
-            || protocol == "openid4vp-v1-multisigned"_s;
+    case Openid4vpV1Unsigned:
+    case Openid4vpV1Signed:
+    case Openid4vpV1Multisigned:
+        return document.settings().digitalCredentialsOpenID4VPEnabled();
     }
-
     return false;
 }
 
-static std::optional<DigitalCredentialPresentationProtocol> convertProtocolString(const String& protocolString)
+static std::optional<DigitalCredentialPresentationProtocol> convertProtocolString(const Document& document, const String& protocolString)
 {
-    if (protocolString == "org-iso-mdoc"_s)
-        return DigitalCredentialPresentationProtocol::OrgIsoMdoc;
+    auto protocol = digitalCredentialPresentationProtocolFromString(protocolString);
+    if (!protocol)
+        return std::nullopt;
+
+    using enum DigitalCredentialPresentationProtocol;
+    switch (*protocol) {
+    case OrgIsoMdoc:
+        return protocol;
+    case Openid4vpV1Signed:
+    case Openid4vpV1Multisigned:
+        return document.settings().digitalCredentialsOpenID4VPEnabled() ? protocol : std::nullopt;
+    case Openid4vpV1Unsigned:
+        // FIXME (webkit.org/b/320207): support once DCQL parsing lands.
+        return std::nullopt;
+    }
     return std::nullopt;
 }
 
 static ExceptionOr<std::optional<UnvalidatedDigitalCredentialRequest>> jsToCredentialRequest(const Document& document, const DigitalCredentialGetRequest& request)
 {
-    auto protocol = convertProtocolString(request.protocol);
+    auto protocol = convertProtocolString(document, request.protocol);
     if (!protocol)
         return std::optional<UnvalidatedDigitalCredentialRequest> { std::nullopt }; // Skip requests with an unsupported protocol.
 
@@ -108,16 +124,29 @@ static ExceptionOr<std::optional<UnvalidatedDigitalCredentialRequest>> jsToCrede
     if (scope.exception()) [[unlikely]]
         return Exception { ExceptionCode::ExistingExceptionError };
 
+    using enum DigitalCredentialPresentationProtocol;
     switch (*protocol) {
-    case DigitalCredentialPresentationProtocol::OrgIsoMdoc: {
+    case OrgIsoMdoc: {
         auto result = convertDictionary<MobileDocumentRequest>(*globalObject, request.data.get());
         if (result.hasException(scope)) [[unlikely]]
             return Exception { ExceptionCode::ExistingExceptionError };
         return std::make_optional<UnvalidatedDigitalCredentialRequest>(result.releaseReturnValue());
     }
-    default:
-        ASSERT_NOT_REACHED();
-        return Exception { ExceptionCode::TypeError, "Unsupported protocol."_s };
+    case Openid4vpV1Signed: {
+        auto result = convertDictionary<OpenID4VPSignedRequest>(*globalObject, request.data.get());
+        if (result.hasException(scope)) [[unlikely]]
+            return Exception { ExceptionCode::ExistingExceptionError };
+        return std::make_optional<UnvalidatedDigitalCredentialRequest>(result.releaseReturnValue());
+    }
+    case Openid4vpV1Multisigned: {
+        auto result = convertDictionary<OpenID4VPMultisignedRequest>(*globalObject, request.data.get());
+        if (result.hasException(scope)) [[unlikely]]
+            return Exception { ExceptionCode::ExistingExceptionError };
+        return std::make_optional<UnvalidatedDigitalCredentialRequest>(result.releaseReturnValue());
+    }
+    case Openid4vpV1Unsigned:
+        // FIXME (webkit.org/b/320207): support once DCQL parsing lands.
+        return std::optional<UnvalidatedDigitalCredentialRequest> { std::nullopt };
     }
 }
 
@@ -185,14 +214,29 @@ void DigitalCredential::discoverFromExternalSource(const Document& document, Cre
         return;
     }
 
-    auto presentationRequestsOrException = convertObjectsToDigitalPresentationRequests(document, options.digital->requests);
-    if (presentationRequestsOrException.hasException()) {
-        promise.reject(presentationRequestsOrException.releaseException());
+    options.digital->requests.removeAllMatching([&](auto& request) {
+        if (userAgentAllowsProtocol(document, request.protocol))
+            return false;
+        if (RefPtr context = document.scriptExecutionContext()) {
+            String warning = makeString("Ignoring DigitalCredentialGetRequest with unsupported protocol: \""_s, request.protocol, "\""_s);
+            context->addConsoleMessage(MessageSource::Other, MessageLevel::Warning, warning);
+        }
+        return true;
+    });
+
+    if (options.digital->requests.isEmpty()) {
+        promise.reject(Exception { ExceptionCode::TypeError, "At least one supported DigitalCredentialGetRequest must be present."_s });
         return;
     }
 
     if (!window->consumeTransientActivation()) {
         promise.reject(Exception { ExceptionCode::NotAllowedError, "Calling get() needs to be triggered by an activation triggering user event."_s });
+        return;
+    }
+
+    auto presentationRequestsOrException = convertObjectsToDigitalPresentationRequests(document, options.digital->requests);
+    if (presentationRequestsOrException.hasException()) {
+        promise.reject(presentationRequestsOrException.releaseException());
         return;
     }
 

@@ -84,7 +84,7 @@ class AudioSourceProvider;
 class AudioTrackPrivate;
 class CDMInstance;
 class CachedResourceLoader;
-class DestinationColorSpace;
+class ColorSpace;
 class GraphicsContextGL;
 class GraphicsContext;
 class InbandTextTrackPrivate;
@@ -108,6 +108,10 @@ class SharedBuffer;
 class TextTrackRepresentation;
 class VideoFrame;
 class VideoTrackPrivate;
+
+#if USE(GSTREAMER) && USE(COORDINATED_GRAPHICS)
+class CoordinatedPlatformLayerBufferProxy;
+#endif
 
 struct GraphicsDeviceAdapter;
 struct HostingContext;
@@ -187,6 +191,7 @@ struct MediaPlayerLoadOptions {
     ContentType contentType { };
     bool requiresRemotePlayback { false };
     bool supportsLimitedMatroska { false };
+    bool disableTeardownOnVisibilityChange { false };
     std::optional<bool> supportsProgressMonitoringOverride { };
     VideoRendererPreferences videoRendererPreferences { };
 };
@@ -551,7 +556,7 @@ public:
     RefPtr<ShareableBitmap> bitmapImageForCurrentTimeSync();
     using BitmapImagePromise = NativePromise<Ref<ShareableBitmap>, void>;
     Ref<BitmapImagePromise> bitmapImageForCurrentTime();
-    DestinationColorSpace colorSpace();
+    ColorSpace colorSpace();
     bool shouldGetNativeImageForCanvasDrawing() const;
 
     using MediaPlayerEnums::NetworkState;
@@ -683,6 +688,10 @@ public:
 #if USE(GSTREAMER)
     void simulateAudioInterruption();
     bool isGStreamerHolePunchingEnabled();
+#if USE(COORDINATED_GRAPHICS)
+    void setPlatformLayerBufferProxy(Ref<CoordinatedPlatformLayerBufferProxy>&&);
+    RefPtr<CoordinatedPlatformLayerBufferProxy> platformLayerBufferProxy() const;
+#endif
 #endif
 
     String languageOfPrimaryAudioTrack() const;
@@ -765,6 +774,7 @@ public:
     void audioOutputDeviceChanged();
 
     std::optional<MediaPlayerIdentifier> identifier() const;
+    bool isHostedInGPUProcess() const;
     bool hasMediaEngine() const;
 
     std::optional<VideoFrameMetadata> videoFrameMetadata();

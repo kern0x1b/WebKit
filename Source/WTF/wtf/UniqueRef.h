@@ -29,6 +29,7 @@
 #include <wtf/Assertions.h>
 #include <wtf/GetPtr.h>
 #include <wtf/StdLibExtras.h>
+#include <wtf/SwiftBridging.h>
 #include <wtf/TypeCasts.h>
 #include <wtf/TypeTraits.h>
 
@@ -53,7 +54,7 @@ template<typename T, class... Args>
 [[nodiscard]] UniqueRef<T> makeUniqueRef(Args&&... args)
 {
     static_assert(std::is_same<typename T::WTFIsFastMallocAllocated, int>::value, "T should use TZoneMalloc (WTF_MAKE_TZONE_ALLOCATED or one of its variants)");
-    static_assert(!HasRefPtrMemberFunctions<T>::value, "T should not be RefCounted");
+    static_assert(!HasRefPtrMemberFunctions<T>, "T should not be RefCounted");
     return makeUniqueRefWithoutFastMallocCheck<T>(std::forward<Args>(args)...);
 }
 
@@ -64,7 +65,7 @@ UniqueRef<T> makeUniqueRefFromNonNullUniquePtr(std::unique_ptr<T>&& ptr)
 }
 
 template<typename T>
-class UniqueRef {
+class SWIFT_ESCAPABLE UniqueRef {
 public:
     template <typename U>
     UniqueRef(UniqueRef<U>&& other)
@@ -138,7 +139,7 @@ inline bool isAnyOf(UniqueRef<ArgType>& source)
 }
 
 template<typename... ExpectedTypes, typename ArgType>
-inline bool is(const UniqueRef<ArgType>& source)
+inline bool isAnyOf(const UniqueRef<ArgType>& source)
 {
     return isAnyOf<ExpectedTypes...>(source.get());
 }

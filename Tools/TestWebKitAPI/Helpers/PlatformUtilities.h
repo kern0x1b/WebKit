@@ -50,6 +50,7 @@ typedef double NSTimeInterval;
 
 #if PLATFORM(COCOA)
 OBJC_CLASS NSImage;
+OBJC_CLASS NSURL;
 OBJC_CLASS NSWindow;
 OBJC_CLASS UIImage;
 OBJC_CLASS UIWindow;
@@ -62,7 +63,7 @@ namespace Util {
 
 std::string toSTD(const char*);
 ALWAYS_INLINE std::string toSTD(ASCIILiteral literal) { return toSTD(literal.characters()); }
-ALWAYS_INLINE std::string toSTD(const String& string) { return toSTD(string.utf8().data()); }
+ALWAYS_INLINE std::string toSTD(const String& string) { return string.utf8().toStdString(); }
 
 #if USE(FOUNDATION)
 std::string toSTD(NSString *);
@@ -130,6 +131,9 @@ using PlatformWindow = UIWindow;
 
 #if PLATFORM(COCOA)
 extern NSString * const TestPlugInClassNameParameter;
+
+NSURL *testPlugInBundleURL();
+
 extern RetainPtr<CGImageRef> convertToCGImage(PlatformImage *);
 #endif
 

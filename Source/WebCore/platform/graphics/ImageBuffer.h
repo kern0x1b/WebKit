@@ -30,6 +30,7 @@
 #include <WebCore/ImageBufferAllocator.h>
 #include <WebCore/ImageBufferBackend.h>
 #include <WebCore/ImageBufferFormat.h>
+#include <WebCore/ImageBufferParameters.h>
 #include <WebCore/PlatformScreen.h>
 #include <WebCore/ProcessIdentity.h>
 #include <WebCore/RenderingMode.h>
@@ -80,67 +81,43 @@ struct ImageBufferCreationContext {
     ImageBufferCreationContext() = default;
 };
 
-struct ImageBufferParameters {
-    FloatSize logicalSize;
-    float resolutionScale;
-    DestinationColorSpace colorSpace;
-    ImageBufferFormat bufferFormat;
-    RenderingPurpose purpose;
-};
-
 class ImageBuffer : public ThreadSafeRefCountedAndCanMakeThreadSafeWeakPtr<ImageBuffer> {
     WTF_MAKE_TZONE_ALLOCATED_EXPORT(ImageBuffer, WEBCORE_EXPORT);
 public:
     using Parameters = ImageBufferParameters;
 
-    static RefPtr<ImageBuffer> create(const FloatSize& size, RenderingMode mode, RenderingPurpose purpose, float resolutionScale, const DestinationColorSpace& colorSpace, PixelFormat bufferFormat, GraphicsClient* client = nullptr)
+    static RefPtr<ImageBuffer> create(const FloatSize& size, RenderingMode mode, RenderingPurpose purpose, float resolutionScale, const ColorSpace& colorSpace, PixelFormat bufferFormat, GraphicsClient* client = nullptr)
     {
         return create(size, mode, purpose, resolutionScale, colorSpace, ImageBufferFormat { bufferFormat }, client);
     }
 
-    WEBCORE_EXPORT static RefPtr<ImageBuffer> create(const FloatSize&, RenderingMode, RenderingPurpose, float resolutionScale, const DestinationColorSpace&, ImageBufferFormat, GraphicsClient* = nullptr);
+    WEBCORE_EXPORT static RefPtr<ImageBuffer> create(const FloatSize&, RenderingMode, RenderingPurpose, float resolutionScale, const ColorSpace&, ImageBufferFormat, GraphicsClient* = nullptr);
 
     template<typename BackendType, typename ImageBufferType = ImageBuffer, typename... Arguments>
-    static RefPtr<ImageBufferType> create(const FloatSize& size, float resolutionScale, const DestinationColorSpace& colorSpace, ImageBufferFormat bufferFormat, RenderingPurpose purpose, const ImageBufferCreationContext& creationContext, Arguments&&... arguments)
+    static RefPtr<ImageBufferType> create(const FloatSize& size, float resolutionScale, const ColorSpace& colorSpace, ImageBufferFormat bufferFormat, RenderingPurpose purpose, const ImageBufferCreationContext& creationContext, Arguments&&... arguments)
     {
         Parameters parameters { size, resolutionScale, colorSpace, bufferFormat, purpose };
-        auto backendParameters = ImageBuffer::backendParameters(parameters);
-        auto backend = BackendType::create(backendParameters, creationContext);
+        auto backend = BackendType::create(parameters, creationContext);
         if (!backend)
             return nullptr;
-        auto backendInfo = populateBackendInfo<BackendType>(backendParameters);
-        return create<ImageBufferType>(parameters, backendInfo, creationContext, WTF::move(backend), std::forward<Arguments>(arguments)...);
+        return create<ImageBufferType>(parameters, creationContext, WTF::move(backend), std::forward<Arguments>(arguments)...);
     }
 
-    template<typename BackendType, typename ImageBufferType = ImageBuffer, typename... Arguments>
-    static RefPtr<ImageBufferType> create(const FloatSize& size, const ImageBufferCreationContext& creationContext, std::unique_ptr<ImageBufferBackend>&& backend, Arguments&&... arguments)
-    {
-        auto backendParameters = backend->parameters();
-        auto parameters = Parameters { size, backendParameters.resolutionScale, backendParameters.colorSpace, backendParameters.bufferFormat, backendParameters.purpose };
-        auto backendInfo = populateBackendInfo<BackendType>(backendParameters);
-        return create<ImageBufferType>(parameters, backendInfo, creationContext, WTF::move(backend), std::forward<Arguments>(arguments)...);
-    }
-
+    // The backend is the source of the buffer's rendering mode, base transform and
+    // memory cost, so it has to be constructed before the buffer.
     template<typename ImageBufferType = ImageBuffer, typename... Arguments>
-    static RefPtr<ImageBufferType> create(Parameters parameters, const ImageBufferBackend::Info& backendInfo, const WebCore::ImageBufferCreationContext& creationContext, std::unique_ptr<ImageBufferBackend>&& backend, Arguments&&... arguments)
+    static RefPtr<ImageBufferType> create(Parameters parameters, const WebCore::ImageBufferCreationContext& creationContext, std::unique_ptr<ImageBufferBackend>&& backend, Arguments&&... arguments)
     {
-        return adoptRef(new ImageBufferType(parameters, backendInfo, creationContext, WTF::move(backend), std::forward<Arguments>(arguments)...));
-    }
-
-    template<typename BackendType>
-    static ImageBufferBackend::Info populateBackendInfo(const ImageBufferBackend::Parameters& parameters)
-    {
-        return {
-            BackendType::renderingMode,
-            ImageBufferBackend::calculateBaseTransform(parameters),
-            BackendType::calculateMemoryCost(parameters),
-        };
+        ASSERT(backend);
+        return adoptRef(new ImageBufferType(parameters, creationContext, WTF::move(backend), std::forward<Arguments>(arguments)...));
     }
 
     WEBCORE_EXPORT virtual ~ImageBuffer();
 
     WEBCORE_EXPORT static IntSize calculateBackendSize(FloatSize logicalSize, float resolutionScale);
-    WEBCORE_EXPORT static ImageBufferBackendParameters backendParameters(const Parameters&);
+
+    // Supported get, putPixelBuffer formats.
+    WEBCORE_EXPORT static bool NODELETE supportedPixelBufferFormats(PixelFormat);
 
     // These functions are used when clamping the ImageBuffer which is created for filter, masker or clipper.
     static bool sizeNeedsClamping(const FloatSize&);
@@ -162,7 +139,7 @@ public:
 
     WEBCORE_EXPORT IntSize backendSize() const;
 
-    virtual void ensureBackendCreated() const { ensureBackend(); }
+    WEBCORE_EXPORT virtual std::optional<RenderingMode> getEffectiveRenderingModeForTesting() const;
     bool hasBackend() const { return !!backend(); }
 
     WEBCORE_EXPORT void transferToNewContext(const ImageBufferCreationContext&);
@@ -172,16 +149,15 @@ public:
     FloatSize logicalSize() const { return m_parameters.logicalSize; }
     IntSize truncatedLogicalSize() const { return IntSize(m_parameters.logicalSize); } // You probably should be calling logicalSize() instead.
     float resolutionScale() const { return m_parameters.resolutionScale; }
-    DestinationColorSpace colorSpace() const { return m_parameters.colorSpace; }
+    ColorSpace colorSpace() const { return m_parameters.colorSpace; }
 
     RenderingPurpose renderingPurpose() const { return m_parameters.purpose; }
     PixelFormat pixelFormat() const { return m_parameters.bufferFormat.pixelFormat; }
     const Parameters& parameters() const LIFETIME_BOUND { return m_parameters; }
 
-    RenderingMode renderingMode() const { return m_backendInfo.renderingMode; }
-    AffineTransform baseTransform() const { return m_backendInfo.baseTransform; }
-    size_t memoryCost() const { return m_backendInfo.memoryCost; }
-    const ImageBufferBackend::Info& backendInfo() const LIFETIME_BOUND { return m_backendInfo; }
+    RenderingMode renderingMode() const { return m_backend->renderingMode(); }
+    AffineTransform baseTransform() const { return m_backend->baseTransform(); }
+    size_t memoryCost() const { return m_backend->memoryCost(); }
 
     // Returns NativeImage of the current drawing results. Results in an immutable copy of the current back buffer.
     WEBCORE_EXPORT virtual RefPtr<NativeImage> copyNativeImage() const;
@@ -225,7 +201,7 @@ public:
     WEBCORE_EXPORT static RefPtr<SharedBuffer> sinkIntoPDFDocument(RefPtr<ImageBuffer>);
 
     WEBCORE_EXPORT virtual void convertToLuminanceMask();
-    WEBCORE_EXPORT virtual void transformToColorSpace(const DestinationColorSpace& newColorSpace);
+    WEBCORE_EXPORT virtual void transformToColorSpace(const ColorSpace& newColorSpace);
 
     WEBCORE_EXPORT virtual RefPtr<PixelBuffer> getPixelBuffer(const PixelBufferFormat& outputFormat, const IntRect& srcRect, const ImageBufferAllocator& = ImageBufferAllocator()) const;
     WEBCORE_EXPORT virtual void putPixelBuffer(const PixelBufferSourceView&, const IntRect& srcRect, const IntPoint& destPoint = { }, AlphaPremultiplication destFormat = AlphaPremultiplication::Premultiplied);
@@ -248,8 +224,11 @@ public:
 
     WEBCORE_EXPORT virtual ImageBufferBackendSharing* toBackendSharing();
 
+    WEBCORE_EXPORT void replaceFontsWithRebuildData();
+    WEBCORE_EXPORT void rebuildFonts();
+
 protected:
-    WEBCORE_EXPORT ImageBuffer(ImageBufferParameters, const ImageBufferBackend::Info&, const WebCore::ImageBufferCreationContext&, std::unique_ptr<ImageBufferBackend>&& = nullptr, RenderingResourceIdentifier = RenderingResourceIdentifier::generate());
+    WEBCORE_EXPORT ImageBuffer(ImageBufferParameters, const WebCore::ImageBufferCreationContext&, std::unique_ptr<ImageBufferBackend>&&, RenderingResourceIdentifier = RenderingResourceIdentifier::generate());
 
     WEBCORE_EXPORT virtual RefPtr<NativeImage> sinkIntoNativeImage();
     WEBCORE_EXPORT virtual RefPtr<ImageBuffer> sinkIntoBufferForDifferentThread();
@@ -257,10 +236,8 @@ protected:
 
     WEBCORE_EXPORT void setBackend(std::unique_ptr<ImageBufferBackend>&&);
     ImageBufferBackend* backend() const LIFETIME_BOUND { return m_backend.get(); }
-    virtual ImageBufferBackend* ensureBackend() const { return m_backend.get(); }
 
     Parameters m_parameters;
-    ImageBufferBackend::Info m_backendInfo;
     std::unique_ptr<ImageBufferBackend> m_backend;
     RenderingResourceIdentifier m_renderingResourceIdentifier;
     unsigned m_backendGeneration { 0 };

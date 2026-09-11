@@ -885,6 +885,27 @@ static WebCore::EditableLinkBehavior NODELETE toEditableLinkBehavior(_WKEditable
     return protect(*_preferences)->colorFilterEnabled();
 }
 
+#if ENABLE(AX_CUSTOM_COLOR_MODE)
+- (void)_setAXCustomColorModeEnabled:(BOOL)enabled
+{
+    protect(*_preferences)->setAXCustomColorModeEnabled(enabled);
+}
+
+- (BOOL)_axCustomColorModeEnabled
+{
+    return protect(*_preferences)->axCustomColorModeEnabled();
+}
+#else
+- (void)_setAXCustomColorModeEnabled:(BOOL)enabled
+{
+}
+
+- (BOOL)_axCustomColorModeEnabled
+{
+    return NO;
+}
+#endif
+
 - (void)_setPunchOutWhiteBackgroundsInDarkMode:(BOOL)punches
 {
     protect(*_preferences)->setPunchOutWhiteBackgroundsInDarkMode(punches);
@@ -1385,18 +1406,12 @@ static WebCore::EditableLinkBehavior NODELETE toEditableLinkBehavior(_WKEditable
 
 - (void)_setShouldEnableTextAutosizingBoost:(BOOL)shouldEnableTextAutosizingBoost
 {
-#if ENABLE(TEXT_AUTOSIZING)
     protect(*_preferences)->setShouldEnableTextAutosizingBoost(shouldEnableTextAutosizingBoost);
-#endif
 }
 
 - (BOOL)_shouldEnableTextAutosizingBoost
 {
-#if ENABLE(TEXT_AUTOSIZING)
     return protect(*_preferences)->shouldEnableTextAutosizingBoost();
-#else
-    return NO;
-#endif
 }
 
 - (BOOL)_isSafeBrowsingEnabled

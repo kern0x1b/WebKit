@@ -30,7 +30,6 @@ WI.ContentBrowserTabContentView = class ContentBrowserTabContentView extends WI.
         super(tabInfo, {navigationSidebarPanelConstructor, detailsSidebarPanelConstructors});
 
         const contentBrowserElement = null;
-        const disableFindBanner = false;
         this._contentBrowser = new WI.ContentBrowser(contentBrowserElement, this, {hideBackForwardButtons, disableBackForwardNavigation, flexibleNavigationItem});
 
         this._ignoreNavigationSidebarPanelCollapsedEvent = false;
@@ -156,7 +155,7 @@ WI.ContentBrowserTabContentView = class ContentBrowserTabContentView extends WI.
     showDetailsSidebarPanels()
     {
         if (!this.isAttached)
-            return;
+            return null;
 
         var currentRepresentedObjects = this._contentBrowser.currentRepresentedObjects;
         var wasSidebarEmpty = !WI.detailsSidebar.sidebarPanels.length;
@@ -206,9 +205,11 @@ WI.ContentBrowserTabContentView = class ContentBrowserTabContentView extends WI.
         this._ignoreDetailsSidebarPanelSelectedEvent = false;
 
         if (!this.detailsSidebarPanels.length)
-            return;
+            return null;
 
         this._showDetailsSidebarItem.enabled = WI.detailsSidebar.sidebarPanels.length;
+
+        return sidebarPanelToSelect;
     }
 
     showRepresentedObject(representedObject, cookie)

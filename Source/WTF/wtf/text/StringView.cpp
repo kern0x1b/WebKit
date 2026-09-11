@@ -106,16 +106,16 @@ bool StringView::endsWithIgnoringASCIICase(StringView suffix) const
     return ::WTF::endsWithIgnoringASCIICase(*this, suffix);
 }
 
-Expected<CString, UTF8ConversionError> StringView::tryGetUTF8(ConversionMode mode) const
+std::expected<UTF8CString, UTF8ConversionError> StringView::tryGetUTF8(ConversionMode mode) const
 {
     if (isNull())
-        return CString { ""_span };
+        return UTF8CString { u8""_span };
     if (is8Bit())
         return StringImpl::utf8ForCharacters(span8());
     return StringImpl::utf8ForCharacters(span16(), mode);
 }
 
-CString StringView::utf8(ConversionMode mode) const
+UTF8CString StringView::utf8(ConversionMode mode) const
 {
     auto expectedString = tryGetUTF8(mode);
     RELEASE_ASSERT(expectedString);
@@ -137,6 +137,9 @@ SUPPRESS_NODELETE size_t StringView::find(AdaptiveStringSearcherTables& tables, 
 
     if (!matchLength)
         return start;
+
+    if (matchLength > subjectLength - start)
+        return notFound;
 
     if (subjectLength > INT32_MAX || matchLength > INT32_MAX) [[unlikely]]
         return find(matchString, start);
@@ -442,34 +445,18 @@ SUPPRESS_NODELETE size_t StringView::reverseFind(StringView matchString, unsigne
 
 String makeStringByReplacingAll(StringView string, char16_t target, char16_t replacement)
 {
-    if (string.is8Bit()) {
-        if (!isLatin1(target)) {
-            // Looking for a 16-bit character in an 8-bit string, so we're done.
-            return string.toString();
-        }
-
-        auto characters = string.span8();
-        size_t i;
-        unsigned length = string.length();
-        for (i = 0; i != characters.size(); ++i) {
-            if (characters[i] == target)
-                break;
-        }
-        if (i == length)
+    auto replaceAll = [&](auto characters) -> String {
+        // find() is SIMD-accelerated, and its Latin1 overload returns notFound for a
+        // non-Latin1 target, so an 8-bit string with a 16-bit target is handled here too.
+        size_t i = find(characters, target);
+        if (i == notFound)
             return string.toString();
         return StringImpl::createByReplacingInCharacters(characters, target, replacement, i);
-    }
+    };
 
-    auto characters = string.span16();
-    size_t i;
-    unsigned length = string.length();
-    for (i = 0; i != characters.size(); ++i) {
-        if (characters[i] == target)
-            break;
-    }
-    if (i == length)
-        return string.toString();
-    return StringImpl::createByReplacingInCharacters(characters, target, replacement, i);
+    if (string.is8Bit())
+        return replaceAll(string.span8());
+    return replaceAll(string.span16());
 }
 
 SUPPRESS_NODELETE std::strong_ordering codePointCompare(StringView lhs, StringView rhs)

@@ -76,7 +76,7 @@ WI.NetworkManager = class NetworkManager extends WI.Object
                     if (localResourceOverride.isRegex) {
                         // FIXME <https://webkit.org/b/294126> Remove fix for stored local overrides created before URL regex checking was added
                         try {
-                            localResourceOverride._urlRegex;
+                            void localResourceOverride._urlRegex;
                         } catch {
                             const key = null;
                             WI.objectStores.localResourceOverrides.associateObject(localResourceOverride, key, serializedLocalResourceOverride);
@@ -223,6 +223,7 @@ WI.NetworkManager = class NetworkManager extends WI.Object
             target.NetworkAgent.enable();
             target.NetworkAgent.setResourceCachingDisabled(WI.settings.resourceCachingDisabled.value);
 
+            // COMPATIBILITY (macOS 26.4, iOS 26.4): Network.setClearResourceDataOnNavigate did not exist yet.
             if (target.hasCommand("Network.setClearResourceDataOnNavigate"))
                 target.NetworkAgent.setClearResourceDataOnNavigate(WI.settings.clearNetworkOnNavigate.value);
 
@@ -274,6 +275,7 @@ WI.NetworkManager = class NetworkManager extends WI.Object
     get mainFrame() { return this._mainFrame; }
     get localResourceOverrides() { return this._localResourceOverrides; }
     get bootstrapScript() { return this._bootstrapScript; }
+    get enabledNetworkForSiteIsolation() { return this._enabledNetworkForSiteIsolation; }
     get enabledPageForSiteIsolation() { return this._enabledPageForSiteIsolation; }
 
     get frames()
@@ -667,9 +669,9 @@ WI.NetworkManager = class NetworkManager extends WI.Object
 
         if (framePayload.loaderId === frame.provisionalLoaderIdentifier) {
             // There was a provisional load in progress, commit it.
-            frame.commitProvisionalLoad(framePayload.securityOrigin);
+            frame.commitProvisionalLoad(framePayload.name, framePayload.securityOrigin);
         } else {
-            let mainResource = null;
+            let mainResource;
             if (frame.mainResource.url !== framePayload.url || frame.loaderIdentifier !== framePayload.loaderId) {
                 // Navigations like back/forward do not have provisional loads, so create a new main resource here.
                 mainResource = new WI.Resource(framePayload.url, {
@@ -748,9 +750,8 @@ WI.NetworkManager = class NetworkManager extends WI.Object
         let resource = this._resourceRequestIdentifierMap.get(requestIdentifier);
         if (resource) {
             // This is an existing request which is being redirected, update the resource.
-            console.assert(resource.parentFrame.id === frameIdentifier);
+            console.assert(resource.parentFrame?.id === frameIdentifier || resource.target?.identifier === targetId);
             console.assert(resource.loaderIdentifier === loaderIdentifier);
-            console.assert(!targetId);
             resource.updateForRedirectResponse(request, redirectResponse, elapsedTime, walltime);
             return;
         }
@@ -1201,7 +1202,7 @@ WI.NetworkManager = class NetworkManager extends WI.Object
 
         let type = WI.ExecutionContext.typeFromPayload(payload);
         let target = frame.mainResource.target;
-        let executionContext = new WI.ExecutionContext(target, payload.id, type, payload.name, frame);
+        let executionContext = new WI.ExecutionContext(target, payload.id, type, payload.name, payload.frameId);
         frame.addExecutionContext(executionContext);
     }
 
@@ -1211,7 +1212,7 @@ WI.NetworkManager = class NetworkManager extends WI.Object
     {
         console.assert(!this._waitingForMainFrameResourceTreePayload);
 
-        let resource = null;
+        let resource;
 
         if (!frameIdentifier && resourceOptions.targetId) {
             // This is a new resource for a ServiceWorker target.
@@ -1566,11 +1567,11 @@ WI.NetworkManager = class NetworkManager extends WI.Object
         if (!WI.settings.experimentalEnableNetworkEmulatedCondition.value)
             return;
 
-        // COMPATIBILITY (macOS 13.0, iOS 16.0): Network.setEmulatedConditions did not exist.
+        // COMPATIBILITY (macOS X.Y, iOS X.Y): Network.setEmulatedConditions did not exist.
         if (!target.hasCommand("Network.setEmulatedConditions"))
             return;
 
-        target.NetworkAgent.setEmulatedConditions(this._emulatedCondition.bytesPerSecondLimit);
+        target.NetworkAgent.setEmulatedConditions(this._emulatedCondition.bandwidth, this._emulatedCondition.latency);
     }
 
     _dispatchFrameWasAddedEvent(frame)
@@ -1626,6 +1627,14 @@ WI.NetworkManager = class NetworkManager extends WI.Object
         }
 
         let target = WI.assumingMainTarget();
+
+        // Under Site Isolation, ProxyingNetworkAgent implements Network.loadResource on the backend
+        // (web-page) target, fanning the load out to the frame's owning process. Route there when
+        // Network is enabled on the backend target; otherwise the main target handles it. Mirrors
+        // Resource.requestContentFromBackend.
+        if (this._networkEnabledOnBackendTarget && WI.backendTarget && WI.backendTarget !== target && WI.backendTarget.hasCommand("Network.loadResource"))
+            target = WI.backendTarget;
+
         if (!target.hasCommand("Network.loadResource")) {
             this._sourceMapLoadFailed(sourceMapURL);
             return;
@@ -1781,43 +1790,50 @@ WI.NetworkManager.EmulatedCondition = {
     // Keep this first.
     None: {
         id: "none",
-        bytesPerSecondLimit: 0,
+        bandwidth: 0,
+        latency: 0,
         get displayName() { return WI.UIString("No throttling", "Label indicating that network throttling is inactive."); }
     },
 
     Mobile3G: {
         id: "mobile-3g",
-        bytesPerSecondLimit: 780 * 1000 / 8, // 780kbps
+        bandwidth: 780 * 1000 / 8, // 780kbps
+        latency: 100, // 100ms
         get displayName() { return WI.UIString("3G", "Label indicating that network activity is being simulated with 3G connectivity."); }
     },
 
     DSL: {
         id: "dsl",
-        bytesPerSecondLimit: 2 * 1000 * 1000 / 8, // 2mbps
+        bandwidth: 2 * 1000 * 1000 / 8, // 2mbps
+        latency: 5, // 5ms
         get displayName() { return WI.UIString("DSL", "Label indicating that network activity is being simulated with DSL connectivity."); }
     },
 
     Edge: {
         id: "edge",
-        bytesPerSecondLimit: 240 * 1000 / 8, // 240kbps
+        bandwidth: 240 * 1000 / 8, // 240kbps
+        latency: 400, // 400ms
         get displayName() { return WI.UIString("Edge", "Label indicating that network activity is being simulated with Edge connectivity."); }
     },
 
     LTE: {
         id: "lte",
-        bytesPerSecondLimit: 50 * 1000 * 1000 / 8, // 50mbps
+        bandwidth: 50 * 1000 * 1000 / 8, // 50mbps
+        latency: 50, // 50ms
         get displayName() { return WI.UIString("LTE", "Label indicating that network activity is being simulated with LTE connectivity"); }
     },
 
     WiFi: {
         id: "wifi",
-        bytesPerSecondLimit: 40 * 1000 * 1000 / 8, // 40mbps
+        bandwidth: 40 * 1000 * 1000 / 8, // 40mbps
+        latency: 5, // 5ms
         get displayName() { return WI.UIString("Wi-Fi", "Label indicating that network activity is being simulated with Wi-Fi connectivity"); }
     },
 
     WiFi802_11ac: {
         id: "wifi-802_11ac",
-        bytesPerSecondLimit: 250 * 1000 * 1000 / 8, // 250mbps
+        bandwidth: 250 * 1000 * 1000 / 8, // 250mbps
+        latency: 2, // 2ms
         get displayName() { return WI.UIString("Wi-Fi 802.11ac", "Label indicating that network activity is being simulated with Wi-Fi 802.11ac connectivity"); }
     },
 };

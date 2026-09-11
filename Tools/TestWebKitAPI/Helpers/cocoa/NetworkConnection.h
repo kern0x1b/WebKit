@@ -29,9 +29,12 @@
 
 #import "Helpers/CoroutineUtilities.h"
 #import <Network/Network.h>
+#import <memory>
 #import <wtf/CompletionHandler.h>
 #import <wtf/CoroutineUtilities.h>
+#import <wtf/HashMap.h>
 #import <wtf/darwin/DispatchOSObject.h>
+#import <wtf/text/WTFString.h>
 
 namespace TestWebKitAPI {
 
@@ -39,9 +42,18 @@ class ReceiveHTTPRequestOperation;
 class ReceiveBytesOperation;
 class SendOperation;
 class ConnectionGroup;
-#if PLATFORM(COCOA)
+#if HAVE(WEBTRANSPORT)
 class ReceiveIncomingConnectionOperation;
 #endif
+struct HTTPResponse;
+
+struct HTTPRequestData {
+    String method;
+    String path;
+    String authority;
+    HashMap<String, String> headerFields; // Header field names arrive lowercased per RFC 7540 8.1.2.
+    Vector<uint8_t> body;
+};
 
 class Connection {
 public:
@@ -56,15 +68,19 @@ public:
     ReceiveBytesOperation awaitableReceiveBytes() const;
     void receiveHTTPRequest(CompletionHandler<void(Vector<char>&&)>&&, Vector<char>&& buffer = { }) const;
     ReceiveHTTPRequestOperation awaitableReceiveHTTPRequest() const;
+#if HAVE(NETWORK_FRAMEWORK_HTTP_MESSAGING)
+    void receiveHTTPMessagingRequest(CompletionHandler<void(HTTPRequestData&&)>&&, HTTPRequestData&& partial = { }) const;
+    void sendHTTPMessagingResponse(const HTTPResponse&, CompletionHandler<void()>&& = nullptr) const;
+#endif
     void webSocketHandshake(CompletionHandler<void()>&& = { });
     void terminate(CompletionHandler<void()>&& = { });
     void cancel();
-#if PLATFORM(COCOA)
+#if HAVE(WEBTRANSPORT)
     void abortReads(uint64_t errorCode);
     void abortWrites(uint64_t errorCode);
     void setRemoteReceiveErrorHandler(CompletionHandler<void(uint64_t)>&&);
     void setRemoteSendErrorHandler(CompletionHandler<void(uint64_t)>&&);
-#endif // PLATFORM(COCOA)
+#endif // HAVE(WEBTRANSPORT)
 
 private:
     friend class HTTPServer;
@@ -76,7 +92,7 @@ private:
     RetainPtr<nw_connection_t> m_connection;
 };
 
-#if PLATFORM(COCOA)
+#if HAVE(WEBTRANSPORT)
 
 class ConnectionGroup {
 public:
@@ -89,6 +105,7 @@ public:
     void cancel();
     Awaitable<void> awaitableFailure();
     void drainWebTransportSession();
+    Vector<uint8_t> exportKeyingMaterial(std::span<const uint8_t> label, std::span<const uint8_t> context, uint32_t outputLength) const;
 
 private:
     friend class WebTransportServer;

@@ -167,12 +167,12 @@ RefPtr<NativeImage> RemoteVideoFrameObjectHeapProxyProcessor::getNativeImage(con
         return nullptr;
     }
 
-    auto [destinationColorSpace] = sendResult.takeReplyOr(DestinationColorSpace { DestinationColorSpace::SRGB().platformColorSpace() });
+    auto [destinationColorSpace] = sendResult.takeReplyOr(ColorSpace { ColorSpace::SRGB().platformColorSpace() });
 
     m_conversionSemaphore.wait();
 
     RetainPtr pixelBuffer = std::exchange(m_convertedBuffer, { });
-    return pixelBuffer ? NativeImage::create(createImageFrom32BGRAPixelBuffer(WTF::move(pixelBuffer), RetainPtr { destinationColorSpace.platformColorSpace() }.get())) : nullptr;
+    return pixelBuffer ? NativeImage::create(WTF::move(pixelBuffer), kCGImageAlphaFirst, destinationColorSpace.platformColorSpace()) : nullptr;
 }
 
 }

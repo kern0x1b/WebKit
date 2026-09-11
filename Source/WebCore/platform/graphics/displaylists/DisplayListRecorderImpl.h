@@ -36,17 +36,21 @@ class RecorderImpl : public Recorder {
     WTF_MAKE_TZONE_ALLOCATED_EXPORT(RecorderImpl, WEBCORE_EXPORT);
     WTF_MAKE_NONCOPYABLE(RecorderImpl);
 public:
-    WEBCORE_EXPORT RecorderImpl(const GraphicsContextState&, const FloatRect& initialClip, const AffineTransform&, const DestinationColorSpace& = DestinationColorSpace::SRGB(), DrawGlyphsMode = DrawGlyphsMode::Normal);
-    RecorderImpl(FloatSize initialClipSize)
-        : RecorderImpl({ }, { { }, initialClipSize }, { }, DestinationColorSpace::SRGB(), DrawGlyphsMode::Normal)
+    WEBCORE_EXPORT RecorderImpl(const GraphicsContextState&, const FloatRect& initialClip, const AffineTransform&, const ColorSpace& = ColorSpace::SRGB(), DrawGlyphsMode = DrawGlyphsMode::Normal);
+    RecorderImpl(const FloatRect& initialClip)
+        : RecorderImpl(GraphicsContextState::initialIndeterminate(), initialClip, { }, ColorSpace::SRGB(), DrawGlyphsMode::Normal)
     {
     }
+
     WEBCORE_EXPORT virtual ~RecorderImpl();
 
     WEBCORE_EXPORT Ref<const DisplayList> takeDisplayList();
     // This function is deprecated and sign that caller is doing something incorrect. This will be
     // removed once all clients are fixed.
     WEBCORE_EXPORT Ref<const DisplayList> copyDisplayList();
+
+    WEBCORE_EXPORT void replaceFontsWithRebuildData();
+    WEBCORE_EXPORT void rebuildFonts();
 
     void save(GraphicsContextState::Purpose) final;
     void restore(GraphicsContextState::Purpose) final;

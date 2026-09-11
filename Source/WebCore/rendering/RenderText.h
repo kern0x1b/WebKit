@@ -70,7 +70,7 @@ public:
     Color selectionBackgroundColor() const;
     Color selectionForegroundColor() const;
     Color selectionEmphasisMarkColor() const;
-    std::unique_ptr<Style::ComputedStyle> selectionPseudoStyle() const;
+    const Style::ComputedStyle* selectionPseudoStyle() const LIFETIME_BOUND;
 
     const Style::ComputedStyle* spellingErrorPseudoStyle() const LIFETIME_BOUND;
     const Style::ComputedStyle* grammarErrorPseudoStyle() const LIFETIME_BOUND;
@@ -165,10 +165,8 @@ public:
 
     virtual void styleDidChange(Style::Difference, const Style::ComputedStyle* oldStyle);
 
-#if ENABLE(TEXT_AUTOSIZING)
     float candidateComputedTextSize() const { return m_candidateComputedTextSize; }
     void setCandidateComputedTextSize(float size) { m_candidateComputedTextSize = size; }
-#endif
 
     StringView NODELETE stringView(unsigned start = 0, std::optional<unsigned> stop = std::nullopt) const;
     
@@ -176,6 +174,7 @@ public:
 
     Vector<std::pair<unsigned, unsigned>> contentRangesBetweenOffsetsForType(const DocumentMarkerType, unsigned startOffset, unsigned endOffset) const;
 
+    bool hasInlineWrapperForDisplayContents() const { return m_hasInlineWrapperForDisplayContents; }
     RenderInline* NODELETE inlineWrapperForDisplayContents();
     void setInlineWrapperForDisplayContents(RenderInline*);
 
@@ -235,10 +234,8 @@ private:
     float widthFromCacheConsideringPossibleTrailingSpace(const Style::ComputedStyle&, const FontCascade&, unsigned startIndex, unsigned wordLen, float xPos, bool currentCharacterIsSpace, WordTrailingSpace&, SingleThreadWeakHashSet<const Font>& fallbackFonts, GlyphOverflow&) const;
     void initiateFontLoadingByAccessingGlyphDataAndComputeCanUseSimplifiedTextMeasuring(const String&);
 
-#if ENABLE(TEXT_AUTOSIZING)
     // FIXME: This should probably be part of the text sizing structures in Document instead. That would save some memory.
     float m_candidateComputedTextSize { 0 };
-#endif
     Markable<float> m_minWidth;
     Markable<float> m_maxWidth;
     float m_beginMinWidth { 0 };
@@ -331,7 +328,7 @@ inline Color RenderText::selectionEmphasisMarkColor() const
     return Color();
 }
 
-inline std::unique_ptr<Style::ComputedStyle> RenderText::selectionPseudoStyle() const
+inline const Style::ComputedStyle* RenderText::selectionPseudoStyle() const
 {
     if (auto* ancestor = firstNonAnonymousAncestor())
         return ancestor->selectionPseudoStyle();

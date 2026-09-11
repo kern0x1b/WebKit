@@ -32,6 +32,7 @@
 #include "FontCascadeFonts.h"
 #include "FontCascadeInlines.h"
 #include "FontInlines.h"
+#include "Hyphenation.h"
 #include "InlineLineTypes.h"
 #include "InlineTextItem.h"
 #include "Latin1TextIterator.h"
@@ -63,6 +64,11 @@ InlineLayoutUnit TextUtil::width(const InlineTextBox& inlineTextBox, const FontC
 {
     if (from == to)
         return 0;
+
+    if (inlineTextBox.hasSynthesizedGlyph()) {
+        // The glyph the counter style's character would draw is not used: TextBoxPainter draws in its place, sized from the font metrics, and reserving that same size here keeps the two in step.
+        return (fontCascade.metricsOfPrimaryFont().intAscent() * 2 / 3 + 1) / 2 + 2;
+    }
 
     if (inlineTextBox.isCombined())
         return fontCascade.size();
@@ -387,7 +393,7 @@ bool TextUtil::mayBreakInBetween(const String& previousContent, const Style::Com
         // See the templated CharacterType in nextBreakablePosition for last and lastlast characters.
         nextContent.convertTo16Bit();
     }
-    auto lineBreakIteratorFactory = CachedLineBreakIteratorFactory { nextContent, Style::toPlatform(nextContentStyle.computedLocale()), TextUtil::lineBreakIteratorMode(nextContentStyle.lineBreak()), TextUtil::contentAnalysis(nextContentStyle.wordBreak()) };
+    auto lineBreakIteratorFactory = CachedLineBreakIteratorFactory { nextContent, Style::toPlatform(nextContentStyle.usedLocale()), TextUtil::lineBreakIteratorMode(nextContentStyle.lineBreak()), TextUtil::contentAnalysis(nextContentStyle.wordBreak()) };
     auto previousContentLength = previousContent.length();
     // FIXME: We should look into the entire uncommitted content for more text context.
     char16_t lastCharacter = previousContentLength ? previousContent[previousContentLength - 1] : 0;
@@ -463,6 +469,46 @@ bool TextUtil::isWrappingAllowed(const Style::ComputedStyle& style)
 {
     // https://www.w3.org/TR/css-text-4/#text-wrap
     return style.textWrapMode() != TextWrapMode::NoWrap;
+}
+
+EnumSet<TextUtil::WordBreakRule> TextUtil::wordBreakBehavior(const Style::ComputedStyle& style, bool hasWrapOpportunityAtPreviousPosition, IsMinimumInIntrinsicWidthMode isMinimumInIntrinsicWidthMode, HyphenationIsDisabled hyphenationIsDisabled)
+{
+    // Disregard any prohibition against line breaks mandated by the word-break property.
+    // The different wrapping opportunities must not be prioritized.
+    // Note hyphenation is not applied.
+    if (style.lineBreak() == LineBreak::Anywhere)
+        return { WordBreakRule::AtArbitraryPosition };
+
+    // Breaking is allowed within “words”.
+    if (style.wordBreak() == WordBreak::BreakAll)
+        return { WordBreakRule::AtArbitraryPositionWithinWords };
+
+    auto includeHyphenationIfAllowed = [&](std::optional<WordBreakRule> wordBreakRule) -> EnumSet<WordBreakRule> {
+        auto hyphenationIsAllowed = hyphenationIsDisabled == HyphenationIsDisabled::No && style.hyphens() == Hyphens::Auto && canHyphenate(Style::toPlatform(style.usedLocale()));
+        if (hyphenationIsAllowed) {
+            if (wordBreakRule)
+                return { *wordBreakRule, WordBreakRule::AtHyphenationOpportunities };
+            return { WordBreakRule::AtHyphenationOpportunities };
+        }
+        if (wordBreakRule)
+            return *wordBreakRule;
+        return { };
+    };
+
+    // For compatibility with legacy content, the word-break property also supports a deprecated break-word keyword.
+    // When specified, this has the same effect as word-break: normal and overflow-wrap: anywhere, regardless of the actual value of the overflow-wrap property.
+    if (style.wordBreak() == WordBreak::BreakWord && !hasWrapOpportunityAtPreviousPosition)
+        return includeHyphenationIfAllowed(WordBreakRule::AtArbitraryPosition);
+    // OverflowWrap::BreakWord/Anywhere An otherwise unbreakable sequence of characters may be broken at an arbitrary point if there are no otherwise-acceptable break points in the line.
+    // Note that this applies to content where CSS properties (e.g. WordBreak::KeepAll) make it unbreakable.
+    // Soft wrap opportunities introduced by overflow-wrap/word-wrap: break-word are not considered when calculating min-content intrinsic sizes.
+    auto overflowWrapBreakWordIsApplicable = isMinimumInIntrinsicWidthMode == IsMinimumInIntrinsicWidthMode::No;
+    if (((overflowWrapBreakWordIsApplicable && style.overflowWrap() == OverflowWrap::BreakWord) || style.overflowWrap() == OverflowWrap::Anywhere) && !hasWrapOpportunityAtPreviousPosition)
+        return includeHyphenationIfAllowed(WordBreakRule::AtArbitraryPosition);
+    // Breaking is forbidden within “words”.
+    if (style.wordBreak() == WordBreak::KeepAll)
+        return { };
+    return includeHyphenationIfAllowed({ });
 }
 
 bool TextUtil::shouldTrailingWhitespaceHang(const Style::ComputedStyle& style)

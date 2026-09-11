@@ -20,6 +20,7 @@
 #include "RenderLayer.h"
 
 #include "CSSFilterRenderer.h"
+#include "ClipPathPaintScope.h"
 #include "HitTestRequest.h"
 #include "HitTestResult.h"
 #include "ReferencedSVGResources.h"
@@ -27,6 +28,7 @@
 #include "RenderBoxInlines.h"
 #include "RenderDescendantIterator.h"
 #include "RenderElementInlines.h"
+#include "RenderElementStyleInlines.h"
 #include "RenderIterator.h"
 #include "RenderLayerBacking.h"
 #include "RenderLayerFilters.h"
@@ -47,6 +49,7 @@
 #include "RenderSVGViewportContainer.h"
 #include "SVGFilterElement.h"
 #include "SVGRenderSupport.h"
+#include "SVGSVGElement.h"
 #include "Settings.h"
 #include "StyleTransformResolver.h"
 #include "TransformPaintScope.h"
@@ -57,24 +60,107 @@ namespace WebCore {
 
 WTF_MAKE_STRUCT_TZONE_ALLOCATED_IMPL(RenderLayer::SVGData);
 
+// Applies clip-path and mask to a non-layer SVG renderer for the lifetime of the scope, the
+// non-layer counterpart of the layer paint flow. A clip-path clips with a path via ClipPathPaintScope
+// when possible. A mask, and a clip-path that cannot be a path, need a transparency layer capturing
+// the renderer's foreground, which the destructor composites the mask and the clipper over with
+// destination-in once the content is done.
+class SVGNonLayerClippingAndMaskingScope {
+    WTF_MAKE_NONCOPYABLE(SVGNonLayerClippingAndMaskingScope);
+public:
+    SVGNonLayerClippingAndMaskingScope(GraphicsContext& context, RenderElement& child, std::optional<LayoutSize> offsetFromRoot, const RenderLayer::LayerPaintingInfo& paintingInfo, OptionSet<PaintBehavior> paintBehavior, RenderObject* subtreePaintRoot, RenderLayer& hostLayer, bool isCollectingEventRegion)
+        : m_context(context)
+        , m_paintingInfo(paintingInfo)
+        , m_paintBehavior(paintBehavior)
+        , m_subtreePaintRoot(subtreePaintRoot)
+        , m_hostLayer(hostLayer)
+    {
+        CheckedPtr svgChild = dynamicDowncast<RenderLayerModelObject>(child);
+        if (!svgChild || (!child.hasClipPath() && !child.hasMask()) || !offsetFromRoot || (context.paintingDisabled() && !isCollectingEventRegion) || paintingInfo.paintDirtyRect.isEmpty())
+            return;
+
+        m_renderer = svgChild.get();
+        m_offsetFromRoot = *offsetFromRoot;
+
+        if (child.hasClipPath())
+            m_clipScope.emplace(context, paintingInfo.regionContext, *svgChild, *offsetFromRoot, LayoutSize(), LayoutRect(), isCollectingEventRegion, ClipPathPaintScope::CoordinateMode::NonLayerPaint);
+
+        // The mask, and a clip that can't be a path, composite over the foreground, so they need a
+        // painting context. While only the event region is collected there is nothing to composite.
+        if (context.paintingDisabled())
+            return;
+
+        m_paintsMask = child.hasMask();
+        m_paintsClippingMask = m_clipScope && m_clipScope->needsMaskClipping();
+
+        if (m_paintsMask || m_paintsClippingMask)
+            m_maskLayer.emplace(context, 1);
+    }
+
+    ~SVGNonLayerClippingAndMaskingScope()
+    {
+        if (!m_maskLayer)
+            return;
+
+        CheckedRef renderer = *m_renderer;
+
+        if (m_paintsMask)
+            paintPhase(renderer.get(), PaintPhase::Mask, LayoutPoint(m_offsetFromRoot));
+
+        if (m_paintsClippingMask) {
+            auto maskOriginTranslation = m_offsetFromRoot;
+            if (renderer->isSVGLayerAwareRenderer())
+                maskOriginTranslation += toLayoutSize(renderer->currentSVGLayoutLocation()) - toLayoutSize(renderer->nominalSVGLayoutLocation());
+
+            GraphicsContextStateSaver maskCTMSaver(m_context, false);
+            if (!maskOriginTranslation.isZero()) {
+                maskCTMSaver.save();
+                m_context.translate(maskOriginTranslation);
+            }
+
+            paintPhase(renderer.get(), PaintPhase::ClippingMask, LayoutPoint());
+        }
+
+        m_maskLayer.reset();
+    }
+
+private:
+    void paintPhase(RenderLayerModelObject& renderer, PaintPhase phase, const LayoutPoint& paintOffset)
+    {
+        PaintInfo paintInfo(m_context, m_paintingInfo.paintDirtyRect, phase, m_paintBehavior, m_subtreePaintRoot.get(), nullptr, nullptr, &m_paintingInfo.rootLayer->renderer(), m_hostLayer.ptr());
+        renderer.paint(paintInfo, paintOffset);
+    }
+
+    GraphicsContext& m_context;
+    const RenderLayer::LayerPaintingInfo& m_paintingInfo;
+    OptionSet<PaintBehavior> m_paintBehavior;
+    CheckedPtr<RenderObject> m_subtreePaintRoot;
+    CheckedRef<RenderLayer> m_hostLayer;
+    CheckedPtr<RenderLayerModelObject> m_renderer;
+    LayoutSize m_offsetFromRoot;
+    std::optional<ClipPathPaintScope> m_clipScope;
+    std::optional<TransparencyLayerScope> m_maskLayer;
+    bool m_paintsMask : 1 { false };
+    bool m_paintsClippingMask : 1 { false };
+};
+
 bool RenderLayer::hasVisibleContentForPaintingForSVG() const
 {
     ASSERT(m_svgData);
     ASSERT(renderer().document().settings().layerBasedSVGEngineEnabled());
 
-    // Layers belonging to a resource container (mask, clipPath, marker, pattern) — either as
-    // the container itself or a descendant — are only visible when actively painting via
-    // paintResourceLayerForSVG(). The flag lives on the resource container's own layer.
-    CheckedPtr resourceContainer = dynamicDowncast<RenderSVGResourceContainer>(renderer());
-    if (!resourceContainer)
-        resourceContainer = dynamicDowncast<RenderSVGResourceContainer>(m_svgData->enclosingHiddenOrResourceContainer.get());
-    if (resourceContainer) {
-        ASSERT(resourceContainer->hasLayer());
-        return resourceContainer->layer()->isPaintingResourceLayerForSVG();
+    // paintResourceLayerForSVG() sets isPaintingResourceLayer on the paint root, a resource
+    // container for mask/clipPath/marker/pattern or the referenced content itself for feImage. Any
+    // layer up the chain carrying the flag means we paint this resource subtree now, so it must
+    // paint despite living in a hidden (<defs>) or resource container, regardless of visibility.
+    for (CheckedPtr ancestor = this; ancestor; ancestor = ancestor->parent()) {
+        if (ancestor->isPaintingResourceLayerForSVG())
+            return true;
     }
 
-    // Hidden SVG containers (<defs> / <symbol> ...) and their children are never painted directly.
-    if (m_svgData->enclosingHiddenOrResourceContainer)
+    // Outside an active resource paint, resource-container and hidden SVG container (<defs>,
+    // <symbol> ...) content are never painted directly.
+    if (is<RenderSVGResourceContainer>(renderer()) || m_svgData->enclosingHiddenOrResourceContainer)
         return false;
 
     return hasVisibleContent();
@@ -149,19 +235,37 @@ void RenderLayer::paintNegativeZOrderChildrenForSVG(GraphicsContext& context, co
     // (paintChildrenInDOMOrderForSVG handles all children including negative z-index).
 }
 
-void RenderLayer::paintForegroundChildrenForSVG(GraphicsContext& context, const LayerPaintingInfo& paintingInfo, const LayerPaintingInfo& localPaintingInfo, OptionSet<PaintLayerFlag> paintFlags, const LayerFragments& layerFragments, OptionSet<PaintBehavior> paintBehavior, RenderObject* subtreePaintRoot, std::optional<WTF::Range<unsigned>> svgPaintOrderItemRange)
+static bool viewBoxDisablesPaintingForSVG(RenderLayerModelObject& renderer)
+{
+    if (CheckedPtr svgRoot = dynamicDowncast<RenderSVGRoot>(renderer))
+        return protect(svgRoot->svgSVGElement())->viewBoxDisablesPainting();
+
+    if (CheckedPtr viewportContainer = dynamicDowncast<RenderSVGViewportContainer>(renderer))
+        return protect(viewportContainer->svgSVGElement())->viewBoxDisablesPainting();
+
+    return false;
+}
+
+void RenderLayer::paintForegroundChildrenForSVG(GraphicsContext& context, const LayerPaintingInfo& paintingInfo, const LayerPaintingInfo& localPaintingInfo, OptionSet<PaintLayerFlag> paintFlags, const LayerFragments& layerFragments, OptionSet<PaintBehavior> paintBehavior, RenderObject* subtreePaintRoot, std::optional<WTF::Range<unsigned>> svgPaintOrderItemRange, LayoutSize svgFilterChildLayerCorrection)
 {
     ASSERT(m_svgData);
 
+    // An empty viewBox disables rendering of the content. Non-layer descendants are flattened into
+    // this layer's DOM-order list (see collectChildrenInDOMOrderForSVG), so the whole list has to be
+    // gated here -- RenderSVGViewportContainer::paint() alone would not catch the flattened ones.
+    if (viewBoxDisablesPaintingForSVG(renderer()))
+        return;
+
     // foreignObject uses HTML-style z-order painting.
     if (renderer().isRenderSVGForeignObject()) {
-        // HTML layers and foreignObject use normal z-order list painting.
+        // HTML layers and foreignObject use normal z-order list painting. No filter buffer correction
+        // applies: these child layers paint via paintList and never reach paintChildrenInDOMOrderForSVG.
         paintList(normalFlowLayers(), context, paintingInfo, paintFlags);
         paintList(positiveZOrderLayers(), context, localPaintingInfo, paintFlags);
         return;
     }
 
-    paintChildrenInDOMOrderForSVG(context, localPaintingInfo, paintFlags, layerFragments, paintBehavior, subtreePaintRoot, svgPaintOrderItemRange);
+    paintChildrenInDOMOrderForSVG(context, localPaintingInfo, paintFlags, layerFragments, paintBehavior, subtreePaintRoot, svgPaintOrderItemRange, svgFilterChildLayerCorrection);
 }
 
 RenderLayer::HitLayer RenderLayer::hitTestChildrenForSVG(RenderLayer* rootLayer, const HitTestRequest& request, HitTestResult& result, const LayoutRect& hitTestRect, const HitTestLocation& hitTestLocation, const HitTestingTransformState* transformState, double* zOffsetForDescendants)
@@ -238,11 +342,8 @@ bool RenderLayer::hasFailedFilterForSVG() const
     ASSERT(m_svgData);
     ASSERT(renderer().document().settings().layerBasedSVGEngineEnabled());
 
-    // Per the SVG spec, if a filter is referenced but cannot be applied (non-existent
-    // reference, empty filter, etc.), the element must not be rendered — the filter
-    // produces transparent black, making the element invisible. The CSS Filter Effects
-    // spec differs — a failed filter means "no effect" (painted normally). Therefore
-    // treat SVG renderers differently, obeying to the SVG rules.
+    // Per the SVG spec, a referenced filter that cannot be applied (missing reference,
+    // empty filter) means the element must not be rendered.
     if (!m_filters || m_filters->filter() || !renderer().style().filter().isReferenceFilter())
         return false;
     return WTF::switchOn(renderer().style().filter().first(),
@@ -332,6 +433,15 @@ bool RenderLayer::appendChildrenInDOMOrderForSVG(RenderElement& parent, LayoutSi
             continue;
         }
 
+        // Paint a non-layer child that clips its subtree together with that subtree as one unit, so the
+        // clip covers all of it. Splitting it apart would move its descendants into the parent's
+        // z-order list and paint them outside the clip.
+        if (RenderSVGModelObject::clipsSubtree(child.get())) {
+            allChildren.append(SVGPaintOrderLayerItem::makeAtomic(child.get(), ancestorOffset));
+            hasIndependentlyPaintedDescendant = true;
+            continue;
+        }
+
         // Leaf nodes (no children) are always painted atomically.
         if (!child->firstChild()) {
             allChildren.append(SVGPaintOrderLayerItem::makeAtomic(child.get(), ancestorOffset));
@@ -383,6 +493,7 @@ bool RenderLayer::appendChildrenInDOMOrderForSVG(RenderElement& parent, LayoutSi
         size_t startIndex = allChildren.size();
         bool subtreeHasIndependentlyPaintedDescendant = appendChildrenInDOMOrderForSVG(child.get(), childOffset, anyNonZeroZIndex);
         if (subtreeHasIndependentlyPaintedDescendant) {
+            ASSERT(!RenderSVGModelObject::clipsSubtree(child.get()));
             allChildren.append(SVGPaintOrderLayerItem::makeOutlineOnly(child.get(), ancestorOffset));
             hasIndependentlyPaintedDescendant = true;
         } else {
@@ -446,8 +557,23 @@ void RenderLayer::paintNonLayerChildForFragmentsForSVG(RenderElement& childRende
     }
 }
 
+void RenderLayer::paintResourceCorrectedChildLayerForSVG(GraphicsContext& context, RenderLayer& childLayer,
+    const LayerPaintingInfo& paintingInfo, OptionSet<PaintLayerFlag> paintFlags, LayoutSize correction) const
+{
+    // A child layer painted inside an SVG resource/filter buffer (mask, clipPath, filter) computes its
+    // position relative to the buffer root and so misses the buffer's nominalSVGLayoutLocation offset.
+    // Translate by 'correction' to compensate. Deeper layers do not re-apply it: the resource path
+    // recomputes it per level and the filter path re-derives it per layer in paintLayerContents.
+    GraphicsContextStateSaver stateSaver(context, false);
+    if (!correction.isZero()) {
+        stateSaver.save();
+        context.translate(correction.width(), correction.height());
+    }
+    childLayer.paintLayer(context, paintingInfo, paintFlags);
+}
+
 void RenderLayer::paintChildrenInDOMOrderForSVG(GraphicsContext& context, const LayerPaintingInfo& paintingInfo, OptionSet<PaintLayerFlag> paintFlags,
-    const LayerFragments& layerFragments, OptionSet<PaintBehavior> paintBehavior, RenderObject* subtreePaintRootForRenderer, std::optional<WTF::Range<unsigned>> svgPaintOrderItemRange)
+    const LayerFragments& layerFragments, OptionSet<PaintBehavior> paintBehavior, RenderObject* subtreePaintRootForRenderer, std::optional<WTF::Range<unsigned>> svgPaintOrderItemRange, LayoutSize svgFilterChildLayerCorrection)
 {
     ASSERT(m_svgData);
     auto& allChildren = childrenInDOMOrderForSVG();
@@ -455,15 +581,14 @@ void RenderLayer::paintChildrenInDOMOrderForSVG(GraphicsContext& context, const 
         return;
 
     bool isSVGRoot = is<RenderSVGRoot>(renderer());
+    bool isCollectingEventRegion = paintFlags.contains(PaintLayerFlag::CollectingEventRegion);
     LayoutPoint containerBaseOffset;
     LayoutPoint layerResourceOffset;
 
     if (auto* svgModelObject = dynamicDowncast<RenderSVGModelObject>(renderer())) {
         containerBaseOffset = svgModelObject->currentSVGLayoutLocation();
-        if (isPaintingResourceLayerForSVG()) {
+        if (isPaintingResourceLayerForSVG())
             layerResourceOffset = svgModelObject->nominalSVGLayoutLocation();
-            containerBaseOffset.moveBy(layerResourceOffset);
-        }
     } else if (auto* svgRoot = dynamicDowncast<RenderSVGRoot>(renderer()))
         containerBaseOffset = svgRoot->location();
 
@@ -507,12 +632,14 @@ void RenderLayer::paintChildrenInDOMOrderForSVG(GraphicsContext& context, const 
             if (!childLayer->paintsInlineInSVGContainer() && !paintBehavior.contains(PaintBehavior::FlattenCompositingLayers))
                 continue;
 
-            if (isPaintingResourceLayerForSVG() && !layerResourceOffset.isZero()) {
-                GraphicsContextStateSaver stateSaver(context);
-                context.translate(layerResourceOffset.x(), layerResourceOffset.y());
-                childLayer->paintLayer(context, paintingInfo, paintFlags);
-            } else
-                childLayer->paintLayer(context, paintingInfo, paintFlags);
+            // mask/clipPath buffers supply the correction locally as layerResourceOffset, filters
+            // carry it via the svgFilterChildLayerCorrection argument (computed at filter-buffer setup
+            // in paintLayerContents). These are mutually exclusive per child, with the resource path
+            // taking precedence.
+            auto correction = (isPaintingResourceLayerForSVG() && !layerResourceOffset.isZero())
+                ? toLayoutSize(layerResourceOffset) : svgFilterChildLayerCorrection;
+
+            paintResourceCorrectedChildLayerForSVG(context, *childLayer, paintingInfo, paintFlags, correction);
             continue;
         }
 
@@ -560,6 +687,21 @@ void RenderLayer::paintChildrenInDOMOrderForSVG(GraphicsContext& context, const 
             continue;
         }
 
+        std::optional<SVGNonLayerClippingAndMaskingScope> clippingAndMaskingScope;
+        if (childRenderer->hasClipPath() || childRenderer->hasMask()) {
+            std::optional<LayoutSize> offsetFromRoot;
+            for (const auto& fragment : layerFragments) {
+                if (!fragment.shouldPaintContent || fragment.dirtyForegroundRect().isEmpty())
+                    continue;
+                auto childPaintOffset = paintOffsetForRenderer(fragment, paintingInfo) + containerBaseOffset;
+                if (isSVGRoot)
+                    childPaintOffset.moveBy(LayoutPoint(-downcast<RenderSVGRoot>(renderer()).scrollPosition()));
+                offsetFromRoot = toLayoutSize(childPaintOffset + childToPaint.accumulatedAncestorOffset);
+                break;
+            }
+            clippingAndMaskingScope.emplace(context, childRenderer.get(), offsetFromRoot, paintingInfo, paintBehavior, subtreePaintRootForRenderer, *this, isCollectingEventRegion);
+        }
+
         // phasesToPaint only covers normal painting (Foreground/Outline), so drive the
         // EventRegion phase separately for non-layer children when collecting the event region.
         if (paintFlags.contains(PaintLayerFlag::CollectingEventRegion)) {
@@ -569,6 +711,8 @@ void RenderLayer::paintChildrenInDOMOrderForSVG(GraphicsContext& context, const 
         }
 
         for (auto phase : childToPaint.phasesToPaint) {
+            if ((phase == PaintPhase::Outline || phase == PaintPhase::SelfOutline) && !childRenderer->hasOutline())
+                continue;
             paintNonLayerChildForFragmentsForSVG(childRenderer.get(), childToPaint.accumulatedAncestorOffset,
                 phase, layerFragments, context, paintingInfo, paintBehavior, subtreePaintRootForRenderer, containerBaseOffset, isSVGRoot, sharedClipSaver.has_value());
         }
@@ -687,19 +831,25 @@ void RenderLayer::paintRendererByApplyingTransformForSVG(GraphicsContext& contex
             selfPaintOffset.moveBy(-layerModelObject->currentSVGLayoutLocation());
         }
 
-        if (rendererToPaint->isRenderSVGContainer()) {
-            // Children recurse from the container's nominal origin (= selfPaintOffset + current) and
-            // re-add their own currentSVGLayoutLocation; the anonymous outermost viewport starts at (0, 0).
-            LayoutPoint recursionBase;
-            if (auto* viewportContainer = dynamicDowncast<RenderSVGViewportContainer>(rendererToPaint.get()); viewportContainer && viewportContainer->isAnonymous()) {
-                // Outermost viewport container: coordinate system starts at (0, 0).
-            } else if (auto* svgModel = dynamicDowncast<RenderSVGModelObject>(rendererToPaint.get()))
-                recursionBase = svgModel->nominalSVGLayoutLocation();
-            paintSubtreeWithinTransformScopeForSVG(context, rendererToPaint.get(), recursionBase, transformedPaintingInfo, adjustedPaintFlags, paintBehavior, subtreePaintRoot);
-            paintInScope(PaintPhase::SelfOutline, selfPaintOffset);
-        } else {
-            paintInScope(PaintPhase::Foreground, selfPaintOffset);
-            paintInScope(PaintPhase::Outline, selfPaintOffset);
+        bool isCollectingEventRegion = adjustedPaintFlags.contains(PaintLayerFlag::CollectingEventRegion);
+        {
+            SVGNonLayerClippingAndMaskingScope clippingAndMaskingScope(context, rendererToPaint.get(), toLayoutSize(selfPaintOffset), transformedPaintingInfo, paintBehavior, subtreePaintRoot, *this, isCollectingEventRegion);
+            if (rendererToPaint->isRenderSVGContainer()) {
+                // Children recurse from the container's nominal origin (selfPaintOffset plus current) and
+                // add their own currentSVGLayoutLocation. The anonymous outermost viewport starts at (0, 0).
+                LayoutPoint recursionBase;
+                if (auto* viewportContainer = dynamicDowncast<RenderSVGViewportContainer>(rendererToPaint.get()); viewportContainer && viewportContainer->isAnonymous()) {
+                    // Outermost viewport container: coordinate system starts at (0, 0).
+                } else if (auto* svgModel = dynamicDowncast<RenderSVGModelObject>(rendererToPaint.get()))
+                    recursionBase = svgModel->nominalSVGLayoutLocation();
+                paintSubtreeWithinTransformScopeForSVG(context, rendererToPaint.get(), recursionBase, transformedPaintingInfo, adjustedPaintFlags, paintBehavior, subtreePaintRoot);
+                if (rendererToPaint->hasOutline())
+                    paintInScope(PaintPhase::SelfOutline, selfPaintOffset);
+            } else {
+                paintInScope(PaintPhase::Foreground, selfPaintOffset);
+                if (rendererToPaint->hasOutline())
+                    paintInScope(PaintPhase::Outline, selfPaintOffset);
+            }
         }
     }
 }
@@ -758,12 +908,10 @@ void RenderLayer::paintSubtreeWithinTransformScopeForSVG(GraphicsContext& contex
 
             RenderLayer::LayerPaintingInfo childPaintingInfo(paintingInfo);
 
-            if (isPaintingResourceLayerForSVG() && !paintOffset.isZero()) {
-                GraphicsContextStateSaver stateSaver(context);
-                context.translate(paintOffset.x(), paintOffset.y());
-                childLayer->paintLayer(context, childPaintingInfo, adjustedFlags);
-            } else
-                childLayer->paintLayer(context, childPaintingInfo, adjustedFlags);
+            // Inside a resource buffer the transform-scope paint offset is this child's resource-layer
+            // correction (see paintResourceCorrectedChildLayerForSVG).
+            auto correction = isPaintingResourceLayerForSVG() ? toLayoutSize(paintOffset) : LayoutSize();
+            paintResourceCorrectedChildLayerForSVG(context, *childLayer, childPaintingInfo, adjustedFlags, correction);
             continue;
         }
 
@@ -772,23 +920,27 @@ void RenderLayer::paintSubtreeWithinTransformScopeForSVG(GraphicsContext& contex
         if (CheckedPtr childSvgModel = dynamicDowncast<RenderSVGModelObject>(child.get()))
             adjustedPaintOffset.moveBy(childSvgModel->currentSVGLayoutLocation());
 
-        if (child->isRenderSVGContainer()) {
-            paintSubtreeWithinTransformScopeForSVG(context, child.get(), adjustedPaintOffset, paintingInfo, paintFlags, paintBehavior, subtreePaintRoot);
+        bool isCollectingEventRegion = paintFlags.contains(PaintLayerFlag::CollectingEventRegion);
+        {
+            SVGNonLayerClippingAndMaskingScope clippingAndMaskingScope(context, child.get(), toLayoutSize(paintOffset), paintingInfo, paintBehavior, subtreePaintRoot, *this, isCollectingEventRegion);
+            if (child->isRenderSVGContainer()) {
+                paintSubtreeWithinTransformScopeForSVG(context, child.get(), adjustedPaintOffset, paintingInfo, paintFlags, paintBehavior, subtreePaintRoot);
 
-            PaintInfo outlinePaintInfo(context, paintingInfo.paintDirtyRect, PaintPhase::SelfOutline, paintBehavior, subtreePaintRoot,
-                nullptr, nullptr, &paintingInfo.rootLayer->renderer(), this,
-                paintingInfo.requireSecurityOriginAccessForWidgets);
-            child->paint(outlinePaintInfo, paintOffset);
-        } else {
-            LayoutRect dirtyRect = paintingInfo.paintDirtyRect;
-            PaintInfo paintInfo(context, dirtyRect, PaintPhase::Foreground, paintBehavior, subtreePaintRoot,
-                nullptr, nullptr, &paintingInfo.rootLayer->renderer(), this,
-                paintingInfo.requireSecurityOriginAccessForWidgets);
-            child->paint(paintInfo, paintOffset);
+                PaintInfo outlinePaintInfo(context, paintingInfo.paintDirtyRect, PaintPhase::SelfOutline, paintBehavior, subtreePaintRoot,
+                    nullptr, nullptr, &paintingInfo.rootLayer->renderer(), this,
+                    paintingInfo.requireSecurityOriginAccessForWidgets);
+                child->paint(outlinePaintInfo, paintOffset);
+            } else {
+                LayoutRect dirtyRect = paintingInfo.paintDirtyRect;
+                PaintInfo paintInfo(context, dirtyRect, PaintPhase::Foreground, paintBehavior, subtreePaintRoot,
+                    nullptr, nullptr, &paintingInfo.rootLayer->renderer(), this,
+                    paintingInfo.requireSecurityOriginAccessForWidgets);
+                child->paint(paintInfo, paintOffset);
 
-            PaintInfo outlinePaintInfo(paintInfo);
-            outlinePaintInfo.phase = PaintPhase::Outline;
-            child->paint(outlinePaintInfo, paintOffset);
+                PaintInfo outlinePaintInfo(paintInfo);
+                outlinePaintInfo.phase = PaintPhase::Outline;
+                child->paint(outlinePaintInfo, paintOffset);
+            }
         }
     }
 }

@@ -28,6 +28,7 @@
 #import "Helpers/cocoa/HTTPServer.h"
 #import "Helpers/PlatformUtilities.h"
 #import "Helpers/Test.h"
+#import "Helpers/Utilities.h"
 #import "Helpers/cocoa/TestCocoa.h"
 #import "Helpers/cocoa/TestNavigationDelegate.h"
 #import "Helpers/cocoa/TestUIDelegate.h"
@@ -174,7 +175,7 @@ static void testAlertWithEnhancedSecurity(RetainPtr<TestUIDelegate> uiDelegate, 
     EXPECT_WK_STREQ(result[0], message);
     if ([result[1] boolValue] != enhancedSecurityEnabled) {
         ADD_FAILURE_AT(location.file_name(), location.line())
-            << "Enhanced security mismatch for alert '" << message.utf8().data() << "'"
+            << "Enhanced security mismatch for alert '" << message.utf8().toStdString() << "'"
             << " (expected: " << (enhancedSecurityEnabled ? "Enabled" : "Disabled")
             << ", actual: " << ([result[1] boolValue] ? "Enabled" : "Disabled") << ")";
     }
@@ -270,7 +271,7 @@ TEST(EnhancedSecurityPolicies, test_name) \
 } \
 
 #define TEST_WITH_SITE_ISOLATION(test_name) \
-TEST(EnhancedSecurityPolicies, DISABLED_##test_name##WithSiteIsolation) \
+TEST(EnhancedSecurityPolicies, test_name##WithSiteIsolation) \
 { \
     run##test_name(true); \
 }
@@ -297,6 +298,37 @@ static void runHttpLoad(bool useSiteIsolation)
     EXPECT_EQ(plaintextServer.totalRequests(), 1u);
 }
 TEST_WITH_AND_WITHOUT_SITE_ISOLATION(HttpLoad)
+
+static void runHttpFragmentNavigation(bool useSiteIsolation)
+{
+    auto pageBody = "<a id='link' href='#target'>target</a><div id='target'></div>"
+        "<script>"
+        "alert('insecure-page');"
+        "window.onhashchange = () => alert('after-fragment-navigation');"
+        "window.onload = () => { document.getElementById('link').click(); };"
+        "</script>"_s;
+
+    HTTPServer plaintextServer({
+        { "http://insecure.example.internal/"_s, { pageBody } },
+        { "http://insecure.example.internal/#target"_s, { pageBody } },
+    });
+
+    auto webView = enhancedSecurityTestConfiguration(&plaintextServer, nullptr, useSiteIsolation);
+
+    loadRequestAndCheckEnhancedSecurityAlerts(webView, @"http://insecure.example.internal/", {
+        { "insecure-page"_s, ExpectedEnhancedSecurity::Enabled },
+        { "after-fragment-navigation"_s, ExpectedEnhancedSecurity::Enabled }
+    });
+
+    EXPECT_WK_STREQ([webView URL].absoluteString, @"http://insecure.example.internal/#target");
+
+    // Allow a moment for the provisional load to begin, if it is going to.
+    TestWebKitAPI::Util::runFor(0.1_s);
+
+    EXPECT_EQ([webView _provisionalWebProcessIdentifier], 0);
+    EXPECT_EQ(plaintextServer.totalRequests(), 1u);
+}
+TEST_WITH_AND_WITHOUT_SITE_ISOLATION(HttpFragmentNavigation)
 
 static void runHttpLoadWithCOOP(bool useSiteIsolation)
 {
@@ -463,6 +495,40 @@ static void runHttpToHttpsRedirectNoEnhancedSecurityProcess(bool useSiteIsolatio
     EXPECT_FALSE(sawEnhancedSecurityProcess);
 }
 TEST_WITH_AND_WITHOUT_SITE_ISOLATION(HttpToHttpsRedirectNoEnhancedSecurityProcess)
+
+static void runIframeKeepsSiteOutOfEnhancedSecurityProcess(bool useSiteIsolation)
+{
+    HTTPServer plaintextServer({
+        { "http://insecure.example.internal/iframe"_s, { "<script>alert('iframe-in-page')</script>"_s } },
+        { "http://insecure.example.internal/first"_s, { "<script>alert('with-iframe-alive')</script>"_s } },
+        { "http://insecure.example.internal/second"_s, { "<script>alert('after-iframe-gone')</script>"_s } },
+    });
+
+    auto webView = enhancedSecurityTestConfiguration(&plaintextServer, nullptr, useSiteIsolation);
+
+    runActionAndCheckEnhancedSecurityAlerts(webView, [webView] {
+        [webView loadHTMLString:@"<iframe src='http://insecure.example.internal/iframe'></iframe>" baseURL:nil];
+    }, {
+        { "iframe-in-page"_s, ExpectedEnhancedSecurity::Disabled }
+    });
+
+    loadRequestAndCheckEnhancedSecurityAlerts(webView, @"http://insecure.example.internal/first", {
+        { "with-iframe-alive"_s, ExpectedEnhancedSecurity::Disabled }
+    });
+
+    EXPECT_WK_STREQ([webView URL].absoluteString, @"http://insecure.example.internal/first");
+
+    auto pidWithoutEnhancedSecurity = [webView _webProcessIdentifier];
+
+    loadRequestAndCheckEnhancedSecurityAlerts(webView, @"http://insecure.example.internal/second", {
+        { "after-iframe-gone"_s, ExpectedEnhancedSecurity::Enabled }
+    });
+
+    EXPECT_WK_STREQ([webView URL].absoluteString, @"http://insecure.example.internal/second");
+    EXPECT_NE([webView _webProcessIdentifier], pidWithoutEnhancedSecurity);
+    EXPECT_EQ(plaintextServer.totalRequests(), 3u);
+}
+TEST_WITH_SITE_ISOLATION(IframeKeepsSiteOutOfEnhancedSecurityProcess)
 
 // MARK: - HTTPS First Upgrade Tests
 

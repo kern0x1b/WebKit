@@ -232,7 +232,12 @@ TEST_F(SampleMapTest, findSamplesBetweenPresentationTimes)
     EXPECT_TRUE(presentationMap.end() == iterator_range.first);
     EXPECT_TRUE(presentationMap.end() == iterator_range.second);
 
-    iterator_range = presentationMap.findSamplesBetweenPresentationTimes(MediaTime(5, 1), MediaTime(2, 1));
+    // An inverted range must not produce a pair whose first iterator follows its second.
+    iterator_range = presentationMap.findSamplesBetweenPresentationTimes(MediaTime(20, 1), MediaTime(5, 1));
+    EXPECT_TRUE(presentationMap.end() == iterator_range.first);
+    EXPECT_TRUE(presentationMap.end() == iterator_range.second);
+
+    iterator_range = presentationMap.findSamplesBetweenPresentationTimes(MediaTime(10, 1), MediaTime(10, 1));
     EXPECT_TRUE(presentationMap.end() == iterator_range.first);
     EXPECT_TRUE(presentationMap.end() == iterator_range.second);
 }
@@ -273,7 +278,11 @@ TEST_F(SampleMapTest, findSamplesBetweenPresentationTimesFromEnd)
     EXPECT_TRUE(presentationMap.end() == iterator_range.first);
     EXPECT_TRUE(presentationMap.end() == iterator_range.second);
 
-    iterator_range = presentationMap.findSamplesBetweenPresentationTimesFromEnd(MediaTime(5, 1), MediaTime(2, 1));
+    iterator_range = presentationMap.findSamplesBetweenPresentationTimesFromEnd(MediaTime(20, 1), MediaTime(5, 1));
+    EXPECT_TRUE(presentationMap.end() == iterator_range.first);
+    EXPECT_TRUE(presentationMap.end() == iterator_range.second);
+
+    iterator_range = presentationMap.findSamplesBetweenPresentationTimesFromEnd(MediaTime(10, 1), MediaTime(10, 1));
     EXPECT_TRUE(presentationMap.end() == iterator_range.first);
     EXPECT_TRUE(presentationMap.end() == iterator_range.second);
 }

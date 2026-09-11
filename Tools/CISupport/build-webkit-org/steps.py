@@ -743,7 +743,7 @@ class RunJavaScriptCoreTests(TestWithFailureCount, CustomFlagsMixin, ShellMixin)
         "--buildbot-master", DNS_NAME,
         "--report", RESULTS_WEBKIT_URL,
     ]
-    commandExtra = ['--treat-failing-as-flaky=0.7,10,20']
+    commandExtra = ['--treat-failing-as-flaky=0.7,10,20', '--max-timeout', '800']
     failedTestsFormatString = "%d JSC test%s failed"
     logfiles = {"json": jsonFileName}
 
@@ -830,7 +830,7 @@ class RunTest262Tests(TestWithFailureCount, CustomFlagsMixin, ShellMixin):
     description = ["test262-tests running"]
     descriptionDone = ["test262-tests"]
     failedTestsFormatString = "%d Test262 test%s failed"
-    command = ["perl", "Tools/Scripts/test262-runner", "--verbose", WithProperties("--%(configuration)s")]
+    command = ["Tools/Scripts/test262-runner", "--verbose", WithProperties("--%(configuration)s")]
     test_summary_re = re.compile(r'^\! NEW FAIL')
 
     def __init__(self, *args, **kwargs):
@@ -1372,6 +1372,7 @@ class RunWebDriverTests(shell.Test, CustomFlagsMixin, ShellMixin):
 
     def __init__(self, **kwargs):
         kwargs['timeout'] = 90 * 60
+        kwargs['maxTime'] = 3 * 60 * 60
         super().__init__(**kwargs)
 
     @defer.inlineCallbacks

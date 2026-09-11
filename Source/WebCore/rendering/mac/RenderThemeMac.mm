@@ -1171,7 +1171,7 @@ bool RenderThemeMac::controlSupportsTints(const RenderElement& renderer) const
 
 static NSControlSize controlSizeForSystemFont(const Style::ComputedStyle& style)
 {
-    auto fontSize = style.computedFontSize();
+    auto fontSize = style.usedFontSize();
     if (fontSize >= [NSFont systemFontSizeForControlSize:NSControlSizeLarge] && supportsLargeFormControls())
         return NSControlSizeLarge;
     if (fontSize >= [NSFont systemFontSizeForControlSize:NSControlSizeRegular])
@@ -1183,7 +1183,7 @@ static NSControlSize controlSizeForSystemFont(const Style::ComputedStyle& style)
 
 static NSControlSize controlSizeForFont(const Style::ComputedStyle& style)
 {
-    auto fontSize = style.computedFontSize();
+    auto fontSize = style.usedFontSize();
     if (fontSize >= 21 && supportsLargeFormControls())
         return NSControlSizeLarge;
     if (fontSize >= 16)
@@ -1195,10 +1195,6 @@ static NSControlSize controlSizeForFont(const Style::ComputedStyle& style)
 
 static IntSize sizeForFont(const Style::ComputedStyle& style, std::span<const IntSize, 4> sizes)
 {
-    if (style.usedZoom() != 1.0f && !style.evaluationTimeZoomEnabled()) {
-        IntSize result = sizes[controlSizeForFont(style)];
-        return IntSize(result.width() * style.usedZoom(), result.height() * style.usedZoom());
-    }
     return sizes[controlSizeForFont(style)];
 }
 
@@ -1228,11 +1224,13 @@ static void setFontFromControlSize(Style::ComputedStyle& style, NSControlSize co
 
     NSFont* font = [NSFont systemFontOfSize:[NSFont systemFontSizeForControlSize:controlSize]];
     fontDescription.setOneFamily("-apple-system"_s);
-    fontDescription.setComputedSize([font pointSize] * style.usedZoom());
-    fontDescription.setSpecifiedSize([font pointSize] * style.usedZoom());
+    fontDescription.setUsedSize([font pointSize] * style.usedZoom(), style.usedZoom());
+    fontDescription.setComputedSize([font pointSize]);
 
     // Reset line height
     style.setLineHeight(Style::ComputedStyle::initialLineHeight());
+    style.setTextAutosizingAdjustedLineHeight(Style::ComputedStyle::initialLineHeight());
+
     style.setFontDescription(WTF::move(fontDescription));
 }
 
@@ -1375,7 +1373,7 @@ Style::PaddingBox RenderThemeMac::platformPopupInternalPaddingBox(const Style::C
     }
 
     if (style.usedAppearance() == StyleAppearance::MenulistButton) {
-        float arrowWidth = baseArrowWidth * (style.computedFontSize() / baseFontSize);
+        float arrowWidth = baseArrowWidth * (style.usedFontSize() / baseFontSize);
         float rightPadding = ceilf(arrowWidth + (arrowPaddingBefore + arrowPaddingAfter + paddingBeforeSeparator) * style.usedZoom());
         float leftPadding = styledPopupPaddingLeft;
 
@@ -1417,16 +1415,17 @@ void RenderThemeMac::adjustMenuListButtonStyle(Style::ComputedStyle& style, cons
 #endif
 
     auto usedZoom = style.usedZoomForLength();
-    float fontScale = style.computedFontSize() / baseFontSize / usedZoom.value;
+    float fontScale = style.usedFontSize() / baseFontSize / usedZoom.value;
 
     style.resetPadding();
 
-    auto radius = Style::LengthPercentage<CSS::NonnegativeUnzoomed>::Dimension { std::trunc(baseBorderRadius + fontScale - 1) }; // FIXME: Round up?
+    auto radius = Style::LengthPercentage<CSS::Nonnegative>::Dimension { std::trunc(baseBorderRadius + fontScale - 1) }; // FIXME: Round up?
     style.setBorderRadius({ radius, radius });
 
     style.setMinHeight(18_css_px);
 
     style.setLineHeight(Style::ComputedStyle::initialLineHeight());
+    style.setTextAutosizingAdjustedLineHeight(Style::ComputedStyle::initialLineHeight());
 }
 
 std::span<const IntSize, 4> RenderThemeMac::menuListSizes() const
@@ -1641,8 +1640,8 @@ std::optional<FontCascadeDescription> RenderThemeMac::controlFont(StyleAppearanc
 
         NSFont* nsFont = [NSFont systemFontOfSize:[NSFont systemFontSizeForControlSize:controlSizeForFont(font)]];
         fontDescription.setOneFamily("-apple-system"_s);
-        fontDescription.setComputedSize([nsFont pointSize] * zoomFactor);
-        fontDescription.setSpecifiedSize([nsFont pointSize] * zoomFactor);
+        fontDescription.setUsedSize([nsFont pointSize] * zoomFactor, zoomFactor);
+        fontDescription.setComputedSize([nsFont pointSize]);
         return fontDescription;
     }
     default:
@@ -1775,7 +1774,7 @@ LayoutSize RenderThemeMac::attachmentIntrinsicSize(const RenderAttachment& attac
 static RefPtr<Icon> iconForAttachment(const String& fileName, const String& attachmentType, const String& title)
 {
 // FIXME: Remove after rdar://136373445 is fixed.
-#define LOG_ATTACHMENT(fmt, ...) RELEASE_LOG(Editing, "iconForAttachment(type='%s') " fmt, attachmentType.utf8().data(), ##__VA_ARGS__);
+#define LOG_ATTACHMENT(fmt, ...) RELEASE_LOG(Editing, "iconForAttachment(type='%s') " fmt, attachmentType.utf8().legacyCStringPointer(), ##__VA_ARGS__);
 
     if (!attachmentType.isEmpty() && !equalLettersIgnoringASCIICase(attachmentType, "public.data"_s)) {
         if (equalLettersIgnoringASCIICase(attachmentType, "public.directory"_s) || equalLettersIgnoringASCIICase(attachmentType, "multipart/x-folder"_s) || equalLettersIgnoringASCIICase(attachmentType, "application/vnd.apple.folder"_s)) {
@@ -1792,10 +1791,10 @@ static RefPtr<Icon> iconForAttachment(const String& fileName, const String& atta
                 type = UTIFromMIMEType(attachmentType);
 
             if (auto icon = Icon::createIconForUTI(type)) {
-                LOG_ATTACHMENT("-> Got icon for %s '%s'", type == attachmentType ? "declared UTI" : "UTI-from-MIMEtype", type.utf8().data());
+                LOG_ATTACHMENT("-> Got icon for %s '%s'", type == attachmentType ? "declared UTI" : "UTI-from-MIMEtype", type.utf8().legacyCStringPointer());
                 return icon;
             }
-            LOG_ATTACHMENT("-> No icon for %s '%s'! Will fallback to filename or title...", type == attachmentType ? "declared UTI" : "UTI-from-MIMEtype", type.utf8().data());
+            LOG_ATTACHMENT("-> No icon for %s '%s'! Will fallback to filename or title...", type == attachmentType ? "declared UTI" : "UTI-from-MIMEtype", type.utf8().legacyCStringPointer());
         }
     }
 
@@ -1810,10 +1809,10 @@ static RefPtr<Icon> iconForAttachment(const String& fileName, const String& atta
     RetainPtr nsTitle = title.createNSString();
     if (RetainPtr<NSString> fileExtension = nsTitle.get().pathExtension; fileExtension.get().length) {
         if (auto icon = Icon::createIconForFileExtension(fileExtension.get())) {
-            LOG_ATTACHMENT("-> Got icon for title file extension '%s'", String(fileExtension.get()).utf8().data());
+            LOG_ATTACHMENT("-> Got icon for title file extension '%s'", String(fileExtension.get()).utf8().legacyCStringPointer());
             return icon;
         }
-        LOG_ATTACHMENT("-> No icon for title file extension '%s'! Will fallback to public.data icon", String(fileExtension.get()).utf8().data());
+        LOG_ATTACHMENT("-> No icon for title file extension '%s'! Will fallback to public.data icon", String(fileExtension.get()).utf8().legacyCStringPointer());
     } else
         LOG_ATTACHMENT("-> No file extension in title! Will fallback to public.data icon");
 

@@ -404,7 +404,7 @@ void VideoPresentationInterfaceIOS::videoDimensionsChanged(const FloatSize& vide
 #endif
 }
 
-void VideoPresentationInterfaceIOS::externalPlaybackChanged(bool enabled, PlaybackSessionModel::ExternalPlaybackTargetType, const String&)
+void VideoPresentationInterfaceIOS::externalPlaybackChanged(bool enabled, PlaybackSessionModel::ExternalPlaybackTargetType, const String&, const String&)
 {
     [playerLayerView() setHidden:enabled];
 }

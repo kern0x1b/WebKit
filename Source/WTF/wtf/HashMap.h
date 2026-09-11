@@ -31,6 +31,7 @@
 #include <wtf/OptionSetHash.h>
 #include <wtf/Packed.h>
 #include <wtf/RangeAdaptors.h>
+#include <wtf/SwiftBridging.h>
 
 namespace WTF {
 
@@ -278,7 +279,7 @@ private:
     }
 
     HashTableType m_impl;
-};
+} SWIFT_ESCAPABLE_IF(KeyArg, MappedArg) SWIFT_COPYABLE_IF(KeyArg, MappedArg);
 
 template<typename ValueTraits, typename HashFunctions>
 struct HashMapTranslator {

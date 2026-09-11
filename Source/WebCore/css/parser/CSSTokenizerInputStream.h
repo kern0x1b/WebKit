@@ -40,7 +40,7 @@ class CSSTokenizerInputStream {
     WTF_MAKE_NONCOPYABLE(CSSTokenizerInputStream);
     WTF_DEPRECATED_MAKE_FAST_ALLOCATED_WITH_HEAP_IDENTIFIER(CSSTokenizerInputStream, CSSTokenizerInputStream);
 public:
-    explicit CSSTokenizerInputStream(const String& input);
+    explicit CSSTokenizerInputStream(StringView string LIFETIME_BOUND);
 
     // Gets the char in the stream. Will return (NUL) kEndOfFileMarker when at the
     // end of the stream.
@@ -48,7 +48,7 @@ public:
     {
         if (m_offset >= m_stringLength) [[unlikely]]
             return kEndOfFileMarker;
-        return characterAt(m_offset);
+        return m_string[m_offset];
     }
 
     // Gets the char at lookaheadOffset from the current stream position. Will
@@ -58,7 +58,7 @@ public:
         size_t index = m_offset + lookaheadOffset;
         if (index >= m_stringLength) [[unlikely]]
             return kEndOfFileMarker;
-        return characterAt(index);
+        return m_string[m_offset + lookaheadOffset];
     }
 
     void advance(unsigned offset = 1) { m_offset += offset; }
@@ -77,19 +77,14 @@ public:
     template<typename Predicate>
     unsigned skipWhile(unsigned offset, Predicate predicate) const
     {
-        size_t start = m_offset + offset;
-        if (start >= m_stringLength) [[unlikely]]
-            return offset;
-        size_t index = start;
-        size_t length = m_stringLength;
-        if (m_is8Bit) {
-            const Latin1Character* characters = m_characters8;
-            while (index < length && predicate(characters[index]))
-                ++index;
+        if (m_string.is8Bit()) {
+            auto characters8 = m_string.span8();
+            while ((m_offset + offset) < m_stringLength && characterPredicate(characters8[m_offset + offset]))
+                ++offset;
         } else {
-            const char16_t* characters = m_characters16;
-            while (index < length && predicate(characters[index]))
-                ++index;
+            auto characters16 = m_string.span16();
+            while ((m_offset + offset) < m_stringLength && characterPredicate(characters16[m_offset + offset]))
+                ++offset;
         }
         return offset + static_cast<unsigned>(index - start);
     }
@@ -110,9 +105,7 @@ public:
     StringView rangeAt(unsigned start, unsigned length) const
     {
         ASSERT(start + length <= m_stringLength);
-        if (m_is8Bit)
-            return StringView(static_cast<const void*>(m_characters8 + start), length, true);
-        return StringView(static_cast<const void*>(m_characters16 + start), length, false);
+        return m_string.substring(start, length);
     }
 
 private:
@@ -123,12 +116,7 @@ private:
 
     size_t m_offset;
     const size_t m_stringLength;
-    // The buffer pointer is hoisted out of the StringImpl once so that every character
-    // access is a single indexed load instead of re-testing the is8Bit flag.
-    const Latin1Character* m_characters8 { nullptr };
-    const char16_t* m_characters16 { nullptr };
-    bool m_is8Bit { false };
-    RefPtr<StringImpl> m_string;
+    StringView m_string;
 };
 
 } // namespace WebCore

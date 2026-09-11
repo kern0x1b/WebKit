@@ -31,7 +31,6 @@
 #include "WebPage.h"
 #include "WebsiteDataStoreParameters.h"
 #include <WebCore/FrameLoader.h>
-#include <WebCore/NetworkStorageSession.h>
 #include <WebCore/ResourceError.h>
 #include <WebCore/Settings.h>
 
@@ -42,8 +41,8 @@ void WebFrameNetworkingContext::ensureWebsiteDataStoreSession(const WebsiteDataS
 {
 }
 
-WebFrameNetworkingContext::WebFrameNetworkingContext(WebFrame* frame)
-    : FrameNetworkingContext(frame->coreLocalFrame())
+WebFrameNetworkingContext::WebFrameNetworkingContext(WebCore::LocalFrame* frame)
+    : FrameNetworkingContext(frame)
 {
 }
 

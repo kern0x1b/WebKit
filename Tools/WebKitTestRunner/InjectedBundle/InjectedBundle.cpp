@@ -187,15 +187,6 @@ WKBundlePageRef InjectedBundle::pageRef() const
     return page ? page->page() : nullptr;
 }
 
-bool InjectedBundle::pageHasLocalMainFrame() const
-{
-    auto page = this->page();
-    // WKBundleFrameGetJavaScriptContext returns null for remote frames; a local main frame has one.
-    ALLOW_DEPRECATED_DECLARATIONS_BEGIN
-    return page && WKBundleFrameGetJavaScriptContext(WKBundlePageGetMainFrame(page->page()));
-    ALLOW_DEPRECATED_DECLARATIONS_END
-}
-
 void InjectedBundle::didReceiveMessage(WKStringRef, WKTypeRef)
 {
     WKBundlePostMessage(m_bundle.get(), toWK("Error").get(), toWK("Unknown").get());
@@ -247,7 +238,7 @@ void InjectedBundle::didReceiveMessageToPage(WKBundlePageRef page, WKStringRef m
             beforeTest = toWTFString(options) == "BeforeTest"_s;
 
         if (auto options = stringValue(messageBodyDictionary, "JSCOptions"))
-            JSC::Options::setOptions(toWTFString(options).utf8().data());
+            JSC::Options::setOptions(toWTFString(options).utf8().legacyCStringPointer());
 
         if (booleanValue(messageBodyDictionary, "ShouldGC"))
             WKBundleGarbageCollectJavaScriptObjects(m_bundle.get());
@@ -295,7 +286,7 @@ void InjectedBundle::didReceiveMessageToPage(WKBundlePageRef page, WKStringRef m
     }
 
     if (WKStringIsEqualToUTF8CString(messageName, "WorkQueueProcessedCallback")) {
-        if (!topLoadingFrame() && m_testRunner && !m_testRunner->shouldWaitUntilDone())
+        if (m_testRunner && !m_testRunner->shouldWaitUntilDone() && InjectedBundle::page() && !InjectedBundle::page()->topLoadingFrame())
             InjectedBundle::page()->dump();
         return;
     }
@@ -342,7 +333,7 @@ void InjectedBundle::setAllowedHosts(WKDictionaryRef settings)
 void InjectedBundle::beginTesting(WKDictionaryRef settings, BegingTestingMode testingMode)
 {
     if (auto jscOpts = stringValue(settings, "JSCOptions"))
-        JSC::Options::setOptions(toWTFString(jscOpts).utf8().data());
+        JSC::Options::setOptions(toWTFString(jscOpts).utf8().legacyCStringPointer());
 
     m_dumpPixels = booleanValue(settings, "DumpPixels");
     m_timeout = Seconds::fromMilliseconds(uint64Value(settings, "Timeout"));
@@ -405,7 +396,8 @@ void InjectedBundle::beginTesting(WKDictionaryRef settings, BegingTestingMode te
 
 void InjectedBundle::done()
 {
-    setTopLoadingFrame(0);
+    for (auto& page : m_pages)
+        page->setTopLoadingFrame(nullptr);
 
     m_accessibilityController->resetToConsistentState();
 
@@ -450,7 +442,7 @@ void InjectedBundle::outputText(StringView output, IsFinalTestOutput isFinalTest
     // is done via asynchronous IPC, even if the connection is in fully synchronous mode due to a WKBundlePagePostSynchronousMessageForTesting()
     // call. Otherwise, messages logged via sync and async IPC may end up out of order and cause flakiness.
     auto messageName = isFinalTestOutput == IsFinalTestOutput::Yes ? toWK("FinalTextOutput") : toWK("TextOutput");
-    WKBundlePagePostMessageIgnoringFullySynchronousMode(page()->page(), messageName.get(), toWK(string ? string->data() : "Out of memory\n").get());
+    WKBundlePagePostMessageIgnoringFullySynchronousMode(page()->page(), messageName.get(), toWK(string ? string->legacyCStringPointer() : "Out of memory\n").get());
 }
 
 void InjectedBundle::postNewBeforeUnloadReturnValue(bool value)

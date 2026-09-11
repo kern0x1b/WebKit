@@ -50,6 +50,7 @@
 #include <WebCore/UserMediaRequest.h>
 #include <algorithm>
 #include <wtf/CryptographicallyRandomNumber.h>
+#include <wtf/HexNumber.h>
 #include <wtf/LoggerHelper.h>
 #include <wtf/Scope.h>
 #include <wtf/StdLibExtras.h>
@@ -791,7 +792,10 @@ void UserMediaPermissionRequestManagerProxy::processUserMediaPermissionValidRequ
             return;
 
         if (!isOK) {
-            protectedThis->denyRequest(protect(*protectedThis->m_currentUserMediaRequest), UserMediaPermissionRequestProxy::UserMediaAccessDenialReason::PermissionDenied);
+            RefPtr currentUserMediaRequest = protectedThis->m_currentUserMediaRequest;
+            if (!currentUserMediaRequest)
+                return;
+            protectedThis->denyRequest(*currentUserMediaRequest, UserMediaPermissionRequestProxy::UserMediaAccessDenialReason::PermissionDenied);
             return;
         }
         protectedThis->decidePolicyForUserMediaPermissionRequest();

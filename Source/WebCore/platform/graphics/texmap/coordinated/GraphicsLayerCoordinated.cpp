@@ -43,6 +43,7 @@
 #include "GraphicsLayerFilterAnimationValue.h"
 #include "GraphicsLayerKeyframeValueList.h"
 #include "Image.h"
+#include "MediaPlayer.h"
 #include "NativeImage.h"
 #include <wtf/Locker.h>
 
@@ -61,7 +62,11 @@ bool GraphicsLayer::supportsLayerType(Type type)
     case Type::TiledBacking:
         return true;
     case Type::Shape:
+#if USE(TEXTURE_MAPPER)
+        return false;
+#else
         return true;
+#endif
     }
     RELEASE_ASSERT_NOT_REACHED();
 }
@@ -85,7 +90,7 @@ GraphicsLayerCoordinated::GraphicsLayerCoordinated(Type layerType, GraphicsLayer
 GraphicsLayerCoordinated::~GraphicsLayerCoordinated()
 {
     if (m_contentsBufferProxy)
-        m_contentsBufferProxy->setTargetLayer(nullptr);
+        m_contentsBufferProxy->invalidate();
     m_platformLayer->setOwner(nullptr);
     if (m_parent)
         downcast<GraphicsLayerCoordinated>(*m_parent).noteLayerPropertyChanged(Change::Children, ScheduleFlush::Yes);
@@ -264,6 +269,15 @@ void GraphicsLayerCoordinated::setPreserves3D(bool preserves3D)
     setNeedsUpdateLayerTransform();
 }
 
+void GraphicsLayerCoordinated::setBackgroundColor(const Color& color)
+{
+    if (m_backgroundColor == color)
+        return;
+
+    GraphicsLayer::setBackgroundColor(color);
+    noteLayerPropertyChanged(Change::BackgroundColor, ScheduleFlush::Yes);
+}
+
 void GraphicsLayerCoordinated::setBackfaceVisibility(bool backfaceVisibility)
 {
     if (m_backfaceVisibility == backfaceVisibility)
@@ -356,6 +370,15 @@ void GraphicsLayerCoordinated::setContentsClippingRect(const FloatRoundedRect& c
     noteLayerPropertyChanged(Change::ContentsClippingRect, ScheduleFlush::Yes);
 }
 
+void GraphicsLayerCoordinated::setContentsClipShapePath(const Path& path)
+{
+    if (contentsClipShapePath().definitelyEqual(path))
+        return;
+
+    GraphicsLayer::setContentsClipShapePath(path);
+    noteLayerPropertyChanged(Change::ContentsClipShapePath, ScheduleFlush::Yes);
+}
+
 void GraphicsLayerCoordinated::setContentsNeedsDisplay()
 {
     if (m_contentsDisplayDelegate)
@@ -380,24 +403,33 @@ void GraphicsLayerCoordinated::setContentsNeedsDisplayInRect(const FloatRect& re
     noteLayerPropertyChanged(Change::ContentsBufferNeedsDisplay, ScheduleFlush::Yes);
 }
 
-void GraphicsLayerCoordinated::setContentsToPlatformLayer(PlatformLayer* contentsLayer, ContentsLayerPurpose)
+#if ENABLE(VIDEO) && USE(GSTREAMER)
+void GraphicsLayerCoordinated::setContentsToMediaPlayer(MediaPlayer* player, ContentsLayerPurpose)
 {
-    if (m_contentsBufferProxy == contentsLayer)
+    // Never try to get or set the proxy on a player that doesn't support accelerated rendering (null media player).
+    if (player && !player->supportsAcceleratedRendering())
+        player = nullptr;
+
+    if (player && m_contentsBufferProxy && player->platformLayerBufferProxy() == m_contentsBufferProxy)
+        return;
+
+    if (!player && !m_contentsBufferProxy)
         return;
 
     if (m_contentsBufferProxy)
-        m_contentsBufferProxy->setTargetLayer(nullptr);
-
-    m_contentsBufferProxy = contentsLayer;
+        m_contentsBufferProxy->invalidate();
 
     EnumSet<Change> change = { Change::ContentsBuffer };
-    if (m_contentsBufferProxy) {
-        m_contentsBufferProxy->setTargetLayer(m_platformLayer.ptr());
+    if (player) {
+        m_contentsBufferProxy = CoordinatedPlatformLayerBufferProxy::create(m_platformLayer.copyRef());
+        player->setPlatformLayerBufferProxy(Ref { *m_contentsBufferProxy });
         m_contentsDisplayDelegate = nullptr;
         change.add(Change::ContentsBufferNeedsDisplay);
-    }
+    } else
+        m_contentsBufferProxy = nullptr;
     noteLayerPropertyChanged(change, ScheduleFlush::Yes);
 }
+#endif
 
 void GraphicsLayerCoordinated::setContentsDisplayDelegate(RefPtr<GraphicsLayerContentsDisplayDelegate>&& delegate, ContentsLayerPurpose)
 {
@@ -408,11 +440,11 @@ void GraphicsLayerCoordinated::setContentsDisplayDelegate(RefPtr<GraphicsLayerCo
 
     EnumSet<Change> change = { Change::ContentsBuffer };
     if (m_contentsDisplayDelegate) {
-#if USE(SKIA)
+#if !USE(TEXTURE_MAPPER)
         m_contentsDisplayDelegate->setThreadSafeGrContext(m_platformLayer->threadSafeGrContext());
 #endif
         if (m_contentsBufferProxy) {
-            m_contentsBufferProxy->setTargetLayer(nullptr);
+            m_contentsBufferProxy->invalidate();
             m_contentsBufferProxy = nullptr;
         }
         change.add(Change::ContentsBufferNeedsDisplay);
@@ -427,7 +459,7 @@ RefPtr<GraphicsLayerAsyncContentsDisplayDelegate> GraphicsLayerCoordinated::crea
         return existing;
     }
     auto delegate = GraphicsLayerAsyncContentsDisplayDelegateCoordinated::create(*this);
-#if USE(SKIA)
+#if !USE(TEXTURE_MAPPER)
     delegate->setThreadSafeGrContext(m_platformLayer->threadSafeGrContext());
 #endif
     return delegate;
@@ -525,7 +557,9 @@ void GraphicsLayerCoordinated::setEventRegion(EventRegion&& eventRegion)
 
 void GraphicsLayerCoordinated::setShapeLayerPath(const Path& path)
 {
-    // FIXME: need to check for path equality. No bool Path::operator==(const Path&)!.
+    if (!path.isEmpty() && shapeLayerPath().definitelyEqual(path))
+        return;
+
     GraphicsLayer::setShapeLayerPath(path);
     noteLayerPropertyChanged(Change::Shape, ScheduleFlush::Yes);
 }
@@ -635,6 +669,15 @@ void GraphicsLayerCoordinated::setBackdropFiltersRect(const FloatRoundedRect& ba
 
     GraphicsLayer::setBackdropFiltersRect(backdropFiltersRect);
     noteLayerPropertyChanged(Change::BackdropRect, ScheduleFlush::Yes);
+}
+
+void GraphicsLayerCoordinated::setBackdropFiltersShapePath(const Path& path)
+{
+    if (backdropFiltersShapePath().definitelyEqual(path))
+        return;
+
+    GraphicsLayer::setBackdropFiltersShapePath(path);
+    noteLayerPropertyChanged(Change::BackdropShapePath, ScheduleFlush::Yes);
 }
 
 void GraphicsLayerCoordinated::setIsBackdropRoot(bool isBackdropRoot)
@@ -1102,6 +1145,9 @@ void GraphicsLayerCoordinated::commitLayerChanges(CommitState& commitState, floa
     if (m_pendingChanges.contains(Change::BackfaceVisibility))
         m_platformLayer->setBackfaceVisibility(m_backfaceVisibility);
 
+    if (m_pendingChanges.contains(Change::BackgroundColor))
+        m_platformLayer->setBackgroundColor(m_backgroundColor);
+
     if (m_pendingChanges.contains(Change::Opacity))
         m_platformLayer->setOpacity(m_opacity);
 
@@ -1133,6 +1179,9 @@ void GraphicsLayerCoordinated::commitLayerChanges(CommitState& commitState, floa
     if (m_pendingChanges.contains(Change::ContentsClippingRect))
         m_platformLayer->setContentsClippingRect(m_contentsClippingRect);
 
+    if (m_pendingChanges.contains(Change::ContentsClipShapePath))
+        m_platformLayer->setContentsClipShapePath(contentsClipShapePath());
+
     updateRootRelativeScale(); // Needs to happen before Change::ContentsScale.
 
     if (m_pendingChanges.contains(Change::ContentsScale))
@@ -1163,6 +1212,9 @@ void GraphicsLayerCoordinated::commitLayerChanges(CommitState& commitState, floa
 
     if (m_pendingChanges.contains(Change::BackdropRect))
         updateBackdropFiltersRect();
+
+    if (m_pendingChanges.contains(Change::BackdropShapePath))
+        m_platformLayer->setBackdropShapePath(backdropFiltersShapePath());
 
     if (m_pendingChanges.contains(Change::BackdropRoot))
         m_platformLayer->setIsBackdropRoot(m_isBackdropRoot);

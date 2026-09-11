@@ -42,7 +42,7 @@
 #if PLATFORM(MAC)
 #import <WebCore/ColorMac.h>
 #else
-#import <WebCore/ColorSpace.h>
+#import <WebCore/ColorSpaceName.h>
 #endif
 
 #define IMPL reinterpret_cast<WebCore::DeprecatedCSSOMRGBColor*>(_internal)

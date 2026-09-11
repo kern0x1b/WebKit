@@ -219,7 +219,7 @@ void RemoteScrollingCoordinatorProxy::stickyScrollingTreeNodeBeganSticking(Scrol
     protect(webPageProxy())->stickyScrollingTreeNodeBeganSticking();
 }
 
-void RemoteScrollingCoordinatorProxy::handleWheelEvent(const WebWheelEvent& wheelEvent, RectEdges<WebCore::RubberBandingBehavior> rubberBandableEdges)
+void RemoteScrollingCoordinatorProxy::handleWheelEvent(Ref<WebWheelEvent>&& wheelEvent, RectEdges<WebCore::RubberBandingBehavior> rubberBandableEdges)
 {
 #if !(PLATFORM(MAC) && ENABLE(UI_SIDE_COMPOSITING))
     auto platformWheelEvent = platform(wheelEvent);
@@ -231,7 +231,7 @@ void RemoteScrollingCoordinatorProxy::handleWheelEvent(const WebWheelEvent& whee
 
     auto processingSteps = m_scrollingTree->determineWheelEventProcessing(platformWheelEvent);
     if (!processingSteps.contains(WheelEventProcessingSteps::AsyncScrolling)) {
-        continueWheelEventHandling(wheelEvent, { processingSteps, false });
+        continueWheelEventHandling(WTF::move(wheelEvent), { processingSteps, false });
         return;
     }
 
@@ -241,17 +241,17 @@ void RemoteScrollingCoordinatorProxy::handleWheelEvent(const WebWheelEvent& whee
     auto result = m_scrollingTree->handleWheelEvent(filteredEvent, processingSteps);
     didReceiveWheelEvent(result.wasHandled);
 
-    continueWheelEventHandling(wheelEvent, result);
+    continueWheelEventHandling(WTF::move(wheelEvent), result);
 #else
     UNUSED_PARAM(wheelEvent);
     UNUSED_PARAM(rubberBandableEdges);
 #endif
 }
 
-void RemoteScrollingCoordinatorProxy::continueWheelEventHandling(const WebWheelEvent& wheelEvent, WheelEventHandlingResult result)
+void RemoteScrollingCoordinatorProxy::continueWheelEventHandling(Ref<WebWheelEvent>&& wheelEvent, WheelEventHandlingResult result)
 {
     bool willStartSwipe = m_scrollingTree->willWheelEventStartSwipeGesture(platform(wheelEvent));
-    protect(webPageProxy())->continueWheelEventHandling(wheelEvent, result, willStartSwipe);
+    protect(webPageProxy())->continueWheelEventHandling(WTF::move(wheelEvent), result, willStartSwipe);
 }
 
 TrackingType RemoteScrollingCoordinatorProxy::eventTrackingTypeForPoint(WebCore::EventTrackingRegions::EventType eventType, IntPoint p) const
@@ -346,9 +346,8 @@ void RemoteScrollingCoordinatorProxy::receivedLastScrollingTreeNodeUpdateReply()
         return;
 
     RunLoop::mainSingleton().dispatch([weakThis = WeakPtr { *this }]() {
-        if (!weakThis)
-            return;
-        weakThis->sendScrollingTreeNodeUpdate();
+        if (CheckedPtr checkedThis = weakThis)
+            checkedThis->sendScrollingTreeNodeUpdate();
     });
 }
 
@@ -370,6 +369,11 @@ bool RemoteScrollingCoordinatorProxy::scrollingTreeNodeRequestsKeyboardScroll(Sc
 String RemoteScrollingCoordinatorProxy::scrollingTreeAsText() const
 {
     return m_scrollingTree->scrollingTreeAsText();
+}
+
+String RemoteScrollingCoordinatorProxy::scrollingTreeIncludingNodeIDsAsText() const
+{
+    return m_scrollingTree->scrollingTreeAsText(ScrollingStateTreeAsTextBehavior::IncludeNodeIDs);
 }
 
 float RemoteScrollingCoordinatorProxy::rubberbandHyperbolicCoefficientForTesting() const
@@ -571,6 +575,11 @@ bool RemoteScrollingCoordinatorProxy::scrollingPerformanceTestingEnabled() const
 void RemoteScrollingCoordinatorProxy::scrollingTreeNodeScrollbarVisibilityDidChange(WebCore::ScrollingNodeID nodeID, ScrollbarOrientation orientation, bool isVisible)
 {
     protect(webPageProxy())->sendToProcessContainingFrame(m_scrollingTree->frameIDForScrollingNodeID(nodeID), Messages::RemoteScrollingCoordinator::ScrollingTreeNodeScrollbarVisibilityDidChange(nodeID, orientation, isVisible));
+}
+
+void RemoteScrollingCoordinatorProxy::requestFullScrollingTreeCommitForFrame(WebCore::FrameIdentifier frameID)
+{
+    protect(webPageProxy())->sendToProcessContainingFrame(frameID, Messages::RemoteScrollingCoordinator::RequestFullScrollingTreeCommit(frameID));
 }
 
 void RemoteScrollingCoordinatorProxy::scrollingTreeNodeScrollbarMinimumThumbLengthDidChange(WebCore::ScrollingNodeID nodeID, ScrollbarOrientation orientation, int minimumThumbLength)

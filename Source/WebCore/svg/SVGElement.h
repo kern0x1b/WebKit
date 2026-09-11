@@ -28,6 +28,7 @@
 #include <wtf/HashMap.h>
 #include <wtf/HashSet.h>
 #include <wtf/TZoneMalloc.h>
+#include <wtf/TriState.h>
 #include <wtf/WeakHashSet.h>
 #include <wtf/WeakPtr.h>
 
@@ -129,10 +130,14 @@ public:
     void removeReferencingElement(SVGElement&);
     void removeElementReference();
 
+    bool isReferencedByFEImage() const;
+
     Vector<WeakPtr<SVGResourceElementClient>> referencingCSSClients() const;
     void addReferencingCSSClient(SVGResourceElementClient&);
     void removeReferencingCSSClient(SVGResourceElementClient&);
 
+    bool isInSVGResourceContainer() const;
+    static bool isResourceContainerTagName(const QualifiedName&);
 
     SVGElement* NODELETE correspondingElement() const;
     SVGUseElement* NODELETE correspondingUseElement() const;
@@ -226,6 +231,7 @@ protected:
 private:
     virtual void clearTarget() { }
 
+    void invalidateLayerRequirementForFEImageReference(const SVGElement& referencingElement);
     void buildPendingResourcesIfNeeded();
     bool accessKeyAction(bool sendMouseEvents) override;
 
@@ -239,6 +245,7 @@ private:
     bool m_hasRegisteredWithParentForRelativeLengths { false };
     bool m_selfHasRelativeLengths { false };
     bool m_hasInitializedRelativeLengthsState { false };
+    mutable TriState m_isInSVGResourceContainer { TriState::Indeterminate };
 
     std::unique_ptr<SVGPropertyAnimatorFactory> m_propertyAnimatorFactory;
 

@@ -27,14 +27,12 @@
 #include "CSSParserContext.h"
 #include "CSSParserTokenRange.h"
 #include "GenericMediaQueryTypes.h"
-#include "MediaQueryParserContext.h"
+#include <wtf/EnumSet.h>
 #include <wtf/RobinHoodHashMap.h>
 #include <wtf/SetForScope.h>
 #include <wtf/text/AtomStringHash.h>
 
 namespace WebCore {
-
-struct MediaQueryParserContext;
 
 namespace MQ {
 
@@ -42,13 +40,20 @@ namespace MQ {
 // Returns the referenced property name, or nullAtom() if the tokens are anything else.
 AtomString bareCustomPropertyName(std::span<const CSSParserToken>);
 
+enum class FeatureParserOption : uint8_t {
+    // Container query conditions have an element context (the query container), so unlike media
+    // queries they allow the tree counting functions.
+    // https://github.com/w3c/csswg-drafts/issues/10982
+    TreeCountingFunctionsAllowed,
+};
+
 struct FeatureParser {
-    static std::optional<Feature> consumeFeature(CSSParserTokenRange&, const MediaQueryParserContext&);
-    static std::optional<Feature> consumeBooleanOrPlainFeature(CSSParserTokenRange&, const MediaQueryParserContext&);
-    static std::optional<Feature> consumeRangeFeature(CSSParserTokenRange&, const MediaQueryParserContext&);
+    static std::optional<Feature> consumeFeature(CSSParserTokenRange&, const CSSParserContext&, EnumSet<FeatureParserOption>);
+    static std::optional<Feature> consumeBooleanOrPlainFeature(CSSParserTokenRange&, const CSSParserContext&, EnumSet<FeatureParserOption>);
+    static std::optional<Feature> consumeRangeFeature(CSSParserTokenRange&, const CSSParserContext&, EnumSet<FeatureParserOption>);
 
     static AtomString consumeFeatureName(CSSParserTokenRange&);
-    static std::optional<Value> consumeCustomPropertyValue(const AtomString& propertyName, CSSParserTokenRange&, const MediaQueryParserContext&);
+    static std::optional<Value> consumeCustomPropertyValue(const AtomString& propertyName, CSSParserTokenRange&, const CSSParserContext&);
     static std::optional<ComparisonOperator> consumeRangeComparisonOperator(CSSParserTokenRange&);
 
     static bool validateFeatureAgainstSchema(Feature&, const FeatureSchema&);
@@ -59,22 +64,24 @@ struct GenericMediaQueryParser  {
     struct State {
         std::optional<CSSValueID> inFunctionId;
     };
-    static std::optional<Condition> consumeCondition(CSSParserTokenRange& range, const MediaQueryParserContext& context)
+    static std::optional<Condition> consumeCondition(CSSParserTokenRange& range, const CSSParserContext& context)
     {
         State state;
         return consumeCondition(range, context, state);
     }
-    static std::optional<Condition> consumeCondition(CSSParserTokenRange&, const MediaQueryParserContext&, State&);
-    static std::optional<QueryInParens> consumeQueryInParens(CSSParserTokenRange&, const MediaQueryParserContext&, State&);
-    static std::optional<Feature> consumeAndValidateFeature(CSSParserTokenRange&, const MediaQueryParserContext&, State&);
+    static std::optional<Condition> consumeCondition(CSSParserTokenRange&, const CSSParserContext&, State&);
+    static std::optional<QueryInParens> consumeQueryInParens(CSSParserTokenRange&, const CSSParserContext&, State&);
+    static std::optional<Feature> consumeAndValidateFeature(CSSParserTokenRange&, const CSSParserContext&, State&);
+
+    static constexpr EnumSet<FeatureParserOption> featureParserOptions = { };
 
     static bool isValidFunctionId(CSSValueID) { return false; }
-    static const FeatureSchema* schemaForFeatureName(const AtomString&, const MediaQueryParserContext&, State&);
-    static bool validateFeature(Feature&, const MediaQueryParserContext&, State&);
+    static const FeatureSchema* schemaForFeatureName(const AtomString&, const CSSParserContext&, State&);
+    static bool validateFeature(Feature&, const CSSParserContext&, State&);
 };
 
 template<typename ConcreteParser>
-std::optional<Condition> GenericMediaQueryParser<ConcreteParser>::consumeCondition(CSSParserTokenRange& range, const MediaQueryParserContext& context, State& state)
+std::optional<Condition> GenericMediaQueryParser<ConcreteParser>::consumeCondition(CSSParserTokenRange& range, const CSSParserContext& context, State& state)
 {
     if (range.peek().type() == IdentToken) {
         if (range.peek().id() == CSSValueNot) {
@@ -89,8 +96,8 @@ std::optional<Condition> GenericMediaQueryParser<ConcreteParser>::consumeConditi
 
     Condition condition;
 
-    auto consumeOperator = [&]() -> std::optional<LogicalOperator> {
-        auto operatorToken = range.consumeIncludingWhitespace();
+    auto peekOperator = [&]() -> std::optional<LogicalOperator> {
+        auto operatorToken = range.peek();
         if (operatorToken.type() != IdentToken)
             return { };
         if (operatorToken.id() == CSSValueAnd)
@@ -102,9 +109,16 @@ std::optional<Condition> GenericMediaQueryParser<ConcreteParser>::consumeConditi
 
     do {
         if (!condition.queries.isEmpty()) {
-            auto op = consumeOperator();
+            auto op = peekOperator();
+
+            // Next token isn't 'and'/'or', nothing more to parse.
             if (!op)
-                return { };
+                break;
+
+            // Consume the token we just peeked.
+            range.consumeIncludingWhitespace();
+
+            // A condition with multiple queries must have the same operator.
             if (condition.queries.size() > 1 && condition.logicalOperator != *op)
                 return { };
             condition.logicalOperator = *op;
@@ -121,17 +135,19 @@ std::optional<Condition> GenericMediaQueryParser<ConcreteParser>::consumeConditi
 }
 
 template<typename ConcreteParser>
-std::optional<QueryInParens> GenericMediaQueryParser<ConcreteParser>::consumeQueryInParens(CSSParserTokenRange& range, const MediaQueryParserContext& context, State& state)
+std::optional<QueryInParens> GenericMediaQueryParser<ConcreteParser>::consumeQueryInParens(CSSParserTokenRange& range, const CSSParserContext& context, State& state)
 {
     std::optional<CSSValueID> functionId;
+    std::optional<StringView> functionName;
 
     if (range.peek().type() == FunctionToken) {
         if (state.inFunctionId)
             return { };
 
         functionId = range.peek().functionId();
+        functionName = range.peek().value();
+
         if (!ConcreteParser::isValidFunctionId(*functionId)) {
-            auto name = range.peek().value();
             auto functionRange = range.consumeBlock();
             range.consumeWhitespace();
 
@@ -139,7 +155,7 @@ std::optional<QueryInParens> GenericMediaQueryParser<ConcreteParser>::consumeQue
             if (!validationRange.consumeAnyValue())
                 return { };
 
-            return GeneralEnclosed { name.toString(), functionRange.serialize() };
+            return GeneralEnclosed { functionName->toString(), functionRange.serialize(CSSParserToken::SerializationMode::CustomProperty) };
         }
     }
 
@@ -154,29 +170,33 @@ std::optional<QueryInParens> GenericMediaQueryParser<ConcreteParser>::consumeQue
 
     SetForScope functionScope(state.inFunctionId, functionId ? *functionId : state.inFunctionId);
 
-    auto conditionRange = blockRange;
-    if (auto condition = consumeCondition(conditionRange, context, state)) {
-        condition->functionId = functionId;
-        return { condition };
-    }
-
+    // Try to parse as feature first before falling back to nested condition.
+    // Otherwise, when parsing something like (calc(10px + 10em) < width),
+    // consumeCondition => consumeQueryInParams => consumeCondition => consumeQueryInParams
+    // would consume calc(10px + 10em) as a general enclosed function instead of a feature.
     auto featureRange = blockRange;
     if (auto feature = ConcreteParser::consumeAndValidateFeature(featureRange, context, state)) {
         feature->functionId = functionId;
         return { *feature };
     }
 
+    auto conditionRange = blockRange;
+    if (auto condition = consumeCondition(conditionRange, context, state)) {
+        condition->functionId = functionId;
+        return { condition };
+    }
+
     auto validationRange = originalBlockRange;
     if (!validationRange.consumeAnyValue())
         return { };
 
-    return GeneralEnclosed { functionId ? nameString(*functionId) : nullAtom(), originalBlockRange.serialize() };
+    return GeneralEnclosed { functionName ? functionName->toString() : nullString(), originalBlockRange.serialize(CSSParserToken::SerializationMode::CustomProperty) };
 }
 
 template<typename ConcreteParser>
-std::optional<Feature> GenericMediaQueryParser<ConcreteParser>::consumeAndValidateFeature(CSSParserTokenRange& range, const MediaQueryParserContext& context, State& state)
+std::optional<Feature> GenericMediaQueryParser<ConcreteParser>::consumeAndValidateFeature(CSSParserTokenRange& range, const CSSParserContext& context, State& state)
 {
-    auto feature = FeatureParser::consumeFeature(range, context);
+    auto feature = FeatureParser::consumeFeature(range, context, ConcreteParser::featureParserOptions);
     if (!feature)
         return { };
 
@@ -187,16 +207,16 @@ std::optional<Feature> GenericMediaQueryParser<ConcreteParser>::consumeAndValida
 }
 
 template<typename ConcreteParser>
-bool GenericMediaQueryParser<ConcreteParser>::validateFeature(Feature& feature, const MediaQueryParserContext& context, State& state)
+bool GenericMediaQueryParser<ConcreteParser>::validateFeature(Feature& feature, const CSSParserContext& context, State& state)
 {
-    auto* schema = ConcreteParser::schemaForFeatureName(feature.name, context.context, state);
+    auto* schema = ConcreteParser::schemaForFeatureName(feature.name, context, state);
     if (!schema)
         return false;
     return FeatureParser::validateFeatureAgainstSchema(feature, *schema);
 }
 
 template<typename ConcreteParser>
-const FeatureSchema* GenericMediaQueryParser<ConcreteParser>::schemaForFeatureName(const AtomString& name, const MediaQueryParserContext&, State&)
+const FeatureSchema* GenericMediaQueryParser<ConcreteParser>::schemaForFeatureName(const AtomString& name, const CSSParserContext&, State&)
 {
     using SchemaMap = MemoryCompactLookupOnlyRobinHoodHashMap<AtomString, const FeatureSchema*>;
 

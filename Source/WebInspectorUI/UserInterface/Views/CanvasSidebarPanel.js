@@ -381,8 +381,7 @@ WI.CanvasSidebarPanel = class CanvasSidebarPanel extends WI.NavigationSidebarPan
         const selectedByUser = false;
         canvasTreeElement.revealAndSelect(omitFocus, selectedByUser);
 
-        if (this._canvas.supportsRecording)
-            this._recordButtonNavigationItem.enabled = true;
+        this._recordButtonNavigationItem.enabled = true;
 
         this.recording = null;
     }
@@ -452,7 +451,7 @@ WI.CanvasSidebarPanel = class CanvasSidebarPanel extends WI.NavigationSidebarPan
 
         let initialStateAction = this._recording.actions[0];
         if (initialStateAction.ready && !this._recordingTreeOutline.getCachedTreeElement(initialStateAction)) {
-            this._recordingTreeOutline.appendChild(new WI.RecordingActionTreeElement(initialStateAction, 0, this._recording.type));
+            this._recordingTreeOutline.appendChild(new WI.RecordingActionTreeElement(initialStateAction, 0, this._recording));
 
             if (!this._recording[WI.CanvasSidebarPanel.SelectedActionSymbol])
                 this.action = initialStateAction;
@@ -480,7 +479,7 @@ WI.CanvasSidebarPanel = class CanvasSidebarPanel extends WI.NavigationSidebarPan
 
     _updateRecordNavigationItem()
     {
-        if (!this._canvas?.supportsRecording) {
+        if (!this._canvas) {
             this._recordButtonNavigationItem.enabled = false;
             return;
         }
@@ -557,7 +556,7 @@ WI.CanvasSidebarPanel = class CanvasSidebarPanel extends WI.NavigationSidebarPan
 
     _createRecordingActionTreeElement(action, index, parent)
     {
-        let treeElement = new WI.RecordingActionTreeElement(action, index, this._recording.type);
+        let treeElement = new WI.RecordingActionTreeElement(action, index, this._recording);
 
         parent.appendChild(treeElement);
 

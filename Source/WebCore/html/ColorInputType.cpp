@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010 Google Inc. All rights reserved.
+ * Copyright (C) 2010-2016 Google Inc. All rights reserved.
  * Copyright (C) 2015-2025 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -96,8 +96,7 @@ static std::optional<Color> parseColorValue(StringView string, HTMLInputElement&
     Ref document = context.document();
     auto parserContext = document->cssParserContext();
     parserContext.mode = HTMLStandardMode;
-    auto colorString = string.toString();
-    auto color = parseColorRawSimple(colorString, parserContext);
+    auto color = parseColorRawSimple(string, parserContext);
     if (color.isValid())
         return color;
 
@@ -105,7 +104,7 @@ static std::optional<Color> parseColorValue(StringView string, HTMLInputElement&
     CSS::PlatformColorResolutionState state {
         .resolvedCurrentColor = Color::black
     };
-    color = parseColorRawGeneral(colorString, parserContext, document, options, state);
+    color = parseColorRawGeneral(string, parserContext, document, options, state);
     if (color.isValid())
         return color;
 
@@ -250,7 +249,7 @@ void ColorInputType::attributeChanged(const QualifiedName& name)
 void ColorInputType::handleDOMActivateEvent(Event& event)
 {
     ASSERT(element());
-    if (element()->isDisabledFormControl() || !element()->renderer())
+    if (element()->isDisabledFormControl())
         return;
 
     if (!UserGestureIndicator::processingUserGesture())
@@ -341,14 +340,17 @@ HTMLElement* ColorInputType::shadowColorSwatch() const
     return wrapper ? downcast<HTMLElement>(wrapper->firstChild()) : nullptr;
 }
 
-IntRect ColorInputType::elementRectRelativeToRootView() const
+IntRect ColorInputType::elementRectRelativeToMainFrameView() const
 {
     ASSERT(element());
     Ref element = *this->element();
     CheckedPtr renderer = element->renderer();
     if (!renderer)
         return IntRect();
-    return protect(element->document().view())->contentsToRootView(renderer->absoluteBoundingBoxRect());
+
+    Ref document = element->document();
+    RefPtr view = element->document().view();
+    return view->contentsToMainFrameView(renderer->absoluteBoundingBoxRect());
 }
 
 std::optional<FrameIdentifier> ColorInputType::rootFrameID() const

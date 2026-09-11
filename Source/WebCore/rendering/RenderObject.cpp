@@ -69,6 +69,8 @@
 #include "RenderLayerCompositor.h"
 #include "RenderLayerScrollableArea.h"
 #include "RenderLineBreak.h"
+#include "RenderListItem.h"
+#include "RenderListOutsideMarker.h"
 #include "RenderMultiColumnFlow.h"
 #include "RenderMultiColumnSet.h"
 #include "RenderMultiColumnSpannerPlaceholder.h"
@@ -428,8 +430,6 @@ RenderObject* RenderObject::lastLeafChild() const
     return r;
 }
 
-#if ENABLE(TEXT_AUTOSIZING)
-
 // Non-recursive version of the DFS search.
 RenderObject* RenderObject::traverseNext(const RenderObject* stayWithin, HeightTypeTraverseNextInclusionFunction inclusionFunction, int& currentDepth, int& newFixedDepth) const
 {
@@ -477,8 +477,6 @@ RenderObject* RenderObject::traverseNext(const RenderObject* stayWithin, HeightT
     }
     return nullptr;
 }
-
-#endif // ENABLE(TEXT_AUTOSIZING)
 
 RenderLayer* RenderObject::enclosingLayer() const
 {
@@ -1141,7 +1139,7 @@ auto RenderObject::rectsForRepaintingAfterLayout(const RenderLayerModelObject* r
     return result;
 }
 
-LayoutRect RenderObject::clippedOverflowRect(const RenderLayerModelObject* repaintContainer, VisibleRectContext context) const
+LayoutRect RenderObject::clippedOverflowRect(const RenderLayerModelObject* repaintContainer, const VisibleRectContext& context) const
 {
     auto repaintRects = localRectsForRepaint(RepaintOutlineBounds::No);
     if (repaintRects.clippedOverflowRect.isEmpty())
@@ -1150,21 +1148,21 @@ LayoutRect RenderObject::clippedOverflowRect(const RenderLayerModelObject* repai
     return computeRects(repaintRects, repaintContainer, context).clippedOverflowRect;
 }
 
-auto RenderObject::computeRects(const RepaintRects& rects, const RenderLayerModelObject* repaintContainer, VisibleRectContext context) const -> RepaintRects
+auto RenderObject::computeRects(const RepaintRects& rects, const RenderLayerModelObject* repaintContainer, const VisibleRectContext& context) const -> RepaintRects
 {
-    auto result = computeVisibleRectsInContainer(rects, repaintContainer, context);
+    auto result = computeVisibleRectsInContainer(rects, repaintContainer, context, { });
     RELEASE_ASSERT(result);
     return *result;
 }
 
 FloatRect RenderObject::computeFloatRectForRepaint(const FloatRect& rect, const RenderLayerModelObject* repaintContainer) const
 {
-    auto result = computeFloatVisibleRectInContainer(rect, repaintContainer, visibleRectContextForRepaint());
+    auto result = computeFloatVisibleRectInContainer(rect, repaintContainer, visibleRectContextForRepaint(), { });
     RELEASE_ASSERT(result);
     return *result;
 }
 
-auto RenderObject::computeVisibleRectsInContainer(const RepaintRects& rects, const RenderLayerModelObject* container, VisibleRectContext context) const -> std::optional<RepaintRects>
+auto RenderObject::computeVisibleRectsInContainer(const RepaintRects& rects, const RenderLayerModelObject* container, const VisibleRectContext& context, VisibleRectState state) const -> std::optional<RepaintRects>
 {
     if (container == this)
         return rects;
@@ -1182,10 +1180,10 @@ auto RenderObject::computeVisibleRectsInContainer(const RepaintRects& rects, con
             return adjustedRects;
         }
     }
-    return parent->computeVisibleRectsInContainer(adjustedRects, container, context);
+    return parent->computeVisibleRectsInContainer(adjustedRects, container, context, state);
 }
 
-std::optional<FloatRect> RenderObject::computeFloatVisibleRectInContainer(const FloatRect&, const RenderLayerModelObject*, VisibleRectContext) const
+std::optional<FloatRect> RenderObject::computeFloatVisibleRectInContainer(const FloatRect&, const RenderLayerModelObject*, const VisibleRectContext&, VisibleRectState) const
 {
     ASSERT_NOT_REACHED();
     return FloatRect();
@@ -1214,7 +1212,7 @@ void RenderObject::showRenderTreeForThis() const
     TextStream stream(TextStream::LineMode::MultipleLine, TextStream::Formatting::SVGStyleRect);
     outputRenderTreeLegend(stream);
     root->outputRenderSubTreeAndMark(stream, this, 1);
-    WTFLogAlways("%s", stream.release().utf8().data());
+    WTFLogAlways("%s", stream.release().utf8().legacyCStringPointer());
 }
 
 void RenderObject::showSubtreeForThis() const
@@ -1222,7 +1220,7 @@ void RenderObject::showSubtreeForThis() const
     TextStream stream(TextStream::LineMode::MultipleLine, TextStream::Formatting::SVGStyleRect);
     outputRenderTreeLegend(stream);
     outputRenderSubTreeAndMark(stream, this, 1);
-    WTFLogAlways("%s", stream.release().utf8().data());
+    WTFLogAlways("%s", stream.release().utf8().legacyCStringPointer());
 }
 
 void RenderObject::showLineTreeForThis() const
@@ -1234,7 +1232,7 @@ void RenderObject::showLineTreeForThis() const
     outputRenderTreeLegend(stream);
     outputRenderObject(stream, false, 1);
     blockFlow->outputLineTreeAndMark(stream, nullptr, 2);
-    WTFLogAlways("%s", stream.release().utf8().data());
+    WTFLogAlways("%s", stream.release().utf8().legacyCStringPointer());
 }
 
 static const RenderFragmentedFlow* enclosingFragmentedFlowFromRenderer(const RenderObject* renderer)
@@ -1364,7 +1362,7 @@ void RenderObject::outputRenderObject(TextStream& stream, bool mark, int depth) 
         stream << " ";
 
     if (node())
-        stream << node()->nodeName().utf8().data() << " ";
+        stream << node()->nodeName() << " ";
 
     ASCIILiteral name = renderName();
     StringView nameView { name };
@@ -1407,9 +1405,9 @@ void RenderObject::outputRenderObject(TextStream& stream, bool mark, int depth) 
         const int maxPrintedLength = 80;
         if (value.length() > maxPrintedLength) {
             auto substring = StringView(value).left(maxPrintedLength);
-            stream << " \"" << substring.utf8().data() << "\"...";
+            stream << " \"" << substring << "\"...";
         } else
-            stream << " \"" << value.utf8().data() << "\"";
+            stream << " \"" << value << "\"";
     }
 
     if (auto* box = dynamicDowncast<RenderBox>(*this)) {
@@ -1896,7 +1894,8 @@ Node* RenderObject::nodeForHitTest() const
     auto* node = this->node();
     // If we hit the anonymous renderers inside generated content we should
     // actually hit the generated content so walk up to the PseudoElement.
-    if (!node && parent() && parent()->isBeforeOrAfterContent()) {
+    // A marker has no element of its own, so hitting its content is hitting the list item.
+    if (!node && parent() && (parent()->isBeforeOrAfterContent() || parent()->style().isListMarkerStyle())) {
         for (auto* renderer = parent(); renderer && !node; renderer = renderer->parent())
             node = renderer->element();
     }
@@ -2045,7 +2044,7 @@ bool RenderObject::canUpdateSelectionOnRootLineBoxes()
         return false;
 
     CheckedPtr containingBlock = this->containingBlock();
-    return containingBlock ? !containingBlock->needsLayout() : true;
+    return !containingBlock || !containingBlock->needsLayout();
 }
 
 // We only create "generated" child renderers like one for first-letter if:
@@ -2174,14 +2173,11 @@ bool RenderObject::hasEmptyVisibleRectRespectingParentFrames() const
 
     auto hasEmptyVisibleRect = [] (const RenderObject& renderer) {
         VisibleRectContext context {
-            .hasPositionFixedDescendant = false,
-            .dirtyRectIsFlipped = false,
-            .descendantNeedsEnclosingIntRect = false,
             .options = { VisibleRectContext::Option::UseEdgeInclusiveIntersection, VisibleRectContext::Option::ApplyCompositedClips },
             .scrollMargin = { }
         };
         CheckedRef box = renderer.enclosingBoxModelObject();
-        auto clippedBounds = box->computeVisibleRectsInContainer({ box->borderBoundingBox() }, &box->view(), context);
+        auto clippedBounds = box->computeVisibleRectsInContainer({ box->borderBoundingBox() }, &box->view(), context, { });
         return !clippedBounds || clippedBounds->clippedOverflowRect.isEmpty();
     };
 
@@ -2295,7 +2291,9 @@ static RefPtr<Node> nodeAfter(const BoundaryPoint& point)
 
 enum class CoordinateSpace { Client, Absolute };
 
-static Vector<FloatRect> borderAndTextRects(const SimpleRange& range, CoordinateSpace space, OptionSet<RenderObject::BoundingRectBehavior> behavior)
+enum class TextOnly : bool { No, Yes };
+
+static Vector<FloatRect> borderAndTextRects(const SimpleRange& range, CoordinateSpace space, OptionSet<RenderObject::BoundingRectBehavior> behavior, TextOnly textOnly = TextOnly::No)
 {
     Vector<FloatRect> rects;
 
@@ -2318,7 +2316,7 @@ static Vector<FloatRect> borderAndTextRects(const SimpleRange& range, Coordinate
 
     for (Ref node : intersectingNodesWithDeprecatedZeroOffsetStartQuirk(range)) {
         auto* element = dynamicDowncast<Element>(node.get());
-        if (element && selectedElementsSet.contains(element) && (useVisibleBounds || !node->parentElement() || !selectedElementsSet.contains(node->parentElement()))) {
+        if (textOnly == TextOnly::No && element && selectedElementsSet.contains(element) && (useVisibleBounds || !node->parentElement() || !selectedElementsSet.contains(node->parentElement()))) {
             if (CheckedPtr renderer = element->renderBoxModelObject()) {
                 if (useVisibleBounds) {
                     auto localBounds = renderer->borderBoundingBox();
@@ -2326,16 +2324,14 @@ static Vector<FloatRect> borderAndTextRects(const SimpleRange& range, Coordinate
                         { localBounds },
                         protect(renderer->view()).ptr(),
                         {
-                            .hasPositionFixedDescendant = false,
-                            .dirtyRectIsFlipped = false,
-                            .descendantNeedsEnclosingIntRect = false,
                             .options = {
                                 VisibleRectContext::Option::UseEdgeInclusiveIntersection,
                                 VisibleRectContext::Option::ApplyCompositedClips,
                                 VisibleRectContext::Option::ApplyCompositedContainerScrolls
                             },
                             .scrollMargin = { }
-                        }
+                        },
+                        { }
                     );
                     if (!rootClippedBounds)
                         continue;
@@ -2379,6 +2375,11 @@ Vector<FloatRect> RenderObject::absoluteBorderAndTextRects(const SimpleRange& ra
 Vector<FloatRect> RenderObject::clientBorderAndTextRects(const SimpleRange& range)
 {
     return borderAndTextRects(range, CoordinateSpace::Client, { });
+}
+
+Vector<FloatRect> RenderObject::clientTextRects(const SimpleRange& range)
+{
+    return borderAndTextRects(range, CoordinateSpace::Client, { }, TextOnly::Yes);
 }
 
 ScrollAnchoringController* RenderObject::searchParentChainForScrollAnchoringController(const RenderObject& renderer)
@@ -3147,6 +3148,17 @@ VisibleInViewportState RenderObject::imageFrameAvailable(CachedImage& image, Ima
     return VisibleInViewportState::No;
 }
 
+bool RenderObject::isExcludedMarker() const
+{
+    // An excluded list marker is the direct child of its list item, never wrapped in an anonymous block, and no part of in-flow layout.
+    auto* marker = dynamicDowncast<RenderListOutsideMarker>(*this);
+    if (!marker)
+        return false;
+    if (!document().settings().listMarkerPositionedPostLayoutEnabled())
+        return false;
+    return parent() && parent() == marker->listItem();
+}
+
 #if ENABLE(TREE_DEBUGGING)
 
 void printPaintOrderTreeForLiveDocuments()
@@ -3156,7 +3168,7 @@ void printPaintOrderTreeForLiveDocuments()
             continue;
         if (document->frame() && document->frame()->isRootFrame())
             WTFLogAlways("----------------------root frame--------------------------\n");
-        WTFLogAlways("%s", document->url().string().utf8().data());
+        WTFLogAlways("%s", document->url().string().utf8().legacyCStringPointer());
         showPaintOrderTree(document->renderView());
     }
 }
@@ -3168,7 +3180,7 @@ void printRenderTreeForLiveDocuments()
             continue;
         if (document->frame() && document->frame()->isRootFrame())
             WTFLogAlways("----------------------root frame--------------------------\n");
-        WTFLogAlways("%s", document->url().string().utf8().data());
+        WTFLogAlways("%s", document->url().string().utf8().legacyCStringPointer());
         showRenderTree(document->renderView());
     }
 }
@@ -3180,7 +3192,7 @@ void printLayerTreeForLiveDocuments()
             continue;
         if (document->frame() && document->frame()->isRootFrame())
             WTFLogAlways("----------------------root frame--------------------------\n");
-        WTFLogAlways("%s", document->url().string().utf8().data());
+        WTFLogAlways("%s", document->url().string().utf8().legacyCStringPointer());
         showLayerTree(document->renderView());
     }
 }
@@ -3203,9 +3215,9 @@ void printAccessibilityTreeForLiveDocuments()
             continue;
         if (document->frame()) {
             if (document->frame()->isRootFrame())
-                WTFLogAlways("\nPID %d: Accessibility tree for root document %p %s", getpid(), document.ptr(), document->url().string().utf8().data());
+                WTFLogAlways("\nPID %d: Accessibility tree for root document %p %s", getpid(), document.ptr(), document->url().string().utf8().legacyCStringPointer());
             else
-                WTFLogAlways("\nPID %d: Accessibility tree for non-root document %p %s", getpid(), document.ptr(), document->url().string().utf8().data());
+                WTFLogAlways("\nPID %d: Accessibility tree for non-root document %p %s", getpid(), document.ptr(), document->url().string().utf8().legacyCStringPointer());
             dumpAccessibilityTreeToStderr(document.get());
         }
     }
@@ -3217,8 +3229,8 @@ void printGraphicsLayerTreeForLiveDocuments()
         if (!document->renderView())
             continue;
         if (document->frame() && document->frame()->isRootFrame()) {
-            WTFLogAlways("Graphics layer tree for root document %p %s", document.ptr(), document->url().string().utf8().data());
-            showGraphicsLayerTreeForCompositor(document->renderView()->compositor());
+            WTFLogAlways("Graphics layer tree for root document %p %s", document.ptr(), document->url().string().utf8().legacyCStringPointer());
+            showGraphicsLayerTreeForCompositor(protect(document->renderView())->compositor());
         }
     }
 }

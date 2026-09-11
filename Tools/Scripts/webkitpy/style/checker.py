@@ -65,6 +65,7 @@ from webkitpy.style.checkers.api_test_allowlist import APITestAllowlistChecker
 from webkitpy.style.checkers.api_test_expectations import APITestExpectationsChecker
 from webkitpy.style.checkers.swift import SwiftChecker
 from webkitpy.style.checkers.swift_association import SwiftAssociationChecker
+from webkitpy.style.checkers.swift_build_registration import SwiftBuildRegistrationChecker
 from webkitpy.style.checkers.test_expectations import TestExpectationsChecker
 from webkitpy.style.checkers.text import TextChecker
 from webkitpy.style.checkers.watchlist import WatchListChecker
@@ -122,7 +123,6 @@ _BASE_FILTER_RULES = [
     # WebKit's importer drops some files (e.g. manual tests), causing these rules to trip
     # when such missing files are the only match for entries in a WEB_FEATURES.yml file:
     '-wpt/lint/missing_web_features_file',
-    '-wpt/lint/unnecessary_exclusion_in_web_features_file',
 
     # List Python pep8 categories last.
     #
@@ -155,6 +155,11 @@ _PATH_RULES_SPECIFIER = [
     # Files in these directories are consumers of the WebKit
     # API and therefore do not follow the same header including
     # discipline as WebCore.
+
+    ([
+        # SwiftBrowser does not generate the platform args response file.
+        os.path.join('Tools', 'SwiftBrowser')],
+     ["-webkit/wtf_platform"]),
 
     ([  # Ignore use of RetainPtr<NSObject *> for tests that ensure its compatibility with ReteainPtr<NSObject>.
       os.path.join('Tools', 'TestWebKitAPI', 'Tests', 'WTF', 'ns', 'RetainPtr.mm')],
@@ -693,7 +698,9 @@ def _all_categories():
     categories = categories.union(FeatureDefinesChecker.categories)
     categories = categories.union(BaseXcconfigChecker.categories)
     categories = categories.union(XcodeSchemeChecker.categories)
+    categories = categories.union(SwiftChecker.categories)
     categories = categories.union(SwiftAssociationChecker.categories)
+    categories = categories.union(SwiftBuildRegistrationChecker.categories)
 
     # FIXME: Consider adding all of the pep8 categories.  Since they
     #        are not too meaningful for documentation purposes, for
@@ -1359,6 +1366,8 @@ class StyleProcessor(ProcessorBase):
         APITestExpectationsChecker.lint_test_expectations(files, self._configuration, cwd, self._increment_error_count, host=host)
 
         SwiftAssociationChecker.check_associations(files, self._configuration, cwd, self._increment_error_count, host=host)
+
+        SwiftBuildRegistrationChecker.check_registrations(files, self._configuration, cwd, self._increment_error_count, host=host)
 
         wpt_dir = os.path.join('LayoutTests', *IMPORTED_WPT_DIR.split('/'))
         wpt_paths = []

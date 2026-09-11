@@ -381,7 +381,7 @@ static AtomString effectiveViewTransitionName(RenderLayerModelObject& renderer, 
             if (isCrossDocument)
                 return nullAtom();
 
-            return makeAtomString("-ua-auto-"_s, String::number(element->nodeIdentifier().toRawValue()));
+            return makeAtomString("-ua-auto-"_s, String::number(element->nodeIdentifier().toUInt64()));
         },
         [&](const CSS::Keyword::MatchElement&) {
             SUPPRESS_UNCHECKED_LOCAL auto scope = computeScope();
@@ -389,7 +389,7 @@ static AtomString effectiveViewTransitionName(RenderLayerModelObject& renderer, 
                 return nullAtom();
 
             Ref element = *renderer.element();
-            return makeAtomString("-ua-auto-"_s, String::number(element->nodeIdentifier().toRawValue()));
+            return makeAtomString("-ua-auto-"_s, String::number(element->nodeIdentifier().toUInt64()));
         },
         [&](const Style::CustomIdent& customIdent) {
             SUPPRESS_UNCHECKED_LOCAL auto scope = computeScope();
@@ -476,7 +476,7 @@ static RefPtr<ImageBuffer> snapshotElementVisualOverflowClippedToViewport(LocalF
     auto hostWindow = frameView->root() ? protect(frameView->root())->hostWindow() : nullptr;
     auto colorSpace = screenColorSpace(frameView);
 #if PLATFORM(IOS_FAMILY)
-    colorSpace = DestinationColorSpace::SRGB(); // FIXME: We should use the screen colorspace on iOS too, but that has blending issues: webkit.org/b/318764.
+    colorSpace = ColorSpace::SRGB(); // FIXME: We should use the screen colorspace on iOS too, but that has blending issues: webkit.org/b/318764.
 #endif
 
     auto buffer = ImageBuffer::create(paintRect.size(), RenderingMode::Accelerated, RenderingPurpose::Snapshot, scaleFactor, colorSpace, PixelFormat::BGRA8, hostWindow);
@@ -992,9 +992,9 @@ void ViewTransition::copyElementBaseProperties(RenderLayerModelObject& renderer,
     // Factor out the zoom from the nearest common ancestor of the captured element and the view transition
     // pseudo tree (the document element), so that it doesn't get applied a second time when rendering the
     // snapshots.
-    LayoutSize cssSize = Style::adjustLayoutSizeForAbsoluteZoom(output.size, documentElementRenderer->style());
-    protect(output.properties)->setProperty(CSSPropertyWidth, CSSPrimitiveValue::create(cssSize.width(), CSSUnitType::CSS_PX));
-    protect(output.properties)->setProperty(CSSPropertyHeight, CSSPrimitiveValue::create(cssSize.height(), CSSUnitType::CSS_PX));
+    auto cssSize = Style::unapplyingZoom<LayoutSize>(output.size, documentElementRenderer->style());
+    protect(output.properties)->setProperty(CSSPropertyWidth, CSSPrimitiveValue::create(cssSize.width(), CSSUnitType::Px));
+    protect(output.properties)->setProperty(CSSPropertyHeight, CSSPrimitiveValue::create(cssSize.height(), CSSUnitType::Px));
 }
 
 // https://drafts.csswg.org/css-view-transitions-1/#update-pseudo-element-styles

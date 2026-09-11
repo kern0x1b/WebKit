@@ -51,7 +51,7 @@ WTF_MAKE_TZONE_ALLOCATED_IMPL(ProxyingPageAgent);
 ProxyingPageAgent::ProxyingPageAgent(WebPageAgentContext& context)
     : InspectorAgentBase("Page"_s, context)
     , m_frontendDispatcher(makeUniqueRef<PageFrontendDispatcher>(context.frontendRouter))
-    , m_backendDispatcher(PageBackendDispatcher::create(context.backendDispatcher, this))
+    , m_backendDispatcher(PageBackendDispatcher::create(protect(context.backendDispatcher), this))
     , m_inspectedPage(context.inspectedPage)
 {
 }
@@ -94,8 +94,10 @@ static String protocolFrameIdForFrameID(FrameIdentifier frameID)
     return IdentifierRegistry::protocolFrameId(frameID);
 }
 
-void ProxyingPageAgent::frameNavigated(FrameIdentifier frameID, const URL& url, const String& mimeType, SecurityOriginData&& securityOrigin, std::optional<FrameIdentifier> parentFrameID, const String& name, WebCore::ScriptExecutionContextIdentifier loaderId)
+void ProxyingPageAgent::frameNavigated(FrameIdentifier frameID, const URL& url, const String& mimeType, IPC::Untrusted<WebCore::SecurityOriginData>&& untrustedSecurityOrigin, std::optional<FrameIdentifier> parentFrameID, const String& name, const String& loaderId)
 {
+    auto securityOrigin = WTF::move(untrustedSecurityOrigin).unsafeExtractWithoutValidation(IPC::UnvalidatedReason::NeedsReview);
+
     // Cache the committing frame's real document info so getResourceTree()/buildFrameTree()
     // can report it for cross-origin children, whose commit the inspectedPage's WebFrameProxy
     // never observes (its url/origin stay stale). See webkit.org/b/308896.
@@ -103,7 +105,7 @@ void ProxyingPageAgent::frameNavigated(FrameIdentifier frameID, const URL& url, 
 
     auto frameObject = Protocol::Page::Frame::create()
         .setId(protocolFrameIdForFrameID(frameID))
-        .setLoaderId(IdentifierRegistry::protocolLoaderId(loaderId))
+        .setLoaderId(loaderId)
         .setUrl(url.string())
         .setMimeType(mimeType)
         .setSecurityOrigin(securityOrigin.toString())
@@ -163,12 +165,12 @@ void ProxyingPageAgent::frameDestroyed(FrameIdentifier frameID)
 
 void ProxyingPageAgent::didCreateFrontendAndBackend()
 {
-    enable();
+    std::ignore = enable();
 }
 
 void ProxyingPageAgent::willDestroyFrontendAndBackend(DisconnectReason)
 {
-    disable();
+    std::ignore = disable();
 }
 
 // MARK: - Enable / disable IPC flow
@@ -185,6 +187,12 @@ void ProxyingPageAgent::enableInstrumentationForProcess(WebProcessProxy& webProc
     });
     webProcess.addMessageReceiver(Messages::ProxyingPageAgent::messageReceiverName(), pageID, *this);
     webProcess.send(Messages::WebInspectorBackend::EnablePageInstrumentation { }, pageID);
+
+    // Replay the current toggle to this newly-registered process (a cross-origin navigation can
+    // spawn a new WebContent process after setShowPaintRects(true)). This choke point is passed
+    // exactly once per (process, page) registration, guarded above.
+    if (m_showPaintRects)
+        webProcess.send(Messages::WebInspectorBackend::SetShowPaintRects { true }, pageID);
 }
 
 void ProxyingPageAgent::disableInstrumentationForProcess(WebProcessProxy& webProcess, PageIdentifier pageID)
@@ -239,6 +247,10 @@ CommandResult<void> ProxyingPageAgent::disable()
     m_enabled = false;
     m_cachedFrameDocumentInfo.clear();
 
+    // Reset so a later frontend reconnect doesn't replay a stale "on" toggle via
+    // enableInstrumentationForProcess. The processes are torn down below, so no "off" send is needed.
+    m_showPaintRects = false;
+
     // Force-teardown: disable all processes unconditionally, bypassing the
     // refcount discipline in disableInstrumentationForProcess(). This is
     // correct because disable() is called when the Page domain is torn
@@ -282,7 +294,7 @@ Ref<Protocol::Page::FrameResourceTree> ProxyingPageAgent::buildFrameTree(const W
     URL url = frame.url();
     SecurityOriginData securityOrigin = frame.documentSecurityOriginData();
     String mimeType = frame.mimeType();
-    std::optional<WebCore::ScriptExecutionContextIdentifier> loaderId;
+    String loaderId;
     if (auto it = m_cachedFrameDocumentInfo.find(frame.frameID()); it != m_cachedFrameDocumentInfo.end()) {
         url = it->value.url;
         securityOrigin = it->value.securityOrigin;
@@ -298,7 +310,7 @@ Ref<Protocol::Page::FrameResourceTree> ProxyingPageAgent::buildFrameTree(const W
     // before the inspector connected (e.g. the main frame), whose live frameNavigated wasn't cached.
     auto resources = JSON::ArrayOf<Protocol::Page::FrameResource>::create();
     if (auto it = resourcesByFrame.find(frame.frameID()); it != resourcesByFrame.end()) {
-        if (!loaderId)
+        if (loaderId.isEmpty())
             loaderId = it->value.loaderId;
         for (auto& resource : it->value.resources)
             resources->addItem(ResourceUtilities::buildResourceObject(resource));
@@ -306,7 +318,7 @@ Ref<Protocol::Page::FrameResourceTree> ProxyingPageAgent::buildFrameTree(const W
 
     auto frameObject = Protocol::Page::Frame::create()
         .setId(protocolId)
-        .setLoaderId(loaderId ? IdentifierRegistry::protocolLoaderId(*loaderId) : String())
+        .setLoaderId(loaderId)
         .setUrl(url.string())
         .setMimeType(mimeType.isEmpty() ? "text/html"_s : mimeType)
         .setSecurityOrigin(securityOrigin.toString())
@@ -661,7 +673,9 @@ void ProxyingPageAgent::searchInResources(const String& text, std::optional<bool
     }
 }
 
-// FIXME: <https://webkit.org/b/308899> Forward overlay state to all WebContent processes.
+// FIXME: <https://webkit.org/b/308899> Draw rulers in every WebContent process. Rulers render via
+// InspectorOverlay, which subframe processes don't have wired up, and need page-wide (cross-process)
+// geometry rather than the per-frame local drawing used for paint rects.
 #if !PLATFORM(IOS_FAMILY)
 CommandResult<void> ProxyingPageAgent::setShowRulers(bool)
 {
@@ -669,8 +683,18 @@ CommandResult<void> ProxyingPageAgent::setShowRulers(bool)
 }
 #endif
 
-CommandResult<void> ProxyingPageAgent::setShowPaintRects(bool)
+// Fan the paint-rects toggle out to every WebContent process and remember it so a process that
+// registers later (enableInstrumentationForProcess) gets it replayed. Each process draws in its own
+// frame's coordinate space; the compositor already positions each process's layer tree.
+CommandResult<void> ProxyingPageAgent::setShowPaintRects(bool show)
 {
+    m_showPaintRects = show;
+
+    Ref inspectedPage = m_inspectedPage.get();
+    inspectedPage->forEachWebContentProcess([&](auto& webProcess, auto pageID) {
+        webProcess.send(Messages::WebInspectorBackend::SetShowPaintRects { show }, pageID);
+    });
+
     return { };
 }
 

@@ -77,6 +77,10 @@
 #import <WebCore/VisibleUnits.h>
 #import <wtf/text/StringToIntegerConversion.h>
 
+#if ENABLE(SPATIAL_PORTAL)
+#import <WebCore/SpatialPortalController.h>
+#endif
+
 namespace WebKit {
 
 static void focusedElementPositionInformation(WebPage& page, WebCore::Element& focusedElement, const InteractionInformationRequest& request, InteractionInformationAtPosition& info)
@@ -576,7 +580,7 @@ static CursorContext cursorContext(const WebCore::HitTestResult& hitTestResult, 
 
     if (!lineContainsRequestPoint && cursorTypeIs(context.cursor, WebCore::Cursor::Type::IBeam)) {
         auto approximateLineRectInContentCoordinates = renderer->absoluteBoundingBoxRect();
-        approximateLineRectInContentCoordinates.setHeight(protect(renderer->style())->computedLineHeight());
+        approximateLineRectInContentCoordinates.setHeight(protect(renderer->style())->usedLineHeight());
         context.lineCaretExtent = view->contentsToRootView(approximateLineRectInContentCoordinates);
         if (!context.lineCaretExtent.contains(request.point) || !isEditable)
             context.lineCaretExtent.setY(request.point.y() - context.lineCaretExtent.height() / 2);
@@ -592,7 +596,7 @@ static CursorContext cursorContext(const WebCore::HitTestResult& hitTestResult, 
     };
 
     const auto& deepPosition = position.deepEquivalent();
-    context.shouldNotUseIBeamInEditableContent = nodeShouldNotUseIBeam(node) || nodeShouldNotUseIBeam(deepPosition.computeNodeBeforePosition()) || nodeShouldNotUseIBeam(deepPosition.computeNodeAfterPosition());
+    context.shouldNotUseIBeamInEditableContent = nodeShouldNotUseIBeam(node) || nodeShouldNotUseIBeam(protect(deepPosition.computeNodeBeforePosition())) || nodeShouldNotUseIBeam(protect(deepPosition.computeNodeAfterPosition()));
     return context;
 }
 
@@ -735,6 +739,18 @@ InteractionInformationAtPosition positionInformationForWebPage(WebPage& page, co
 #if ENABLE(MODEL_PROCESS)
     if (RefPtr modelElement = dynamicDowncast<WebCore::HTMLModelElement>(hitTestNode))
         info.isInteractiveModel = modelElement->model() && modelElement->supportsStageModeInteraction();
+#elif ENABLE(MODEL_ELEMENT_STAGE_MODE)
+    // There is no stage mode session in this configuration. Instead, the orbit is driven by mouse events
+    // forwarded by HTMLModelElement to the model player. This behavior is gated behind `isInteractive`.
+    if (RefPtr modelElement = dynamicDowncast<WebCore::HTMLModelElement>(hitTestNode))
+        info.isInteractiveModel = modelElement->model() && modelElement->isInteractive();
+#endif
+
+#if ENABLE(SPATIAL_PORTAL)
+    if (!info.isInteractiveModel) {
+        RefPtr element = dynamicDowncast<WebCore::Element>(hitTestNode);
+        info.isInteractiveModel = !!WebCore::SpatialPortalController::interactiveControllerForHitTestedElement(element);
+    }
 #endif
 
 #if ENABLE(MODEL_ELEMENT)

@@ -33,8 +33,9 @@ messages -> WebFullScreenManagerProxy {
     UpdateImageSource(struct WebKit::FullScreenMediaDetails mediaDetails)
 #endif
     ExitFullScreen() -> ()
+    EnterInWindowFullScreen(WebCore::FrameIdentifier frameID) -> ()
     BeganEnterFullScreen(WebCore::FrameIdentifier frameID, WebCore::IntRect initialRect, WebCore::IntRect finalRect) -> (bool success)
-    BeganExitFullScreen(WebCore::FrameIdentifier frameID, WebCore::IntRect initialRect, WebCore::IntRect finalRect) -> ()
-    Close()
+    BeganExitFullScreen(WebCore::IntRect initialRect, WebCore::IntRect finalRect) -> ()
+    CloseFullScreen()
 }
 #endif

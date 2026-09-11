@@ -58,7 +58,6 @@ public:
     void servePendingRequests(ResourceLoadPriority) final { }
     void suspendPendingRequests() final { }
     void resumePendingRequests() final { }
-    void startPingLoad(LocalFrame&, ResourceRequest&, const HTTPHeaderMap&, const FetchOptions&, ContentSecurityPolicyImposition, PingLoadCompletionHandler&&) final { }
     void preconnectTo(FrameLoader&, ResourceRequest&&, StoredCredentialsPolicy, ShouldPreconnectAsFirstParty, PreconnectCompletionHandler&&) final { }
     void setCaptureExtraNetworkLoadMetricsEnabled(bool) final { }
     bool isOnLine() const final { return true; }
@@ -127,11 +126,13 @@ public:
     RefPtr<SharedBuffer> readBufferFromClipboard(const String&, const String&) final { return nullptr; }
     void writeToClipboard(const String&, SelectionData&&) final { }
     void clearClipboard(const String&) final { }
-    int64_t changeCount(const String&) final { return 0; }
 #elif USE(LIBWPE)
     void getTypes(Vector<String>&) final { }
     void writeToPasteboard(const PasteboardWebContent&) final { }
     void writeToPasteboard(const String&, const String&) final { }
+#endif
+#if PLATFORM(GTK) || PLATFORM(WPE) || PLATFORM(WIN)
+    int64_t changeCount(const String&) final { return 0; }
 #endif
 };
 

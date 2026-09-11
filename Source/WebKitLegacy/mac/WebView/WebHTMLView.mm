@@ -2695,7 +2695,7 @@ static String commandNameForSelector(SEL selector)
     size_t selectorNameLength = strlen(selectorName);
     if (selectorNameLength < 2 || selectorName[selectorNameLength - 1] != ':')
         return String();
-    return String({ selectorName, selectorNameLength - 1 });
+    return String::fromLatin1(unsafeMakeSpan(selectorName, selectorNameLength - 1));
 }
 
 - (WebCore::Editor::Command)coreCommandBySelector:(SEL)selector
@@ -6947,7 +6947,7 @@ static CGImageRef selectionImage(WebCore::LocalFrame* frame, bool forceBlackText
 {
     ASSERT(!WebThreadIsEnabled() || WebThreadIsLocked());
     frame->view()->setPaintBehavior(WebCore::PaintBehavior::SelectionOnly | (forceBlackText ? OptionSet<WebCore::PaintBehavior>(WebCore::PaintBehavior::ForceBlackText) : OptionSet<WebCore::PaintBehavior>()));
-    frame->document()->updateLayout();
+    protect(frame->document())->updateLayout();
     CGImageRef result = imageFromRect(frame, frame->selection().selectionBounds());
     frame->view()->setPaintBehavior(WebCore::PaintBehavior::Normal);
     return result;

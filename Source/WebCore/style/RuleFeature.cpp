@@ -347,7 +347,7 @@ void RuleFeatureSet::recursivelyCollectFeaturesFromSelector(SelectorFeatures& se
                 idsMatchingAncestorsInRules.add(selector->value());
             else if (matchElement.hasRelation || matchElement.relation != MatchElement::Relation::Subject)
                 selectorFeatures.ids.append({ selector, matchElement, context.isNegation, scopeSourcesForFeature() });
-        } else if (selector->match() == CSSSelector::Match::Class)
+        } else if (selector->match() == CSSSelector::Match::Class || selector->isEquivalentToClassSelector())
             selectorFeatures.classes.append({ selector, matchElement, context.isNegation, scopeSourcesForFeature() });
         else if (selector->isAttributeSelector()) {
             auto& attribute = selector->attribute();
@@ -442,17 +442,14 @@ static PseudoClassInvalidationKey makePseudoClassInvalidationKey(CSSSelector::Ps
         if (simpleSelector->match() == CSSSelector::Match::Id)
             return makePseudoClassInvalidationKey(pseudoClass, InvalidationKeyType::Id, simpleSelector->value());
 
-        if (simpleSelector->match() == CSSSelector::Match::Class && className.isNull())
+        if ((simpleSelector->match() == CSSSelector::Match::Class || simpleSelector->isEquivalentToClassSelector()) && className.isNull())
             className = simpleSelector->value();
 
         if (simpleSelector->match() == CSSSelector::Match::Tag)
             tagName = simpleSelector->tagLowercaseLocalName();
 
-        if (simpleSelector->isAttributeSelector()) {
-            auto& lowercaseName = simpleSelector->attribute().localNameLowercase();
-            if (!unlikelyToHaveSelectorForAttribute(lowercaseName))
-                attributeName = lowercaseName;
-        }
+        if (simpleSelector->isAttributeSelector() && !simpleSelector->isEquivalentToClassSelector() && !unlikelyToHaveSelectorForAttribute(simpleSelector->attribute().localNameLowercase()))
+            attributeName = simpleSelector->attribute().localNameLowercase();
     }
     if (!attributeName.isEmpty())
         return makePseudoClassInvalidationKey(pseudoClass, InvalidationKeyType::Attribute, attributeName);
@@ -631,12 +628,6 @@ void RuleFeatureSet::add(const RuleFeatureSet& other)
     idsMatchingAncestorsInRules.addAll(other.idsMatchingAncestorsInRules);
     attributeLowercaseLocalNamesInRules.addAll(other.attributeLowercaseLocalNamesInRules);
     attributeLocalNamesInRules.addAll(other.attributeLocalNamesInRules);
-    for (auto& [name, affectsShadowTree] : other.substitutionAttributeNamesInRules) {
-        if (affectsShadowTree == AffectsShadowTree::Yes)
-            substitutionAttributeNamesInRules.set(name, AffectsShadowTree::Yes);
-        else
-            substitutionAttributeNamesInRules.add(name, AffectsShadowTree::No);
-    }
 
     auto addMap = [&](auto& map, auto& otherMap) {
         if (otherMap.isEmpty())
@@ -678,17 +669,6 @@ void RuleFeatureSet::add(const RuleFeatureSet& other)
     usesHasPseudoClass = usesHasPseudoClass || other.usesHasPseudoClass;
 }
 
-void RuleFeatureSet::registerSubstitutionAttribute(const AtomString& attributeName, AffectsShadowTree affectsShadowTree)
-{
-    auto lowercaseName = attributeName.convertToASCIILowercase();
-    if (affectsShadowTree == AffectsShadowTree::Yes)
-        substitutionAttributeNamesInRules.set(lowercaseName, AffectsShadowTree::Yes);
-    else
-        substitutionAttributeNamesInRules.add(lowercaseName, AffectsShadowTree::No);
-    attributeLowercaseLocalNamesInRules.add(attributeName);
-    attributeLocalNamesInRules.add(attributeName);
-}
-
 void RuleFeatureSet::clear()
 {
     RELEASE_ASSERT(isMainThread());
@@ -697,7 +677,6 @@ void RuleFeatureSet::clear()
     idsMatchingAncestorsInRules.clear();
     attributeLowercaseLocalNamesInRules.clear();
     attributeLocalNamesInRules.clear();
-    substitutionAttributeNamesInRules.clear();
     idRules.clear();
     classRules.clear();
     hasPseudoClassRules.clear();

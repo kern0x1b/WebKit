@@ -30,6 +30,7 @@
 #import <wtf/CompletionHandler.h>
 #import <wtf/ContinuousApproximateTime.h>
 #import <wtf/Function.h>
+#import <wtf/HashSet.h>
 #import <wtf/Ref.h>
 #import <wtf/RetainPtr.h>
 #import <wtf/Vector.h>
@@ -115,8 +116,7 @@ public:
     {
         m_wasInitialized = true;
         setCachedListData(WTF::move(data));
-        // FIXME: This is a safer cpp false positive (rdar://161384112).
-        SUPPRESS_FORWARD_DECL_ARG m_observers.forEach([](ListDataObserver& observer) {
+        m_observers.forEach([](ListDataObserver& observer) {
             observer.invokeCallback();
         });
     }
@@ -185,6 +185,26 @@ private:
     RetainPtr<WKWebPrivacyNotificationListener> m_notificationListener;
     HashMap<WebCore::RegistrableDomain, RestrictedOpenerType> m_restrictedOpenerTypes;
     ContinuousApproximateTime m_nextScheduledUpdateTime;
+};
+
+class HighValueFraudTargetDomainsController {
+public:
+    static HighValueFraudTargetDomainsController& singleton();
+
+    bool contains(const WebCore::RegistrableDomain&) const;
+    void setDomainsForTesting(HashSet<WebCore::RegistrableDomain>&&);
+
+private:
+    friend class NeverDestroyed<HighValueFraudTargetDomainsController, MainRunLoopAccessTraits>;
+    HighValueFraudTargetDomainsController();
+    void scheduleNextUpdate(ContinuousApproximateTime);
+    void update();
+
+    RetainPtr<WKWebPrivacyNotificationListener> m_notificationListener;
+    HashSet<WebCore::RegistrableDomain> m_domains;
+    ContinuousApproximateTime m_nextScheduledUpdateTime;
+    bool m_didReceiveInitialData { false };
+    bool m_hasInjectedDomainsForTesting { false };
 };
 
 class ResourceMonitorURLsController {

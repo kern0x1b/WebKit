@@ -30,8 +30,11 @@
 #include "config.h"
 #include "CSSSupportsParser.h"
 
+#include "CSSAtRuleID.h"
 #include "CSSParser.h"
 #include "CSSPropertyParserConsumer+Font.h"
+#include "CSSPropertyParserConsumer+Ident.h"
+#include "CSSPropertyParserConsumer+Primitives.h"
 #include "CSSPropertyParserState.h"
 #include "CSSSelectorParser.h"
 #include "CSSTokenizer.h"
@@ -57,7 +60,7 @@ CSSSupportsParser::SupportsResult CSSSupportsParser::supportsCondition(CSSParser
     return supportsParser.consumeSupportsFeatureOrGeneralEnclosed(range);
 }
 
-CSSSupportsParser::SupportsResult CSSSupportsParser::supportsCondition(const String& condition, const CSSParserContext& context, ParsingMode mode)
+CSSSupportsParser::SupportsResult CSSSupportsParser::supportsCondition(StringView condition, const CSSParserContext& context, ParsingMode mode)
 {
     CSSParser parser(context, condition);
     if (!parser.tokenizer())
@@ -148,6 +151,10 @@ CSSSupportsParser::SupportsResult CSSSupportsParser::consumeSupportsFunction(CSS
         return consumeSupportsFontFormatFunction(range);
     case CSSValueFontTech:
         return consumeSupportsFontTechFunction(range);
+    case CSSValueAtRule:
+        return consumeSupportsAtRuleFunction(range);
+    case CSSValueNamedFeature:
+        return consumeSupportsNamedFeatureFunction(range);
     default: // Unknown functions should parse as unsupported.
         range.consumeComponentValue();
         return Unsupported;
@@ -199,6 +206,89 @@ CSSSupportsParser::SupportsResult CSSSupportsParser::consumeSupportsFontTechFunc
         return Unsupported;
     ASSERT(technologies.size() == 1);
     return FontCustomPlatformData::supportsTechnology(technologies[0]) ? Supported : Unsupported;
+}
+
+// <supports-at-rule-fn> = at-rule( <at-keyword-token> )
+CSSSupportsParser::SupportsResult CSSSupportsParser::consumeSupportsAtRuleFunction(CSSParserTokenRange& range)
+{
+    ASSERT(range.peek().type() == FunctionToken && range.peek().functionId() == CSSValueAtRule);
+
+    auto function = CSSPropertyParserHelpers::consumeFunction(range);
+    auto atKeywordToken = function.consumeIncludingWhitespace();
+    if (atKeywordToken.type() != AtKeywordToken)
+        return Invalid;
+    if (!function.atEnd())
+        return Invalid;
+
+    // List all the at-rules here, so when adding a new at-rule, the compiler
+    // will remind to add them to this list.
+    // FIXME: should look into auto-generating this list using data from CSSProperties.json
+    switch (cssAtRuleID(atKeywordToken.value())) {
+    case CSSAtRuleWebkitKeyframes:
+    case CSSAtRuleAnnotation:
+    case CSSAtRuleCharacterVariant:
+    case CSSAtRuleContainer:
+    case CSSAtRuleCounterStyle:
+    case CSSAtRuleFontFace:
+    case CSSAtRuleFontFeatureValues:
+    case CSSAtRuleFontPaletteValues:
+    case CSSAtRuleImport:
+    case CSSAtRuleKeyframes:
+    case CSSAtRuleLayer:
+    case CSSAtRuleMedia:
+    case CSSAtRuleNamespace:
+    case CSSAtRuleOrnaments:
+    case CSSAtRulePage:
+    case CSSAtRulePositionTry:
+    case CSSAtRuleProperty:
+    case CSSAtRuleScope:
+    case CSSAtRuleStartingStyle:
+    case CSSAtRuleStyleset:
+    case CSSAtRuleStylistic:
+    case CSSAtRuleSupports:
+    case CSSAtRuleSwash:
+    case CSSAtRuleViewTransition:
+        return Supported;
+
+    case CSSAtRuleFunction:
+        return m_parser.context().propertySettings.cssFunctionAtRuleEnabled ? Supported : Unsupported;
+
+    case CSSAtRuleInvalid:
+    // Per spec, @charset is not an at-rule.
+    case CSSAtRuleCharset:
+        return Unsupported;
+    }
+
+    ASSERT_NOT_REACHED();
+    return Invalid;
+}
+
+// <supports-named-feature-fn> = named-feature( <ident> )
+CSSSupportsParser::SupportsResult CSSSupportsParser::consumeSupportsNamedFeatureFunction(CSSParserTokenRange& range)
+{
+    ASSERT(range.peek().type() == FunctionToken && range.peek().functionId() == CSSValueNamedFeature);
+
+    auto functionArgs = CSSPropertyParserHelpers::consumeFunction(range);
+    auto namedFeature = CSSPropertyParserHelpers::consumeIdentRaw(functionArgs);
+
+    if (!namedFeature)
+        return Invalid;
+    if (!functionArgs.atEnd())
+        return Invalid;
+
+    switch (*namedFeature) {
+    // FIXME (webkit.org/b/321970): remaining issue before transformed anchor is fully supported.
+    case CSSValueAnchorPositionFollowsTransforms:
+        return Unsupported;
+
+    // FIXME: not implemented yet
+    // https://github.com/WebKit/standards-positions/issues/680
+    case CSSValueSingleAxisScrollContainer:
+        return Unsupported;
+
+    default:
+        return Unsupported;
+    }
 }
 
 // <supports-in-parens> = ( <supports-condition> ) | <supports-feature> | <general-enclosed>

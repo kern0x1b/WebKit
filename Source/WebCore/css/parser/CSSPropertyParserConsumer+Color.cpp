@@ -32,6 +32,7 @@
 #include "CSSColor.h"
 #include "CSSColorConversion+Normalize.h"
 #include "CSSColorDescriptors.h"
+#include "CSSColorInterpolationMethod.h"
 #include "CSSColorLayers.h"
 #include "CSSColorMix.h"
 #include "CSSContrastColor.h"
@@ -283,10 +284,10 @@ template<typename Descriptor>
 static std::optional<CSS::Color> consumeRelativeFunctionParameters(CSSParserTokenRange& args, ColorParserState& state, CSS::Color&& originColor)
 {
     const CSSCalcSymbolsAllowed symbolsAllowed {
-        { std::get<0>(Descriptor::components).symbol, CSSUnitType::CSS_NUMBER },
-        { std::get<1>(Descriptor::components).symbol, CSSUnitType::CSS_NUMBER },
-        { std::get<2>(Descriptor::components).symbol, CSSUnitType::CSS_NUMBER },
-        { std::get<3>(Descriptor::components).symbol, CSSUnitType::CSS_NUMBER }
+        { std::get<0>(Descriptor::components).symbol, CSSUnitType::Number },
+        { std::get<1>(Descriptor::components).symbol, CSSUnitType::Number },
+        { std::get<2>(Descriptor::components).symbol, CSSUnitType::Number },
+        { std::get<3>(Descriptor::components).symbol, CSSUnitType::Number }
     };
 
     auto c1 = consumeRelativeComponent<Descriptor, 0>(args, state, symbolsAllowed);
@@ -576,7 +577,7 @@ static std::optional<CSS::Color> consumeColorMixFunction(CSSParserTokenRange& ra
 
     auto args = consumeFunction(range);
 
-    std::optional<ColorInterpolationMethod> colorInterpolationMethod = CSS::defaultInterpolationMethodForColorMix;
+    std::optional<CSS::ColorInterpolationMethod> colorInterpolationMethod = CSS::defaultInterpolationMethodForColorMix;
     if (args.peek().id() == CSSValueIn) {
         colorInterpolationMethod = consumeColorInterpolationMethod(args, state.propertyParserState);
         if (!colorInterpolationMethod)
@@ -696,7 +697,7 @@ static std::optional<CSS::Color> consumeRelativeAlphaColorFunction(CSSParserToke
         return std::nullopt;
 
     const CSSCalcSymbolsAllowed symbolsAllowed {
-        { std::get<0>(Descriptor::components).symbol, CSSUnitType::CSS_NUMBER },
+        { std::get<0>(Descriptor::components).symbol, CSSUnitType::Number },
     };
 
     auto alpha = consumeRelativeComponent<Descriptor, 0>(args, state, symbolsAllowed);
@@ -918,7 +919,7 @@ Color consumeColorRaw(CSSParserTokenRange& range, CSS::PropertyParserState& prop
 
 // MARK: - Raw parsing entry points
 
-Color parseColorRawGeneral(const String& string, const CSSParserContext& context, ScriptExecutionContext& scriptExecutionContext, const CSSColorParsingOptions& options, CSS::PlatformColorResolutionState& eagerResolutionState)
+Color parseColorRawGeneral(StringView string, const CSSParserContext& context, ScriptExecutionContext& scriptExecutionContext, const CSSColorParsingOptions& options, CSS::PlatformColorResolutionState& eagerResolutionState)
 {
     CSSTokenizer tokenizer(string);
     CSSParserTokenRange range(tokenizer.tokenRange());
@@ -938,7 +939,7 @@ Color parseColorRawGeneral(const String& string, const CSSParserContext& context
     return createColor(*result, eagerResolutionState);
 }
 
-Color deprecatedParseColorRawWithoutContext(const String& string, const CSSColorParsingOptions& options)
+Color deprecatedParseColorRawWithoutContext(StringView string, const CSSColorParsingOptions& options)
 {
     auto& context = strictCSSParserContext();
     if (auto color = CSSParserFastPaths::parseSimpleColor(string, context))

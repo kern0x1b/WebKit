@@ -31,6 +31,10 @@ header: <wtf/text/CString.h>
    std::span<const char> span()
 }
 
+[Alias=class CStringWithEncoding<char8_t>, CustomHeader, WebKitPlatform, AdditionalEncoder=StreamConnectionEncoder] alias WTF::UTF8CString {
+   std::span<const char8_t> span()
+}
+
 [AdditionalEncoder=StreamConnectionEncoder] class WTF::MediaTime {
     int64_t timeValue()
     uint32_t timeScale()
@@ -168,7 +172,6 @@ template: struct WebKit::RemoteAudioDestinationIdentifierType
 template: struct WebKit::RemoteAudioHardwareListenerIdentifierType
 template: struct WebKit::RemoteMediaResourceLoaderIdentifierType
 template: struct WebKit::RemoteRemoteCommandListenerIdentifierType
-template: struct WebKit::RiceBackendIdentifierType
 template: struct WebKit::SampleBufferDisplayLayerIdentifierType
 template: struct WebKit::ScriptMessageHandlerIdentifierType
 template: struct WebKit::TapIdentifierType
@@ -184,7 +187,7 @@ template: struct WebKit::WebPageProxyIdentifierType
 template: struct WebKit::WebURLSchemeHandlerIdentifierType
 template: struct WebKit::WebUndoStepIDType
 [WebKitPlatform, AdditionalEncoder=StreamConnectionEncoder] class WTF::ObjectIdentifier {
-    [Validator='WTF::ObjectIdentifierGenericBase<uint64_t>::isValidIdentifier(*toUInt64)'] uint64_t toUInt64()
+    [Validator='WTF::ObjectIdentifierGenericBase::isValidIdentifier(*toUInt64)'] uint64_t toUInt64()
 }
 
 header: <wtf/ObjectIdentifier.h>
@@ -204,6 +207,7 @@ template: struct WebCore::LibWebRTCSocketIdentifierType
 template: enum class WebCore::MainThreadPermissionObserverIdentifierType
 template: enum class WebCore::OpaqueOriginIdentifierType
 template: enum class WebCore::PortIdentifierType
+template: struct WebCore::PendingStreamIdentifierType
 template: enum class WebCore::RTCDataChannelLocalIdentifierType
 template: enum class WebCore::RTCEncodedStreamProducerIdentifierType
 template: struct WebCore::RenderingResourceIdentifierType
@@ -244,12 +248,7 @@ template: struct WebKit::StorageAreaIdentifierType
 template: struct WebKit::WebGPUIdentifierType
 template: struct WebKit::WebTransportSessionIdentifierType
 [WebKitPlatform, CustomHeader, AdditionalEncoder=StreamConnectionEncoder] class WTF::AtomicObjectIdentifier {
-    [Validator='WTF::ObjectIdentifierGenericBase<uint64_t>::isValidIdentifier(*toUInt64)'] uint64_t toUInt64()
-}
-
-template: struct WebCore::FileSystemHandleGlobalIdentifierType
-[WebKitPlatform, CustomHeader, AdditionalEncoder=StreamConnectionEncoder] class WTF::UUIDObjectIdentifier {
-    [Validator='WTF::ObjectIdentifierGenericBase<WTF::UUID>::isValidIdentifier(*toRawValue)'] WTF::UUID toRawValue()
+    [Validator='WTF::ObjectIdentifierGenericBase::isValidIdentifier(*toUInt64)'] uint64_t toUInt64()
 }
 
 #if OS(WINDOWS)

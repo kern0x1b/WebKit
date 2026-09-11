@@ -33,12 +33,14 @@
 #include "HTMLFrameOwnerElement.h"
 #include "FrameInlines.h"
 #include "NodeDocument.h"
+#include "Page.h"
 #include "PrivateClickMeasurement.h"
 #include "RemoteDOMWindow.h"
 #include "RemoteFrameClient.h"
 #include "RemoteFrameView.h"
 #include "ResourceTiming.h"
 #include "SecurityOrigin.h"
+#include "WebsitePolicies.h"
 #include <wtf/CompletionHandler.h>
 #include <wtf/HexNumber.h>
 #include <wtf/text/StringBuilder.h>
@@ -61,11 +63,15 @@ RemoteFrame::RemoteFrame(Page& page, ClientCreator&& clientCreator, FrameIdentif
     , m_client(clientCreator(*this))
     , m_layerHostingContextIdentifier(layerHostingContextIdentifier)
     , m_autoplayPolicy(AutoplayPolicy::Default)
+    , m_colorSchemePreference(ColorSchemePreference::NoPreference)
 {
     setView(RemoteFrameView::create(*this));
 }
 
-RemoteFrame::~RemoteFrame() = default;
+RemoteFrame::~RemoteFrame()
+{
+    detachFromPage();
+}
 
 ProcessIdentifier RemoteFrame::hostingProcessIdentifier() const
 {
@@ -74,7 +80,7 @@ ProcessIdentifier RemoteFrame::hostingProcessIdentifier() const
     // Fallback to the process encoded in the FrameIdentifier's upper bits when the
     // hosting process has not been recorded. This reproduces the legacy
     // IdentifierRegistry::protocolFrameId(FrameIdentifier) value. See webkit.org/b/310164.
-    return ObjectIdentifier<ProcessIdentifierType>(frameID().toRawValue() >> 32);
+    return ObjectIdentifier<ProcessIdentifierType>(frameID().toUInt64() >> 32);
 }
 
 DOMWindow* RemoteFrame::virtualWindow() const
@@ -115,9 +121,9 @@ void RemoteFrame::loadFrameRequest(FrameLoadRequest&& request, Event*)
     m_client->changeLocation(WTF::move(request), std::nullopt);
 }
 
-void RemoteFrame::updateRemoteFrameAccessibilityOffset(IntPoint offset)
+void RemoteFrame::updateRemoteFrameOffsetInMainFrame(IntPoint offset)
 {
-    m_client->updateRemoteFrameAccessibilityOffset(frameID(), offset);
+    m_client->updateRemoteFrameOffsetInMainFrame(frameID(), offset);
 }
 
 #if ENABLE(ACCESSIBILITY_LOCAL_FRAME)
@@ -156,6 +162,7 @@ void RemoteFrame::frameDetached()
 {
     m_client->frameDetached();
     m_window->frameDetached();
+    detachFromPage();
 }
 
 String RemoteFrame::renderTreeAsText(size_t baseIndent, OptionSet<RenderAsTextFlag> behavior)
@@ -241,9 +248,14 @@ AutoplayPolicy RemoteFrame::autoplayPolicy() const
     return m_autoplayPolicy;
 }
 
+ColorSchemePreference RemoteFrame::colorSchemePreference() const
+{
+    return m_colorSchemePreference;
+}
+
 float RemoteFrame::usedZoomForChild(const Frame& child) const
 {
-    if (RefPtr info = frameTreeSyncData().childrenFrameLayoutInfo.get(child.frameID()))
+    if (RefPtr info = frameTreeSyncData().frameGeometry.childrenFrameLayoutInfo.get(child.frameID()))
         return info->usedZoom();
 
     return 1.0;

@@ -30,7 +30,6 @@
 #include <WebCore/JSDOMPromiseDeferredForward.h>
 #include <WebCore/ResourceError.h>
 #include <wtf/CompletionHandler.h>
-#include <wtf/Expected.h>
 #include <wtf/Markable.h>
 
 namespace JSC {
@@ -64,7 +63,7 @@ public:
 
     ExceptionOr<void> respondWith(Ref<DOMPromise>&&);
 
-    using ResponseCallback = CompletionHandler<void(Expected<Ref<FetchResponse>, std::optional<ResourceError>>&&)>;
+    using ResponseCallback = CompletionHandler<void(std::expected<Ref<FetchResponse>, std::optional<ResourceError>>&&)>;
     WEBCORE_EXPORT void onResponse(ResponseCallback&&);
 
     FetchRequest& request() { return m_request.get(); }
@@ -72,6 +71,7 @@ public:
     const String& resultingClientId() const LIFETIME_BOUND { return m_resultingClientId; }
     DOMPromise& handled() const { return m_handled.get(); }
 
+    void processRespondWithPromise(Ref<DOMPromise>&&);
     bool respondWithEntered() const { return m_respondWithEntered; }
 
     static ResourceError createResponseError(const URL&, const String&, ResourceError::IsSanitized = ResourceError::IsSanitized::No);
@@ -87,7 +87,7 @@ private:
     WEBCORE_EXPORT FetchEvent(JSC::JSGlobalObject&, const AtomString&, Init&&, IsTrusted);
 
     void promiseIsSettled();
-    void processResponse(Expected<Ref<FetchResponse>, std::optional<ResourceError>>&&);
+    void processResponse(std::expected<Ref<FetchResponse>, std::optional<ResourceError>>&&);
     void respondWithError(ResourceError&&);
 
     const Ref<FetchRequest> m_request;

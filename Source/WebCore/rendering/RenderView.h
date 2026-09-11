@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
- * Copyright (C) 2006-2025 Apple Inc. All rights reserved.
+ * Copyright (C) 2006-2026 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -73,7 +73,7 @@ public:
 
     float NODELETE pageZoomFactor() const;
 
-    WEBCORE_EXPORT LocalFrameView& NODELETE frameView() const LIFETIME_BOUND;
+    inline LocalFrameView& NODELETE frameView() const LIFETIME_BOUND; // Defined in LocalFrameViewInlines.h.
 
     Layout::InitialContainingBlock& initialContainingBlock() { return m_initialContainingBlock.get(); }
     const Layout::InitialContainingBlock& initialContainingBlock() const { return m_initialContainingBlock.get(); }
@@ -86,7 +86,6 @@ public:
     bool needsEventRegionUpdateForNonCompositedFrame() const { return m_needsEventRegionUpdateForNonCompositedFrame; }
     void setNeedsEventRegionUpdateForNonCompositedFrame(bool value = true) { m_needsEventRegionUpdateForNonCompositedFrame = value; }
 
-#if ENABLE(TEXT_AUTOSIZING)
     enum class TextAutosizingState : uint8_t {
         Normal,
         ResetScheduled,
@@ -94,12 +93,17 @@ public:
     };
     TextAutosizingState textAutosizingState() const { return m_textAutosizingState; }
     void setTextAutosizingState(TextAutosizingState state) { m_textAutosizingState = state; }
-#endif
 
-    std::optional<RepaintRects> computeVisibleRectsInContainer(const RepaintRects&, const RenderLayerModelObject* container, VisibleRectContext) const override;
+    std::optional<RepaintRects> computeVisibleRectsInContainer(const RepaintRects&, const RenderLayerModelObject* container, const VisibleRectContext&, VisibleRectState) const override;
     void repaintRootContents();
     void repaintViewRectangle(const LayoutRect&);
     void repaintViewAndCompositedLayers();
+
+#if ENABLE(AX_CUSTOM_COLOR_MODE)
+    // Some color-filter decisions depend on how boxes actually end up positioned relative to the content
+    // behind them, which is only known once layout has run.
+    void adjustAXCustomColorModeAfterLayout();
+#endif
 
     void paint(PaintInfo&, const LayoutPoint&) override;
     void paintBoxDecorations(PaintInfo&, const LayoutPoint&) override;
@@ -295,9 +299,7 @@ private:
     unsigned m_renderersWithPixelMovingFilterCount { 0 };
     bool m_needsRepaintHackAfterCompositingLayerUpdateForDebugOverlaysOnly { false };
     bool m_needsEventRegionUpdateForNonCompositedFrame { false };
-#if ENABLE(TEXT_AUTOSIZING)
     TextAutosizingState m_textAutosizingState { TextAutosizingState::Normal };
-#endif
 
     SingleThreadWeakHashMap<RenderElement, Vector<WeakPtr<CachedImage>>> m_renderersWithPausedImageAnimation;
     WeakHashSet<SVGSVGElement, WeakPtrImplWithEventTargetData> m_SVGSVGElementsWithPausedImageAnimation;

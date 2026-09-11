@@ -49,6 +49,7 @@
 #include "StyleBuilder.h"
 #include "StyleCustomProperty.h"
 #include "StyleCustomPropertyRegistry.h"
+#include "StyleLocalPropertyRegistry.h"
 #include "StylePrimitiveNumericTypes+Conversions.h"
 #include "StylePrimitiveNumericTypes+Evaluation.h"
 #include "StyleZoomPrimitivesInlines.h"
@@ -95,7 +96,7 @@ struct WidthFeatureSchema : public SizeFeatureSchema {
 
     EvaluationResult evaluate(const MQ::Feature& feature, const RenderBox& renderer, const CSSToLengthConversionData& conversionData) const override
     {
-        auto width = Style::adjustForAbsoluteZoom(renderer.contentBoxWidth(), renderer);
+        auto width = Style::unapplyingZoom<int>(renderer.contentBoxWidth(), renderer);
         return evaluateLengthFeature(feature, width, conversionData);
     }
 };
@@ -110,7 +111,7 @@ struct HeightFeatureSchema : public SizeFeatureSchema {
 
     EvaluationResult evaluate(const MQ::Feature& feature, const RenderBox& renderer, const CSSToLengthConversionData& conversionData) const override
     {
-        auto height = Style::adjustForAbsoluteZoom(renderer.contentBoxHeight(), renderer);
+        auto height = Style::unapplyingZoom<int>(renderer.contentBoxHeight(), renderer);
         return evaluateLengthFeature(feature, height, conversionData);
     }
 };
@@ -125,7 +126,7 @@ struct InlineSizeFeatureSchema : public SizeFeatureSchema {
 
     EvaluationResult evaluate(const MQ::Feature& feature, const RenderBox& renderer, const CSSToLengthConversionData& conversionData) const override
     {
-        auto logicalWidth = Style::adjustForAbsoluteZoom(renderer.contentBoxLogicalWidth(), renderer);
+        auto logicalWidth = Style::unapplyingZoom<int>(renderer.contentBoxLogicalWidth(), renderer);
         return evaluateLengthFeature(feature, logicalWidth, conversionData);
     }
 };
@@ -140,7 +141,7 @@ struct BlockSizeFeatureSchema : public SizeFeatureSchema {
 
     EvaluationResult evaluate(const MQ::Feature& feature, const RenderBox& renderer, const CSSToLengthConversionData& conversionData) const override
     {
-        auto logicalHeight = Style::adjustForAbsoluteZoom(renderer.contentBoxLogicalHeight(), renderer);
+        auto logicalHeight = Style::unapplyingZoom<int>(renderer.contentBoxLogicalHeight(), renderer);
         return evaluateLengthFeature(feature, logicalHeight, conversionData);
     }
 };
@@ -196,7 +197,11 @@ static std::optional<StyleRangeValue> evaluateStyleRangeValue(const Vector<CSSPa
         return { };
 
     auto& conversionData = context.conversionData;
-    auto parserState = CSS::PropertyParserState { .context = protect(context.document.get())->cssParserContext() };
+
+    auto parserState = CSS::PropertyParserState {
+        .context = protect(context.document.get())->cssParserContext(),
+        .treeCountingFunctionsAllowed = true,
+    };
 
     auto isFullyConsumed = [](CSSParserTokenRange consumed) {
         consumed.consumeWhitespace();
@@ -213,7 +218,7 @@ static std::optional<StyleRangeValue> evaluateStyleRangeValue(const Vector<CSSPa
     }
     // overrideParserMode matches MQ::consumeValue's <length> parsing so quirky/quirks-mode lengths behave
     // identically here. See the FIXME there.
-    if (auto subrange = range; auto value = MetaConsumer<CSS::Length<CSS::AllUnzoomed>>::consume(subrange, parserState, { .overrideParserMode = HTMLStandardMode })) {
+    if (auto subrange = range; auto value = MetaConsumer<CSS::Length<>>::consume(subrange, parserState, { .overrideParserMode = HTMLStandardMode })) {
         if (isFullyConsumed(subrange))
             return StyleRangeValue { StyleRangeCategory::Length, Style::evaluate<double>(Style::toStyle(*value, conversionData), style.usedZoomForLength()) };
     }
@@ -270,16 +275,26 @@ struct StyleFeatureSchema : public FeatureSchema {
     {
     }
 
+    // The compared value needs the same registrations as the queried property, or a shadowed
+    // registration compares a token stream against a typed value.
+    // https://drafts.csswg.org/css-mixins/#resolve-function-styles
+    static const Style::LocalPropertyRegistry* localPropertyRegistry(const FeatureEvaluationContext& context)
+    {
+        // Both evaluators that reach a style() feature, container queries and if(), have a builder state.
+        CheckedRef builderState = *context.conversionData.styleBuilderState();
+        return builderState->localPropertyRegistry();
+    }
+
     // FeatureSchema conformance
 
     EvaluationResult evaluate(const MQ::Feature& feature, const FeatureEvaluationContext& context) const override
     {
-        CheckedPtr style = context.conversionData.style();
-        if (!style || !context.conversionData.parentStyle())
+        if (!context.conversionData.parentStyle())
             return EvaluationResult::False;
 
+        CheckedRef style = context.conversionData.style();
         if (feature.syntax == Syntax::Range)
-            return evaluateRange(feature, context, *style);
+            return evaluateRange(feature, context, style);
 
         RefPtr customPropertyValue = style->customPropertyValue(feature.name);
         if (!feature.rightComparison)
@@ -291,13 +306,14 @@ struct StyleFeatureSchema : public FeatureSchema {
 
             // Resolve the queried custom property value for var() references, css-wide keywords and registered properties.
             auto builderContext = Style::BuilderContext {
-                context.document.get(),
-                context.conversionData.parentStyle(),
-                context.conversionData.rootStyle(),
-                context.conversionData.elementForContainerUnitResolution()
+                .document = context.document.get(),
+                .parentStyle = context.conversionData.parentStyle(),
+                .rootElementStyle = context.conversionData.rootStyle(),
+                .element = context.conversionData.elementForContainerUnitResolution(),
+                .localPropertyRegistry = localPropertyRegistry(context)
             };
 
-            auto dummyStyle = Style::ComputedStyle::clone(*style);
+            auto dummyStyle = Style::ComputedStyle::clone(style);
             auto dummyMatchResult = Style::MatchResult::create();
 
             auto styleBuilder = Style::Builder { dummyStyle, WTF::move(builderContext), dummyMatchResult };
@@ -326,10 +342,11 @@ struct StyleFeatureSchema : public FeatureSchema {
         auto ensureBuilder = [&]() -> Style::Builder& {
             if (!styleBuilder) {
                 auto builderContext = Style::BuilderContext {
-                    context.document.get(),
-                    context.conversionData.parentStyle(),
-                    context.conversionData.rootStyle(),
-                    context.conversionData.elementForContainerUnitResolution()
+                    .document = context.document.get(),
+                    .parentStyle = context.conversionData.parentStyle(),
+                    .rootElementStyle = context.conversionData.rootStyle(),
+                    .element = context.conversionData.elementForContainerUnitResolution(),
+                    .localPropertyRegistry = localPropertyRegistry(context)
                 };
                 dummyStyle = Style::ComputedStyle::clonePtr(style);
                 dummyMatchResult = Style::MatchResult::create();

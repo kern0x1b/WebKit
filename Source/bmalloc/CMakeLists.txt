@@ -4,36 +4,32 @@ if (USE_MIMALLOC)
     add_subdirectory(mimalloc)
 endif ()
 
-set(bmalloc_PRIVATE_INCLUDE_DIRECTORIES
-    "${BMALLOC_DIR}"
-    "${BMALLOC_DIR}/bmalloc"
-    "${BMALLOC_DIR}/libpas/src/libpas"
-)
-
-if (USE_MIMALLOC)
-    list(APPEND bmalloc_PRIVATE_INCLUDE_DIRECTORIES
-        "${BMALLOC_DIR}/mimalloc/mimalloc/include"
+if (CMAKE_SIZEOF_VOID_P EQUAL 8)
+    set(BMALLOC_LIBPAS_SOURCES_0
+    libpas/src/libpas/bmalloc_heap.c
+    libpas/src/libpas/bmalloc_heap_config.c
+    libpas/src/libpas/bmalloc_heap_flex.c
+    libpas/src/libpas/bmalloc_heap_iso.c
+    libpas/src/libpas/bmalloc_heap_utils.c
+    libpas/src/libpas/bmalloc_prefault_supply.c
+    libpas/src/libpas/jit_heap.c
+    libpas/src/libpas/pas_bitfit_page_config_kind.c
+    libpas/src/libpas/pas_heap_config_kind.c
+    libpas/src/libpas/pas_segregated_page_config_kind.c
+    libpas/src/libpas/tagged_bmalloc_heap.c
+    libpas/src/libpas/tagged_bmalloc_heap_config.c
+    libpas/src/libpas/tagged_bmalloc_heap_utils.c
     )
 endif ()
 
-set(bmalloc_SOURCES
-    bmalloc/CryptoRandom.cpp
-    bmalloc/SystemHeap.cpp
-    bmalloc/Environment.cpp
-    bmalloc/Gigacage.cpp
-    bmalloc/HeapKind.cpp
-    bmalloc/Logging.cpp
-    bmalloc/Mutex.cpp
-    bmalloc/TZoneHeap.cpp
-    bmalloc/TZoneHeapManager.cpp
-    bmalloc/VMAllocate.cpp
-    bmalloc/bmalloc.cpp
-
+if (CMAKE_SIZEOF_VOID_P EQUAL 8)
+    set(BMALLOC_LIBPAS_SOURCES_1
     libpas/src/libpas/bmalloc_heap.c
     libpas/src/libpas/bmalloc_heap_config.c
     libpas/src/libpas/bmalloc_heap_flex.c
     libpas/src/libpas/bmalloc_heap_iso.c
     libpas/src/libpas/bmalloc_heap_utils.c
+    libpas/src/libpas/bmalloc_prefault_supply.c
     libpas/src/libpas/jit_heap.c
     libpas/src/libpas/pas_bitfit_page_config_kind.c
     libpas/src/libpas/pas_heap_config_kind.c
@@ -41,25 +37,11 @@ set(bmalloc_SOURCES
     libpas/src/libpas/tagged_bmalloc_heap.c
     libpas/src/libpas/tagged_bmalloc_heap_config.c
     libpas/src/libpas/tagged_bmalloc_heap_utils.c
-)
+    )
+endif ()
 
-set_source_files_properties(
-    libpas/src/libpas/bmalloc_heap.c
-    libpas/src/libpas/bmalloc_heap_config.c
-    libpas/src/libpas/bmalloc_heap_flex.c
-    libpas/src/libpas/bmalloc_heap_iso.c
-    libpas/src/libpas/bmalloc_heap_utils.c
-    libpas/src/libpas/jit_heap.c
-    libpas/src/libpas/pas_bitfit_page_config_kind.c
-    libpas/src/libpas/pas_heap_config_kind.c
-    libpas/src/libpas/pas_segregated_page_config_kind.c
-    libpas/src/libpas/tagged_bmalloc_heap.c
-    libpas/src/libpas/tagged_bmalloc_heap_config.c
-    libpas/src/libpas/tagged_bmalloc_heap_utils.c
-    PROPERTIES LANGUAGE CXX
-)
-
-set(bmalloc_C_SOURCES
+if (CMAKE_SIZEOF_VOID_P EQUAL 8)
+    set(BMALLOC_LIBPAS_SOURCES_2
     libpas/src/libpas/bmalloc_type.c
     libpas/src/libpas/hotbit_heap.c
     libpas/src/libpas/hotbit_heap_config.c
@@ -205,43 +187,11 @@ set(bmalloc_C_SOURCES
     libpas/src/libpas/pas_virtual_range.c
     libpas/src/libpas/thingy_heap.c
     libpas/src/libpas/thingy_heap_config.c
-)
+    )
+endif ()
 
-set(bmalloc_PUBLIC_HEADERS
-    bmalloc/Algorithm.h
-    bmalloc/AllocationCounts.h
-    bmalloc/ClassicBmalloc.h
-    bmalloc/CompactAllocationMode.h
-    bmalloc/BAssert.h
-    bmalloc/BCompiler.h
-    bmalloc/BExport.h
-    bmalloc/BInline.h
-    bmalloc/BMalloced.h
-    bmalloc/BPlatform.h
-    bmalloc/BSyscall.h
-    bmalloc/BVMTags.h
-    bmalloc/CryptoRandom.h
-    bmalloc/SystemHeap.h
-    bmalloc/Environment.h
-    bmalloc/FailureAction.h
-    bmalloc/Gigacage.h
-    bmalloc/GigacageConfig.h
-    bmalloc/GigacageKind.h
-    bmalloc/HeapKind.h
-    bmalloc/Logging.h
-    bmalloc/Map.h
-    bmalloc/Mutex.h
-    bmalloc/Sizes.h
-    bmalloc/StaticPerProcess.h
-    bmalloc/TZoneHeap.h
-    bmalloc/TZoneHeapInlines.h
-    bmalloc/TZoneHeapManager.h
-    bmalloc/TZoneLog.h
-    bmalloc/VMAllocate.h
-    bmalloc/Vector.h
-    bmalloc/bmalloc.h
-    bmalloc/valgrind.h
-
+if (CMAKE_SIZEOF_VOID_P EQUAL 8)
+    set(BMALLOC_LIBPAS_SOURCES_3
     libpas/src/libpas/bmalloc_heap_config.h
     libpas/src/libpas/bmalloc_heap_flex_internal.h
     libpas/src/libpas/bmalloc_heap.h
@@ -250,6 +200,7 @@ set(bmalloc_PUBLIC_HEADERS
     libpas/src/libpas/bmalloc_heap_iso_internal.h
     libpas/src/libpas/bmalloc_heap_ref.h
     libpas/src/libpas/bmalloc_heap_utils.h
+    libpas/src/libpas/bmalloc_prefault_supply.h
     libpas/src/libpas/bmalloc_type.h
     libpas/src/libpas/hotbit_heap_config.h
     libpas/src/libpas/hotbit_heap.h
@@ -574,13 +525,11 @@ set(bmalloc_PUBLIC_HEADERS
     libpas/src/libpas/tagged_bmalloc_heap_innards.h
     libpas/src/libpas/tagged_bmalloc_heap_utils.h
     libpas/src/libpas/thingy_heap_config.h
-)
+    )
+endif ()
 
-set(bmalloc_PRIVATE_HEADERS
-    bmalloc/ProcessCheck.h
-    bmalloc/ScopeExit.h
-    bmalloc/SpinBackoff.h
-
+if (CMAKE_SIZEOF_VOID_P EQUAL 8)
+    set(BMALLOC_LIBPAS_SOURCES_4
     libpas/src/libpas/hotbit_heap_inlines.h
     libpas/src/libpas/iso_heap_inlines.h
     libpas/src/libpas/pas_all_heap_configs.h
@@ -625,6 +574,97 @@ set(bmalloc_PRIVATE_HEADERS
     libpas/src/libpas/pas_try_shrink.h
     libpas/src/libpas/thingy_heap.h
     libpas/src/libpas/thingy_heap_prefix.h
+    )
+endif ()
+
+if (CMAKE_SIZEOF_VOID_P EQUAL 8)
+    set(BMALLOC_LIBPAS_SOURCES_5
+    libpas/src/libpas/pas_fast_large_free_heap.c
+    libpas/src/libpas/pas_simple_large_free_heap.c
+    )
+endif ()
+
+set(bmalloc_PRIVATE_INCLUDE_DIRECTORIES
+    "${BMALLOC_DIR}"
+    "${BMALLOC_DIR}/bmalloc"
+    "${BMALLOC_DIR}/libpas/src/libpas"
+)
+
+if (USE_MIMALLOC)
+    list(APPEND bmalloc_PRIVATE_INCLUDE_DIRECTORIES
+        "${BMALLOC_DIR}/mimalloc/mimalloc/include"
+    )
+endif ()
+
+set(bmalloc_SOURCES
+    bmalloc/CryptoRandom.cpp
+    bmalloc/SystemHeap.cpp
+    bmalloc/Environment.cpp
+    bmalloc/Gigacage.cpp
+    bmalloc/HeapKind.cpp
+    bmalloc/Logging.cpp
+    bmalloc/Mutex.cpp
+    bmalloc/TZoneHeap.cpp
+    bmalloc/TZoneHeapManager.cpp
+    bmalloc/VMAllocate.cpp
+    bmalloc/bmalloc.cpp
+
+    ${BMALLOC_LIBPAS_SOURCES_0}
+)
+
+set_source_files_properties(
+    ${BMALLOC_LIBPAS_SOURCES_1}
+    PROPERTIES LANGUAGE CXX
+)
+
+set(bmalloc_C_SOURCES
+    ${BMALLOC_LIBPAS_SOURCES_2}
+)
+
+set(bmalloc_PUBLIC_HEADERS
+    bmalloc/Algorithm.h
+    bmalloc/AllocationCounts.h
+    bmalloc/ClassicBmalloc.h
+    bmalloc/CompactAllocationMode.h
+    bmalloc/BAssert.h
+    bmalloc/BCompiler.h
+    bmalloc/BExport.h
+    bmalloc/BInline.h
+    bmalloc/BMalloced.h
+    bmalloc/BPlatform.h
+    bmalloc/BSyscall.h
+    bmalloc/BVMTags.h
+    bmalloc/CryptoRandom.h
+    bmalloc/SystemHeap.h
+    bmalloc/Environment.h
+    bmalloc/FailureAction.h
+    bmalloc/Gigacage.h
+    bmalloc/GigacageConfig.h
+    bmalloc/GigacageKind.h
+    bmalloc/HeapKind.h
+    bmalloc/Logging.h
+    bmalloc/Map.h
+    bmalloc/Mutex.h
+    bmalloc/Sizes.h
+    bmalloc/StaticPerProcess.h
+    bmalloc/TZoneHeap.h
+    bmalloc/TZoneHeapInlines.h
+    bmalloc/TZoneHeapManager.h
+    bmalloc/TZoneLog.h
+    bmalloc/VMAllocate.h
+    bmalloc/Vector.h
+    bmalloc/bmalloc.h
+    bmalloc/valgrind.h
+
+    ${BMALLOC_LIBPAS_SOURCES_3}
+)
+
+set(bmalloc_PRIVATE_HEADERS
+    bmalloc/ProcessCheck.h
+    bmalloc/ScopeExit.h
+    bmalloc/SpinBackoff.h
+
+    ${BMALLOC_LIBPAS_SOURCES_4}
 )
 
 if (USE_MIMALLOC)
@@ -684,8 +724,7 @@ if (CMAKE_C_COMPILER_ID STREQUAL "GNU")
     set(_all_c_flags "${CMAKE_C_FLAGS} ${CMAKE_C_FLAGS_${_BUILD_TYPE_UPPER}}")
     if (_all_c_flags MATCHES "-O1")
         set_source_files_properties(
-            libpas/src/libpas/pas_fast_large_free_heap.c
-            libpas/src/libpas/pas_simple_large_free_heap.c
+            ${BMALLOC_LIBPAS_SOURCES_5}
             PROPERTIES COMPILE_OPTIONS "-O2"
         )
     endif ()
@@ -732,7 +771,6 @@ WEBKIT_FRAMEWORK_DECLARE(bmalloc)
 WEBKIT_INCLUDE_CONFIG_FILES_IF_EXISTS()
 
 WEBKIT_COPY_FILES(bmalloc_CopyHeaders
-    PRUNE_STALE
     DESTINATION ${bmalloc_HEADERS_DIR}
     FILES ${bmalloc_PUBLIC_HEADERS}
     FLATTENED
@@ -740,7 +778,6 @@ WEBKIT_COPY_FILES(bmalloc_CopyHeaders
 
 if (bmalloc_PRIVATE_FRAMEWORK_HEADERS_DIR)
     WEBKIT_COPY_FILES(bmalloc_CopyPrivateHeaders
-        PRUNE_STALE
         DESTINATION ${bmalloc_PRIVATE_HEADERS_DIR}
         FILES ${bmalloc_PRIVATE_HEADERS}
         FLATTENED

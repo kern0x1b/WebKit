@@ -36,6 +36,7 @@ namespace Layout {
 class FloatingContext;
 class InlineFormattingContext;
 class InlineLevelBox;
+class LineBox;
 
 class InlineFormattingUtils {
 public:
@@ -44,10 +45,11 @@ public:
     InlineLayoutUnit logicalTopForNextLine(const LineLayoutResult&, const InlineRect& lineLogicalRect, const FloatingContext&) const;
 
     enum class IsIntrinsicWidthMode : bool { No, Yes };
-    enum class LineEndsWithLineBreak : bool { No, Yes };
-    InlineLayoutUnit computedTextIndent(IsIntrinsicWidthMode, IsFirstFormattedLine, std::optional<LineEndsWithLineBreak> previousLineEndsWithLineBreak, InlineLayoutUnit availableWidth) const;
+    enum class PreviousLineEndsParagraph : bool { No, Yes };
+    InlineLayoutUnit computedTextIndent(IsIntrinsicWidthMode, IsFirstFormattedLine, std::optional<PreviousLineEndsParagraph>, InlineLayoutUnit availableWidth) const;
+    static InlineLayoutUnit computedTextIndentForFirstLine(const ElementBox& root, InlineLayoutUnit availableWidth);
 
-    bool inlineLevelBoxAffectsLineBox(const InlineLevelBox&) const;
+    bool inlineLevelBoxAffectsLineBox(const InlineLevelBox&, const LineBox&) const;
 
     InlineLayoutUnit initialLineHeight(bool isFirstLine) const;
 
