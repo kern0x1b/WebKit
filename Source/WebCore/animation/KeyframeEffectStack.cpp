@@ -88,7 +88,7 @@ void KeyframeEffectStack::removeEffect(KeyframeEffect& effect)
         startAcceleratedAnimationsIfPossible();
 }
 
-bool KeyframeEffectStack::hasMatchingEffect(NOESCAPE const Function<bool(const KeyframeEffect&)>& function) const
+bool KeyframeEffectStack::hasMatchingEffect(const ScopedLambda<bool(const KeyframeEffect&)>& function) const
 {
     for (auto& effect : m_effects) {
         if (function(*effect))
@@ -97,25 +97,33 @@ bool KeyframeEffectStack::hasMatchingEffect(NOESCAPE const Function<bool(const K
     return false;
 }
 
+bool KeyframeEffectStack::hasMatchingEffect(NOESCAPE const Function<bool(const KeyframeEffect&)>& function) const
+{
+    return hasMatchingEffect(scopedLambdaRef<bool(const KeyframeEffect&)>(function));
+}
+
 bool KeyframeEffectStack::containsProperty(CSSPropertyID property) const
 {
-    return hasMatchingEffect([property] (const KeyframeEffect& effect) {
+    auto matches = [property] (const KeyframeEffect& effect) {
         return effect.animatesProperty(property);
-    });
+    };
+    return hasMatchingEffect(scopedLambdaRef<bool(const KeyframeEffect&)>(matches));
 }
 
 bool KeyframeEffectStack::requiresPseudoElement() const
 {
-    return hasMatchingEffect([] (const KeyframeEffect& effect) {
+    auto matches = [] (const KeyframeEffect& effect) {
         return effect.requiresPseudoElement();
-    });
+    };
+    return hasMatchingEffect(scopedLambdaRef<bool(const KeyframeEffect&)>(matches));
 }
 
 bool KeyframeEffectStack::isCurrentlyAffectingProperty(CSSPropertyID property) const
 {
-    return hasMatchingEffect([property] (const KeyframeEffect& effect) {
+    auto matches = [property] (const KeyframeEffect& effect) {
         return effect.isCurrentlyAffectingProperty(property) || effect.isRunningAcceleratedAnimationForProperty(property);
-    });
+    };
+    return hasMatchingEffect(scopedLambdaRef<bool(const KeyframeEffect&)>(matches));
 }
 
 const Vector<WeakPtr<KeyframeEffect>>& KeyframeEffectStack::sortedEffects()
@@ -151,10 +159,19 @@ OptionSet<AnimationImpact> KeyframeEffectStack::applyKeyframeEffects(Style::Comp
             || targetStyle.transform() != previousStyle.transform();
     }();
 
-    auto unanimatedStyle = Style::ComputedStyle::clone(targetStyle);
-
     // We iterate over a snapshot of the effect list as it may mutate during application.
-    for (const auto& effect : copyToVector(sortedEffects())) {
+    auto& effects = sortedEffects();
+    Vector<WeakPtr<KeyframeEffect>, 4> effectsSnapshot;
+    effectsSnapshot.reserveInitialCapacity(effects.size());
+    for (auto& effect : effects)
+        effectsSnapshot.append(effect);
+
+    std::unique_ptr<Style::ComputedStyle> unanimatedStyleSnapshot;
+    if (effectsSnapshot.size() > 1)
+        unanimatedStyleSnapshot = Style::ComputedStyle::clonePtr(targetStyle);
+    const Style::ComputedStyle& unanimatedStyle = unanimatedStyleSnapshot ? *unanimatedStyleSnapshot : targetStyle;
+
+    for (const auto& effect : effectsSnapshot) {
         auto keyframeRecomputationReason = effect->recomputeKeyframesIfNecessary(previousLastStyleChangeEventStyle, unanimatedStyle, resolutionContext);
 
         auto wasOrWasAboutToRunAccelerated = effect->isRunningAccelerated() || effect->isAboutToRunAccelerated();

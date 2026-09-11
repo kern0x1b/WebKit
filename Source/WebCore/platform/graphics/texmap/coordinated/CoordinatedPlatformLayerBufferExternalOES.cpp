@@ -203,7 +203,6 @@ RefPtr<BitmapTexture> CoordinatedPlatformLayerBufferExternalOES::createExternalO
 }
 #endif // USE(GSTREAMER) && USE(GBM)
 
-#if USE(TEXTURE_MAPPER)
 void CoordinatedPlatformLayerBufferExternalOES::paintToTextureMapper(TextureMapper& textureMapper, const FloatRect& targetRect, const TransformationMatrix& modelViewMatrix, float opacity)
 {
     waitForContentsIfNeeded();

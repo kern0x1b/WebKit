@@ -111,7 +111,7 @@ AffineTransform computeTextMatrix(const FontBase& font)
     return textMatrix;
 }
 
-static void fillVectorWithHorizontalGlyphPositions(Vector<CGPoint, 256>& positions, std::span<const CGSize> advances, const FloatPoint& point, CGAffineTransform textMatrix)
+static void fillVectorWithHorizontalGlyphPositions(Vector<CGPoint, 256>& positions, const AffineTransform& contextTextMatrix, std::span<const CGSize> advances, const FloatPoint& point)
 {
     // Keep this in sync as the inverse of `DrawGlyphsRecorder::recordDrawGlyphs`.
     // The input positions are in the context's coordinate system, without the text matrix.
@@ -122,8 +122,27 @@ static void fillVectorWithHorizontalGlyphPositions(Vector<CGPoint, 256>& positio
     // CTM * text matrix * positions we need to deliver to CT = CTM * input positions
     // Solving for the positions we need to deliver to CT, we get
     // positions we need to deliver to CT = inverse(text matrix) * input positions
-    CGAffineTransform matrix = CGAffineTransformInvert(textMatrix);
+    // The caller has just installed contextTextMatrix on the context, so asking CG to read
+    // it back would be a round trip for a value we already have.
+    CGAffineTransform textMatrix = contextTextMatrix;
+    // Horizontal text without synthetic oblique gets the plain Y-flip, which is its own
+    // inverse, so the general inversion is only needed for the other cases.
+    CGAffineTransform matrix = (textMatrix.a == 1 && !textMatrix.b && !textMatrix.c && textMatrix.d == -1 && !textMatrix.tx && !textMatrix.ty)
+        ? textMatrix : CGAffineTransformInvert(textMatrix);
     positions[0] = CGPointApplyAffineTransform(point, matrix);
+
+    if (!matrix.b && !matrix.c) {
+        // Horizontal text without synthetic oblique: the matrix is a scale/flip, so the
+        // per-glyph 2x3 apply collapses to one multiply per axis.
+        CGFloat a = matrix.a;
+        CGFloat d = matrix.d;
+        for (size_t i = 1; i < advances.size(); ++i) {
+            positions[i].x = positions[i - 1].x + advances[i - 1].width * a;
+            positions[i].y = positions[i - 1].y + advances[i - 1].height * d;
+        }
+        return;
+    }
+
     for (size_t i = 1; i < advances.size(); ++i) {
         CGSize advance = CGSizeApplyAffineTransform(advances[i - 1], matrix);
         positions[i].x = positions[i - 1].x + advance.width;
@@ -289,12 +308,23 @@ public:
         if (m_glyphs.empty())
             return;
 
-        if (m_translations)
-            fillVectorWithVerticalGlyphPositions(m_positions, m_translations->span(), m_advances, point, m_ascentDelta, m_textMatrix);
-        else
-            fillVectorWithHorizontalGlyphPositions(m_positions, m_advances, point, m_textMatrix);
+    const FontPlatformData& platformData = font.platformData();
+    Vector<CGPoint, 256> positions(glyphs.size());
+    if (platformData.orientation() == FontOrientation::Vertical) {
+        ScopedTextMatrix savedMatrix(computeVerticalTextMatrix(font, textMatrix), context);
 
-        CTFontDrawGlyphs(m_ctFont.get(), m_glyphs.data(), m_positions.span().data(), m_glyphs.size(), context);
+        Vector<CGSize, 256> translations(glyphs.size());
+        RetainPtr ctFont = platformData.ctFont();
+        CTFontGetVerticalTranslationsForGlyphs(ctFont.get(), glyphs.data(), translations.mutableSpan().data(), glyphs.size());
+
+        auto ascentDelta = font.fontMetrics().ascent(FontBaseline::Ideographic) - font.fontMetrics().ascent();
+        fillVectorWithVerticalGlyphPositions(positions, translations, advances, point, ascentDelta, CGContextGetTextMatrix(context));
+        CTFontDrawGlyphs(ctFont.get(), glyphs.data(), positions.span().data(), glyphs.size(), context);
+    } else {
+        fillVectorWithHorizontalGlyphPositions(positions, textMatrix, advances, point);
+        // The FontPlatformData owns the CTFont for the whole call; retaining it here would
+        // be a CFRetain/CFRelease pair per glyph run.
+        CTFontDrawGlyphs(platformData.ctFont(), glyphs.data(), positions.span().data(), glyphs.size(), context);
     }
 
 private:
@@ -308,18 +338,19 @@ private:
 };
 }
 
-static void setCGFontRenderingMode(GraphicsContext& context)
+// Takes the context the caller already holds: wrapping it in a RetainPtr again is a
+// CFRetain/CFRelease pair per glyph run for a context that cannot go away underneath us.
+static void setCGFontRenderingMode(GraphicsContext& context, CGContextRef cgContext)
 {
-    RetainPtr<CGContextRef> cgContext = context.platformContext();
-    CGContextSetShouldAntialiasFonts(cgContext.get(), true);
+    CGContextSetShouldAntialiasFonts(cgContext, true);
 
-    CGAffineTransform contextTransform = CGContextGetCTM(cgContext.get());
+    CGAffineTransform contextTransform = CGContextGetCTM(cgContext);
     bool isTranslationOrIntegralScale = WTF::isIntegral(contextTransform.a) && WTF::isIntegral(contextTransform.d) && contextTransform.b == 0.f && contextTransform.c == 0.f;
     bool isRotated = ((contextTransform.b || contextTransform.c) && (contextTransform.a || contextTransform.d));
     bool doSubpixelQuantization = isTranslationOrIntegralScale || (!isRotated && context.shouldSubpixelQuantizeFonts());
 
-    CGContextSetShouldSubpixelPositionFonts(cgContext.get(), true);
-    CGContextSetShouldSubpixelQuantizeFonts(cgContext.get(), doSubpixelQuantization);
+    CGContextSetShouldSubpixelPositionFonts(cgContext, true);
+    CGContextSetShouldSubpixelQuantizeFonts(cgContext, doSubpixelQuantization);
 }
 
 void FontCascade::drawGlyphs(GraphicsContext& context, const FontBase& font, std::span<const GlyphBufferGlyph> glyphs, std::span<const GlyphBufferAdvance> advances, const FloatPoint& anchorPoint, FontSmoothingMode smoothingMode)
@@ -333,7 +364,9 @@ void FontCascade::drawGlyphs(GraphicsContext& context, const FontBase& font, std
         return;
     }
 
-    RetainPtr<CGContextRef> cgContext = context.platformContext();
+    // The GraphicsContext owns this context for the whole call; a RetainPtr here would only
+    // add a CFRetain/CFRelease pair per glyph run.
+    CGContextRef cgContext = context.platformContext();
 
     if (!font.allowsAntialiasing())
         smoothingMode = FontSmoothingMode::None;
@@ -357,28 +390,37 @@ void FontCascade::drawGlyphs(GraphicsContext& context, const FontBase& font, std
 #if PLATFORM(IOS_FAMILY)
     UNUSED_VARIABLE(shouldSmoothFonts);
 #else
-    bool originalShouldUseFontSmoothing = CGContextGetShouldSmoothFonts(cgContext.get());
+    bool originalShouldUseFontSmoothing = CGContextGetShouldSmoothFonts(cgContext);
     if (shouldSmoothFonts != originalShouldUseFontSmoothing)
-        CGContextSetShouldSmoothFonts(cgContext.get(), shouldSmoothFonts);
+        CGContextSetShouldSmoothFonts(cgContext, shouldSmoothFonts);
 #endif
 
-    bool originalShouldAntialias = CGContextGetShouldAntialias(cgContext.get());
+    bool originalShouldAntialias = CGContextGetShouldAntialias(cgContext);
     if (shouldAntialias != originalShouldAntialias)
-        CGContextSetShouldAntialias(cgContext.get(), shouldAntialias);
+        CGContextSetShouldAntialias(cgContext, shouldAntialias);
 
     FloatPoint point = anchorPoint;
 
-    auto textMatrix = computeTextMatrix(font);
-    CGContextSetTextMatrix(cgContext.get(), textMatrix);
-    setCGFontRenderingMode(context);
-    CGContextSetFontSize(cgContext.get(), platformData.size());
+    auto textMatrix = computeOverallTextMatrix(font);
+    ScopedTextMatrix restorer(textMatrix, cgContext);
+
+    setCGFontRenderingMode(context, cgContext);
+    CGContextSetFontSize(cgContext, platformData.size());
 
     auto shadow = context.dropShadow();
 
-    AffineTransform contextCTM = context.getCTM();
+    // Reading the CTM back out of CoreGraphics is only needed for synthetic bold and for
+    // the simple-shadow test, neither of which body text hits.
+    std::optional<AffineTransform> contextCTM;
+    auto ctm = [&]() -> const AffineTransform& {
+        if (!contextCTM)
+            contextCTM = context.getCTM();
+        return *contextCTM;
+    };
+
     float syntheticBoldOffset = font.syntheticBoldOffset();
-    if (syntheticBoldOffset && !contextCTM.isIdentityOrTranslationOrFlipped()) {
-        FloatSize horizontalUnitSizeInDevicePixels = contextCTM.mapSize(FloatSize(1, 0));
+    if (syntheticBoldOffset && !ctm().isIdentityOrTranslationOrFlipped()) {
+        FloatSize horizontalUnitSizeInDevicePixels = ctm().mapSize(FloatSize(1, 0));
         float horizontalUnitLengthInDevicePixels = sqrtf(horizontalUnitSizeInDevicePixels.width() * horizontalUnitSizeInDevicePixels.width() + horizontalUnitSizeInDevicePixels.height() * horizontalUnitSizeInDevicePixels.height());
         if (horizontalUnitLengthInDevicePixels) {
             // Make sure that a scaled down context won't blow up the gap between the glyphs.
@@ -386,10 +428,7 @@ void FontCascade::drawGlyphs(GraphicsContext& context, const FontBase& font, std
         }
     }
 
-    bool hasSimpleShadow = context.textDrawingMode() == TextDrawingMode::Fill && shadow && shadow->color.isValid() && !shadow->radius && !platformData.isColorBitmapFont() && (!context.shadowsIgnoreTransforms() || contextCTM.isIdentityOrTranslationOrFlipped()) && !context.isInTransparencyLayer();
-
-    RepeatedDrawGlyphs repeatedDrawGlyphs { font, glyphs, advances, textMatrix };
-
+    bool hasSimpleShadow = context.textDrawingMode() == TextDrawingMode::Fill && shadow && shadow->color.isValid() && !shadow->radius && !platformData.isColorBitmapFont() && (!context.shadowsIgnoreTransforms() || ctm().isIdentityOrTranslationOrFlipped()) && !context.isInTransparencyLayer();
     if (hasSimpleShadow) {
         // Paint simple shadows ourselves instead of relying on CG shadows, to avoid losing subpixel antialiasing.
         context.clearDropShadow();
@@ -397,29 +436,29 @@ void FontCascade::drawGlyphs(GraphicsContext& context, const FontBase& font, std
         Color shadowFillColor = shadow->color.colorWithAlphaMultipliedBy(fillColor.alphaAsFloat());
         context.setFillColor(shadowFillColor);
         auto shadowTextOffset = point + context.platformShadowOffset(shadow->offset);
-        repeatedDrawGlyphs.showGlyphsWithAdvances(shadowTextOffset, cgContext.get());
+        showGlyphsWithAdvances(shadowTextOffset, font, cgContext, glyphs, advances, textMatrix);
         if (syntheticBoldOffset) {
             shadowTextOffset.move(syntheticBoldOffset, 0);
-            repeatedDrawGlyphs.showGlyphsWithAdvances(shadowTextOffset, cgContext.get());
+            showGlyphsWithAdvances(shadowTextOffset, font, cgContext, glyphs, advances, textMatrix);
         }
         context.setFillColor(fillColor);
     }
 
-    repeatedDrawGlyphs.showGlyphsWithAdvances(point, cgContext.get());
+    showGlyphsWithAdvances(point, font, cgContext, glyphs, advances, textMatrix);
 
     if (syntheticBoldOffset)
-        repeatedDrawGlyphs.showGlyphsWithAdvances(FloatPoint(point.x() + syntheticBoldOffset, point.y()), cgContext.get());
+        showGlyphsWithAdvances(FloatPoint(point.x() + syntheticBoldOffset, point.y()), font, cgContext, glyphs, advances, textMatrix);
 
     if (hasSimpleShadow)
         context.setDropShadow(*shadow);
 
 #if !PLATFORM(IOS_FAMILY)
     if (shouldSmoothFonts != originalShouldUseFontSmoothing)
-        CGContextSetShouldSmoothFonts(cgContext.get(), originalShouldUseFontSmoothing);
+        CGContextSetShouldSmoothFonts(cgContext, originalShouldUseFontSmoothing);
 #endif
 
     if (shouldAntialias != originalShouldAntialias)
-        CGContextSetShouldAntialias(cgContext.get(), originalShouldAntialias);
+        CGContextSetShouldAntialias(cgContext, originalShouldAntialias);
 }
 
 bool FontCascade::primaryFontIsSystemFont() const
@@ -492,6 +531,8 @@ RefPtr<const Font> FontCascade::fontForCombiningCharacterSequence(StringView str
     return Font::createSystemFallbackFontPlaceholder();
 }
 
+static constexpr char32_t firstCharacterWithEmojiPresentationByDefault = 0x231A;
+
 ResolvedEmojiPolicy FontCascade::resolveEmojiPolicy(FontVariantEmoji fontVariantEmoji, char32_t character)
 {
     // You may think that this function should be different between macOS and iOS. And you may even be right!
@@ -535,7 +576,7 @@ ResolvedEmojiPolicy FontCascade::resolveEmojiPolicy(FontVariantEmoji fontVariant
         // The first category are characters with Emoji=Yes and Emoji_Presentation=Yes.
         // The second category are characters with Emoji=Yes and Emoji_Presentation=No.
         // The third category are characters with Emoji=No.
-        if (isEmojiWithPresentationByDefault(character))
+        if (character >= firstCharacterWithEmojiPresentationByDefault && isEmojiWithPresentationByDefault(character))
             return ResolvedEmojiPolicy::RequireEmoji;
         return ResolvedEmojiPolicy::NoPreference;
     case FontVariantEmoji::Text:

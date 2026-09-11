@@ -79,11 +79,13 @@ bool InheritedData::fastPathInheritedEqual(const InheritedData& other) const
 
 bool InheritedData::nonFastPathInheritedEqual(const InheritedData& other) const
 {
-    return lineHeight == other.lineHeight
-        && textAutosizingAdjustedLineHeight == other.textAutosizingAdjustedLineHeight
-        && fontData == other.fontData
-        && borderHorizontalSpacing == other.borderHorizontalSpacing
-        && borderVerticalSpacing == other.borderVerticalSpacing;
+    return borderHorizontalSpacing == other.borderHorizontalSpacing
+        && borderVerticalSpacing == other.borderVerticalSpacing
+        && lineHeight == other.lineHeight
+#if ENABLE(TEXT_AUTOSIZING)
+        && specifiedLineHeight == other.specifiedLineHeight
+#endif
+        && fontData == other.fontData;
 }
 
 void InheritedData::fastPathInheritFrom(const InheritedData& inheritParent)

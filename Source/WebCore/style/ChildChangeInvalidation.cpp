@@ -290,12 +290,16 @@ void ChildChangeInvalidation::traverseAddedElements(Function&& function)
     if (!m_childChange.isInsertion())
         return;
 
+    // The removal path already hoists this; the insertion path resolved the scope, took a ref on the
+    // resolver and reached into the feature set once per inserted child, for a value that cannot
+    // change while one mutation is being processed.
+    Ref resolver = parentElement().styleResolver();
+    const bool needsDescendantTraversal = Style::needsDescendantTraversal(resolver->ruleSets().features());
+
     auto callFunctionOnInclusiveDescendants = [&](Element& element) {
         function(element);
 
-        Ref resolver = parentElement().styleResolver();
-        auto& features = resolver->ruleSets().features();
-        if (!needsDescendantTraversal(features))
+        if (!needsDescendantTraversal)
             return;
 
         for (Ref descendant : descendantsOfType<Element>(element))

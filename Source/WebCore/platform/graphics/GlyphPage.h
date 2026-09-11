@@ -74,12 +74,14 @@ public:
 
     WEBCORE_EXPORT static unsigned count();
 
-    static constexpr unsigned size = 16;
+    static constexpr unsigned sizeBits = 4;
+    static constexpr unsigned size = 1 << sizeBits; // 16
+    static constexpr unsigned sizeMask = size - 1;  // 15
 
     static constexpr unsigned sizeForPageNumber(unsigned) { return size; }
-    static constexpr unsigned indexForCodePoint(char32_t c) { return c % size; }
-    static constexpr unsigned pageNumberForCodePoint(char32_t c) { return c / size; }
-    static constexpr char32_t startingCodePointInPageNumber(unsigned pageNumber) { return pageNumber * size; }
+    static constexpr unsigned indexForCodePoint(char32_t c) { return c & sizeMask; }
+    static constexpr unsigned pageNumberForCodePoint(char32_t c) { return c >> sizeBits; }
+    static constexpr char32_t startingCodePointInPageNumber(unsigned pageNumber) { return pageNumber << sizeBits; }
     static constexpr bool pageNumberIsUsedForArabic(unsigned pageNumber) { return startingCodePointInPageNumber(pageNumber) >= 0x600 && startingCodePointInPageNumber(pageNumber) + sizeForPageNumber(pageNumber) < 0x700; }
 
     GlyphData glyphDataForCharacter(char32_t c) const

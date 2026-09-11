@@ -269,6 +269,9 @@ ScalableImageDecoderFrame* PNGImageDecoder::frameBufferAtIndex(size_t index)
     if (ScalableImageDecoder::encodedDataStatus() < EncodedDataStatus::SizeAvailable)
         return nullptr;
 
+    if (index >= decodeIfNeededAndGetFrameCount())
+        index = decodeIfNeededAndGetFrameCount() - 1;
+
     if (m_frameBufferCache.isEmpty())
         m_frameBufferCache.grow(1);
 
@@ -452,10 +455,12 @@ void PNGImageDecoder::headerAvailable()
 ScalableImageDecoderFrame* PNGImageDecoder::currentFrameBuffer()
 {
     assertIsHeld(m_lock);
-    if (m_frameBufferCache.isEmpty() || m_currentFrame >= decodeIfNeededAndGetFrameCount())
-        return nullptr;
+    if (m_frameBufferCache.isEmpty())
+        return;
 
-    RELEASE_ASSERT(m_currentFrame < m_frameBufferCache.size());
+    // Initialize the framebuffer if needed.
+    if (m_currentFrame >= decodeIfNeededAndGetFrameCount())
+        return;
     auto& buffer = m_frameBufferCache[m_currentFrame];
     if (buffer.isInvalid()) {
         if (!buffer.initialize(size(), m_premultiplyAlpha)) {
@@ -910,8 +915,12 @@ void PNGImageDecoder::updateFrameRect(ScalableImageDecoderFrame& buffer)
 void PNGImageDecoder::paintFrame()
 {
     assertIsHeld(m_lock);
-    ASSERT(m_png);
-    auto* frameBuffer = currentFrameBuffer();
+    if (m_frameIsHidden || m_currentFrame >= decodeIfNeededAndGetFrameCount())
+        return;
+
+    auto& buffer = m_frameBufferCache[m_currentFrame];
+    buffer.setDecodingStatus(DecodingStatus::Complete);
+
     png_bytep interlaceBuffer = m_reader->interlaceBuffer();
     if (!frameBuffer || !interlaceBuffer)
         return;
@@ -943,8 +952,8 @@ void PNGImageDecoder::paintFrame()
             address = address.subspan(1);
         }
 #if USE(LCMS)
-        if (m_iccTransform)
-            cmsDoTransform(m_iccTransform.get(), destinationRow.data(), destinationRow.data(), rect.width());
+            if (m_iccTransform)
+                cmsDoTransform(m_iccTransform.get(), destinationRow.data(), destinationRow.data(), rect.width());
 #endif
     }
 

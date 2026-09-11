@@ -52,6 +52,11 @@ public:
     ~DOMMatrixReadOnly();
 
     enum class Is2D : bool { No, Yes };
+
+    struct AbstractMatrix {
+        TransformationMatrix matrix;
+        bool is2D { true };
+    };
     static Ref<DOMMatrixReadOnly> create(const TransformationMatrix& matrix, Is2D is2D)
     {
         return adoptRef(*new DOMMatrixReadOnly(matrix, is2D));
@@ -130,11 +135,6 @@ protected:
     DOMMatrixReadOnly() = default;
     DOMMatrixReadOnly(const TransformationMatrix&, Is2D);
     DOMMatrixReadOnly(TransformationMatrix&&, Is2D);
-
-    struct AbstractMatrix {
-        TransformationMatrix matrix;
-        bool is2D { true };
-    };
 
     static ExceptionOr<AbstractMatrix> parseStringIntoAbstractMatrix(Document&, const String&);
 

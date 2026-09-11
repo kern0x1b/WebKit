@@ -61,8 +61,8 @@ InlineLayoutUnit LineBoxVerticalAligner::computeLogicalHeightAndAlign(LineBox& l
                 if (inlineLevelBox.hasTextEmphasis())
                     return false;
                 // Baseline aligned, non-stretchy direct children are considered to be simple for now.
-                CheckedRef layoutBox = inlineLevelBox.layoutBox();
-                if (&layoutBox->parent() != &rootInlineBox.layoutBox() || !WTF::holdsAlternative<CSS::Keyword::Baseline>(inlineLevelBox.verticalAlign()))
+                auto& layoutBox = inlineLevelBox.layoutBox();
+                if (&layoutBox.parent() != &rootInlineBox.layoutBox() || !WTF::holdsAlternative<CSS::Keyword::Baseline>(inlineLevelBox.verticalAlign()))
                     return false;
 
                 if (inlineLevelBox.isAtomicInlineBox()) {

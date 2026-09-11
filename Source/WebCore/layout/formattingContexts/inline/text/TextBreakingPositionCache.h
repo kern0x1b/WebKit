@@ -71,6 +71,8 @@ public:
     const WidthList* widths(const Entry&, const FontCascadeCacheKey&);
     void addWidths(const Key&, const FontCascadeCacheKey&, WidthList&&);
 
+    bool isEmpty() const { return m_breakingPositionMap.isEmpty(); }
+
     void clear();
 
 private:

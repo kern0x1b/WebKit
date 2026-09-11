@@ -705,6 +705,7 @@ private:
 
     void repaintLayerDirtyRects();
 
+
     LayerChangeFlags m_uncommittedChanges { 0 };
 
     RefPtr<PlatformCALayer> m_layer; // The main layer

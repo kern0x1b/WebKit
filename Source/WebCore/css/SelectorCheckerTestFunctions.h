@@ -606,14 +606,14 @@ ALWAYS_INLINE bool matchesPopoverOpenPseudoClass(const Element& element)
 
 ALWAYS_INLINE bool matchesOpenPseudoClass(const Element& element)
 {
-    if (auto* dialog = dynamicDowncast<HTMLDialogElement>(element))
-        return dialog->isOpen();
-    if (auto* details = dynamicDowncast<HTMLDetailsElement>(element))
-        return details->isOpen();
-    if (auto* select = dynamicDowncast<HTMLSelectElement>(element))
-        return select->isOpen();
-    if (auto* input = dynamicDowncast<HTMLInputElement>(element))
-        return input->isPresentingAttachedView();
+    if (element.hasTagName(HTMLNames::dialogTag))
+        return downcast<HTMLDialogElement>(element).isOpen();
+    if (element.hasTagName(HTMLNames::detailsTag))
+        return downcast<HTMLDetailsElement>(element).isOpen();
+    if (element.hasTagName(HTMLNames::selectTag))
+        return downcast<HTMLSelectElement>(element).isOpen();
+    if (element.hasTagName(HTMLNames::inputTag))
+        return downcast<HTMLInputElement>(element).isPresentingAttachedView();
 
     return false;
 }
@@ -637,21 +637,21 @@ ALWAYS_INLINE bool matchesActiveViewTransitionPseudoClass(const Element& element
 
 ALWAYS_INLINE bool matchesEvenLessGoodPseudoClass(const Element& element)
 {
-    if (RefPtr meterElement = dynamicDowncast<HTMLMeterElement>(element))
+    if (auto* meterElement = dynamicDowncast<HTMLMeterElement>(element))
         return meterElement->gaugeRegion() == HTMLMeterElement::GaugeRegion::EvenLessGood;
     return false;
 }
 
 ALWAYS_INLINE bool matchesOptimumPseudoClass(const Element& element)
 {
-    if (RefPtr meterElement = dynamicDowncast<HTMLMeterElement>(element))
+    if (auto* meterElement = dynamicDowncast<HTMLMeterElement>(element))
         return meterElement->gaugeRegion() == HTMLMeterElement::GaugeRegion::Optimum;
     return false;
 }
 
 ALWAYS_INLINE bool matchesSuboptimumPseudoClass(const Element& element)
 {
-    if (RefPtr meterElement = dynamicDowncast<HTMLMeterElement>(element))
+    if (auto* meterElement = dynamicDowncast<HTMLMeterElement>(element))
         return meterElement->gaugeRegion() == HTMLMeterElement::GaugeRegion::Suboptimal;
     return false;
 }

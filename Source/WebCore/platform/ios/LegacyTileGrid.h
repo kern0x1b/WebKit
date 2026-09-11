@@ -70,16 +70,18 @@ public:
 
     void dropAllTiles();
     void dropInvalidTiles();
+    void dropInvalidTiles(const IntRect& bounds);
     void dropTilesOutsideRect(const IntRect&);
     void dropTilesIntersectingRect(const IntRect&);
     // Drops tiles that intersect dropRect but do not intersect keepRect.
     void dropTilesBetweenRects(const IntRect& dropRect, const IntRect& keepRect);
-    bool dropDistantTiles(unsigned tilesNeeded, double shortestDistance);
+    bool dropDistantTiles(unsigned tilesNeeded, double shortestDistance, const IntRect& visibleRect);
 
     void addTilesCoveringRect(const IntRect&);
 
     bool tilesCover(const IntRect&) const;
     void centerTileGridOrigin(const IntRect& visibleRect);
+    void centerTileGridOrigin(const IntRect& visibleRect, const IntRect& bounds);
     void invalidateTiles(const IntRect& dirtyRect);
 
     void updateTileOpacity();
@@ -89,24 +91,40 @@ public:
 
     bool hasTiles() const { return !m_tiles.isEmpty(); }
 
-    IntRect calculateCoverRect(const IntRect& visibleRect, bool& centerGrid);
+    IntRect calculateCoverRect(const IntRect& visibleRect, bool& centerGrid, bool useMinimalCoverage);
+    IntRect calculateCoverRect(const IntRect& visibleRect, bool& centerGrid) { return calculateCoverRect(visibleRect, centerGrid, shouldUseMinimalTileCoverage()); }
 
     // Logging
     void dumpTiles();
 
 private:
-    double tileDistance2(const IntRect& visibleRect, const IntRect& tileRect) const;
+    // The direction-dependent part of tileDistance2() depends only on the
+    // visible rect and the tiling direction, not on the tile, so it is computed
+    // once per pass instead of once per candidate tile.
+    struct TileDistanceMetrics {
+        IntPoint visibleCenter;
+        double xScaleLeftward;
+        double xScaleRightward;
+        double yScaleUpward;
+        double yScaleDownward;
+    };
+    TileDistanceMetrics distanceMetricsFor(const IntRect& visibleRect) const;
+    static double tileDistance2(const IntRect& visibleRect, const IntRect& tileRect, const TileDistanceMetrics&);
     unsigned tileByteSize() const;
 
     void addTileForIndex(const TileIndex&);
+    void addTileForIndex(const TileIndex&, const IntRect& bounds);
 
     RefPtr<LegacyTileGridTile> tileForIndex(const TileIndex&) const;
     IntRect tileRectForIndex(const TileIndex&) const;
+    IntRect tileRectForIndex(const TileIndex&, const IntRect& bounds) const;
     RefPtr<LegacyTileGridTile> tileForPoint(const IntPoint&) const;
     TileIndex tileIndexForPoint(const IntPoint&) const;
 
-    IntRect adjustCoverRectForPageBounds(const IntRect&) const;
+    IntRect adjustCoverRectForPageBounds(const IntRect&, bool useMinimalCoverage) const;
+public:
     bool shouldUseMinimalTileCoverage() const;
+private:
 
 private:        
     WeakRef<LegacyTileCache> m_tileCache;

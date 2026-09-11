@@ -198,10 +198,10 @@ bool RenderFlexibleBox::willStretchItem(const RenderBox& item, LogicalBoxAxis co
 
 RenderFlexibleBox::FlexItemBorderBoxRects RenderFlexibleBox::flexItemBorderBoxRects() const
 {
-    FlexItemBorderBoxRects flexItemBorderBoxRects;
-    for (auto& flexItem : childrenOfType<RenderBox>(*this)) {
-        if (!flexItem.isOutOfFlowPositioned() && !flexItem.isExcludedFromNormalLayout())
-            flexItemBorderBoxRects.append(flexItem.borderBoxRectInContainer());
+    for (auto& renderer : m_flexItems) {
+        auto* flexItem = renderer.get();
+        if (flexItem && !paintChild(*flexItem, paintInfo, paintOffset, paintInfoForFlexItem, usePrintRect, PaintAsInlineBlock))
+            return;
     }
     return flexItemBorderBoxRects;
 }
@@ -351,7 +351,45 @@ void RenderFlexibleBox::invalidateBlockAxisSizeForFlexItem(const RenderBox& flex
 
 bool RenderFlexibleBox::isComputingFlexBaseSizes() const
 {
-    return m_flexLayout.layoutPhase() == LayoutPhase::ComputingFlexBaseSizes;
+    auto& flexItem = flexLayoutItem.renderer.get();
+
+    setOverridingMainSizeForFlexItem(flexItem, mainSize);
+    // The flexed content size and the override size include the scrollbar
+    // width, so we need to compare to the size including the scrollbar.
+    // FIXME: Should it include the scrollbar?
+    if (mainSize != mainAxisContentExtentForFlexItemIncludingScrollbar(*this, flexItem))
+        flexItem.setChildNeedsLayout(MarkingBehavior::MarkOnlyThis);
+    else {
+        // To avoid double applying margin changes in
+        // updateAutoMarginsInCrossAxis, we reset the margins here.
+        resetAutoMarginsAndLogicalTopInCrossAxis(flexItem);
+    }
+    // We may have already forced relayout for orthogonal flowing children in
+    // computeInnerFlexBaseSizeForFlexItem.
+    bool forceFlexItemRelayout = flexLayoutItem.shouldInvalidateChildContent && !hasFlexItemCompletedLayout(flexItem);
+#if defined(WEBKIT_IOS6)
+    if (!forceFlexItemRelayout && flexItemHasPercentHeightDescendants(flexItem) && hasFlexItemCompletedLayout(flexItem))
+        forceFlexItemRelayout = true;
+#else
+    if (!forceFlexItemRelayout && flexItemHasPercentHeightDescendants(flexItem)) {
+        forceFlexItemRelayout = true;
+    }
+#endif
+    updateFlexItemDirtyBitsBeforeLayout(forceFlexItemRelayout, flexItem);
+    if (!flexItem.needsLayout())
+        flexItem.markForPaginationRelayoutIfNeeded();
+    if (flexItem.needsLayout())
+        markFlexItemLayoutComplete(flexItem);
+
+    {
+        auto flexLayoutScope = scopedAfterMainAxisItemSizing();
+        flexItem.layoutIfNeeded();
+    }
+
+    if (!flexLayoutItem.everHadLayout && flexItem.checkForRepaintDuringLayout()) {
+        flexItem.repaint();
+        flexItem.repaintOverhangingFloats(true);
+    }
 }
 
 bool RenderFlexibleBox::isInCrossAxisStretchLayout() const
@@ -380,6 +418,56 @@ void RenderFlexibleBox::clearFlexItemOverridingSizes()
         if (!flexItem->isOutOfFlowPositioned())
             flexItem->clearOverridingSize();
     }
+}
+
+void RenderFlexibleBox::prepareFlexItemsAndMargins()
+{
+    // Collect the in-flow flex items in order-modified document order (a stable sort by the used 'order' value
+    // keeps document order among equal values). This is rebuilt every layout and replaces the order iterator.
+    // Out-of-flow and excluded children are not flex items, so they are left out; the list holds weak pointers
+    // because painting/hit-testing/baseline queries read it after layout, when a child may have been removed.
+    m_flexItems.clear();
+    bool hasNonZeroOrder = false;
+    for (auto& child : childrenOfType<RenderBox>(*this)) {
+        if (!child.isOutOfFlowPositioned() && !child.isExcludedFromNormalLayout()) {
+            if (child.style().order().value != 0) [[unlikely]]
+                hasNonZeroOrder = true;
+            m_flexItems.append(child);
+        }
+    }
+    if (hasNonZeroOrder) [[unlikely]] {
+        std::stable_sort(m_flexItems.begin(), m_flexItems.end(), [](auto& a, auto& b) {
+            return a->style().order().value < b->style().order().value;
+        });
+    }
+
+    for (auto& flexItem : m_flexItems) {
+        // Before running the flex algorithm, 'auto' has a margin of 0.
+        // Also, if we're not auto sizing, we don't do a layout that computes the start/end margins.
+        if (FlexFormattingUtils::isHorizontalFlow(*this)) {
+            flexItem->setMarginLeft(computeFlexItemMarginValue(*this, flexItem->style().marginLeft()));
+            flexItem->setMarginRight(computeFlexItemMarginValue(*this, flexItem->style().marginRight()));
+        } else {
+            flexItem->setMarginTop(computeFlexItemMarginValue(*this, flexItem->style().marginTop()));
+            flexItem->setMarginBottom(computeFlexItemMarginValue(*this, flexItem->style().marginBottom()));
+        }
+    }
+}
+
+FlexContainerUsedExtents RenderFlexibleBox::updateFlexContainerLogicalHeight(LayoutUnit flexContentBlockExtent)
+{
+    // Resolve the container's logical height to the largest of: what is already set, the block-axis extent FlexFormattingContext
+    // built from its line sizes (row flow) or its column lines' main content extent (column flow), and the empty-line
+    // minimum for a container that establishes a line with no in-flow items (e.g. all children are out of flow). The
+    // empty-line minimum is a block-axis floor, so it is folded into the block-axis max here rather than compared
+    // against the physical borderBoxHeight() (which is the inline extent in a vertical writing mode). Then resolve
+    // against the container's own specified/min/max height and box-sizing, and return the used cross extents (line
+    // positioning / item cross sizing / rtl-column flip) and block extents (column re-resolve / column-reverse
+    // placement) so FlexFormattingContext takes them as values rather than reading them back off the container.
+    auto minimumHeightForEmptyLine = hasLineIfEmpty() ? borderAndPaddingLogicalHeight() + lineHeight() + scrollbarLogicalHeight() : 0_lu;
+    setLogicalHeight(std::max(minimumHeightForEmptyLine, std::max(logicalHeight(), borderAndPaddingLogicalHeight() + flexContentBlockExtent)));
+    updateLogicalHeight();
+    return { FlexFormattingUtils::crossAxisContentExtent(*this), crossAxisExtent(*this), contentBoxLogicalHeight(), logicalHeight() };
 }
 
 }

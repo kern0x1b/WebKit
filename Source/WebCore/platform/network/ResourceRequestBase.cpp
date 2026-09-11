@@ -306,7 +306,9 @@ void ResourceRequestBase::setFirstPartyForCookies(const URL& firstPartyForCookie
         return;
 
     m_requestData.m_firstPartyForCookies = firstPartyForCookies;
-    
+    m_cachePartition = String();
+    m_cachePartitionComputed = false;
+
     m_platformRequestUpdated = false;
 }
 
@@ -844,6 +846,8 @@ void ResourceRequestBase::updateResourceRequest(HTTPBodyUpdatePolicy bodyPolicy)
         ASSERT(m_platformRequestUpdated);
         const_cast<ResourceRequest&>(asResourceRequest()).doUpdateResourceRequest();
         m_resourceRequestUpdated = true;
+        m_cachePartition = String();
+        m_cachePartitionComputed = false;
     }
 
     if (!m_resourceRequestBodyUpdated && bodyPolicy == HTTPBodyUpdatePolicy::UpdateHTTPBody) {
@@ -867,10 +871,13 @@ String ResourceRequestBase::cachePartition() const
 #if ENABLE(CACHE_PARTITIONING)
     if (!m_shouldBlockThirdPartyStorage)
         return emptyString();
-    RegistrableDomain domain(firstPartyForCookies());
-    if (domain.isEmpty())
-        return emptyString();
-    return domain.string();
+    const URL& firstParty = firstPartyForCookies();
+    if (!m_cachePartitionComputed) {
+        RegistrableDomain domain(firstParty);
+        m_cachePartition = domain.isEmpty() ? emptyString() : domain.string();
+        m_cachePartitionComputed = true;
+    }
+    return m_cachePartition;
 #else
     return emptyString();
 #endif

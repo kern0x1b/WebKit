@@ -1001,6 +1001,7 @@ set(JavaScriptCore_PRIVATE_FRAMEWORK_HEADERS
     jit/ScratchRegisterAllocator.h
     jit/Snippet.h
     jit/SnippetParams.h
+    jit/SnippetReg.h
     jit/SnippetSlowPathCalls.h
     jit/SpillRegistersMode.h
     jit/TagRegistersMode.h

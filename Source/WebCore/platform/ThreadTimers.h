@@ -73,6 +73,7 @@ private:
     CheckedPtr<SharedTimer> m_sharedTimer; // External object, can be a run loop on a worker thread. Normally set/reset by worker thread.
     bool m_firingTimers { false };
     bool m_shouldBreakFireLoopForRenderingUpdate { false };
+    bool m_sharedTimerIsStopped { true };
     unsigned m_currentHeapInsertionOrder { 0 };
     MonotonicTime m_pendingSharedTimerFireTime;
 };

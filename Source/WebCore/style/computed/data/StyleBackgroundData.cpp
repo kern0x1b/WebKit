@@ -54,9 +54,9 @@ Ref<BackgroundData> BackgroundData::copy() const
 
 bool BackgroundData::operator==(const BackgroundData& other) const
 {
-    return background == other.background
-        && backgroundColor == other.backgroundColor
-        && outline == other.outline;
+    return backgroundColor == other.backgroundColor
+        && outline == other.outline
+        && background == other.background;
 }
 
 bool BackgroundData::containsCurrentColor() const

@@ -230,6 +230,8 @@ void ComputedStyle::copyPseudoElementBitsFrom(const ComputedStyle& other)
 
 bool ComputedStyle::operator==(const ComputedStyle& other) const
 {
+    if (this == &other)
+        return true;
     // compare everything except the pseudoStyle pointer
     return m_inheritedFlags == other.m_inheritedFlags
         && m_nonInheritedFlags == other.m_nonInheritedFlags
@@ -241,6 +243,8 @@ bool ComputedStyle::operator==(const ComputedStyle& other) const
 
 bool ComputedStyle::inheritedEqual(const ComputedStyle& other) const
 {
+    if (this == &other)
+        return true;
     return m_inheritedFlags == other.m_inheritedFlags
         && m_inheritedData == other.m_inheritedData
         && (m_svgData.ptr() == other.m_svgData.ptr() || m_svgData->inheritedEqual(other.m_svgData))
@@ -249,6 +253,8 @@ bool ComputedStyle::inheritedEqual(const ComputedStyle& other) const
 
 bool ComputedStyle::nonInheritedEqual(const ComputedStyle& other) const
 {
+    if (this == &other)
+        return true;
     return m_nonInheritedFlags == other.m_nonInheritedFlags
         && m_nonInheritedData == other.m_nonInheritedData
         && (m_svgData.ptr() == other.m_svgData.ptr() || m_svgData->nonInheritedEqual(other.m_svgData));

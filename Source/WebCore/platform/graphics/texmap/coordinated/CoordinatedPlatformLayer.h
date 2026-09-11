@@ -153,7 +153,6 @@ public:
     bool masksToBounds() const WTF_REQUIRES_LOCK(m_lock);
     void setPreserves3D(bool) WTF_REQUIRES_LOCK(m_lock);
     void setBackfaceVisibility(bool) WTF_REQUIRES_LOCK(m_lock);
-    void setBackgroundColor(const Color&) WTF_REQUIRES_LOCK(m_lock);
     void setOpacity(float) WTF_REQUIRES_LOCK(m_lock);
     void setBlendMode(BlendMode) WTF_REQUIRES_LOCK(m_lock);
 
@@ -163,7 +162,6 @@ public:
     void setContentsRect(const FloatRect&) WTF_REQUIRES_LOCK(m_lock);
     void setContentsRectClipsDescendants(bool) WTF_REQUIRES_LOCK(m_lock);
     void setContentsClippingRect(const FloatRoundedRect&) WTF_REQUIRES_LOCK(m_lock);
-    void setContentsClipShapePath(const Path&) WTF_REQUIRES_LOCK(m_lock);
     void setContentsScale(float) WTF_REQUIRES_LOCK(m_lock);
     float contentsScale() const WTF_REQUIRES_LOCK(m_lock);
     enum class RequireComposition : bool { No, Yes };
@@ -184,7 +182,6 @@ public:
     void setBackdrop(CoordinatedPlatformLayer*) WTF_REQUIRES_LOCK(m_lock);
     void notifyBackdropFiltersChanged() WTF_REQUIRES_LOCK(m_lock);
     void setBackdropRect(const FloatRoundedRect&) WTF_REQUIRES_LOCK(m_lock);
-    void setBackdropShapePath(const Path&) WTF_REQUIRES_LOCK(m_lock);
     void setIsBackdropRoot(bool) WTF_REQUIRES_LOCK(m_lock);
 
     void setAnimations(const TextureMapperAnimations&) WTF_REQUIRES_LOCK(m_lock);
@@ -288,7 +285,6 @@ private:
     const PlatformLayerIdentifier m_id;
 
     GraphicsLayerCoordinated* m_owner WTF_GUARDED_BY_CAPABILITY(mainThread) { nullptr };
-#if USE(TEXTURE_MAPPER)
     std::unique_ptr<TextureMapperLayer> m_target;
 #else
     RefPtr<SkiaCompositingLayer> m_target;
@@ -335,7 +331,6 @@ private:
     RefPtr<CoordinatedBackingStoreProxy> m_backingStoreProxy WTF_GUARDED_BY_LOCK(m_lock);
 #if USE(TEXTURE_MAPPER)
     RefPtr<CoordinatedBackingStore> m_backingStore WTF_GUARDED_BY_LOCK(m_lock);
-#endif
     struct {
         RefPtr<CoordinatedImageBackingStore> current;
         RefPtr<CoordinatedImageBackingStore> committed;

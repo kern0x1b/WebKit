@@ -35,7 +35,9 @@
 #include <wtf/ThreadSafeWeakPtr.h>
 #include <wtf/text/CStringView.h>
 
-typedef struct _GstGLMemory GstGLMemory;
+#if USE(GSTREAMER_GL)
+#include "GraphicsTypesGL.h"
+#endif
 
 namespace WebCore {
 

@@ -27,6 +27,7 @@
 #include "SVGElement.h"
 #include "SVGNames.h"
 #include "SVGUnitTypes.h"
+#include <wtf/NeverDestroyed.h>
 #include <wtf/RefPtr.h>
 #include <wtf/TZoneMalloc.h>
 
@@ -94,10 +95,30 @@ private:
 
     // Spec: If the x/y attribute is not specified, the effect is as if a value of "0%" were specified.
     // Spec: If the width/height attribute is not specified, the effect is as if a value of "100%" were specified.
-    const Ref<SVGAnimatedLength> m_x { SVGAnimatedLength::create(this, SVGLengthMode::Width, "0%"_s) };
-    const Ref<SVGAnimatedLength> m_y { SVGAnimatedLength::create(this, SVGLengthMode::Height, "0%"_s) };
-    const Ref<SVGAnimatedLength> m_width { SVGAnimatedLength::create(this, SVGLengthMode::Width, "100%"_s) };
-    const Ref<SVGAnimatedLength> m_height { SVGAnimatedLength::create(this, SVGLengthMode::Height, "100%"_s) };
+    static const SVGLengthValue& defaultOrigin(SVGLengthMode mode)
+    {
+        if (mode == SVGLengthMode::Height) {
+            static NeverDestroyed<SVGLengthValue> height { SVGLengthMode::Height, "0%"_s };
+            return height.get();
+        }
+        static NeverDestroyed<SVGLengthValue> width { SVGLengthMode::Width, "0%"_s };
+        return width.get();
+    }
+
+    static const SVGLengthValue& defaultExtent(SVGLengthMode mode)
+    {
+        if (mode == SVGLengthMode::Height) {
+            static NeverDestroyed<SVGLengthValue> height { SVGLengthMode::Height, "100%"_s };
+            return height.get();
+        }
+        static NeverDestroyed<SVGLengthValue> width { SVGLengthMode::Width, "100%"_s };
+        return width.get();
+    }
+
+    const Ref<SVGAnimatedLength> m_x { SVGAnimatedLength::create(this, defaultOrigin(SVGLengthMode::Width)) };
+    const Ref<SVGAnimatedLength> m_y { SVGAnimatedLength::create(this, defaultOrigin(SVGLengthMode::Height)) };
+    const Ref<SVGAnimatedLength> m_width { SVGAnimatedLength::create(this, defaultExtent(SVGLengthMode::Width)) };
+    const Ref<SVGAnimatedLength> m_height { SVGAnimatedLength::create(this, defaultExtent(SVGLengthMode::Height)) };
     const Ref<SVGAnimatedString> m_result { SVGAnimatedString::create(this) };
 };
 

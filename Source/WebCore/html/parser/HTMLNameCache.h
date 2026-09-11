@@ -100,23 +100,25 @@ private:
         return *slot;
     }
 
-    ALWAYS_INLINE static size_t slotIndex(char16_t firstCharacter, char16_t lastCharacter, char16_t length, size_t capacity)
+    template<size_t capacity>
+    ALWAYS_INLINE static size_t slotIndex(char16_t firstCharacter, char16_t lastCharacter, char16_t length)
     {
+        static_assert(hasOneBitSet(capacity));
         unsigned hash = (firstCharacter << 6) ^ ((lastCharacter << 14) ^ firstCharacter);
         hash += (hash >> 14) + (length << 14);
         hash ^= hash << 14;
-        return (hash + (hash >> 6)) % capacity;
+        return (hash + (hash >> 6)) & (capacity - 1);
     }
 
     ALWAYS_INLINE static AtomString& atomStringCacheSlot(char16_t firstCharacter, char16_t lastCharacter, char16_t length)
     {
-        auto index = slotIndex(firstCharacter, lastCharacter, length, atomStringCacheCapacity);
+        auto index = slotIndex<atomStringCacheCapacity>(firstCharacter, lastCharacter, length);
         return atomStringCache()[index];
     }
 
     ALWAYS_INLINE static RefPtr<QualifiedName::QualifiedNameImpl>& qualifiedNameCacheSlot(char16_t firstCharacter, char16_t lastCharacter, char16_t length)
     {
-        auto index = slotIndex(firstCharacter, lastCharacter, length, qualifiedNameCacheCapacity);
+        auto index = slotIndex<qualifiedNameCacheCapacity>(firstCharacter, lastCharacter, length);
         return qualifiedNameCache()[index];
     }
 

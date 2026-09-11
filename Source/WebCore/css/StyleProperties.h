@@ -62,6 +62,8 @@ public:
         const AtomString& cssName() const LIFETIME_BOUND;
         String cssText(const CSS::SerializationContext&) const;
 
+        const StylePropertyMetadata& metadata() const LIFETIME_BOUND { return m_metadata; }
+
         const CSSValue* value() const { return m_value; }
         // FIXME: We should try to remove this mutable overload.
         CSSValue* value() { return const_cast<CSSValue*>(m_value); }

@@ -51,8 +51,9 @@ private:
     bool mayTryReplaceEncodedData() const final { return true; }
 
     void setEncoding(const String&) final;
-    ASCIILiteral encoding() const final WTF_REQUIRES_SHARED_LOCK(m_lock);
-    const TextResourceDecoder* textResourceDecoder() const final WTF_REQUIRES_SHARED_LOCK(m_lock) { return m_decoder.get(); }
+    ASCIILiteral encoding() const final;
+    const TextResourceDecoder* textResourceDecoder() const final { return m_decoder.get(); }
+    bool needsProgressiveData() const final { return false; }
     void finishLoading(const FragmentedSharedBuffer*, const NetworkLoadMetrics&) final;
 
     void destroyDecodedData() final;

@@ -89,83 +89,14 @@ CSSPrimitiveValue::CSSPrimitiveValue(CSS::UnevaluatedCalcBase&& value)
 
 CSSPrimitiveValue::~CSSPrimitiveValue()
 {
+    // Every unit but CSS_CALC owns nothing, so the seventy-case switch this replaces always
+    // reached the same empty body. One compare replaces the jump table.
     auto type = primitiveUnitType();
-    switch (type) {
-    case CSSUnitType::Calc:
+    if (type == CSSUnitType::CSS_CALC)
         m_value.calc->deref();
-        break;
-    case CSSUnitType::CalcPercentageWithAngle:
-    case CSSUnitType::CalcPercentageWithLength:
-        ASSERT_NOT_REACHED();
-        break;
-    case CSSUnitType::Number:
-    case CSSUnitType::Integer:
-    case CSSUnitType::Percentage:
-    case CSSUnitType::Em:
-    case CSSUnitType::QuirkyEm:
-    case CSSUnitType::Ex:
-    case CSSUnitType::Cap:
-    case CSSUnitType::Ch:
-    case CSSUnitType::Ic:
-    case CSSUnitType::Rcap:
-    case CSSUnitType::Rch:
-    case CSSUnitType::Rem:
-    case CSSUnitType::Rex:
-    case CSSUnitType::Ric:
-    case CSSUnitType::Px:
-    case CSSUnitType::Cm:
-    case CSSUnitType::Mm:
-    case CSSUnitType::In:
-    case CSSUnitType::Pt:
-    case CSSUnitType::Pc:
-    case CSSUnitType::Deg:
-    case CSSUnitType::Rad:
-    case CSSUnitType::Grad:
-    case CSSUnitType::Ms:
-    case CSSUnitType::S:
-    case CSSUnitType::Hz:
-    case CSSUnitType::Khz:
-    case CSSUnitType::Turn:
-    case CSSUnitType::Vw:
-    case CSSUnitType::Vh:
-    case CSSUnitType::Vmin:
-    case CSSUnitType::Vmax:
-    case CSSUnitType::Vb:
-    case CSSUnitType::Vi:
-    case CSSUnitType::Svw:
-    case CSSUnitType::Svh:
-    case CSSUnitType::Svmin:
-    case CSSUnitType::Svmax:
-    case CSSUnitType::Svb:
-    case CSSUnitType::Svi:
-    case CSSUnitType::Lvw:
-    case CSSUnitType::Lvh:
-    case CSSUnitType::Lvmin:
-    case CSSUnitType::Lvmax:
-    case CSSUnitType::Lvb:
-    case CSSUnitType::Lvi:
-    case CSSUnitType::Dvw:
-    case CSSUnitType::Dvh:
-    case CSSUnitType::Dvmin:
-    case CSSUnitType::Dvmax:
-    case CSSUnitType::Dvb:
-    case CSSUnitType::Dvi:
-    case CSSUnitType::Dppx:
-    case CSSUnitType::X:
-    case CSSUnitType::Dpi:
-    case CSSUnitType::Dpcm:
-    case CSSUnitType::Fr:
-    case CSSUnitType::Q:
-    case CSSUnitType::Lh:
-    case CSSUnitType::Rlh:
-    case CSSUnitType::Unknown:
-    case CSSUnitType::Cqw:
-    case CSSUnitType::Cqh:
-    case CSSUnitType::Cqi:
-    case CSSUnitType::Cqb:
-    case CSSUnitType::Cqmin:
-    case CSSUnitType::Cqmax:
-        break;
+    else {
+        ASSERT(type != CSSUnitType::CSS_CALC_PERCENTAGE_WITH_ANGLE);
+        ASSERT(type != CSSUnitType::CSS_CALC_PERCENTAGE_WITH_LENGTH);
     }
     if (m_hasCachedCSSText) {
         ASSERT(isMainThread());
@@ -174,15 +105,17 @@ CSSPrimitiveValue::~CSSPrimitiveValue()
     }
 }
 
-static CSSPrimitiveValue* valueFromPool(std::span<AlignedStorage<CSSPrimitiveValue>> pool, double value)
+static ALWAYS_INLINE CSSPrimitiveValue* valueFromPool(std::span<AlignedStorage<CSSPrimitiveValue>> pool, double value)
 {
-    // Casting to a signed integer first since casting a negative floating point value to an unsigned
-    // integer is undefined behavior.
-    unsigned poolIndex = static_cast<unsigned>(static_cast<int>(value));
-    double roundTripValue = poolIndex;
-    if (equalSpans(asByteSpan(value), asByteSpan(roundTripValue)) && poolIndex < pool.size())
-        return pool[poolIndex].get();
-    return nullptr;
+    // The range test comes first: it is one compare pair and it rejects every value the pool
+    // cannot hold (negatives, NaN, anything past the last entry) before doing any conversion.
+    if (!(value >= 0 && value < pool.size()))
+        return nullptr;
+    unsigned poolIndex = static_cast<unsigned>(value);
+    // Bit comparison rather than ==, so that -0.0 keeps its own non-pooled value as before.
+    if (std::bit_cast<uint64_t>(static_cast<double>(poolIndex)) != std::bit_cast<uint64_t>(value))
+        return nullptr;
+    return pool[poolIndex].get();
 }
 
 Ref<CSSPrimitiveValue> CSSPrimitiveValue::create(double value)
@@ -220,7 +153,9 @@ Ref<CSSPrimitiveValue> CSSPrimitiveValue::create(CSS::UnevaluatedCalcBase value)
 
 Ref<CSSPrimitiveValue> CSSPrimitiveValue::createInteger(double value)
 {
-    return adoptRef(*new CSSPrimitiveValue(value, CSSUnitType::Integer));
+    if (RefPtr result = valueFromPool(staticCSSValuePool->m_integerValues, value))
+        return result.releaseNonNull();
+    return adoptRef(*new CSSPrimitiveValue(value, CSSUnitType::CSS_INTEGER));
 }
 
 std::optional<bool> CSSPrimitiveValue::isZero() const
@@ -375,172 +310,47 @@ String CSSPrimitiveValue::customCSSText(const CSS::SerializationContext& context
 
 bool CSSPrimitiveValue::equals(const CSSPrimitiveValue& other) const
 {
-    if (primitiveUnitType() != other.primitiveUnitType())
+    auto type = primitiveUnitType();
+    if (type != other.primitiveUnitType())
         return false;
 
-    switch (primitiveUnitType()) {
-    case CSSUnitType::Unknown:
+    // Every unit but the four handled here compared the raw number, so they collapse into the
+    // default case instead of a seventy-entry jump table.
+    switch (type) {
+    case CSSUnitType::CSS_UNKNOWN:
         return false;
-    case CSSUnitType::Number:
-    case CSSUnitType::Integer:
-    case CSSUnitType::Percentage:
-    case CSSUnitType::Em:
-    case CSSUnitType::QuirkyEm:
-    case CSSUnitType::Ex:
-    case CSSUnitType::Cap:
-    case CSSUnitType::Ch:
-    case CSSUnitType::Ic:
-    case CSSUnitType::Rcap:
-    case CSSUnitType::Rch:
-    case CSSUnitType::Rem:
-    case CSSUnitType::Rex:
-    case CSSUnitType::Ric:
-    case CSSUnitType::Px:
-    case CSSUnitType::Cm:
-    case CSSUnitType::Dppx:
-    case CSSUnitType::X:
-    case CSSUnitType::Dpi:
-    case CSSUnitType::Dpcm:
-    case CSSUnitType::Mm:
-    case CSSUnitType::In:
-    case CSSUnitType::Pt:
-    case CSSUnitType::Pc:
-    case CSSUnitType::Deg:
-    case CSSUnitType::Rad:
-    case CSSUnitType::Grad:
-    case CSSUnitType::Ms:
-    case CSSUnitType::S:
-    case CSSUnitType::Hz:
-    case CSSUnitType::Khz:
-    case CSSUnitType::Turn:
-    case CSSUnitType::Vw:
-    case CSSUnitType::Vh:
-    case CSSUnitType::Vmin:
-    case CSSUnitType::Vmax:
-    case CSSUnitType::Vb:
-    case CSSUnitType::Vi:
-    case CSSUnitType::Svw:
-    case CSSUnitType::Svh:
-    case CSSUnitType::Svmin:
-    case CSSUnitType::Svmax:
-    case CSSUnitType::Svb:
-    case CSSUnitType::Svi:
-    case CSSUnitType::Lvw:
-    case CSSUnitType::Lvh:
-    case CSSUnitType::Lvmin:
-    case CSSUnitType::Lvmax:
-    case CSSUnitType::Lvb:
-    case CSSUnitType::Lvi:
-    case CSSUnitType::Dvw:
-    case CSSUnitType::Dvh:
-    case CSSUnitType::Dvmin:
-    case CSSUnitType::Dvmax:
-    case CSSUnitType::Dvb:
-    case CSSUnitType::Dvi:
-    case CSSUnitType::Fr:
-    case CSSUnitType::Q:
-    case CSSUnitType::Lh:
-    case CSSUnitType::Rlh:
-    case CSSUnitType::Cqw:
-    case CSSUnitType::Cqh:
-    case CSSUnitType::Cqi:
-    case CSSUnitType::Cqb:
-    case CSSUnitType::Cqmin:
-    case CSSUnitType::Cqmax:
-        return m_value.number == other.m_value.number;
-    case CSSUnitType::Calc:
-        return CSS::UnevaluatedCalcBase { protect(const_cast<CSSCalc::Value&>(*cssCalcValue())) } == CSS::UnevaluatedCalcBase { protect(const_cast<CSSCalc::Value&>(*other.cssCalcValue())) };
-    case CSSUnitType::CalcPercentageWithAngle:
-    case CSSUnitType::CalcPercentageWithLength:
+    case CSSUnitType::CSS_CALC:
+        return protect(cssCalcValue())->equals(*protect(other.cssCalcValue()));
+    case CSSUnitType::CSS_CALC_PERCENTAGE_WITH_ANGLE:
+    case CSSUnitType::CSS_CALC_PERCENTAGE_WITH_LENGTH:
         // FIXME: seems like these should be handled.
         ASSERT_NOT_REACHED();
-        break;
+        return false;
+    default:
+        return m_value.number == other.m_value.number;
     }
-    return false;
 }
 
 bool CSSPrimitiveValue::addDerivedHash(Hasher& hasher) const
 {
-    add(hasher, primitiveUnitType());
+    auto type = primitiveUnitType();
+    add(hasher, type);
 
-    switch (primitiveUnitType()) {
-    case CSSUnitType::Unknown:
+    // Every unit but the four handled here hashed the raw number, so they collapse into the
+    // default case instead of a seventy-entry jump table.
+    switch (type) {
+    case CSSUnitType::CSS_UNKNOWN:
         break;
-    case CSSUnitType::Number:
-    case CSSUnitType::Integer:
-    case CSSUnitType::Percentage:
-    case CSSUnitType::Em:
-    case CSSUnitType::QuirkyEm:
-    case CSSUnitType::Ex:
-    case CSSUnitType::Cap:
-    case CSSUnitType::Ch:
-    case CSSUnitType::Ic:
-    case CSSUnitType::Rcap:
-    case CSSUnitType::Rch:
-    case CSSUnitType::Rem:
-    case CSSUnitType::Rex:
-    case CSSUnitType::Ric:
-    case CSSUnitType::Px:
-    case CSSUnitType::Cm:
-    case CSSUnitType::Dppx:
-    case CSSUnitType::X:
-    case CSSUnitType::Dpi:
-    case CSSUnitType::Dpcm:
-    case CSSUnitType::Mm:
-    case CSSUnitType::In:
-    case CSSUnitType::Pt:
-    case CSSUnitType::Pc:
-    case CSSUnitType::Deg:
-    case CSSUnitType::Rad:
-    case CSSUnitType::Grad:
-    case CSSUnitType::Ms:
-    case CSSUnitType::S:
-    case CSSUnitType::Hz:
-    case CSSUnitType::Khz:
-    case CSSUnitType::Turn:
-    case CSSUnitType::Vw:
-    case CSSUnitType::Vh:
-    case CSSUnitType::Vmin:
-    case CSSUnitType::Vmax:
-    case CSSUnitType::Vb:
-    case CSSUnitType::Vi:
-    case CSSUnitType::Svw:
-    case CSSUnitType::Svh:
-    case CSSUnitType::Svmin:
-    case CSSUnitType::Svmax:
-    case CSSUnitType::Svb:
-    case CSSUnitType::Svi:
-    case CSSUnitType::Lvw:
-    case CSSUnitType::Lvh:
-    case CSSUnitType::Lvmin:
-    case CSSUnitType::Lvmax:
-    case CSSUnitType::Lvb:
-    case CSSUnitType::Lvi:
-    case CSSUnitType::Dvw:
-    case CSSUnitType::Dvh:
-    case CSSUnitType::Dvmin:
-    case CSSUnitType::Dvmax:
-    case CSSUnitType::Dvb:
-    case CSSUnitType::Dvi:
-    case CSSUnitType::Fr:
-    case CSSUnitType::Q:
-    case CSSUnitType::Lh:
-    case CSSUnitType::Rlh:
-    case CSSUnitType::Cqw:
-    case CSSUnitType::Cqh:
-    case CSSUnitType::Cqi:
-    case CSSUnitType::Cqb:
-    case CSSUnitType::Cqmin:
-    case CSSUnitType::Cqmax:
-        add(hasher, m_value.number);
-        break;
-    case CSSUnitType::Calc:
+    case CSSUnitType::CSS_CALC:
         add(hasher, m_value.calc);
         break;
     case CSSUnitType::CalcPercentageWithAngle:
     case CSSUnitType::CalcPercentageWithLength:
         ASSERT_NOT_REACHED();
         return false;
+    default:
+        add(hasher, m_value.number);
+        break;
     }
     return true;
 }

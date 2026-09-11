@@ -130,6 +130,7 @@ public:
     virtual const TextResourceDecoder* textResourceDecoder() const { return nullptr; }
     virtual void updateBuffer(const FragmentedSharedBuffer&);
     virtual void updateData(const SharedBuffer&);
+    virtual bool needsProgressiveData() const { return true; }
     virtual void finishLoading(const FragmentedSharedBuffer*, const NetworkLoadMetrics&);
     virtual void error(CachedResource::Status);
 

@@ -40,7 +40,7 @@ public:
     using StaticGetter = JSC::JSValue(JSC::JSGlobalObject&);
 
     template<Setter setter, CastedThisErrorBehavior shouldThrow = CastedThisErrorBehavior::Throw>
-    static bool set(JSC::JSGlobalObject& lexicalGlobalObject, JSC::EncodedJSValue thisValue, JSC::EncodedJSValue encodedValue, JSC::PropertyName attributeName)
+    static ALWAYS_INLINE bool set(JSC::JSGlobalObject& lexicalGlobalObject, JSC::EncodedJSValue thisValue, JSC::EncodedJSValue encodedValue, JSC::PropertyName attributeName)
     {
         auto throwScope = DECLARE_THROW_SCOPE(JSC::getVM(&lexicalGlobalObject));
 
@@ -57,7 +57,7 @@ public:
 
     // FIXME: FIXME: This can be merged with `set` if we replace the explicit setter function template parameter with a generic lambda.
     template<SetterPassingPropertyName setter, CastedThisErrorBehavior shouldThrow = CastedThisErrorBehavior::Throw>
-    static bool setPassingPropertyName(JSC::JSGlobalObject& lexicalGlobalObject, JSC::EncodedJSValue thisValue, JSC::EncodedJSValue encodedValue, JSC::PropertyName attributeName)
+    static ALWAYS_INLINE bool setPassingPropertyName(JSC::JSGlobalObject& lexicalGlobalObject, JSC::EncodedJSValue thisValue, JSC::EncodedJSValue encodedValue, JSC::PropertyName attributeName)
     {
         auto throwScope = DECLARE_THROW_SCOPE(JSC::getVM(&lexicalGlobalObject));
 
@@ -73,13 +73,13 @@ public:
     }
 
     template<StaticSetter setter, CastedThisErrorBehavior shouldThrow = CastedThisErrorBehavior::Throw>
-    static bool setStatic(JSC::JSGlobalObject& lexicalGlobalObject, JSC::EncodedJSValue, JSC::EncodedJSValue encodedValue, JSC::PropertyName)
+    static ALWAYS_INLINE bool setStatic(JSC::JSGlobalObject& lexicalGlobalObject, JSC::EncodedJSValue, JSC::EncodedJSValue encodedValue, JSC::PropertyName)
     {
         return setter(lexicalGlobalObject, JSC::JSValue::decode(encodedValue));
     }
     
     template<Getter getter, CastedThisErrorBehavior shouldThrow = CastedThisErrorBehavior::Throw>
-    static JSC::EncodedJSValue get(JSC::JSGlobalObject& lexicalGlobalObject, JSC::EncodedJSValue thisValue, JSC::PropertyName attributeName)
+    static ALWAYS_INLINE JSC::EncodedJSValue get(JSC::JSGlobalObject& lexicalGlobalObject, JSC::EncodedJSValue thisValue, JSC::PropertyName attributeName)
     {
         auto throwScope = DECLARE_THROW_SCOPE(JSC::getVM(&lexicalGlobalObject));
 
@@ -104,7 +104,7 @@ public:
 
     // FIXME: This can be merged with `get` if we replace the explicit setter function template parameter with a generic lambda.
     template<GetterPassingPropertyName getter, CastedThisErrorBehavior shouldThrow = CastedThisErrorBehavior::Throw>
-    static JSC::EncodedJSValue getPassingPropertyName(JSC::JSGlobalObject& lexicalGlobalObject, JSC::EncodedJSValue thisValue, JSC::PropertyName attributeName)
+    static ALWAYS_INLINE JSC::EncodedJSValue getPassingPropertyName(JSC::JSGlobalObject& lexicalGlobalObject, JSC::EncodedJSValue thisValue, JSC::PropertyName attributeName)
     {
         auto throwScope = DECLARE_THROW_SCOPE(JSC::getVM(&lexicalGlobalObject));
 
@@ -128,7 +128,7 @@ public:
     }
 
     template<StaticGetter getter, CastedThisErrorBehavior shouldThrow = CastedThisErrorBehavior::Throw>
-    static JSC::EncodedJSValue getStatic(JSC::JSGlobalObject& lexicalGlobalObject, JSC::EncodedJSValue, JSC::PropertyName)
+    static ALWAYS_INLINE JSC::EncodedJSValue getStatic(JSC::JSGlobalObject& lexicalGlobalObject, JSC::EncodedJSValue, JSC::PropertyName)
     {
         return JSC::JSValue::encode(getter(lexicalGlobalObject));
     }

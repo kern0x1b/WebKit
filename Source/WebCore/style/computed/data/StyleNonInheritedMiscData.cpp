@@ -124,18 +124,31 @@ Ref<NonInheritedMiscData> NonInheritedMiscData::copy() const
 
 bool NonInheritedMiscData::operator==(const NonInheritedMiscData& o) const
 {
-    return opacity == o.opacity
-        && deprecatedFlexibleBox == o.deprecatedFlexibleBox
+    unsigned packedDelta = (hasAttrContent ^ o.hasAttrContent)
+        | (hasDisplayAffectedByAnimations ^ o.hasDisplayAffectedByAnimations)
+#if ENABLE(DARK_MODE_CSS)
+        | (hasExplicitlySetColorScheme ^ o.hasExplicitlySetColorScheme)
+#endif
+        | (hasExplicitlySetDirection ^ o.hasExplicitlySetDirection)
+        | (hasExplicitlySetWritingMode ^ o.hasExplicitlySetWritingMode)
+        | (tableLayout ^ o.tableLayout)
+        | (appearance ^ o.appearance)
+        | (usedAppearance ^ o.usedAppearance)
+        | (textOverflow ^ o.textOverflow)
+        | (userDrag ^ o.userDrag)
+        | (objectFit ^ o.objectFit)
+        | (resize ^ o.resize);
+    if (packedDelta)
+        return false;
+
+    return deprecatedFlexibleBox == o.deprecatedFlexibleBox
         && flexibleBox == o.flexibleBox
         && multiCol == o.multiCol
         && filter == o.filter
         && transform == o.transform
         && visitedLinkColor == o.visitedLinkColor
-        && mask == o.mask
-        && animations == o.animations
-        && transitions == o.transitions
-        && content == o.content
-        && boxShadow == o.boxShadow
+        && opacity == o.opacity
+        && order == o.order
         && aspectRatio == o.aspectRatio
         && alignContent == o.alignContent
         && alignItems == o.alignItems
@@ -145,24 +158,11 @@ bool NonInheritedMiscData::operator==(const NonInheritedMiscData& o) const
         && justifySelf == o.justifySelf
         && objectPosition == o.objectPosition
         && objectViewBox == o.objectViewBox
-        && order == o.order
-        && textOverflow == o.textOverflow
-        && hasAttrContent == o.hasAttrContent
-        && hasDisplayAffectedByAnimations == o.hasDisplayAffectedByAnimations
-#if ENABLE(DARK_MODE_CSS)
-        && hasExplicitlySetColorScheme == o.hasExplicitlySetColorScheme
-#endif
-        && hasExplicitlySetDirection == o.hasExplicitlySetDirection
-        && hasExplicitlySetUserSelect == o.hasExplicitlySetUserSelect
-        && hasExplicitlySetWebkitUserSelect == o.hasExplicitlySetWebkitUserSelect
-        && hasExplicitlySetWritingMode == o.hasExplicitlySetWritingMode
-        && tableLayout == o.tableLayout
-        && appearance == o.appearance
-        && usedAppearance == o.usedAppearance
-        && userSelect == o.userSelect
-        && userDrag == o.userDrag
-        && objectFit == o.objectFit
-        && resize == o.resize;
+        && mask == o.mask
+        && animations == o.animations
+        && transitions == o.transitions
+        && content == o.content
+        && boxShadow == o.boxShadow;
 }
 
 bool NonInheritedMiscData::hasFilters() const

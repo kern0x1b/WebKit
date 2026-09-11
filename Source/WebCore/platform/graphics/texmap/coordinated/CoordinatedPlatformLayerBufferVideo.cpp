@@ -125,7 +125,6 @@ static std::pair<CoordinatedPlatformLayerBufferYUV::YuvToRgbColorSpace, Coordina
 }
 #endif
 
-#if USE(TEXTURE_MAPPER)
 std::unique_ptr<CoordinatedPlatformLayerBuffer> CoordinatedPlatformLayerBufferVideo::createBufferIfNeeded(bool gstGLEnabled)
 {
     const auto& sample = m_videoFrame->sample();

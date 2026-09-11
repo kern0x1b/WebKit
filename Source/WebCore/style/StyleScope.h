@@ -103,6 +103,11 @@ public:
     bool NODELETE hasPendingSheets() const;
     bool NODELETE hasPendingSheetsBeforeBody() const;
     bool NODELETE hasPendingSheetsInBody() const;
+    // Sheets pending in <head> normally suppress render tree construction entirely, with no time
+    // limit. This is that condition bounded by Settings::pendingStylesheetRenderingTimeout(): once
+    // the deadline passes the document is rendered with whatever style has arrived so far, and the
+    // late sheet invalidates style when it lands. Script execution is not affected.
+    bool NODELETE blocksRenderingBeforeBody() const;
     bool NODELETE hasPendingSheet(const Element&) const;
     bool NODELETE hasPendingSheetInBody(const Element&) const;
     bool NODELETE hasPendingSheet(const ProcessingInstruction&) const;
@@ -206,6 +211,9 @@ private:
     void pendingUpdateTimerFired();
     void clearPendingUpdate();
 
+    void startPendingSheetRenderingDeadlineIfNeeded();
+    void pendingSheetRenderingDeadlineTimerFired();
+
     TreeScope& NODELETE treeScope();
 
     const CheckedRef<Document> m_document;
@@ -217,6 +225,7 @@ private:
     Vector<Ref<CSSStyleSheet>> m_activeStyleSheets;
 
     Timer m_pendingUpdateTimer;
+    Timer m_pendingSheetRenderingDeadlineTimer;
 
     mutable HashSet<SingleThreadWeakRef<const CSSStyleSheet>> m_weakCopyOfActiveStyleSheetListForFastLookup;
 
@@ -233,6 +242,7 @@ private:
     std::optional<UpdateType> m_pendingUpdate;
 
     bool m_hasDescendantWithPendingUpdate { false };
+    bool m_didExceedPendingSheetRenderingDeadline { false };
     bool m_usesStyleBasedEditability { false };
     bool m_usesHasPseudoClass { false };
     bool m_isUpdatingStyleResolver { false };

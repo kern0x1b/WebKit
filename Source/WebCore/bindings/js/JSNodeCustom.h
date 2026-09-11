@@ -32,23 +32,6 @@
 #include <WebCore/ScriptWrappableInlines.h>
 #include <WebCore/WebCoreOpaqueRoot.h>
 
-namespace JSC {
-namespace JSCastingHelpers {
-
-template<>
-struct InheritsTraits<WebCore::JSNode> {
-    static constexpr std::optional<JSTypeRange> typeRange { { static_cast<JSType>(WebCore::JSNodeType), static_cast<JSType>(WebCore::JSNodeType + WebCore::JSNodeTypeMask) } };
-    static_assert(std::numeric_limits<uint8_t>::max() == typeRange->last);
-    template<typename From>
-    static inline bool inherits(From* from)
-    {
-        return inheritsJSTypeImpl<WebCore::JSNode>(from, *typeRange);
-    }
-};
-
-} // namespace JSCastingHelpers
-} // namespace JSC
-
 namespace WebCore {
 
 WEBCORE_EXPORT JSC::JSValue createWrapper(JSC::JSGlobalObject*, JSDOMGlobalObject*, Ref<Node>&&);

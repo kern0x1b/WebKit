@@ -43,7 +43,7 @@ namespace Style {
 template<typename, typename> struct EvaluationMinimum;
 
 template<typename Result> struct EvaluationMinimumInvoker {
-    template<typename StyleType, typename Reference, typename Zoom> decltype(auto) operator()(const StyleType& value, NOESCAPE Reference&& reference, Zoom&& zoom) const
+    template<typename StyleType, typename Reference, typename Zoom> ALWAYS_INLINE decltype(auto) operator()(const StyleType& value, NOESCAPE Reference&& reference, Zoom&& zoom) const
     {
         return EvaluationMinimum<StyleType, Result> { }(value, std::forward<Reference>(reference), std::forward<Zoom>(zoom));
     }
@@ -51,7 +51,7 @@ template<typename Result> struct EvaluationMinimumInvoker {
 template<typename Result> inline constexpr EvaluationMinimumInvoker<Result> evaluateMinimum{};
 
 template<TupleLike StyleType, typename Result> requires (std::tuple_size_v<StyleType> == 1) struct EvaluationMinimum<StyleType, Result> {
-    template<typename... Rest> Result operator()(const StyleType& value, Rest&&... rest)
+    template<typename... Rest> ALWAYS_INLINE Result operator()(const StyleType& value, Rest&&... rest)
     {
         return evaluateMinimum<Result>(get<0>(value), std::forward<Rest>(rest)...);
     }

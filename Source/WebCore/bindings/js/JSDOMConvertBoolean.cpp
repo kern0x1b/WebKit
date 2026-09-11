@@ -31,7 +31,7 @@
 
 namespace WebCore {
 
-auto Converter<IDLBoolean>::convert(JSC::JSGlobalObject& lexicalGlobalObject, JSC::JSValue value) -> Result
+auto Converter<IDLBoolean>::convertSlow(JSC::JSGlobalObject& lexicalGlobalObject, JSC::JSValue value) -> Result
 {
     auto& vm = lexicalGlobalObject.vm();
     auto throwScope = DECLARE_THROW_SCOPE(vm);

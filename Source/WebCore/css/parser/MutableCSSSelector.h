@@ -29,7 +29,9 @@ namespace WebCore {
 struct CSSSelectorParserContext;
 
 class MutableCSSSelector;
-using MutableCSSSelectorList = Vector<std::unique_ptr<MutableCSSSelector>>;
+// Inline capacity: nearly every selector list in a real stylesheet is one or two complex
+// selectors, so this keeps a malloc/free pair out of every rule prelude and every :is()/:not().
+using MutableCSSSelectorList = Vector<std::unique_ptr<MutableCSSSelector>, 4>;
 
 class MutableCSSSelector {
     WTF_MAKE_TZONE_ALLOCATED(MutableCSSSelector);

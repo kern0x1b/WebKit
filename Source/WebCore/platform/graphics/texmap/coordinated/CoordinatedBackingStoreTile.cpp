@@ -104,7 +104,7 @@ void CoordinatedBackingStoreTile::processPendingUpdates()
             if (update.sourceRect.size() == update.tileRect.size()) {
                 ASSERT(update.sourceRect.location().isZero());
                 if (m_texture)
-                    m_texture->swapTexture(texture);
+                    m_texture->swapTexture(*texture);
                 else
                     m_texture = WTF::move(texture);
             } else {

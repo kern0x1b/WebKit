@@ -161,7 +161,12 @@
     if (!nativeImage)
         return nullptr;
 
-    return nativeImage->platformImage().unsafeGet();
+    // Handed back alive. nativeImage is a local reference and the image can be
+    // released the moment it goes out of scope, so returning the raw pointer
+    // hands the caller something that may already be gone. Autoreleased matches
+    // what the name promises - no "create" or "copy" in it - so the caller does
+    // not own it and it survives the turn of the run loop.
+    return (CGImageRef)CFAutorelease(CGImageRetain(nativeImage->platformImage().get()));
 }
 
 #endif // PLATFORM(IOS_FAMILY)

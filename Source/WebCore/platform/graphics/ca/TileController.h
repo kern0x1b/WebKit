@@ -150,6 +150,10 @@ public:
     void willRevalidateTiles(TileGrid&, TileRevalidationType);
     void didRevalidateTiles(TileGrid&, TileRevalidationType, const HashSet<TileIndex>& tilesNeedingDisplay);
 
+    // The set of tiles needing display is only ever read by the client, and
+    // there is none in WebKit1, so the grid can skip building it.
+    bool hasClient() const { return !!m_client.get(); }
+
     bool shouldAggressivelyRetainTiles() const;
     bool shouldTemporarilyRetainTileCohorts() const;
 

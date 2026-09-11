@@ -73,8 +73,8 @@ static inline LegacyRenderSVGResource* requestPaintingResource(RenderSVGResource
     Style::ColorResolver colorResolver { style };
 
     Color color;
-    if (auto paintColor = paint.tryAnyColor())
-        color = colorResolver.colorResolvingCurrentColor(*paintColor);
+    if (paint.hasColor())
+        color = colorResolver.colorResolvingCurrentColor(paint.colorDisregardingType());
 
     if (style.insideLink() == InsideLink::InsideVisited) {
         // FIXME: This code doesn't support the uri component of the visited link paint, https://bugs.webkit.org/show_bug.cgi?id=70006

@@ -40,10 +40,6 @@
 #include "NativeImage.h"
 #include <wtf/MainThread.h>
 
-#if USE(TEXTURE_MAPPER)
-#include "TextureMapperLayer.h"
-#endif
-
 #if USE(SKIA)
 #include "SkiaCompositingLayer.h"
 #include "SkiaPaintingEngine.h"
@@ -150,9 +146,9 @@ void CoordinatedPlatformLayer::invalidateTarget()
         m_imageBackingStore.committed = nullptr;
         if (m_target && shouldReleaseBuffer(m_contentsBuffer.committed.get()))
             m_contentsBuffer.committed = nullptr;
-#if !USE(TEXTURE_MAPPER)
-        if (m_target && !shouldReleaseBuffer(m_target->contentsBuffer()))
-            m_contentsBuffer.committed = m_target->takeContentsBuffer();
+#if USE(SKIA)
+        if (m_skiaTarget && !shouldReleaseBuffer(m_skiaTarget->contentsBuffer()))
+            m_contentsBuffer.committed = m_skiaTarget->takeContentsBuffer();
 #endif
         m_contentsBuffer.hasCommitted = false;
     }
@@ -551,7 +547,17 @@ void CoordinatedPlatformLayer::replaceCurrentContentsBufferWithCopy()
 
     m_contentsBuffer.pending = nullptr;
 
-#if USE(TEXTURE_MAPPER)
+#if USE(SKIA)
+    if (m_skiaTarget) {
+        if (auto* buffer = m_skiaTarget->contentsBuffer()) {
+            if (is<CoordinatedPlatformLayerBufferVideo>(*buffer))
+                m_contentsBuffer.pending = downcast<CoordinatedPlatformLayerBufferVideo>(*buffer).copyBuffer();
+            m_contentsBuffer.hasCommitted = !!m_contentsBuffer.pending;
+            m_skiaTarget->setContentsBuffer(WTF::move(m_contentsBuffer.pending));
+        }
+        return;
+    }
+#endif
     if (is<CoordinatedPlatformLayerBufferVideo>(*m_contentsBuffer.committed))
         m_contentsBuffer.pending = downcast<CoordinatedPlatformLayerBufferVideo>(*m_contentsBuffer.committed).copyBuffer();
     m_contentsBuffer.committed = WTF::move(m_contentsBuffer.pending);
@@ -1009,6 +1015,16 @@ void CoordinatedPlatformLayer::didPaintTile()
     if (m_client)
         m_client->didPaintTile();
 }
+
+#if USE(SKIA)
+sk_sp<GrContextThreadSafeProxy> CoordinatedPlatformLayer::threadSafeGrContext() const
+{
+    if (!m_client)
+        return nullptr;
+
+    return m_client->paintingEngine().threadSafeGrContext();
+}
+#endif
 
 void CoordinatedPlatformLayer::waitUntilPaintingComplete()
 {
@@ -1520,7 +1536,11 @@ bool CoordinatedPlatformLayer::hasPendingBackingStoreTileUpdates() const
 {
     ASSERT(!isMainThread());
 
-#if USE(TEXTURE_MAPPER)
+#if USE(SKIA)
+    if (m_skiaTarget)
+        return m_skiaTarget->hasPendingBackingStoreTileUpdates();
+#endif
+
     Locker locker { m_lock };
     if (m_backingStore)
         return m_backingStore->hasPendingUpdates();
@@ -1546,6 +1566,10 @@ void CoordinatedPlatformLayer::processPendingBackingStoreTileUpdates()
         return;
     }
 #endif
+
+    Locker locker { m_lock };
+    if (m_backingStore)
+        m_backingStore->processPendingUpdates();
 }
 
 } // namespace WebCore

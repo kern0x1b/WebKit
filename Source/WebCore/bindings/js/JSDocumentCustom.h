@@ -29,22 +29,6 @@
 #include <WebCore/JSDOMBinding.h>
 #include <WebCore/JSDocument.h>
 
-namespace JSC {
-namespace JSCastingHelpers {
-
-template<>
-struct InheritsTraits<WebCore::JSDocument> {
-    static constexpr std::optional<JSTypeRange> typeRange { JSTypeRange { static_cast<JSType>(WebCore::JSDocumentWrapperType), static_cast<JSType>(WebCore::JSDocumentWrapperType) } };
-    template<typename From>
-    static inline bool inherits(From* from)
-    {
-        return inheritsJSTypeImpl<WebCore::JSDocument>(from, *typeRange);
-    }
-};
-
-} // namespace JSCastingHelpers
-} // namespace JSC
-
 namespace WebCore {
 
 class TreeScope;

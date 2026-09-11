@@ -82,6 +82,7 @@ private:
     NO_RETURN_DUE_TO_ASSERT void setBodyDataFrom(const CachedResource&) final { ASSERT_NOT_REACHED(); }
 
     void didAddClient(CachedResourceClient&) override;
+    bool needsProgressiveData() const override { return false; }
     void finishLoading(const FragmentedSharedBuffer*, const NetworkLoadMetrics&) override;
 
     void allClientsRemoved() override;

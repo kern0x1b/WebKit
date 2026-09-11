@@ -57,6 +57,10 @@ public:
 
     bool inPicture() { return !m_pictureSourceState.isEmpty(); }
 
+    // The only character token contents this scanner ever reads are the ones it feeds to the CSS
+    // scanner from inside a <style> element.
+    bool inStyle() const { return m_inStyle; }
+
 private:
     enum class TagId {
         // These tags are scanned by the StartTagScanner.

@@ -38,6 +38,15 @@
 #pragma clang diagnostic ignored "-Wnon-modular-include-in-module"
 #include <WebKitAdditions/PlatformTouchEventIOS.h>
 #pragma clang diagnostic pop
+#elif ENABLE(TOUCH_EVENTS) || ENABLE(IOS_TOUCH_EVENTS)
+// Without the internal SDK, nothing above brings in PlatformTouchEvent or
+// PlatformTouchPoint, and PlatformEventFactoryIOS.mm builds both directly
+// (PlatformTouchEventBuilder/PlatformTouchPointBuilder, further down in that
+// file) - it just never gets the declaration. Both classes are the fully
+// portable ones GTK and WPE already build against; nothing iOS-specific is
+// missing here, only this include. See PlatformCocoa.cmake for where these
+// two headers stop being stripped from WebCore's forwarding headers.
+#include <WebCore/PlatformTouchEvent.h>
 #endif
 
 OBJC_CLASS WebEvent;

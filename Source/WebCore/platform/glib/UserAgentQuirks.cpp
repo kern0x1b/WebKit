@@ -82,7 +82,7 @@ static bool urlRequiresChromeBrowser(const String& domain, const String& baseDom
 // quirk is good for websites that do macOS-specific things we don't want on
 // other platforms, and when the risk of the website doing Firefox-specific
 // things is relatively low.
-static bool urlRequiresFirefoxBrowser(const String& domain, const String& baseDomain)
+static bool urlRequiresFirefoxBrowser(const String& domain, [[maybe_unused]] const String& baseDomain)
 {
     // Red Hat Bugzilla displays a warning page when performing searches with WebKitGTK's standard
     // user agent.

@@ -29,6 +29,7 @@
 #include "FontCacheCoreText.h"
 #include "FontCascadeDescription.h"
 #include <pal/spi/cf/CoreTextSPI.h>
+#include <wtf/text/StringHash.h>
 
 namespace WebCore {
 
@@ -50,10 +51,28 @@ void FontDatabase::InstalledFontFamily::expand(const InstalledFont& installedFon
     capabilities.expand(installedFont.capabilities);
 }
 
+// The keys in m_familyNameToFontDescriptors are already ASCII-lowercased, so hashing the
+// query case-insensitively lands on the same bucket as hashing its lowercased copy would.
+// This lets a hit avoid allocating that copy, which is what every text run was paying for.
+struct FoldedFamilyNameTranslator {
+    static unsigned hash(const String& familyName) { return ASCIICaseInsensitiveHash::hash(familyName); }
+    static bool equal(const String& foldedKey, const String& familyName) { return equalIgnoringASCIICase(foldedKey, familyName); }
+};
+
 const FontDatabase::InstalledFontFamily& FontDatabase::collectionForFamily(const String& familyName)
 {
+    // Dot-prefixed names are not folded (see FontCascadeDescription::foldedFamilyName), so
+    // their stored keys can differ only by case and must be matched exactly.
+    bool canMatchWithoutFolding = !familyName.isEmpty() && familyName[0] != '.';
+    if (canMatchWithoutFolding) {
+        Locker locker { m_familyNameToFontDescriptorsLock };
+        auto it = m_familyNameToFontDescriptors.find<FoldedFamilyNameTranslator>(familyName);
+        if (it != m_familyNameToFontDescriptors.end())
+            return *it->value;
+    }
+
     auto folded = FontCascadeDescription::foldedFamilyName(familyName);
-    {
+    if (!canMatchWithoutFolding) {
         Locker locker { m_familyNameToFontDescriptorsLock };
         auto it = m_familyNameToFontDescriptors.find(folded);
         if (it != m_familyNameToFontDescriptors.end())

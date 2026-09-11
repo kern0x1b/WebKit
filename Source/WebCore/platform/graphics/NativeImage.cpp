@@ -63,6 +63,7 @@ NativeImage::NativeImage(PlatformImagePtr&& platformImage, std::optional<GainMap
     : m_platformImage(WTF::move(platformImage))
     , m_gainMap(WTF::move(gainMap))
 {
+    cacheSize();
     computeHeadroom();
 }
 #endif
@@ -94,7 +95,8 @@ void NativeImage::replacePlatformImage(PlatformImagePtr&& platformImage) const
     ASSERT(platformImage);
     Locker locker { m_lock };
     m_platformImage = WTF::move(platformImage);
-    // Intention is that the contents do not change, so properties are not recomputed.
+    cacheSize();
+    computeHeadroom();
 }
 
 #if !USE(CG)
@@ -107,21 +109,9 @@ void NativeImage::computeHeadroom() const
 {
 }
 
-RefPtr<NativeImage> NativeImage::rotatedImage(ImageOrientation orientation)
+void NativeImage::cacheSize() const
 {
-    IntSize sizeForRotation = orientation.usesWidthAsHeight() ? size().transposedSize() : size();
-
-    // FIXME: This preserves neither the pixelFormat nor the colorSapace of the original NativeImage.
-    RefPtr buffer = ImageBuffer::create(sizeForRotation, RenderingMode::Unaccelerated, RenderingPurpose::Unspecified, 1, ColorSpace::SRGB(), PixelFormat::BGRA8);
-    if (!buffer)
-        return nullptr;
-
-    GraphicsContext& context = buffer->context();
-    context.drawNativeImage(*this, { { }, sizeForRotation }, { { }, sizeForRotation }, { orientation });
-
-    return ImageBuffer::sinkIntoNativeImage(WTF::move(buffer));
 }
-
 #endif
 
 } // namespace WebCore

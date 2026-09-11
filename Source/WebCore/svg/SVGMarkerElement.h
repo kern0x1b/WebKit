@@ -24,6 +24,7 @@
 #include "SVGElement.h"
 #include "SVGFitToViewBox.h"
 #include "SVGMarkerTypes.h"
+#include <wtf/NeverDestroyed.h>
 #include <wtf/TZoneMalloc.h>
 
 namespace WebCore {
@@ -95,8 +96,18 @@ private:
 
     const Ref<SVGAnimatedLength> m_refX { SVGAnimatedLength::create(this, SVGLengthMode::Width) };
     const Ref<SVGAnimatedLength> m_refY { SVGAnimatedLength::create(this, SVGLengthMode::Height) };
-    const Ref<SVGAnimatedLength> m_markerWidth { SVGAnimatedLength::create(this, SVGLengthMode::Width, "3"_s) };
-    const Ref<SVGAnimatedLength> m_markerHeight { SVGAnimatedLength::create(this, SVGLengthMode::Height, "3"_s) };
+    static const SVGLengthValue& defaultMarkerExtent(SVGLengthMode mode)
+    {
+        if (mode == SVGLengthMode::Height) {
+            static NeverDestroyed<SVGLengthValue> height { SVGLengthMode::Height, "3"_s };
+            return height.get();
+        }
+        static NeverDestroyed<SVGLengthValue> width { SVGLengthMode::Width, "3"_s };
+        return width.get();
+    }
+
+    const Ref<SVGAnimatedLength> m_markerWidth { SVGAnimatedLength::create(this, defaultMarkerExtent(SVGLengthMode::Width)) };
+    const Ref<SVGAnimatedLength> m_markerHeight { SVGAnimatedLength::create(this, defaultMarkerExtent(SVGLengthMode::Height)) };
     const Ref<SVGAnimatedEnumeration> m_markerUnits { SVGAnimatedEnumeration::create(this, SVGMarkerUnitsType::StrokeWidth) };
     const Ref<SVGAnimatedAngle> m_orientAngle { SVGAnimatedAngle::create(this) };
     const Ref<SVGAnimatedOrientType> m_orientType { SVGAnimatedOrientType::create(this, SVGMarkerOrientAngle) };

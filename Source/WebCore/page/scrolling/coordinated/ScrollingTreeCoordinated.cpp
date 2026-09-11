@@ -134,6 +134,15 @@ static void collectDescendantLayersAtPoint(Vector<LayerAndPoint, 16>& layersAtPo
         children = parent->children();
         parentBoundsOrigin = parent->boundsOrigin();
     }
+}
+
+static bool layerEventRegionContainsPoint(const Ref<CoordinatedPlatformLayer>& layer, const FloatPoint& localPoint)
+{
+    assertIsHeld(layer->lock());
+    // Scrolling changes boundsOrigin on the scroll container layer, but we computed its event region ignoring scroll position, so factor out bounds origin.
+    auto originRelativePoint = localPoint - toFloatSize(layer->boundsOrigin());
+    return layer->eventRegion().contains(roundedIntPoint(originRelativePoint));
+}
 
     for (auto& layer : children) {
         FloatPoint transformedPoint;
@@ -333,119 +342,6 @@ OptionSet<EventListenerRegionType> ScrollingTreeCoordinated::eventListenerRegion
 
     Locker hitLayerLocker { hitLayer->lock() };
     return hitLayer->eventRegion().eventListenerRegionTypesForPoint(roundedIntPoint(transformedPoint));
-}
-#endif
-
-#if ENABLE(COORDINATED_TOUCH_EVENTS)
-static std::optional<LayerAndPoint> findLayerOfEventRegionAtPoint(const ScrollingTreeCoordinated& scrollingTree, FloatPoint point)
-{
-    RefPtr rootScrollingNode = scrollingTree.rootNode();
-    if (!rootScrollingNode)
-        return { };
-
-    ScrollingTree::HitTestLocker hitTestLocker(const_cast<ScrollingTreeCoordinated&>(scrollingTree));
-
-    Ref rootContentsLayer = *static_cast<ScrollingTreeFrameScrollingNodeCoordinated*>(rootScrollingNode.get())->rootContentsLayer();
-
-    Vector<LayerAndPoint, 16> layersAtPoint;
-    collectDescendantLayersAtPoint(layersAtPoint, rootContentsLayer, point, [&] (auto layer, auto transformedPoint) {
-        assertIsHeld(layer->lock());
-        return layerEventRegionContainsPoint(layer, transformedPoint);
-    });
-
-    if (layersAtPoint.isEmpty())
-        return { };
-
-    return layersAtPoint.last();
-}
-
-static TrackingType mergeTrackingTypes(TrackingType a, TrackingType b)
-{
-    if (static_cast<uintptr_t>(b) > static_cast<uintptr_t>(a))
-        return b;
-    return a;
-}
-
-TrackingType ScrollingTreeCoordinated::eventTrackingTypeForTouchEvent(const PlatformTouchEvent& event)
-{
-    auto offset = mainFrameScrollOffset();
-    if (!offset)
-        return TrackingType::NotTracking;
-
-    for (auto& touchPoint : event.touchPoints()) {
-        if (touchPoint.state() != PlatformTouchPoint::State::TouchPressed)
-            continue;
-
-        FloatPoint location { touchPoint.pos() };
-        location.move(*offset);
-
-        auto layerAndPoint = findLayerOfEventRegionAtPoint(*this, location);
-        if (!layerAndPoint)
-            continue;
-
-        Locker layerLocker { layerAndPoint->first->lock() };
-        auto& eventRegion = layerAndPoint->first->eventRegion();
-
-        auto update = [&](TrackingType& trackingType, EventTrackingRegions::EventType eventType) {
-            if (trackingType == TrackingType::Synchronous)
-                return;
-
-            auto trackingTypeForLocation = eventRegion.eventTrackingTypeForPoint(eventType, roundedIntPoint(layerAndPoint->second));
-            trackingType = mergeTrackingTypes(trackingType, trackingTypeForLocation);
-        };
-
-        auto& tracking = m_touchEventTracking;
-        using Type = EventTrackingRegions::EventType;
-
-        update(tracking.touchForceChangedTracking, Type::Touchforcechange);
-        update(tracking.touchStartTracking, Type::Touchstart);
-        update(tracking.touchMoveTracking, Type::Touchmove);
-        update(tracking.touchEndTracking, Type::Touchend);
-        update(tracking.touchStartTracking, Type::Pointerover);
-        update(tracking.touchStartTracking, Type::Pointerenter);
-        update(tracking.touchStartTracking, Type::Pointerdown);
-        update(tracking.touchMoveTracking, Type::Pointermove);
-        update(tracking.touchEndTracking, Type::Pointerup);
-        update(tracking.touchEndTracking, Type::Pointerout);
-        update(tracking.touchEndTracking, Type::Pointerleave);
-        update(tracking.touchStartTracking, Type::Mousedown);
-        update(tracking.touchMoveTracking, Type::Mousemove);
-        update(tracking.touchEndTracking, Type::Mouseup);
-        update(tracking.touchEndTracking, Type::Gestureend);
-        update(tracking.touchMoveTracking, Type::Gesturechange);
-        update(tracking.touchStartTracking, Type::Gesturestart);
-    }
-
-    bool allTouchPointsAreReleased = true;
-    auto globalTrackingType = m_touchEventTracking.isTrackingAnything() ? TrackingType::Asynchronous : TrackingType::NotTracking;
-    globalTrackingType = mergeTrackingTypes(globalTrackingType, m_touchEventTracking.touchForceChangedTracking);
-    for (auto& touchPoint : event.touchPoints()) {
-        switch (touchPoint.state()) {
-        case PlatformTouchPoint::State::TouchReleased:
-            globalTrackingType = mergeTrackingTypes(globalTrackingType, m_touchEventTracking.touchEndTracking);
-            break;
-        case PlatformTouchPoint::State::TouchPressed:
-            allTouchPointsAreReleased = false;
-            globalTrackingType = mergeTrackingTypes(globalTrackingType, m_touchEventTracking.touchStartTracking);
-            break;
-        case PlatformTouchPoint::State::TouchMoved:
-        case PlatformTouchPoint::State::TouchStationary:
-            allTouchPointsAreReleased = false;
-            globalTrackingType = mergeTrackingTypes(globalTrackingType, m_touchEventTracking.touchMoveTracking);
-            break;
-        case PlatformTouchPoint::State::TouchCancelled:
-            globalTrackingType = mergeTrackingTypes(globalTrackingType, TrackingType::Asynchronous);
-            break;
-        case PlatformTouchPoint::State::TouchStateEnd:
-            ASSERT_NOT_REACHED();
-            break;
-        }
-    }
-
-    if (allTouchPointsAreReleased)
-        m_touchEventTracking.reset();
-
-    return globalTrackingType;
 }
 #endif
 

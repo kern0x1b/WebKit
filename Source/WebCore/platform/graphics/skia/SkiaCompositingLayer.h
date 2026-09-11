@@ -136,7 +136,7 @@ private:
     bool isReplica() const { return !!m_replicatedLayer; }
     // Contents are painted into m_contentsRect, which the layer bounds do not have to contain.
     bool paintsContentsRect() const { return m_contentsBuffer || m_imageBackingStore || (m_contentsSolidColor.isValid() && m_contentsSolidColor.isVisible()); }
-    bool hasVisualContent() const { return (m_backgroundColor.isValid() && m_backgroundColor.isVisible()) || m_backingStore || paintsContentsRect(); }
+    bool hasVisualContent() const { return m_backingStore || paintsContentsRect(); }
     bool hasVisiblePaintableContent() const { return !m_rect.isEmpty() && m_visible && m_contentsVisible && hasVisualContent(); }
 
     // A backdrop filter paints the layer without any content of its own, so it contributes damage too.

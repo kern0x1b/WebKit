@@ -78,9 +78,9 @@ void CoordinatedPlatformLayerBufferProxy::consumePendingBufferIfNeeded()
     if (!m_pendingBuffer)
         return;
 
-    if (RefPtr layer = m_layer) {
-        assertIsHeld(layer->lock());
-        layer->setContentsBuffer(WTF::move(m_pendingBuffer));
+    if (m_layer) {
+        assertIsHeld(m_layer->lock());
+        m_layer->setContentsBuffer(WTF::move(m_pendingBuffer));
     } else
         m_pendingBuffer = nullptr;
 }
