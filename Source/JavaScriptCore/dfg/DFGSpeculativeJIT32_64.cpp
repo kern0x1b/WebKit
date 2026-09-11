@@ -45,6 +45,7 @@
 #include "JSLexicalEnvironment.h"
 #include "JSMap.h"
 #include "JSPropertyNameEnumerator.h"
+#include "JSSet.h"
 #include "JSStringIterator.h"
 #include "ObjectPrototype.h"
 #include "SetupVarargsFrame.h"
