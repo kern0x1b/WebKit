@@ -131,6 +131,11 @@ enum Opcode : uint8_t {
     ZExt32,
     // Does a bitwise truncation of Int64->Int32 and Double->Float:
     Trunc,
+    // On JSVALUE32_64 platforms only: gets the high 32-bits of an Int64.
+    TruncHigh,
+    // On JSVALUE32_64 platforms only: puts together an Int32 from two Int32s.
+    // High bits come from the first child.
+    Stitch,
     // Takes ints and returns floating point value. Note that we don't currently provide the opposite operation,
     // because double-to-int conversions have weirdly different semantics on different platforms. Use
     // a patchpoint if you need to do that.
@@ -510,7 +515,9 @@ std::optional<Opcode> NODELETE invertedCompare(Opcode, Type);
 
 inline Opcode constPtrOpcode()
 {
-    return Const64;
+    if (is64Bit())
+        return Const64;
+    return Const32;
 }
 
 inline bool isConstant(Opcode opcode)

@@ -42,6 +42,9 @@ void testAtomicWeakCAS()
         if (isX86()) {
             checkUsesInstruction(compilation, "lock");
             checkUsesInstruction(compilation, "cmpxchg");
+        } else if (isARM_THUMB2()) {
+            checkUsesInstruction(compilation, "ldrex");
+            checkUsesInstruction(compilation, "strex");
         } else {
             if (isARM64_LSE())
                 checkUsesInstruction(compilation, "casal");
@@ -300,6 +303,9 @@ void testAtomicStrongCAS()
         if (isX86()) {
             checkUsesInstruction(compilation, "lock");
             checkUsesInstruction(compilation, "cmpxchg");
+        } else if (isARM_THUMB2()) {
+            checkUsesInstruction(compilation, "ldrex");
+            checkUsesInstruction(compilation, "strex");
         } else {
             if (isARM64_LSE())
                 checkUsesInstruction(compilation, "casal");
@@ -675,6 +681,9 @@ void testAtomicXchg(B3::Opcode opcode)
                 default:
                     RELEASE_ASSERT_NOT_REACHED();
                 }
+            } else if (isARM_THUMB2()) {
+                checkUsesInstruction(compilation, "ldrex");
+                checkUsesInstruction(compilation, "strex");
             } else {
                 if (fenced) {
                     checkUsesInstruction(compilation, "ldax");
@@ -1085,6 +1094,14 @@ void testStoreAfterClobberExitsSideways()
     RegisterSet csrs;
     csrs.merge(RegisterSet::calleeSaveRegisters());
     csrs.exclude(RegisterSet::stackRegisters());
+#if CPU(ARM)
+    csrs.remove(MacroAssembler::fpTempRegister);
+    // FIXME We should allow this to be used. See the note
+    // in https://commits.webkit.org/257808@main for more
+    // info about why masm is using scratch registers on
+    // ARM-only.
+    csrs.remove(MacroAssembler::addressTempRegister);
+#endif
     csrs.forEach(
         [&] (Reg reg) {
             CHECK(reg != pinnedBaseGPR);
@@ -1106,7 +1123,8 @@ void testStoreAfterClobberExitsSideways()
     auto* resultAddress = root->appendNew<WasmAddressValue>(proc, Origin(), pointer, pinnedBaseGPR);
     root->appendNew<MemoryValue>(proc, Store, Origin(), root->appendNew<Const32Value>(proc, Origin(), 10), resultAddress, 0);
 
-    pointer = root->appendNew<Value>(proc, Trunc, Origin(), pointer);
+    if (is64Bit())
+        pointer = root->appendNew<Value>(proc, Trunc, Origin(), pointer);
     root->appendNew<WasmBoundsCheckValue>(proc, Origin(), pinnedSizeGPR, pointer, 0);
 
     root->appendNew<MemoryValue>(proc, Store, Origin(), root->appendNew<Const32Value>(proc, Origin(), 20), resultAddress, 0);
@@ -1266,6 +1284,14 @@ void testStoreAfterClobberExitsSidewaysSuccessor()
     RegisterSet csrs;
     csrs.merge(RegisterSet::calleeSaveRegisters());
     csrs.exclude(RegisterSet::stackRegisters());
+#if CPU(ARM)
+    csrs.remove(MacroAssembler::fpTempRegister);
+    // FIXME We should allow this to be used. See the note
+    // in https://commits.webkit.org/257808@main for more
+    // info about why masm is using scratch registers on
+    // ARM-only.
+    csrs.remove(MacroAssembler::addressTempRegister);
+#endif
     csrs.forEach(
         [&] (Reg reg) {
             CHECK(reg != pinnedBaseGPR);
@@ -1297,7 +1323,8 @@ void testStoreAfterClobberExitsSidewaysSuccessor()
     switchValue->appendCase(SwitchCase(0, FrequentedBlock(a)));
     switchValue->appendCase(SwitchCase(1, FrequentedBlock(b)));
 
-    pointer = b->appendNew<Value>(proc, Trunc, Origin(), pointer);
+    if (is64Bit())
+        pointer = b->appendNew<Value>(proc, Trunc, Origin(), pointer);
     b->appendNew<WasmBoundsCheckValue>(proc, Origin(), pinnedSizeGPR, pointer, 0);
 
     UpsilonValue* takeA = a->appendNew<UpsilonValue>(proc, Origin(), a->appendNew<Const64Value>(proc, Origin(), 10));

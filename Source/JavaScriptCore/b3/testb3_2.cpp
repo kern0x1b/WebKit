@@ -306,7 +306,7 @@ void testReturnVoid()
 
 void testLoadZeroExtendIndexAddress()
 {
-    if (Options::defaultB3OptLevel() < 2)
+    if (is32Bit() || Options::defaultB3OptLevel() < 2)
         return;
 
     auto test32 = [&] (uint32_t index, int32_t num, int32_t amount) {
@@ -379,7 +379,7 @@ void testLoadZeroExtendIndexAddress()
 
 void testLoadSignExtendIndexAddress()
 {
-    if (Options::defaultB3OptLevel() < 2)
+    if (is32Bit() || Options::defaultB3OptLevel() < 2)
         return;
 
     auto test32 = [&] (int32_t index, int32_t num, int32_t amount) {
@@ -464,7 +464,8 @@ void testStoreZeroExtendIndexAddress()
         Value* value = root->appendNew<Const32Value>(proc, Origin(), num);
         Value* base = arguments[0];
         Value* indexValue = arguments[1];
-        indexValue = root->appendNew<Value>(proc, ZExt32, Origin(), indexValue);
+        if (!is32Bit())
+            indexValue = root->appendNew<Value>(proc, ZExt32, Origin(), indexValue);
         Value* scale = root->appendNew<Const32Value>(proc, Origin(), amount);
         Value* address = root->appendNew<Value>(
             proc, Add, Origin(), base, 
@@ -522,7 +523,8 @@ void testStoreZeroExtendIndexAddress()
     for (auto index : int32Operands()) {
         for (auto num : int64Operands()) {
             for (int32_t amount = 0; amount < 10; ++amount)
-                test64(index.value, num.value, amount);
+                if (!is32Bit())
+                    test64(index.value, num.value, amount);
         }
     }
 }
@@ -540,7 +542,8 @@ void testStoreSignExtendIndexAddress()
         Value* value = root->appendNew<Const32Value>(proc, Origin(), num);
         Value* base = arguments[0];
         Value* indexValue = arguments[1];
-        indexValue = root->appendNew<Value>(proc, SExt32, Origin(), indexValue);
+        if (!is32Bit())
+            indexValue = root->appendNew<Value>(proc, SExt32, Origin(), indexValue);
         Value* scale = root->appendNew<Const32Value>(proc, Origin(), amount);
         Value* address = root->appendNew<Value>(
             proc, Add, Origin(), base, 
@@ -598,7 +601,8 @@ void testStoreSignExtendIndexAddress()
     for (auto index : int32Operands()) {
         for (auto num : int64Operands()) {
             for (int32_t amount = 0; amount < 10; ++amount)
-                test64(index.value, num.value, amount);
+                if (!is32Bit())
+                    test64(index.value, num.value, amount);
         }
     }
 }
@@ -8025,7 +8029,10 @@ void addBitTests(const TestConfig* config, Deque<RefPtr<SharedTask<void()>>>& ta
     RUN_BINARY(testBitOrArgImmFloat, floatingPointOperands<float>(), floatingPointOperands<float>());
     RUN_BINARY(testBitOrImmsFloat, floatingPointOperands<float>(), floatingPointOperands<float>());
     RUN_BINARY(testBitOrArgsFloatWithUselessDoubleConversion, floatingPointOperands<float>(), floatingPointOperands<float>());
-    RUN_TERNARY(testBitOrAndAndArgs, int64Operands(), int64Operands(), int64Operands());
+    if (!isARM_THUMB2()) {
+        // Not enough argument registers to pass in 3 64-bit arguments on 32-bit ARM.
+        RUN_TERNARY(testBitOrAndAndArgs, int64Operands(), int64Operands(), int64Operands());
+    }
     RUN_TERNARY(testBitOrAndAndArgs32, int32Operands(), int32Operands(), int32Operands());
     RUN_BINARY(testBitOrAndSameArgs, int64Operands(), int64Operands());
     RUN_BINARY(testBitOrAndSameArgs32, int32Operands(), int32Operands());

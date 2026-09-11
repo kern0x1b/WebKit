@@ -26,7 +26,7 @@
 #include "config.h"
 #include "CallFrameShuffler.h"
 
-#if ENABLE(JIT)
+#if ENABLE(JIT) && USE(JSVALUE64)
 
 #include "CCallHelpers.h"
 #include "DataFormat.h"
@@ -44,7 +44,7 @@ DataFormat CallFrameShuffler::emitStore(
         m_jit.storePtr(cachedRecovery.recovery().gpr(), address);
         return DataFormatJS;
     case UnboxedInt32InGPR:
-        m_jit.store32(cachedRecovery.recovery().gpr(), address.withOffset(LowWordOffset));
+        m_jit.store32(cachedRecovery.recovery().gpr(), address.withOffset(PayloadOffset));
         return DataFormatInt32;
     case UnboxedInt52InGPR:
         m_jit.rshift64(MacroAssembler::TrustedImm32(JSValue::int52ShiftAmount),
@@ -53,6 +53,9 @@ DataFormat CallFrameShuffler::emitStore(
     case UnboxedStrictInt52InGPR:
         m_jit.storePtr(cachedRecovery.recovery().gpr(), address);
         return DataFormatStrictInt52;
+    case UnboxedBooleanInGPR:
+        m_jit.storePtr(cachedRecovery.recovery().gpr(), address);
+        return DataFormatBoolean;
     case UnboxedCellInGPR:
         m_jit.storePtr(cachedRecovery.recovery().gpr(), address);
         return DataFormatCell;
@@ -119,6 +122,16 @@ void CallFrameShuffler::emitBox(CachedRecovery& cachedRecovery)
                 dataLog(" into ", cachedRecovery.recovery(), "\n");
             break;
         }
+        case DataFormatBoolean:
+            if (verbose)
+                dataLog("   * Boxing ", cachedRecovery.recovery());
+            m_jit.add32(MacroAssembler::TrustedImm32(JSValue::ValueFalse),
+                cachedRecovery.recovery().gpr());
+            cachedRecovery.setRecovery(
+                ValueRecovery::inGPR(cachedRecovery.recovery().gpr(), DataFormatJS));
+            if (verbose)
+                dataLog(" into ", cachedRecovery.recovery(), "\n");
+            return;
         default:
             return;
         }
@@ -128,7 +141,7 @@ void CallFrameShuffler::emitBox(CachedRecovery& cachedRecovery)
         if (cachedRecovery.recovery().dataFormat() == DataFormatDouble) {
             if (verbose)
                 dataLog("   * Boxing ", cachedRecovery.recovery());
-            GPRReg resultGPR = cachedRecovery.wantedGPR();
+            GPRReg resultGPR = cachedRecovery.wantedJSValueRegs().gpr();
             if (resultGPR == InvalidGPRReg || m_registers[resultGPR])
                 resultGPR = getFreeGPR();
             ASSERT(resultGPR != InvalidGPRReg);
@@ -164,7 +177,7 @@ void CallFrameShuffler::emitLoad(CachedRecovery& cachedRecovery)
     VirtualRegister reg = cachedRecovery.recovery().virtualRegister();
     MacroAssembler::Address address { addressForOld(reg) };
     bool tryFPR { true };
-    GPRReg resultGPR { cachedRecovery.wantedGPR() };
+    GPRReg resultGPR { cachedRecovery.wantedJSValueRegs().gpr() };
 
     // If we want a GPR and it's available, that's better than loading
     // into an FPR.
@@ -226,7 +239,7 @@ bool CallFrameShuffler::canLoad(CachedRecovery& cachedRecovery)
 void CallFrameShuffler::emitDisplace(CachedRecovery& cachedRecovery)
 {
     Reg wantedReg;
-    if (!(wantedReg = Reg { cachedRecovery.wantedGPR() }))
+    if (!(wantedReg = Reg { cachedRecovery.wantedJSValueRegs().gpr() }))
         wantedReg = Reg { cachedRecovery.wantedFPR() };
     ASSERT(wantedReg);
     ASSERT(!m_lockedRegisters.contains(wantedReg, IgnoreVectors));
@@ -300,7 +313,7 @@ void CallFrameShuffler::emitDisplace(CachedRecovery& cachedRecovery)
         ASSERT(wantedReg.isGPR());
         if (verbose)
             dataLog("   * Loading ", cachedRecovery.recovery().constant(), " into ", wantedReg, "\n");
-        m_jit.moveTrustedValue(cachedRecovery.recovery().constant(), wantedReg.gpr());
+        m_jit.moveTrustedValue(cachedRecovery.recovery().constant(), JSValueRegs { wantedReg.gpr() });
         updateRecovery(
             cachedRecovery,
             ValueRecovery::inRegister(wantedReg, DataFormatJS));
@@ -354,4 +367,4 @@ bool CallFrameShuffler::tryAcquireNumberTagRegister()
 
 } // namespace JSC
 
-#endif // ENABLE(JIT)
+#endif // ENABLE(JIT) && USE(JSVALUE64)

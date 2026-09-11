@@ -306,6 +306,7 @@ bool hasCapacityToUseLargeGigacage();
     v(Double, maxEdenSizeForRateLimitingMultiplier, 8.0, Normal, nullptr) \
     v(Double, gcRateLimitingHalfLifeInMS, 1000.00, Normal, nullptr) \
     v(Double, criticalGCMemoryThreshold, 0.80, Normal, "percent memory in use the GC considers critical.  The collector is much more aggressive above this threshold"_s) \
+    v(Double, customFullGCCallbackBailThreshold, -1.0, Normal, "percent of memory paged out before we bail out of timer based Full GCs. -1.0 means use (maxHeapGrowthFactor - 1)"_s) \
     v(Double, minimumMutatorUtilization, 0, Normal, nullptr) \
     v(Double, maximumMutatorUtilization, 0.7, Normal, nullptr) \
     v(Double, epsilonMutatorUtilization, 0.01, Normal, nullptr) \
@@ -317,9 +318,6 @@ bool hasCapacityToUseLargeGigacage();
     v(Double, gcIncrementBytes, 10000, Normal, nullptr) \
     v(Double, gcIncrementMaxBytes, 100000, Normal, nullptr) \
     v(Double, gcIncrementScale, 0, Normal, nullptr) \
-    v(Bool, useWarmUpMarkedBlocks, true, Normal, "hand MarkedBlock allocation pages that a helper thread already made resident"_s) \
-    v(Unsigned, warmUpMarkedBlockCount, 32, Normal, "how many MarkedBlocks the helper thread keeps ready with their pages already resident; 0 turns it off"_s) \
-    v(Double, warmUpMarkedBlockIdleTimeout, 10, Normal, "seconds without a MarkedBlock request before the helper thread releases what it is holding and shuts down"_s) \
     v(Bool, scribbleFreeCells, false, Normal, nullptr) \
     v(Double, sizeClassProgression, 1.4, Normal, nullptr) \
     v(Unsigned, preciseAllocationCutoff, 100000, Normal, nullptr) \
@@ -426,21 +424,10 @@ bool hasCapacityToUseLargeGigacage();
     /* from super long compiles that take a lot of memory. */\
     v(Unsigned, maximumInliningCallerBytecodeCost, 10000, Normal, nullptr) \
     \
-    v(Bool, useGlobalInliningPlanner, true, Normal, "Survey and rank every inlining candidate before parsing and spend one compilation-wide budget on the best of them, instead of deciding each call site in bytecode order"_s) \
-    v(Unsigned, globalInliningPlanBudgetForDFG, 2500, Normal, "Total callee bytecode cost the DFG may plan to inline in one compilation"_s) \
-    v(Unsigned, globalInliningPlanBudgetForFTL, 12000, Normal, "Total callee bytecode cost the FTL may plan to inline in one compilation"_s) \
-    v(Unsigned, maximumGlobalInliningPlanSites, 20000, Normal, "Cap on how many call sites one inlining plan will survey"_s) \
-    v(Double, inliningPlanTierBonusBase, 2.0, Normal, "Multiplicative benefit per tier the callee has reached (LLInt, Baseline, DFG, FTL) when ranking inlining candidates"_s) \
-    v(Double, inliningPlanTierBonusPowerForFTL, 3.0, Normal, "Base for the bonus multiplier for FTL callees"_s) \
-    v(Double, inliningPlanTierBonusPowerForDFG, 2.0, Normal, "Base for the bonus multiplier for DFG callees"_s) \
-    v(Double, inliningPlanTierBonusPowerForBaseline, 1.0, Normal, "Base for the bonus multiplier for Baseline callees"_s) \
-    v(Double, inliningPlanDepthPenalty, 1.5, Normal, "Divisive benefit penalty per level of inline-stack nesting when ranking inlining candidates"_s) \
-    \
     v(Unsigned, maximumVarargsForInlining, 100, Normal, nullptr) \
     \
     v(Unsigned, maximumBinaryStringSwitchCaseLength, 50, Normal, nullptr) \
     v(Unsigned, maximumBinaryStringSwitchTotalLength, 2000, Normal, nullptr) \
-    v(Unsigned, maximumInlineStringSwitchCaseCount, 64, Normal, "Maximum number of cases for which the baseline JIT dispatches op_switch_string inline instead of calling out."_s) \
     v(Unsigned, maximumRegExpTestInlineCodesize, 500, Normal, "Maximum code size in bytes for inlined RegExp.test JIT code."_s) \
     v(Unsigned, maximumRegExpJITCodeSize, 16 * MB, Normal, "Maximum generated code size in bytes for RegExp JIT compilation before falling back to the interpreter."_s) \
     \
@@ -455,9 +442,9 @@ bool hasCapacityToUseLargeGigacage();
     v(Unsigned, wasmInliningSmallFunctionThreshold, 50, Normal, "Wasm size threshold for small wasm functions"_s) \
     \
     v(Double, jitPolicyScale, 1.0, Normal, "scale JIT thresholds to this specified ratio between 0.0 (compile ASAP) and 1.0 (compile like normal)."_s) \
-    v(Int32, numberOfSuperAndPerformanceCoresOverride, 0, Normal, "If non-zero, overrides the number of Super and Performance (i.e. non-Efficiency) cores reported by the hardware; 0 means use the value reported by the hardware."_s) \
-    v(Double, dfgThresholdScaleForFewPerformanceCores, 2.0, Normal, "On Apple silicon Macs with few Super and Performance cores, scale the DFG tier-up thresholds (thresholdForOptimize*) by this factor."_s) \
-    v(Double, ftlThresholdScaleForFewPerformanceCores, 1.5, Normal, "On Apple silicon Macs with few Super and Performance cores, scale the FTL tier-up thresholds (thresholdForFTLOptimize*) by this factor."_s) \
+    v(Int32, numberOfP0CoresOverrides, 0, Normal, "If non-zero, overrides the number of P0 (highest-performance) cores reported by hwNumberOfP0Cores(); 0 means use the value reported by the hardware."_s) \
+    v(Double, dfgThresholdScaleForLowP0Cores, 2.0, Normal, "On low P0-core-count Apple silicon Macs, scale the DFG tier-up thresholds (thresholdForOptimize*) by this factor."_s) \
+    v(Double, ftlThresholdScaleForLowP0Cores, 1.5, Normal, "On low P0-core-count Apple silicon Macs, scale the FTL tier-up thresholds (thresholdForFTLOptimize*) by this factor."_s) \
     v(Bool, forceEagerCompilation, false, Normal, nullptr) \
     v(Int32, thresholdForJITAfterWarmUp, WEBKIT_IOS6_JIT_WARMUP, Normal, nullptr) \
     v(Int32, thresholdForJITSoon, WEBKIT_IOS6_JIT_SOON, Normal, nullptr) \
@@ -615,8 +602,11 @@ bool hasCapacityToUseLargeGigacage();
     \
     v(Bool, logPhaseTimes, false, Normal, nullptr) \
     v(Double, rareBlockPenalty, 0.001, Normal, nullptr) \
+    v(Bool, airForceBriggsAllocator, false, Normal, nullptr) \
+    v(Bool, airForceIRCAllocator, false, Normal, nullptr) \
     v(Bool, airGreedyRegAllocVerbose, false, Normal, nullptr) \
     v(OptionString, airGreedyRegAllocDumpFunction, nullptr, Normal, "dump greedy register allocator state and IR for functions matching this substring"_s) \
+    v(Bool, airUseGreedyRegAlloc, true, Normal, nullptr) \
     v(Double, airGreedyRegAllocSplitMultiplier, 2.0, Normal, nullptr) \
     v(Bool, airGreedyRegAllocSplitAroundLoops, false, Normal, nullptr) \
     v(Double, airGreedyRegAllocLoopSplitMaxLoopFraction, 0.75, Normal, nullptr) \
@@ -676,7 +666,6 @@ bool hasCapacityToUseLargeGigacage();
     v(Size, wasmSmallPartialCompileLimit, 5000, Normal, "Limit on the number of bytes a Wasm::Plan::compile should attempt for small wasm binary before checking for other work."_s) \
     v(Size, wasmLargePartialCompileLimit, 20000, Normal, "Limit on the number of bytes a Wasm::Plan::compile should attempt for large wasm binary before checking for other work."_s) \
     v(Unsigned, wasmOMGOptimizationLevel, Options::defaultB3OptLevel(), Normal, "B3 Optimization level for OMG Web Assembly module compilations."_s) \
-    v(Bool, useWasmByteLoopReplacement, true, Normal, "If true, OMG replaces a loop that copies or fills linear memory one byte per iteration with the equivalent bulk memory operation."_s) \
     \
     v(Bool, useBBQTierUpChecks, true, Normal, "Enables tier up checks for our BBQ code."_s) \
     v(Bool, useWasmOSR, true, Normal, nullptr) \
@@ -687,7 +676,6 @@ bool hasCapacityToUseLargeGigacage();
     v(Unsigned, maximumOMGCandidateCost, 100000, Normal, nullptr) \
     v(Int32, omgTierUpCounterIncrementForLoop, 1, Normal, "The amount the tier up counter is incremented on each loop backedge."_s) \
     v(Int32, omgTierUpCounterIncrementForEntry, 15, Normal, "The amount the tier up counter is incremented on each function entry."_s) \
-    v(Int32, wasmOMGEntryIncrementSizeReference, 128, Normal, "If non-zero, the BBQ->OMG function-entry tier-up increment is scaled down for functions whose bytecode size is below this reference (work-proportional tier-up): increment = clamp(entryIncrement * size / reference, 1, entryIncrement). 0 disables (flat increment)."_s) \
     v(Bool, useWasmFastMemory, true, Normal, "If true, we will try to use a 32-bit address space with a signal handler to bounds check wasm memory."_s) \
     v(Bool, logWasmMemory, false, Normal, nullptr) \
     v(Unsigned, wasmFastMemoryRedzonePages, 128, Normal, "Wasm fast memories use 4GiB virtual allocations, plus a redzone (counted as multiple of 64KiB Wasm pages) at the end to catch reg+imm accesses which exceed 32-bit, anything beyond the redzone is explicitly bounds-checked"_s) \
@@ -698,7 +686,7 @@ bool hasCapacityToUseLargeGigacage();
     v(Bool, verboseBBQJITInstructions, false, Normal, "Logs instruction information during BBQ JIT"_s) \
     v(Bool, disableBBQConsts, false, Normal, "Wasm <type>.const instructions in BBQ JIT won't lower to a const BBQ::Value"_s) \
     v(Bool, useBBQJIT, true, Normal, "allows the BBQ JIT to be used if true"_s) \
-    v(Bool, useOMGJIT, true, Normal, "allows the OMG JIT to be used if true"_s) \
+    v(Bool, useOMGJIT, !isARM_THUMB2(), Normal, "allows the OMG JIT to be used if true"_s) \
     v(OptionRange, wasmFunctionIndexRangeToCompile, nullptr, Normal, "wasm function index range to allow compilation on, e.g. 1:100"_s) \
     v(Bool, useEagerWasmModuleHashing, false, Normal, "Unnamed Wasm modules are identified in backtraces through their hash, if available."_s) \
     v(Bool, useArrayAllocationProfiling, true, Normal, "If true, we will use our normal array allocation profiling. If false, the allocation profile will always claim to be undecided."_s) \
@@ -744,13 +732,11 @@ bool hasCapacityToUseLargeGigacage();
     v(Unsigned, maxPartialLoopUnrollingBodyNodeSize, 70, Normal, nullptr) \
     v(Unsigned, maxPartialLoopUnrollingIterationCount, 4, Normal, nullptr) \
     v(Unsigned, maxNumericHotLoopSize, 225, Normal, nullptr) \
-    v(Unsigned, maxIntegerRangeOptimizationRelationshipsPerNode, 24, Normal, "How many relationships IRO keeps about any one node, 0 for no cap."_s) \
-    v(Unsigned, maxIntegerRangeOptimizationWork, 50000000, Normal, "Give up threshold for IRO"_s) \
     v(Bool, printEachUnrolledLoop, false, Normal, nullptr) \
     v(Bool, verboseExecutablePoolAllocation, false, Normal, nullptr) \
     v(Bool, useHandlerICInFTL, false, Normal, nullptr) \
     v(Bool, useLLIntICs, true, Normal, "Use property and call ICs in LLInt code."_s) \
-    v(Bool, useBaselineJITCodeSharing, jitEnabledByDefault(), Normal, nullptr) \
+    v(Bool, useBaselineJITCodeSharing, is64Bit(), Normal, nullptr) \
     v(Bool, libpasScavengeContinuously, false, Normal, nullptr) \
     v(Unsigned, libpasForcePGMWithRate, 0, Normal, "Forces on probablistic guard malloc and guards allocations with a rate 1/N (0 is disabled)"_s) \
     v(Bool, useWasmFaultSignalHandler, true, Normal, nullptr) \

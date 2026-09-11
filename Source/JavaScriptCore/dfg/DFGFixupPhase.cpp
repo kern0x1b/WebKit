@@ -84,18 +84,21 @@ private:
 
     void fixupArithDivInt32(Node* node, Edge& leftChild, Edge& rightChild)
     {
-        if (optimizeForX86() || optimizeForARM64()) {
+        if (optimizeForX86() || optimizeForARM64() || optimizeForARMv7IDIVSupported()) {
             fixIntOrBooleanEdge(leftChild);
             fixIntOrBooleanEdge(rightChild);
             // We need to be careful about skipping overflow check because div / mod can generate non integer values
             // from (Int32, Int32) inputs. For now, we always check non-zero divisor.
-            if (bytecodeCanTruncateInteger(node->arithNodeFlags()) && bytecodeCanIgnoreNaNAndInfinity(node->arithNodeFlags()) && bytecodeCanIgnoreNegativeZero(node->arithNodeFlags())) {
+            if (bytecodeCanTruncateInteger(node->arithNodeFlags()) && bytecodeCanIgnoreNaNAndInfinity(node->arithNodeFlags()) && bytecodeCanIgnoreNegativeZero(node->arithNodeFlags()))
                 node->setArithMode(Arith::Unchecked);
-                node->clearFlags(NodeMustGenerate);
-            } else if (bytecodeCanIgnoreNegativeZero(node->arithNodeFlags()))
+            else if (bytecodeCanIgnoreNegativeZero(node->arithNodeFlags()))
                 node->setArithMode(Arith::CheckOverflow);
             else
                 node->setArithMode(Arith::CheckOverflowAndNegativeZero);
+            // Regardless of whether we have a check, we clear MustGenerate flag. If nobody is using the output (including MovHint),
+            // we do not need to perform checks and keep this node.
+            // This condition is met only when we are not utilizing this checks as an additional constraint in integer-range-optimization.
+            node->clearFlags(NodeMustGenerate);
             return;
         }
 
@@ -140,13 +143,16 @@ private:
         if ((node->op() == ArithMod || node->op() == ValueMod) && m_graph.modShouldSpeculateInt52(node)) {
             fixEdge<Int52RepUse>(leftChild);
             fixEdge<Int52RepUse>(rightChild);
-            if (bytecodeCanIgnoreNaNAndInfinity(node->arithNodeFlags()) && bytecodeCanIgnoreNegativeZero(node->arithNodeFlags())) {
+            if (bytecodeCanIgnoreNaNAndInfinity(node->arithNodeFlags()) && bytecodeCanIgnoreNegativeZero(node->arithNodeFlags()))
                 node->setArithMode(Arith::Unchecked);
-                node->clearFlags(NodeMustGenerate);
-            } else if (bytecodeCanIgnoreNegativeZero(node->arithNodeFlags()))
+            else if (bytecodeCanIgnoreNegativeZero(node->arithNodeFlags()))
                 node->setArithMode(Arith::CheckOverflow);
             else
                 node->setArithMode(Arith::CheckOverflowAndNegativeZero);
+            // Regardless of whether we have a check, we clear MustGenerate flag. If nobody is using the output (including MovHint),
+            // we do not need to perform checks and keep this node.
+            // This condition is met only when we are not utilizing this checks as an additional constraint in integer-range-optimization.
+            node->clearFlags(NodeMustGenerate);
             node->setResult(NodeResultInt52);
             return;
         }
@@ -162,13 +168,16 @@ private:
         if (m_graph.binaryArithShouldSpeculateInt32(node, FixupPass)) {
             fixIntOrBooleanEdge(leftChild);
             fixIntOrBooleanEdge(rightChild);
-            if (bytecodeCanTruncateInteger(node->arithNodeFlags())) {
+            if (bytecodeCanTruncateInteger(node->arithNodeFlags()))
                 node->setArithMode(Arith::Unchecked);
-                node->clearFlags(NodeMustGenerate);
-            } else if (bytecodeCanIgnoreNegativeZero(node->arithNodeFlags()) || leftChild.node() == rightChild.node())
+            else if (bytecodeCanIgnoreNegativeZero(node->arithNodeFlags()) || leftChild.node() == rightChild.node())
                 node->setArithMode(Arith::CheckOverflow);
             else
                 node->setArithMode(Arith::CheckOverflowAndNegativeZero);
+            // Regardless of whether we have a check, we clear MustGenerate flag. If nobody is using the output (including MovHint),
+            // we do not need to perform checks and keep this node.
+            // This condition is met only when we are not utilizing this checks as an additional constraint in integer-range-optimization.
+            node->clearFlags(NodeMustGenerate);
             return;
         }
         if (m_graph.binaryArithShouldSpeculateInt52(node, FixupPass)) {
@@ -178,6 +187,10 @@ private:
                 node->setArithMode(Arith::CheckOverflow);
             else
                 node->setArithMode(Arith::CheckOverflowAndNegativeZero);
+            // Regardless of whether we have a check, we clear MustGenerate flag. If nobody is using the output (including MovHint),
+            // we do not need to perform checks and keep this node.
+            // This condition is met only when we are not utilizing this checks as an additional constraint in integer-range-optimization.
+            node->clearFlags(NodeMustGenerate);
             node->setResult(NodeResultInt52);
             return;
         }
@@ -476,7 +489,7 @@ private:
                 node->setArithMode(Arith::CheckOverflow);
             else {
                 node->setArithMode(Arith::DoOverflow);
-                node->setResult(NodeResultInt52);
+                node->setResult(enableInt52() ? NodeResultInt52 : NodeResultDouble);
             }
             break;
         }
@@ -485,14 +498,14 @@ private:
             if (node->child1()->shouldSpeculateInt32OrBoolean() && node->canSpeculateInt32(FixupPass)) {
                 node->setOp(ArithNegate);
                 fixIntOrBooleanEdge(node->child1());
-                if (bytecodeCanTruncateInteger(node->arithNodeFlags())) {
+                if (bytecodeCanTruncateInteger(node->arithNodeFlags()))
                     node->setArithMode(Arith::Unchecked);
-                    node->clearFlags(NodeMustGenerate);
-                } else if (bytecodeCanIgnoreNegativeZero(node->arithNodeFlags()))
+                else if (bytecodeCanIgnoreNegativeZero(node->arithNodeFlags()))
                     node->setArithMode(Arith::CheckOverflow);
                 else
                     node->setArithMode(Arith::CheckOverflowAndNegativeZero);
                 node->setResult(NodeResultInt32);
+                node->clearFlags(NodeMustGenerate);
                 break;
             }
             
@@ -504,6 +517,7 @@ private:
                 else
                     node->setArithMode(Arith::CheckOverflowAndNegativeZero);
                 node->setResult(NodeResultInt52);
+                node->clearFlags(NodeMustGenerate);
                 break;
             }
             if (node->child1()->shouldSpeculateNotCellNorBigInt()) {
@@ -638,14 +652,14 @@ private:
         case ArithNegate: {
             if (node->child1()->shouldSpeculateInt32OrBoolean() && node->canSpeculateInt32(FixupPass)) {
                 fixIntOrBooleanEdge(node->child1());
-                if (bytecodeCanTruncateInteger(node->arithNodeFlags())) {
+                if (bytecodeCanTruncateInteger(node->arithNodeFlags()))
                     node->setArithMode(Arith::Unchecked);
-                    node->clearFlags(NodeMustGenerate);
-                } else if (bytecodeCanIgnoreNegativeZero(node->arithNodeFlags()))
+                else if (bytecodeCanIgnoreNegativeZero(node->arithNodeFlags()))
                     node->setArithMode(Arith::CheckOverflow);
                 else
                     node->setArithMode(Arith::CheckOverflowAndNegativeZero);
                 node->setResult(NodeResultInt32);
+                node->clearFlags(NodeMustGenerate);
                 break;
             }
             if (m_graph.unaryArithShouldSpeculateInt52(node, FixupPass)) {
@@ -655,6 +669,7 @@ private:
                 else
                     node->setArithMode(Arith::CheckOverflowAndNegativeZero);
                 node->setResult(NodeResultInt52);
+                node->clearFlags(NodeMustGenerate);
                 break;
             }
 
@@ -844,11 +859,11 @@ private:
             if (node->child1()->shouldSpeculateInt32OrBoolean()
                 && node->canSpeculateInt32(FixupPass)) {
                 fixIntOrBooleanEdge(node->child1());
-                if (bytecodeCanTruncateInteger(node->arithNodeFlags())) {
+                if (bytecodeCanTruncateInteger(node->arithNodeFlags()))
                     node->setArithMode(Arith::Unchecked);
-                    node->clearFlags(NodeMustGenerate);
-                } else
+                else
                     node->setArithMode(Arith::CheckOverflow);
+                node->clearFlags(NodeMustGenerate);
                 node->setResult(NodeResultInt32);
                 break;
             }
@@ -1362,37 +1377,40 @@ private:
                         break;
                     }
 
-                    if (node->op() == GetByVal && m_graph.child(node, 1)->shouldSpeculateInt32()) {
-                        if (m_graph.hasExitSite(node->origin.semantic, OutOfBounds)) {
-                            auto old = node->arrayMode();
-                            old.setSpeculation(Array::OutOfBounds);
-                            node->setArrayMode(old);
-                            arrayMode = node->arrayMode(); // Reload
-                        }
+                    if (is64Bit()) {
+                        if (node->op() == GetByVal && m_graph.child(node, 1)->shouldSpeculateInt32()) {
+                            if (m_graph.hasExitSite(node->origin.semantic, OutOfBounds)) {
+                                auto old = node->arrayMode();
+                                old.setSpeculation(Array::OutOfBounds);
+                                node->setArrayMode(old);
+                                arrayMode = node->arrayMode(); // Reload
+                            }
 
-                        ArrayModes arrayModes = 0;
-                        {
-                            CodeBlock* profiledBlock = m_graph.baselineCodeBlockFor(node->origin.semantic);
-                            if (ArrayProfile* arrayProfile = profiledBlock->getArrayProfile(node->origin.semantic.bytecodeIndex()))
-                                arrayModes = arrayProfile->observedArrayModes();
-                        }
-                        auto info = refineArrayModesForMultiGetByVal(node, arrayModes);
-                        if (!info)
+                            ArrayModes arrayModes = 0;
+                            {
+                                CodeBlock* profiledBlock = m_graph.baselineCodeBlockFor(node->origin.semantic);
+                                ConcurrentJSLocker locker(profiledBlock->m_lock);
+                                if (ArrayProfile* arrayProfile = profiledBlock->getArrayProfile(locker, node->origin.semantic.bytecodeIndex()))
+                                    arrayModes = arrayProfile->observedArrayModes(locker);
+                            }
+                            auto info = refineArrayModesForMultiGetByVal(node, arrayModes);
+                            if (!info)
+                                break;
+
+                            NodeFlags flags = 0;
+                            std::tie(arrayModes, flags) = info.value();
+
+                            fixEdge<CellUse>(m_graph.child(node, 0));
+                            fixEdge<Int32Use>(m_graph.child(node, 1));
+                            auto* data = m_graph.m_multiGetByValData.add(MultiGetByValData {
+                                arrayModes,
+                                arrayMode,
+                            });
+                            node->convertToMultiGetByVal(data);
+                            if (flags == NodeResultDouble)
+                                node->setResult(NodeResultDouble);
                             break;
-
-                        NodeFlags flags = 0;
-                        std::tie(arrayModes, flags) = info.value();
-
-                        fixEdge<CellUse>(m_graph.child(node, 0));
-                        fixEdge<Int32Use>(m_graph.child(node, 1));
-                        auto* data = m_graph.m_multiGetByValData.add(MultiGetByValData {
-                            arrayModes,
-                            arrayMode,
-                        });
-                        node->convertToMultiGetByVal(data);
-                        if (flags == NodeResultDouble)
-                            node->setResult(NodeResultDouble);
-                        break;
+                        }
                     }
                 }
                 break;
@@ -1559,29 +1577,32 @@ private:
                     }
 
                     // Right now, we only support the pattern MultiPutByVal(Object, Int32, Int32)
-                    if (node->op() == PutByVal && child2->shouldSpeculateInt32() && child3->shouldSpeculateInt32()) {
-                        ArrayModes arrayModes = 0;
-                        {
-                            CodeBlock* profiledBlock = m_graph.baselineCodeBlockFor(node->origin.semantic);
-                            if (ArrayProfile* arrayProfile = profiledBlock->getArrayProfile(node->origin.semantic.bytecodeIndex()))
-                                arrayModes = arrayProfile->observedArrayModes();
-                        }
-                        if (auto result = refineArrayModesForMultiPutByVal(node, arrayModes)) {
-                            if (m_graph.hasExitSite(node->origin.semantic, OutOfBounds)) {
-                                auto old = node->arrayMode();
-                                old.setSpeculation(Array::OutOfBounds);
-                                node->setArrayMode(old);
+                    if (is64Bit()) {
+                        if (node->op() == PutByVal && child2->shouldSpeculateInt32() && child3->shouldSpeculateInt32()) {
+                            ArrayModes arrayModes = 0;
+                            {
+                                CodeBlock* profiledBlock = m_graph.baselineCodeBlockFor(node->origin.semantic);
+                                ConcurrentJSLocker locker(profiledBlock->m_lock);
+                                if (ArrayProfile* arrayProfile = profiledBlock->getArrayProfile(locker, node->origin.semantic.bytecodeIndex()))
+                                    arrayModes = arrayProfile->observedArrayModes(locker);
                             }
-                            auto arrayMode = node->arrayMode().modeForPut();
-                            fixEdge<CellUse>(m_graph.child(node, 0));
-                            fixEdge<Int32Use>(m_graph.child(node, 1));
-                            fixEdge<Int32Use>(m_graph.child(node, 2));
-                            auto* data = m_graph.m_multiPutByValData.add(MultiPutByValData {
-                                result.value(),
-                                arrayMode,
-                            });
-                            node->convertToMultiPutByVal(data);
-                            break;
+                            if (auto result = refineArrayModesForMultiPutByVal(node, arrayModes)) {
+                                if (m_graph.hasExitSite(node->origin.semantic, OutOfBounds)) {
+                                    auto old = node->arrayMode();
+                                    old.setSpeculation(Array::OutOfBounds);
+                                    node->setArrayMode(old);
+                                }
+                                auto arrayMode = node->arrayMode().modeForPut();
+                                fixEdge<CellUse>(m_graph.child(node, 0));
+                                fixEdge<Int32Use>(m_graph.child(node, 1));
+                                fixEdge<Int32Use>(m_graph.child(node, 2));
+                                auto* data = m_graph.m_multiPutByValData.add(MultiPutByValData {
+                                    result.value(),
+                                    arrayMode,
+                                });
+                                node->convertToMultiPutByVal(data);
+                                break;
+                            }
                         }
                     }
 
@@ -1815,19 +1836,6 @@ private:
         case ArrayShift: {
             blessArrayOperation(node->child1(), Edge(), node->child2());
             fixEdge<KnownCellUse>(node->child1());
-
-            // The element-move path moves elements without consulting the prototype, which is
-            // valid only when the structure speculation pins the array prototype and the prototype
-            // chain is known to be sane. Without InBoundsSaneChain the backends emit only the
-            // length 0 and length 1 paths, which never look at the prototype, and route everything
-            // else to operationArrayShift, which does its own prototype check.
-            //
-            // setSaneChainIfPossible() is not usable here: it also clears NodeMustGenerate, which
-            // is only sound for pure loads. ArrayShift mutates the array, so it must stay
-            // must-generate even when its result is unused.
-            ArrayMode arrayMode = node->arrayMode();
-            if (arrayMode.isJSArrayWithOriginalStructure() && watchSaneChain(node))
-                node->setArrayMode(arrayMode.withSpeculation(Array::InBoundsSaneChain));
             break;
         }
 
@@ -2620,8 +2628,10 @@ private:
         }
 
         case ObjectToString: {
+#if USE(JSVALUE64)
             if (node->child1()->shouldSpeculateObject())
                 fixEdge<ObjectUse>(node->child1());
+#endif
             break;
         }
 
@@ -2687,7 +2697,7 @@ private:
         }
 
         case InstanceOf: {
-            if (node->child1()->shouldSpeculateCell() && node->child2()->shouldSpeculateCell()) {
+            if (node->child1()->shouldSpeculateCell() && node->child2()->shouldSpeculateCell() && is64Bit()) {
                 fixEdge<CellUse>(node->child1());
                 fixEdge<CellUse>(node->child2());
                 break;
@@ -2696,8 +2706,11 @@ private:
         }
 
         case InstanceOfMegamorphic: {
-            fixEdge<CellUse>(node->child1());
-            fixEdge<CellUse>(node->child2());
+            if (is64Bit()) {
+                fixEdge<CellUse>(node->child1());
+                fixEdge<CellUse>(node->child2());
+                break;
+            }
             break;
         }
 
@@ -2800,6 +2813,7 @@ private:
         }
 
         case FiatInt52: {
+            RELEASE_ASSERT(enableInt52());
             node->convertToIdentity();
             fixEdge<Int52RepUse>(node->child1());
             node->setResult(NodeResultInt52);
@@ -3031,7 +3045,7 @@ private:
                 blessArrayOperation(base, index, storageEdge);
 
                 ArrayMode arrayMode = node->arrayMode();
-                if (arrayMode.isJSArrayWithOriginalStructure() && arrayMode.benefitsFromOriginalArray())
+                if (arrayMode.benefitsFromOriginalArray())
                     setSaneChainIfPossible(node, arrayMode.speculation() == Array::InBounds ? Array::InBoundsSaneChain : Array::OutOfBoundsSaneChain);
             }
 
@@ -3096,9 +3110,13 @@ private:
                     break;
                 }
 
-                fixEdge<AnyIntUse>(node->child1());
-                node->remove(m_graph);
-                break;
+                if (enableInt52()) {
+                    fixEdge<AnyIntUse>(node->child1());
+                    node->remove(m_graph);
+                    break;
+                }
+
+                // Must not perform fixEdge<NumberUse> here since the type set only includes TypeAnyInt. Double values should be logged.
             }
 
             if (typeSet->doesTypeConformTo(TypeNumber | TypeAnyInt)) {
@@ -3165,7 +3183,6 @@ private:
         case EnqueueAsyncGeneratorDriver: {
             fixEdge<KnownCellUse>(node->child1());
             fixEdge<KnownCellUse>(node->child2());
-            fixEdge<UntypedUse>(node->child3());
             break;
         }
 
@@ -3207,6 +3224,7 @@ private:
             else
                 RELEASE_ASSERT_NOT_REACHED();
 
+#if USE(JSVALUE64)
             if (node->child2()->shouldSpeculateBoolean())
                 fixEdge<BooleanUse>(node->child2());
             else if (node->child2()->shouldSpeculateInt32())
@@ -3227,6 +3245,9 @@ private:
                 fixEdge<CellUse>(node->child2());
             else
                 fixEdge<UntypedUse>(node->child2());
+#else
+            fixEdge<UntypedUse>(node->child2());
+#endif // USE(JSVALUE64)
 
             fixEdge<Int32Use>(node->child3());
             break;
@@ -3275,6 +3296,7 @@ private:
             break;
 
         case MapHash: {
+#if USE(JSVALUE64)
             if (node->child1()->shouldSpeculateBoolean()) {
                 fixEdge<BooleanUse>(node->child1());
                 break;
@@ -3318,6 +3340,9 @@ private:
             }
 
             fixEdge<UntypedUse>(node->child1());
+#else
+            fixEdge<UntypedUse>(node->child1());
+#endif // USE(JSVALUE64)
             break;
         }
 
@@ -3648,11 +3673,7 @@ private:
             break;
 
         case DateGetInt32OrNaN:
-            break;
-
-        case DateGetStorage:
         case DateGetTime:
-        case DateGetMilliseconds:
             fixEdge<DateObjectUse>(node->child1());
             break;
 
@@ -4739,14 +4760,14 @@ private:
 
             switch (arrayMode.type()) {
             case Array::Int32:
-                if (arrayMode.speculation() == Array::OutOfBounds && !m_graph.hasExitSite(node->origin.semantic, NegativeIndex))
+                if (is64Bit() && arrayMode.speculation() == Array::OutOfBounds && !m_graph.hasExitSite(node->origin.semantic, NegativeIndex))
                     saneChainSpeculation = Array::OutOfBoundsSaneChain;
                 break;
             case Array::Contiguous:
                 // This is happens to be entirely natural. We already would have
                 // returned any JSValue, and now we'll return Undefined. We still do
                 // the check but it doesn't require taking any kind of slow path.
-                if (arrayMode.speculation() == Array::OutOfBounds && !m_graph.hasExitSite(node->origin.semantic, NegativeIndex))
+                if (is64Bit() && arrayMode.speculation() == Array::OutOfBounds && !m_graph.hasExitSite(node->origin.semantic, NegativeIndex))
                     saneChainSpeculation = Array::OutOfBoundsSaneChain;
                 else if (arrayMode.speculation() == Array::InBounds)
                     saneChainSpeculation = Array::InBoundsSaneChain;
@@ -4758,7 +4779,7 @@ private:
                     // about the difference between Undefined and NaN then we can
                     // do this.
                     saneChainSpeculation = Array::InBoundsSaneChain;
-                } else if (arrayMode.speculation() == Array::OutOfBounds && !m_graph.hasExitSite(node->origin.semantic, NegativeIndex))
+                } else if (is64Bit() && arrayMode.speculation() == Array::OutOfBounds && !m_graph.hasExitSite(node->origin.semantic, NegativeIndex))
                     saneChainSpeculation = Array::OutOfBoundsSaneChain;
                 break;
 
@@ -4920,7 +4941,13 @@ private:
 
     bool NODELETE alwaysUnboxSimplePrimitives()
     {
+#if USE(JSVALUE64)
         return false;
+#else
+        // Any boolean, int, or cell value is profitable to unbox on 32-bit because it
+        // reduces traffic.
+        return true;
+#endif
     }
 
     template<UseKind useKind>
@@ -5177,10 +5204,11 @@ private:
         ArrayMode arrayMode = ArrayMode(Array::SelectUsingPredictions, Array::Read);
         {
             CodeBlock* profiledBlock = m_graph.baselineCodeBlockFor(node->origin.semantic);
-            ArrayProfile* liveProfile = profiledBlock->getArrayProfile(node->origin.semantic.bytecodeIndex());
-            if (liveProfile) {
-                liveProfile->computeUpdatedPrediction(profiledBlock);
-                arrayMode = ArrayMode::fromObserved(*liveProfile, Array::Read, false);
+            ConcurrentJSLocker locker(profiledBlock->m_lock);
+            ArrayProfile* arrayProfile = profiledBlock->getArrayProfile(locker, node->origin.semantic.bytecodeIndex());
+            if (arrayProfile) {
+                arrayProfile->computeUpdatedPrediction(profiledBlock);
+                arrayMode = ArrayMode::fromObserved(locker, arrayProfile, Array::Read, false);
                 if (arrayMode.type() == Array::Unprofiled) {
                     // For normal array operations, it makes sense to treat Unprofiled
                     // accesses as ForceExit and get more data rather than using
@@ -5364,6 +5392,7 @@ private:
         // FTL has object allocation sinking, and keeping this node non-double-result makes that phase much simpler.
         // So FTL will do conversion of this in ValueRepReduction phase instead.
         UNUSED_PARAM(node);
+#if USE(JSVALUE64)
         if (!m_graph.m_plan.isFTL()) {
             if (!m_graph.hasExitSite(node->origin.semantic, BadType)) {
                 if (!node->shouldSpeculateInt32() && node->shouldSpeculateNumber()) {
@@ -5373,6 +5402,7 @@ private:
                 }
             }
         }
+#endif
         return false;
     }
 
@@ -5383,6 +5413,7 @@ private:
         // So FTL will do conversion of this in ValueRepReduction phase instead.
         UNUSED_PARAM(node);
         UNUSED_PARAM(edge);
+#if USE(JSVALUE64)
         if (!m_graph.m_plan.isFTL()) {
             if (!m_graph.hasExitSite(node->origin.semantic, BadType)) {
                 if (!edge->shouldSpeculateInt32() && edge->shouldSpeculateNumber()) {
@@ -5391,6 +5422,7 @@ private:
                 }
             }
         }
+#endif
         return false;
     }
 
@@ -5735,6 +5767,7 @@ private:
             node->setOpAndDefaultFlags(CompareStrictEq);
             return;
         }
+#if USE(JSVALUE64)
         if (node->child1()->shouldSpeculateNeitherDoubleNorHeapBigInt()
             && node->child2()->shouldSpeculateNotDouble()) {
             fixEdge<NeitherDoubleNorHeapBigIntUse>(node->child1());
@@ -5749,6 +5782,7 @@ private:
             node->setOpAndDefaultFlags(CompareStrictEq);
             return;
         }
+#endif // USE(JSVALUE64)
 #endif // !USE(BIGINT32)
     }
 
