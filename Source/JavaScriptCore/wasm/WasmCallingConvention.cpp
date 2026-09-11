@@ -116,23 +116,22 @@ const CCallingConventionArmThumb2& cCallingConventionArmThumb2()
         scratch.exclude(RegisterSet::macroClobberedGPRs());
         scratch.exclude(RegisterSet::reservedHardwareRegisters());
         scratch.exclude(RegisterSet::stackRegisters());
-        for (GPRReg gpr : gprArgumentRegisters)
+        for (GPRReg gpr : gprArgumentRegisters) {
             scratch.remove(gpr);
+        }
 
         Vector<GPRReg> scratchGPRs;
         for (Reg reg : scratch)
             scratchGPRs.append(reg.gpr());
 
         // Need at least one JSValue and an additional GPR
-        RELEASE_ASSERT(scratchGPRs.size() >= 3);
+        RELEASE_ASSERT(scratchGPRs.size() >= 2);
 
-        staticCCallingConventionArmThumb2.construct(WTF::move(gprArgumentRegisters), WTF::move(fprArgumentRegisters), WTF::move(scratchGPRs), RegisterSet::calleeSaveRegisters());
+        staticWasmCallingConvention.construct(WTF::move(gprArgumentRegisters), WTF::move(fprArgumentRegisters), WTF::move(scratchGPRs), RegisterSet::calleeSaveRegisters());
     });
 
-    return staticCCallingConventionArmThumb2;
+    return staticWasmCallingConvention;
 }
-
-#endif
 
 } // namespace JSC::Wasm
 

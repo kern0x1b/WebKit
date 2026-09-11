@@ -292,15 +292,9 @@
 #define ENABLE_IOS_TOUCH_EVENTS 0
 #endif
 
-#if !defined(ENABLE_ISO18013_DOCUMENT_REQUEST_INFO)
-#define ENABLE_ISO18013_DOCUMENT_REQUEST_INFO 0
-#endif
-
 #if !defined(ENABLE_IPC_TESTING_API)
 /* Enable IPC testing on all ASAN builds and debug builds. Enable it in GLib ports when assertions are enabled. */
-/* In GLib ports, only enable for GCC builds, as this is what we currently test in EWS and clang-18 is significantly */
-/* slow to build when IPC testing is enabled. */
-#if ((ASAN_ENABLED || !defined(NDEBUG)) && PLATFORM(COCOA)) || (ASSERT_ENABLED && (PLATFORM(GTK) || PLATFORM(WPE)) && COMPILER(GCC))
+#if ((ASAN_ENABLED || !defined(NDEBUG)) && PLATFORM(COCOA)) || (ASSERT_ENABLED && (PLATFORM(GTK) || PLATFORM(WPE)))
 #define ENABLE_IPC_TESTING_API 1
 #endif
 #endif
@@ -551,10 +545,6 @@
 #define ENABLE_SPELLCHECK 0
 #endif
 
-#if !defined(ENABLE_TEXT_AUTOSIZING)
-#define ENABLE_TEXT_AUTOSIZING 0
-#endif
-
 #if !defined(ENABLE_TEXT_CARET)
 #define ENABLE_TEXT_CARET 1
 #endif
@@ -639,7 +629,7 @@
 #define ENABLE_WEBGPU PLATFORM(COCOA)
 #endif
 
-#if !defined(ENABLE_WEBGPU_BY_DEFAULT) && ((PLATFORM(MAC) && __MAC_OS_X_VERSION_MIN_REQUIRED >= 260000) || PLATFORM(IOS) || PLATFORM(VISION))
+#if !defined(ENABLE_WEBGPU_BY_DEFAULT) && ((PLATFORM(MAC) && __MAC_OS_X_VERSION_MIN_REQUIRED >= 260000) || PLATFORM(IOS) || PLATFORM(VISION) || PLATFORM(WATCHOS))
 #define ENABLE_WEBGPU_BY_DEFAULT 1
 #endif
 
@@ -837,7 +827,7 @@
 #define ENABLE_CONCURRENT_JS 1
 #endif
 
-#if (CPU(X86_64) || CPU(ARM64)) && HAVE(FAST_TLS)
+#if ENABLE(JIT) && (CPU(X86_64) || CPU(ARM64)) && HAVE(FAST_TLS)
 #define ENABLE_FAST_TLS_JIT 1
 #endif
 
@@ -937,26 +927,6 @@
 #define ENABLE_YARR_JIT_DEBUG 0
 #endif
 
-/* Enable JIT'ing Regular Expressions that have nested parenthesis . */
-#if ENABLE(YARR_JIT) && (CPU(ARM64) || CPU(X86_64) || CPU(RISCV64))
-#define ENABLE_YARR_JIT_ALL_PARENS_EXPRESSIONS 1
-#define ENABLE_YARR_JIT_REGEXP_TEST_INLINE 1
-#endif
-
-/* Enable JIT'ing Regular Expressions that have back references. */
-#if ENABLE(YARR_JIT) && (CPU(ARM64) || CPU(X86_64) || CPU(RISCV64))
-#define ENABLE_YARR_JIT_BACKREFERENCES 1
-#if CPU(ARM64) || CPU(X86_64)
-#define ENABLE_YARR_JIT_BACKREFERENCES_FOR_16BIT_EXPRS 1
-#else
-#define ENABLE_YARR_JIT_BACKREFERENCES_FOR_16BIT_EXPRS 0
-#endif
-#endif
-
-#if ENABLE(YARR_JIT) && (CPU(ARM64) || CPU(X86_64) || CPU(RISCV64))
-#define ENABLE_YARR_JIT_UNICODE_EXPRESSIONS 1
-#endif
-
 /* Enables an optimiztion to advance two codepoints when we fail to match a non-BMP character */
 #if ENABLE(YARR_JIT) && CPU(ARM64)
 #define ENABLE_YARR_JIT_UNICODE_CAN_INCREMENT_INDEX_FOR_NON_BMP 1
@@ -1018,11 +988,28 @@
 #define ENABLE_GC_VALIDATION 1
 #endif
 
-#if OS(DARWIN) && ENABLE(JIT) && USE(APPLE_INTERNAL_SDK) && CPU(ARM64E) && HAVE(JIT_CAGE) && !PLATFORM(MAC) && !PLATFORM(MACCATALYST)
+#if OS(DARWIN) && ENABLE(JIT) && USE(APPLE_INTERNAL_SDK) && CPU(ARM64E) && HAVE(JIT_CAGE)
+#if    HAVE(JIT_CAGE_RELAXATION) && !(PLATFORM(MAC) || PLATFORM(MACCATALYST))
 #define ENABLE_JIT_CAGE 1
+// FIXME: rdar://183646426
+#define ENABLE_JIT_CAGE_RELAXATION 0
+#elif  HAVE(JIT_CAGE_RELAXATION) &&  (PLATFORM(MAC) || PLATFORM(MACCATALYST))
+#define ENABLE_JIT_CAGE 0
+// FIXME: rdar://183649352
+#define ENABLE_JIT_CAGE_RELAXATION 0
+#elif !HAVE(JIT_CAGE_RELAXATION) && !(PLATFORM(MAC) || PLATFORM(MACCATALYST))
+#define ENABLE_JIT_CAGE 1
+#define ENABLE_JIT_CAGE_RELAXATION 0
+#elif !HAVE(JIT_CAGE_RELAXATION) &&  (PLATFORM(MAC) || PLATFORM(MACCATALYST))
+#define ENABLE_JIT_CAGE 0
+#define ENABLE_JIT_CAGE_RELAXATION 0
+#else
+#error "Should not be reached"
 #endif
+#endif // OS(DARWIN) && ENABLE(JIT) && USE(APPLE_INTERNAL_SDK) && CPU(ARM64E) && HAVE(JIT_CAGE)
 
-#if OS(DARWIN) && CPU(ADDRESS64) && ENABLE(JIT) && (ENABLE(JIT_CAGE) || ASSERT_ENABLED)
+#if !ENABLE(JIT_CAGE_RELAXATION) && (ENABLE(JIT_CAGE) \
+    || (ENABLE(JIT) && OS(DARWIN) && CPU(ADDRESS64) && ASSERT_ENABLED))
 #define ENABLE_JIT_OPERATION_VALIDATION 1
 #endif
 

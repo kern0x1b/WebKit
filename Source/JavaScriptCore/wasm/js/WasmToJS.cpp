@@ -52,7 +52,7 @@ static void materializeImportJSCell(JIT& jit, const Wasm::ModuleInformation& inf
     jit.loadPtr(JIT::Address(GPRInfo::wasmContextInstancePointer, JSWebAssemblyInstance::offsetOfImportFunction(info, importIndex)), result);
 }
 
-static Expected<MacroAssemblerCodeRef<WasmEntryPtrTag>, BindingFailure> handleBadImportTypeUse(JIT& jit, unsigned importIndex, Wasm::ExceptionType exceptionType)
+static std::expected<MacroAssemblerCodeRef<WasmEntryPtrTag>, BindingFailure> handleBadImportTypeUse(JIT& jit, unsigned importIndex, Wasm::ExceptionType exceptionType)
 {
     jit.move(GPRInfo::wasmContextInstancePointer, GPRInfo::argumentGPR0);
 
@@ -65,7 +65,7 @@ static Expected<MacroAssemblerCodeRef<WasmEntryPtrTag>, BindingFailure> handleBa
     return FINALIZE_WASM_CODE(linkBuffer, WasmEntryPtrTag, nullptr, "WebAssembly->JavaScript throw exception due to invalid use of restricted type in import[%i]", importIndex);
 }
 
-Expected<MacroAssemblerCodeRef<WasmEntryPtrTag>, BindingFailure> wasmToJS(const Wasm::ModuleInformation& info, unsigned importIndex)
+std::expected<MacroAssemblerCodeRef<WasmEntryPtrTag>, BindingFailure> wasmToJS(const Wasm::ModuleInformation& info, unsigned importIndex)
 {
     // FIXME: This function doesn't properly abstract away the calling convention.
     // It'd be super easy to do so: https://bugs.webkit.org/show_bug.cgi?id=169401
@@ -83,7 +83,7 @@ Expected<MacroAssemblerCodeRef<WasmEntryPtrTag>, BindingFailure> wasmToJS(const 
     // If we ever change this, we will also need to change WasmOMGIRGenerator.
 
     // Below, we assume that the JS calling convention is always on the stack.
-    ASSERT_UNUSED(jsCC, !jsCC.jsrArgs.size());
+    ASSERT_UNUSED(jsCC, !jsCC.gprArgs.size());
     ASSERT(!jsCC.fprArgs.size());
 
     jit.emitFunctionPrologue();
@@ -144,12 +144,9 @@ Expected<MacroAssemblerCodeRef<WasmEntryPtrTag>, BindingFailure> wasmToJS(const 
         unsigned frOffset = CallFrameSlot::firstArgument * static_cast<int>(sizeof(Register));
         for (unsigned argNum = 0; argNum < argCount; ++argNum) {
             Type argType = signature.argumentType(argNum);
-            switch (argType.kind) {
+            switch (argType.kind()) {
             case TypeKind::Void:
-            case TypeKind::Func:
-            case TypeKind::Struct:
             case TypeKind::Structref:
-            case TypeKind::Array:
             case TypeKind::Arrayref:
             case TypeKind::Eqref:
             case TypeKind::Anyref:
@@ -158,9 +155,6 @@ Expected<MacroAssemblerCodeRef<WasmEntryPtrTag>, BindingFailure> wasmToJS(const 
             case TypeKind::Nofuncref:
             case TypeKind::Noexternref:
             case TypeKind::I31ref:
-            case TypeKind::Rec:
-            case TypeKind::Sub:
-            case TypeKind::Subfinal:
             case TypeKind::V128:
                 RELEASE_ASSERT_NOT_REACHED(); // Handled above.
             case TypeKind::RefNull:
@@ -217,7 +211,6 @@ Expected<MacroAssemblerCodeRef<WasmEntryPtrTag>, BindingFailure> wasmToJS(const 
                 hasMaterializedDoubleEncodeOffset = true;
             }
         };
-#endif
 
         unsigned marshalledGPRs = 0;
         unsigned marshalledFPRs = 0;
@@ -254,9 +247,6 @@ Expected<MacroAssemblerCodeRef<WasmEntryPtrTag>, BindingFailure> wasmToJS(const 
             case TypeKind::Nofuncref:
             case TypeKind::Noexternref:
             case TypeKind::I31ref:
-            case TypeKind::Rec:
-            case TypeKind::Sub:
-            case TypeKind::Subfinal:
             case TypeKind::V128:
                 RELEASE_ASSERT_NOT_REACHED(); // Handled above.
             case TypeKind::RefNull:
@@ -267,7 +257,7 @@ Expected<MacroAssemblerCodeRef<WasmEntryPtrTag>, BindingFailure> wasmToJS(const 
             case TypeKind::I32:
             case TypeKind::I64: {
                 // Skipped: handled above.
-                if (marshalledGPRs >= wasmCC.jsrArgs.size())
+                if (marshalledGPRs >= wasmCC.gprArgs.size())
                     frOffset += sizeof(Register);
                 ++marshalledGPRs;
                 calleeFrameOffset += sizeof(Register);
@@ -451,7 +441,7 @@ Expected<MacroAssemblerCodeRef<WasmEntryPtrTag>, BindingFailure> wasmToJS(const 
         default:  {
             if (Wasm::isRefType(returnType)) {
                 if (!returnType.isNullable()) {
-                    auto isNotNull = jit.branchIfNotNull(JSRInfo::returnValueJSR);
+                    auto isNotNull = jit.branchIfNotNull(GPRInfo::returnValueGPR);
                     jit.move(GPRInfo::wasmContextInstancePointer, GPRInfo::argumentGPR0);
                     emitThrowWasmToJSException(jit, GPRInfo::argumentGPR0, ExceptionType::TypeErrorUnexpectedNullReference);
                     isNotNull.link(&jit);
@@ -493,10 +483,10 @@ Expected<MacroAssemblerCodeRef<WasmEntryPtrTag>, BindingFailure> wasmToJS(const 
         jit.move(CCallHelpers::stackPointerRegister, savedResultsGPR);
         if constexpr (!!maxFrameExtentForSlowPathCall)
             jit.subPtr(CCallHelpers::TrustedImm32(maxFrameExtentForSlowPathCall), CCallHelpers::stackPointerRegister);
-        static_assert(noOverlap(savedResultsGPR, JSRInfo::returnValueJSR));
+        static_assert(noOverlap(savedResultsGPR, GPRInfo::returnValueGPR));
         static_assert(GPRInfo::wasmContextInstancePointer != savedResultsGPR);
         jit.prepareWasmCallOperation(GPRInfo::wasmContextInstancePointer);
-        jit.setupArguments<decltype(operationIterateResults)>(GPRInfo::wasmContextInstancePointer, CCallHelpers::TrustedImmPtr(&signature), JSRInfo::returnValueJSR, savedResultsGPR, CCallHelpers::framePointerRegister);
+        jit.setupArguments<decltype(operationIterateResults)>(GPRInfo::wasmContextInstancePointer, CCallHelpers::TrustedImmPtr(&signature), GPRInfo::returnValueGPR, savedResultsGPR, CCallHelpers::framePointerRegister);
         jit.callOperation<OperationPtrTag>(operationIterateResults);
         if constexpr (!!maxFrameExtentForSlowPathCall)
             jit.addPtr(CCallHelpers::TrustedImm32(maxFrameExtentForSlowPathCall), CCallHelpers::stackPointerRegister);

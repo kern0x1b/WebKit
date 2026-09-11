@@ -37,6 +37,7 @@
 #include <wtf/Compiler.h>
 #include <wtf/DataLog.h>
 #include <wtf/Function.h>
+#include <wtf/HexNumber.h>
 #include <wtf/Lock.h>
 #include <wtf/NumberOfCores.h>
 #include <wtf/PtrTag.h>
@@ -343,25 +344,13 @@ void testGetEffectiveAddress(size_t pointer, ptrdiff_t length, int32_t offset, C
 void testBranchTruncateDoubleToInt32(double val, int32_t expected)
 {
     const uint64_t valAsUInt = std::bit_cast<uint64_t>(val);
-#if CPU(BIG_ENDIAN)
-    const bool isBigEndian = true;
-#else
-    const bool isBigEndian = false;
-#endif
     CHECK_EQ(compileAndRun<int>([&] (CCallHelpers& jit) {
         emitFunctionPrologue(jit);
         jit.subPtr(CCallHelpers::TrustedImm32(stackAlignmentBytes()), MacroAssembler::stackPointerRegister);
-        if (isBigEndian) {
-            jit.store32(CCallHelpers::TrustedImm32(valAsUInt >> 32),
-                MacroAssembler::Address(MacroAssembler::stackPointerRegister));
-            jit.store32(CCallHelpers::TrustedImm32(valAsUInt & 0xffffffff),
-                MacroAssembler::Address(MacroAssembler::stackPointerRegister, 4));
-        } else {
-            jit.store32(CCallHelpers::TrustedImm32(valAsUInt & 0xffffffff),
-                MacroAssembler::Address(MacroAssembler::stackPointerRegister));
-            jit.store32(CCallHelpers::TrustedImm32(valAsUInt >> 32),
-                MacroAssembler::Address(MacroAssembler::stackPointerRegister, 4));
-        }
+        jit.store32(CCallHelpers::TrustedImm32(valAsUInt & 0xffffffff),
+            MacroAssembler::Address(MacroAssembler::stackPointerRegister));
+        jit.store32(CCallHelpers::TrustedImm32(valAsUInt >> 32),
+            MacroAssembler::Address(MacroAssembler::stackPointerRegister, 4));
         jit.loadDouble(MacroAssembler::Address(MacroAssembler::stackPointerRegister), FPRInfo::fpRegT0);
 
         MacroAssembler::Jump done;
@@ -1004,6 +993,216 @@ void testStore64Imm64AddressPointer()
     doTest(0xAAAA432198765555);
 }
 
+void testAdd32Imm()
+{
+    for (auto immediate : int32Operands()) {
+        for (auto immediate2 : int32Operands()) {
+            auto add = compile([=] (CCallHelpers& jit) {
+                emitFunctionPrologue(jit);
+
+                jit.move(CCallHelpers::TrustedImm32(immediate), GPRInfo::returnValueGPR);
+                jit.add32(CCallHelpers::TrustedImm32(immediate2), GPRInfo::returnValueGPR);
+
+                emitFunctionEpilogue(jit);
+                jit.ret();
+            });
+            CHECK_EQ(invoke<uint32_t>(add), static_cast<uint32_t>(immediate) + static_cast<uint32_t>(immediate2));
+        }
+    }
+}
+
+void testAdd32ArgImm()
+{
+    for (auto immediate : int32Operands()) {
+        auto add = compile([=] (CCallHelpers& jit) {
+            emitFunctionPrologue(jit);
+
+            jit.add32(CCallHelpers::TrustedImm32(immediate), GPRInfo::argumentGPR0, GPRInfo::returnValueGPR);
+
+            emitFunctionEpilogue(jit);
+            jit.ret();
+        });
+
+        for (auto value : int32Operands())
+            CHECK_EQ(invoke<uint32_t>(add, value), static_cast<uint32_t>(value) + static_cast<uint32_t>(immediate));
+    }
+}
+
+void testAdd64Imm32()
+{
+    for (auto immediate : int64Operands()) {
+        for (auto immediate2 : int32Operands()) {
+            auto add = compile([=] (CCallHelpers& jit) {
+                emitFunctionPrologue(jit);
+
+                jit.move(CCallHelpers::TrustedImm64(immediate), GPRInfo::returnValueGPR);
+                jit.add64(CCallHelpers::TrustedImm32(immediate2), GPRInfo::returnValueGPR);
+
+                emitFunctionEpilogue(jit);
+                jit.ret();
+            });
+            CHECK_EQ(invoke<uint64_t>(add), static_cast<uint64_t>(immediate) + static_cast<uint64_t>(immediate2));
+        }
+    }
+}
+
+void testAdd64ArgImm32()
+{
+    for (auto immediate : int32Operands()) {
+        auto add = compile([=] (CCallHelpers& jit) {
+            emitFunctionPrologue(jit);
+
+            jit.add64(CCallHelpers::TrustedImm32(immediate), GPRInfo::argumentGPR0, GPRInfo::returnValueGPR);
+
+            emitFunctionEpilogue(jit);
+            jit.ret();
+        });
+
+        for (auto value : int64Operands())
+            CHECK_EQ(invoke<uint64_t>(add, value), static_cast<uint64_t>(value) + static_cast<uint64_t>(immediate));
+    }
+}
+
+void testAdd64Imm64()
+{
+    for (auto immediate : int64Operands()) {
+        for (auto immediate2 : int64Operands()) {
+            auto add = compile([=] (CCallHelpers& jit) {
+                emitFunctionPrologue(jit);
+
+                jit.move(CCallHelpers::TrustedImm64(immediate), GPRInfo::returnValueGPR);
+                jit.add64(CCallHelpers::TrustedImm64(immediate2), GPRInfo::returnValueGPR);
+
+                emitFunctionEpilogue(jit);
+                jit.ret();
+            });
+            CHECK_EQ(invoke<uint64_t>(add), static_cast<uint64_t>(immediate) + static_cast<uint64_t>(immediate2));
+        }
+    }
+}
+
+void testAdd64ArgImm64()
+{
+    for (auto immediate : int64Operands()) {
+        auto add = compile([=] (CCallHelpers& jit) {
+            emitFunctionPrologue(jit);
+
+            jit.add64(CCallHelpers::TrustedImm64(immediate), GPRInfo::argumentGPR0, GPRInfo::returnValueGPR);
+
+            emitFunctionEpilogue(jit);
+            jit.ret();
+        });
+
+        for (auto value : int64Operands())
+            CHECK_EQ(invoke<uint64_t>(add, value), static_cast<uint64_t>(value) + static_cast<uint64_t>(immediate));
+    }
+}
+
+void testSub32Args()
+{
+    for (auto value : int32Operands()) {
+        auto sub = compile([=] (CCallHelpers& jit) {
+            emitFunctionPrologue(jit);
+
+            jit.sub32(GPRInfo::argumentGPR0, GPRInfo::argumentGPR1, GPRInfo::returnValueGPR);
+
+            emitFunctionEpilogue(jit);
+            jit.ret();
+        });
+
+        for (auto value2 : int32Operands())
+            CHECK_EQ(invoke<uint32_t>(sub, value, value2), static_cast<uint32_t>(value - value2));
+    }
+}
+
+void testSub32Imm()
+{
+    for (auto immediate : int32Operands()) {
+        for (auto immediate2 : int32Operands()) {
+            auto sub = compile([=] (CCallHelpers& jit) {
+                emitFunctionPrologue(jit);
+
+                jit.move(CCallHelpers::TrustedImm32(immediate), GPRInfo::returnValueGPR);
+                jit.sub32(CCallHelpers::TrustedImm32(immediate2), GPRInfo::returnValueGPR);
+
+                emitFunctionEpilogue(jit);
+                jit.ret();
+            });
+            CHECK_EQ(invoke<uint32_t>(sub), static_cast<uint32_t>(immediate - immediate2));
+        }
+    }
+}
+
+void testSub64Imm32()
+{
+    for (auto immediate : int64Operands()) {
+        for (auto immediate2 : int32Operands()) {
+            auto sub = compile([=] (CCallHelpers& jit) {
+                emitFunctionPrologue(jit);
+
+                jit.move(CCallHelpers::TrustedImm64(immediate), GPRInfo::returnValueGPR);
+                jit.sub64(CCallHelpers::TrustedImm32(immediate2), GPRInfo::returnValueGPR);
+
+                emitFunctionEpilogue(jit);
+                jit.ret();
+            });
+            CHECK_EQ(invoke<uint64_t>(sub), static_cast<uint64_t>(immediate - immediate2));
+        }
+    }
+}
+
+void testSub64ArgImm32()
+{
+    for (auto immediate : int32Operands()) {
+        auto sub = compile([=] (CCallHelpers& jit) {
+            emitFunctionPrologue(jit);
+
+            jit.sub64(GPRInfo::argumentGPR0, CCallHelpers::TrustedImm32(immediate), GPRInfo::returnValueGPR);
+
+            emitFunctionEpilogue(jit);
+            jit.ret();
+        });
+
+        for (auto value : int64Operands())
+            CHECK_EQ(invoke<int64_t>(sub, value), static_cast<int64_t>(value - immediate));
+    }
+}
+
+void testSub64Imm64()
+{
+    for (auto immediate : int64Operands()) {
+        for (auto immediate2 : int64Operands()) {
+            auto sub = compile([=] (CCallHelpers& jit) {
+                emitFunctionPrologue(jit);
+
+                jit.move(CCallHelpers::TrustedImm64(immediate), GPRInfo::returnValueGPR);
+                jit.sub64(CCallHelpers::TrustedImm64(immediate2), GPRInfo::returnValueGPR);
+
+                emitFunctionEpilogue(jit);
+                jit.ret();
+            });
+            CHECK_EQ(invoke<uint64_t>(sub), static_cast<uint64_t>(immediate - immediate2));
+        }
+    }
+}
+
+void testSub64ArgImm64()
+{
+    for (auto immediate : int64Operands()) {
+        auto sub = compile([=] (CCallHelpers& jit) {
+            emitFunctionPrologue(jit);
+
+            jit.sub64(GPRInfo::argumentGPR0, CCallHelpers::TrustedImm64(immediate), GPRInfo::returnValueGPR);
+
+            emitFunctionEpilogue(jit);
+            jit.ret();
+        });
+
+        for (auto value : int64Operands())
+            CHECK_EQ(invoke<int64_t>(sub, value), static_cast<int64_t>(value - immediate));
+    }
+}
+
 #endif // CPU(X86_64) || CPU(ARM64)
 
 void testCompareDouble(MacroAssembler::DoubleCondition condition)
@@ -1251,111 +1450,6 @@ void testMultiplyAddZeroExtend32()
                 CHECK_EQ(invoke<int64_t>(add, n, m, a), static_cast<int64_t>(un) * static_cast<int64_t>(um) + a);
             }
         }
-    }
-}
-
-void testSub32Args()
-{
-    for (auto value : int32Operands()) {
-        auto sub = compile([=] (CCallHelpers& jit) {
-            emitFunctionPrologue(jit);
-
-            jit.sub32(GPRInfo::argumentGPR0, GPRInfo::argumentGPR1, GPRInfo::returnValueGPR);
-
-            emitFunctionEpilogue(jit);
-            jit.ret();
-        });
-
-        for (auto value2 : int32Operands())
-            CHECK_EQ(invoke<uint32_t>(sub, value, value2), static_cast<uint32_t>(value - value2));
-    }
-}
-
-void testSub32Imm()
-{
-    for (auto immediate : int32Operands()) {
-        for (auto immediate2 : int32Operands()) {
-            auto sub = compile([=] (CCallHelpers& jit) {
-                emitFunctionPrologue(jit);
-
-                jit.move(CCallHelpers::TrustedImm32(immediate), GPRInfo::returnValueGPR);
-                jit.sub32(CCallHelpers::TrustedImm32(immediate2), GPRInfo::returnValueGPR);
-
-                emitFunctionEpilogue(jit);
-                jit.ret();
-            });
-            CHECK_EQ(invoke<uint32_t>(sub), static_cast<uint32_t>(immediate - immediate2));
-        }
-    }
-}
-
-void testSub64Imm32()
-{
-    for (auto immediate : int64Operands()) {
-        for (auto immediate2 : int32Operands()) {
-            auto sub = compile([=] (CCallHelpers& jit) {
-                emitFunctionPrologue(jit);
-
-                jit.move(CCallHelpers::TrustedImm64(immediate), GPRInfo::returnValueGPR);
-                jit.sub64(CCallHelpers::TrustedImm32(immediate2), GPRInfo::returnValueGPR);
-
-                emitFunctionEpilogue(jit);
-                jit.ret();
-            });
-            CHECK_EQ(invoke<uint64_t>(sub), static_cast<uint64_t>(immediate - immediate2));
-        }
-    }
-}
-
-void testSub64ArgImm32()
-{
-    for (auto immediate : int32Operands()) {
-        auto sub = compile([=] (CCallHelpers& jit) {
-            emitFunctionPrologue(jit);
-
-            jit.sub64(GPRInfo::argumentGPR0, CCallHelpers::TrustedImm32(immediate), GPRInfo::returnValueGPR);
-
-            emitFunctionEpilogue(jit);
-            jit.ret();
-        });
-
-        for (auto value : int64Operands())
-            CHECK_EQ(invoke<int64_t>(sub, value), static_cast<int64_t>(value - immediate));
-    }
-}
-
-void testSub64Imm64()
-{
-    for (auto immediate : int64Operands()) {
-        for (auto immediate2 : int64Operands()) {
-            auto sub = compile([=] (CCallHelpers& jit) {
-                emitFunctionPrologue(jit);
-
-                jit.move(CCallHelpers::TrustedImm64(immediate), GPRInfo::returnValueGPR);
-                jit.sub64(CCallHelpers::TrustedImm64(immediate2), GPRInfo::returnValueGPR);
-
-                emitFunctionEpilogue(jit);
-                jit.ret();
-            });
-            CHECK_EQ(invoke<uint64_t>(sub), static_cast<uint64_t>(immediate - immediate2));
-        }
-    }
-}
-
-void testSub64ArgImm64()
-{
-    for (auto immediate : int64Operands()) {
-        auto sub = compile([=] (CCallHelpers& jit) {
-            emitFunctionPrologue(jit);
-
-            jit.sub64(GPRInfo::argumentGPR0, CCallHelpers::TrustedImm64(immediate), GPRInfo::returnValueGPR);
-
-            emitFunctionEpilogue(jit);
-            jit.ret();
-        });
-
-        for (auto value : int64Operands())
-            CHECK_EQ(invoke<int64_t>(sub, value), static_cast<int64_t>(value - immediate));
     }
 }
 
@@ -4424,7 +4518,7 @@ void testLoadExtend_BaseIndex_RegisterID(const Scenario* scenarios, size_t numbe
 }
 
 template<typename T, typename Scenario, typename CompileFunctor>
-void testLoadExtend_voidp_RegisterID(const Scenario* scenarios, size_t numberOfScenarios, CompileFunctor compileFunctor)
+UNUSED_FUNCTION void testLoadExtend_voidp_RegisterID(const Scenario* scenarios, size_t numberOfScenarios, CompileFunctor compileFunctor)
 {
     for (size_t i = 0; i < numberOfScenarios; ++i) {
         auto test = compile([&] (CCallHelpers& jit) {
@@ -4591,8 +4685,6 @@ void testLoad16SignedExtendTo32_voidp_RegisterID()
         });
 #endif
 }
-
-#if CPU(ADDRESS64)
 
 struct SignedLoad8to64Scenario {
     int8_t src;
@@ -4821,8 +4913,6 @@ void testLoad32SignedExtendTo64_voidp_RegisterID()
         });
 #endif
 }
-
-#endif // CPU(ADDRESS64)
 
 #if CPU(ARM64)
 void testLoadStorePair64Int64()
@@ -6349,9 +6439,7 @@ void testLoadBaseIndex()
         });
         uint16_t array[] = { 1, 2, 0x7ff3, 0x8000, 5, };
         CHECK_EQ(invoke<uint32_t>(test, array, static_cast<UCPURegister>(3)), 0x7ff3);
-#if CPU(REGISTER64)
         CHECK_EQ(invoke<uint64_t>(test, array, static_cast<UCPURegister>(4)), 0xffff8000);
-#endif
     }
     {
         auto test = compile([=](CCallHelpers& jit) {
@@ -6362,9 +6450,7 @@ void testLoadBaseIndex()
         });
         uint16_t array[] = { UINT16_MAX - 1, UINT16_MAX - 2, UINT16_MAX - 3, UINT16_MAX - 4, static_cast<uint16_t>(-1), };
         CHECK_EQ(invoke<uint32_t>(test, array, static_cast<UCPURegister>(3)), static_cast<uint32_t>(-1));
-#if CPU(REGISTER64)
         CHECK_EQ(invoke<uint64_t>(test, array, static_cast<UCPURegister>(3)), static_cast<uint32_t>(-1));
-#endif
     }
 
     // load8
@@ -6399,9 +6485,7 @@ void testLoadBaseIndex()
         });
         uint8_t array[] = { 1, 2, 0x73, 0x80, 5, };
         CHECK_EQ(invoke<uint32_t>(test, array, static_cast<UCPURegister>(3)), 0x73);
-#if CPU(REGISTER64)
         CHECK_EQ(invoke<uint64_t>(test, array, static_cast<UCPURegister>(4)), 0xffffff80);
-#endif
     }
     {
         auto test = compile([=](CCallHelpers& jit) {
@@ -6412,9 +6496,7 @@ void testLoadBaseIndex()
         });
         uint8_t array[] = { UINT8_MAX - 1, UINT8_MAX - 2, UINT8_MAX - 3, UINT8_MAX - 4, static_cast<uint8_t>(-1), };
         CHECK_EQ(invoke<uint32_t>(test, array, static_cast<UCPURegister>(3)), static_cast<uint32_t>(-1));
-#if CPU(REGISTER64)
         CHECK_EQ(invoke<uint64_t>(test, array, static_cast<UCPURegister>(3)), static_cast<uint32_t>(-1));
-#endif
     }
 
     // loadDouble
@@ -8490,6 +8572,21 @@ void run(const char* filter) WTF_IGNORES_THREAD_SAFETY_ANALYSIS
     RUN(testCountTrailingZeros64WithoutNullCheck());
     RUN(testShiftAndAdd());
     RUN(testStore64Imm64AddressPointer());
+
+    RUN(testAdd32Imm());
+    RUN(testAdd32ArgImm());
+    RUN(testAdd64Imm32());
+    RUN(testAdd64ArgImm32());
+    RUN(testAdd64Imm64());
+    RUN(testAdd64ArgImm64());
+
+    RUN(testSub32Args());
+    RUN(testSub32Imm());
+    RUN(testSub64Imm32());
+    RUN(testSub64ArgImm32());
+    RUN(testSub64Imm64());
+    RUN(testSub64ArgImm64());
+
 #endif
 
     RUN(testLoadAcq8SignedExtendTo32_Address_RegisterID());
@@ -8504,7 +8601,6 @@ void run(const char* filter) WTF_IGNORES_THREAD_SAFETY_ANALYSIS
 
     RUN(testLoadStorePair32());
 
-#if CPU(ADDRESS64)
     RUN(testLoadAcq8SignedExtendTo64_Address_RegisterID());
     RUN(testLoad8SignedExtendTo64_Address_RegisterID());
     RUN(testLoad8SignedExtendTo64_BaseIndex_RegisterID());
@@ -8519,20 +8615,12 @@ void run(const char* filter) WTF_IGNORES_THREAD_SAFETY_ANALYSIS
     RUN(testLoad32SignedExtendTo64_Address_RegisterID());
     RUN(testLoad32SignedExtendTo64_BaseIndex_RegisterID());
     RUN(testLoad32SignedExtendTo64_voidp_RegisterID());
-#endif
 
 #if CPU(ARM64)
     RUN(testLoadStorePair64Int64());
     RUN(testLoadStorePair64Double());
     RUN(testMultiplySignExtend32());
     RUN(testMultiplyZeroExtend32());
-
-    RUN(testSub32Args());
-    RUN(testSub32Imm());
-    RUN(testSub64Imm32());
-    RUN(testSub64ArgImm32());
-    RUN(testSub64Imm64());
-    RUN(testSub64ArgImm64());
 
     RUN(testMultiplyAddSignExtend32());
     RUN(testMultiplyAddZeroExtend32());

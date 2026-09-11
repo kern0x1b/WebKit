@@ -85,12 +85,12 @@ bool CallFrame::callSiteBitsAreCodeOriginIndex() const
 
 unsigned CallFrame::callSiteAsRawBits() const
 {
-    return this[static_cast<int>(CallFrameSlot::argumentCountIncludingThis)].tag();
+    return this[static_cast<int>(CallFrameSlot::argumentCountIncludingThis)].highWord();
 }
 
 SUPPRESS_ASAN unsigned CallFrame::unsafeCallSiteAsRawBits() const
 {
-    return this[static_cast<int>(CallFrameSlot::argumentCountIncludingThis)].unsafeTag();
+    return this[static_cast<int>(CallFrameSlot::argumentCountIncludingThis)].unsafeHighWord();
 }
 
 CallSiteIndex CallFrame::callSiteIndex() const
@@ -112,7 +112,7 @@ const JSInstruction* CallFrame::currentVPC() const
 void CallFrame::setCurrentVPC(const JSInstruction* vpc)
 {
     CallSiteIndex callSite(codeBlock()->bytecodeIndex(vpc));
-    this[static_cast<int>(CallFrameSlot::argumentCountIncludingThis)].tag() = callSite.bits();
+    this[static_cast<int>(CallFrameSlot::argumentCountIncludingThis)].highWord() = callSite.bits();
     ASSERT(currentVPC() == vpc);
 }
 

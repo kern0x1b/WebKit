@@ -218,6 +218,9 @@ namespace JSC {
         void loadPtrFromMetadata(const Bytecode&, size_t offset, GPRReg);
 
         template <typename Bytecode>
+        void loadPairPtrFromMetadata(const Bytecode&, size_t offset, GPRReg, GPRReg);
+
+        template <typename Bytecode>
         void load32FromMetadata(const Bytecode&, size_t offset, GPRReg);
 
         template <typename Bytecode>
@@ -652,7 +655,7 @@ namespace JSC {
         void emitNewFuncExprCommon(const JSInstruction*);
         void emitVarInjectionCheck(bool needsVarInjectionChecks, GPRReg);
         void emitVarReadOnlyCheck(ResolveType, GPRReg scratchGPR);
-        void emitNotifyWriteWatchpoint(GPRReg pointerToSet);
+        void emitNotifyWriteWatchpoint(GPRReg pointerToSetAndScratch);
         void emitGetScope(VirtualRegister destination);
         void emitCheckTraps();
 

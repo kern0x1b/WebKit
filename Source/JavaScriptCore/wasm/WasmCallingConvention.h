@@ -156,7 +156,7 @@ private:
         Width width = widthForBytes(alignedSize);
 
         if (count < regArgs.size())
-            return marshallRegs(regArgs, count, valueSize, width);
+            return ArgumentLocation { ValueLocation { regArgs[count++] }, width };
 
         count++;
         ArgumentLocation result = { role == CallRole::Caller ? ValueLocation::stackArgument(stackOffset) : ValueLocation::stack(stackOffset), width };
@@ -168,7 +168,7 @@ private:
     {
         ASSERT(isValueType(valueType));
         unsigned valueSize = bytesForWidth(valueType.width());
-        switch (valueType.kind) {
+        switch (valueType.kind()) {
         case TypeKind::I32:
         case TypeKind::I64:
         case TypeKind::Funcref:
@@ -176,7 +176,7 @@ private:
         case TypeKind::Externref:
         case TypeKind::Ref:
         case TypeKind::RefNull:
-            return marshallLocationImpl(role, jsrArgs, gpArgumentCount, stackOffset, valueSize);
+            return marshallLocationImpl(role, gprArgs, gpArgumentCount, stackOffset, valueSize);
         case TypeKind::F32:
         case TypeKind::F64:
         case TypeKind::V128:
@@ -254,7 +254,7 @@ private:
     ArgumentLocation marshallLocation(CallRole role, Type valueType, size_t& gpArgumentCount, size_t& fpArgumentCount, size_t& stackOffset) const
     {
         ASSERT(isValueType(valueType));
-        switch (valueType.kind) {
+        switch (valueType.kind()) {
         case TypeKind::I32:
         case TypeKind::I64:
         case TypeKind::Funcref:
@@ -262,7 +262,7 @@ private:
         case TypeKind::Externref:
         case TypeKind::Ref:
         case TypeKind::RefNull:
-            return marshallLocationImpl(role, jsrArgs, gpArgumentCount, stackOffset);
+            return marshallLocationImpl(role, gprArgs, gpArgumentCount, stackOffset);
         case TypeKind::F32:
         case TypeKind::F64:
             return marshallLocationImpl(role, fprArgs, fpArgumentCount, stackOffset);

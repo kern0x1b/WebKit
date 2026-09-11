@@ -214,10 +214,7 @@ private:
     // "box" is arguably a bad name here. The meaning is that after
     // calling emitBox(), your ensure that subsequently calling
     // emitStore() will be able to store the value without additional
-    // transformation. In particular, this is a no-op for constants,
-    // and is a complete no-op on 32bits since any unboxed value can
-    // still be stored by storing the payload and a statically known
-    // tag.
+    // transformation. In particular, this is a no-op for constants.
     void emitBox(CachedRecovery&);
 
     bool canBox(CachedRecovery& cachedRecovery)
@@ -419,9 +416,7 @@ private:
     // (e.g. r11 on X86_64), as well as any register that we use for
     // addressing (see m_oldFrameBase and m_newFrameBase).
     //
-    // We also use this to lock registers temporarily, for instance to
-    // ensure that we have at least 2 available registers for loading
-    // a pair on 32bits.
+    // We also use this to lock registers temporarily.
     mutable ScalarRegisterSet m_lockedRegisters = { };
 
     // This stores the current recoveries present in registers. A null

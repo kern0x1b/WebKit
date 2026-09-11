@@ -456,23 +456,8 @@ JSC_DEFINE_NOEXCEPT_JIT_OPERATION(operationToInt32, UCPUStrictInt32, (double val
 
 JSC_DEFINE_NOEXCEPT_JIT_OPERATION(operationToInt32SensibleSlow, UCPUStrictInt32, (double number))
 {
-    return toUCPUStrictInt32(toIntImpl<int32_t, ToIntMode::Int32AfterSensibleConversionAttempt>(number));
+    return toUCPUStrictInt32(toInt32AfterFailedTruncation(number));
 }
-
-#if HAVE(ARM_IDIV_INSTRUCTIONS)
-static inline bool isStrictInt32(double value)
-{
-    int32_t valueAsInt32 = truncateDoubleToInt32(value);
-    if (value != valueAsInt32)
-        return false;
-
-    if (!valueAsInt32) {
-        if (std::signbit(value))
-            return false;
-    }
-    return true;
-}
-#endif
 
 extern "C" {
 

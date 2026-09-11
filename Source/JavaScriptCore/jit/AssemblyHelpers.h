@@ -140,7 +140,6 @@ public:
         else
             store64(src.gpr(), dst);
     }
-#endif
     
     void store32FromReg(Reg src, Address dst)
     {
@@ -175,7 +174,6 @@ public:
         else
             load64(src, dst.gpr());
     }
-#endif
     
     void load32ToReg(Address src, Reg dst)
     {
@@ -668,7 +666,7 @@ public:
     void emitPutCellToCallFrameHeader(GPRReg from, VirtualRegister entry)
     {
         ASSERT(entry.isHeader());
-        storeCell(from, Address(GPRInfo::callFrameRegister, entry.offset() * sizeof(Register)));
+        storeValue(from, Address(GPRInfo::callFrameRegister, entry.offset() * sizeof(Register)));
     }
 
     void emitZeroToCallFrameHeader(VirtualRegister entry)
@@ -1305,40 +1303,40 @@ public:
         return addressFor(operand.virtualRegister());
     }
 
-    static Address tagFor(VirtualRegister virtualRegister, GPRReg baseGPR)
+    static Address highWordFor(VirtualRegister virtualRegister, GPRReg baseGPR)
     {
         ASSERT(virtualRegister.isValid());
-        return Address(baseGPR, virtualRegister.offset() * sizeof(Register) + TagOffset);
+        return Address(baseGPR, virtualRegister.offset() * sizeof(Register) + HighWordOffset);
     }
 
-    static Address tagFor(VirtualRegister virtualRegister)
+    static Address highWordFor(VirtualRegister virtualRegister)
     {
         ASSERT(virtualRegister.isValid());
-        return Address(GPRInfo::callFrameRegister, virtualRegister.offset() * sizeof(Register) + TagOffset);
+        return Address(GPRInfo::callFrameRegister, virtualRegister.offset() * sizeof(Register) + HighWordOffset);
     }
 
-    static Address tagFor(Operand operand)
+    static Address highWordFor(Operand operand)
     {
         ASSERT(!operand.isTmp());
-        return tagFor(operand.virtualRegister());
+        return highWordFor(operand.virtualRegister());
     }
 
-    static Address payloadFor(VirtualRegister virtualRegister, GPRReg baseGPR)
+    static Address lowWordFor(VirtualRegister virtualRegister, GPRReg baseGPR)
     {
         ASSERT(virtualRegister.isValid());
-        return Address(baseGPR, virtualRegister.offset() * sizeof(Register) + PayloadOffset);
+        return Address(baseGPR, virtualRegister.offset() * sizeof(Register) + LowWordOffset);
     }
 
-    static Address payloadFor(VirtualRegister virtualRegister)
+    static Address lowWordFor(VirtualRegister virtualRegister)
     {
         ASSERT(virtualRegister.isValid());
-        return Address(GPRInfo::callFrameRegister, virtualRegister.offset() * sizeof(Register) + PayloadOffset);
+        return Address(GPRInfo::callFrameRegister, virtualRegister.offset() * sizeof(Register) + LowWordOffset);
     }
 
-    static Address payloadFor(Operand operand)
+    static Address lowWordFor(Operand operand)
     {
         ASSERT(!operand.isTmp());
-        return payloadFor(operand.virtualRegister());
+        return lowWordFor(operand.virtualRegister());
     }
 
     // Access to our fixed callee CallFrame.
@@ -1354,24 +1352,24 @@ public:
         return calleeFrameSlot(virtualRegisterForArgumentIncludingThis(argument));
     }
 
-    static Address calleeFrameTagSlot(VirtualRegister slot)
+    static Address calleeFrameHighWordSlot(VirtualRegister slot)
     {
-        return calleeFrameSlot(slot).withOffset(TagOffset);
+        return calleeFrameSlot(slot).withOffset(HighWordOffset);
     }
 
-    static Address calleeFramePayloadSlot(VirtualRegister slot)
+    static Address calleeFrameLowWordSlot(VirtualRegister slot)
     {
-        return calleeFrameSlot(slot).withOffset(PayloadOffset);
+        return calleeFrameSlot(slot).withOffset(LowWordOffset);
     }
 
-    static Address calleeArgumentTagSlot(int argument)
+    static Address calleeArgumentHighWordSlot(int argument)
     {
-        return calleeArgumentSlot(argument).withOffset(TagOffset);
+        return calleeArgumentSlot(argument).withOffset(HighWordOffset);
     }
 
-    static Address calleeArgumentPayloadSlot(int argument)
+    static Address calleeArgumentLowWordSlot(int argument)
     {
-        return calleeArgumentSlot(argument).withOffset(PayloadOffset);
+        return calleeArgumentSlot(argument).withOffset(LowWordOffset);
     }
 
     static Address calleeFrameCallerFrame()
@@ -1906,7 +1904,7 @@ public:
     {
         ASSERT(scratchGPR != resultGPR);
         Jump done;
-        // If vectorLength == 0 then clz will return 32 on both ARM and x86. On 64-bit systems, we can then do a 64-bit right shift on a 32-bit -1 to get a 0 mask for zero vectorLength. On 32-bit ARM, shift masks with 0xff, which means it will still create a 0 mask.
+        // If vectorLength == 0 then clz will return 32 on both ARM and x86. We can then do a 64-bit right shift on a 32-bit -1 to get a 0 mask for zero vectorLength.
         countLeadingZeros32(vectorLengthGPR, scratchGPR);
         move(TrustedImm32(-1), resultGPR);
         urshiftPtr(scratchGPR, resultGPR);
@@ -2015,20 +2013,20 @@ public:
         
         notCell.link(this);
 
-        Jump notNumber = branchIfNotNumber(regs, tempGPR);
+        Jump notNumber = branchIfNotNumber(valueGPR);
         functor(TypeofType::Number, false);
         notNumber.link(this);
         
-        JumpList notNull = branchIfNotEqual(regs, jsNull());
+        JumpList notNull = branchIfNotEqual(valueGPR, jsNull());
         functor(TypeofType::Object, false);
         notNull.link(this);
         
-        Jump notBoolean = branchIfNotBoolean(regs, tempGPR);
+        Jump notBoolean = branchIfNotBoolean(valueGPR, tempGPR);
         functor(TypeofType::Boolean, false);
         notBoolean.link(this);
 
 #if USE(BIGINT32)
-        Jump notBigInt32 = branchIfNotBigInt32(regs, tempGPR);
+        Jump notBigInt32 = branchIfNotBigInt32(valueGPR, tempGPR);
         functor(TypeofType::BigInt, false);
         notBigInt32.link(this);
 #endif

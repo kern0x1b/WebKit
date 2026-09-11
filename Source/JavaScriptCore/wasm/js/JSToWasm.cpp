@@ -144,7 +144,7 @@ static void marshallJSResult(CCallHelpers& jit, const RTT& signature, const Call
                     auto readLocation = CCallHelpers::Address(CCallHelpers::stackPointerRegister, loc.offsetFromSP() + stackResultReadOffset);
                     auto writeLocation = CCallHelpers::Address(CCallHelpers::stackPointerRegister, loc.offsetFromSP());
                     ValueLocation tmp;
-                    switch (type.kind) {
+                    switch (type.kind()) {
                     case TypeKind::F32:
                         tmp = ValueLocation { fprScratch };
                         jit.loadFloat(readLocation, fprScratch);
@@ -235,8 +235,6 @@ static void marshallJSResult(CCallHelpers& jit, const RTT& signature, const Call
         exceptionChecks.append(jit.branchTestPtr(CCallHelpers::NonZero, CCallHelpers::operationExceptionRegister<ResultType>()));
         if constexpr (!!maxFrameExtentForSlowPathCall)
             jit.addPtr(CCallHelpers::TrustedImm32(maxFrameExtentForSlowPathCall), CCallHelpers::stackPointerRegister);
-
-        jit.boxCell(GPRInfo::returnValueGPR, JSRInfo::returnValueJSR);
     }
 }
 
@@ -267,9 +265,6 @@ MacroAssemblerCodeRef<JITThunkPtrTag> createJSToWasmJITShared()
         jit.load32(CCallHelpers::Address(GPRInfo::regWS0, WebAssemblyFunction::offsetOfFrameSize()), GPRInfo::regWS1);
         jit.subPtr(CCallHelpers::stackPointerRegister, GPRInfo::regWS1, GPRInfo::regWS1);
 
-#if !CPU(ADDRESS64)
-        stackOverflow.append(jit.branchPtr(CCallHelpers::Above, GPRInfo::regWS1, GPRInfo::callFrameRegister));
-#endif
         stackOverflow.append(jit.branchPtr(CCallHelpers::LessThanOrEqual, GPRInfo::regWS1, CCallHelpers::Address(GPRInfo::wasmContextInstancePointer, JSWebAssemblyInstance::offsetOfSoftStackLimit())));
 
         jit.move(GPRInfo::regWS1, CCallHelpers::stackPointerRegister);
@@ -616,7 +611,7 @@ CodePtr<JSEntryPtrTag> RTT::jsToWasmICEntrypoint() const
     // https://bugs.webkit.org/show_bug.cgi?id=196564
     if (argumentCount() > 0) {
         slowPath.append(jit.branch32(CCallHelpers::Below,
-            CCallHelpers::payloadFor(CallFrameSlot::argumentCountIncludingThis), CCallHelpers::TrustedImm32(argumentCount() + 1)));
+            CCallHelpers::lowWordFor(CallFrameSlot::argumentCountIncludingThis), CCallHelpers::TrustedImm32(argumentCount() + 1)));
     }
 
     bool haveTagRegisters = false;

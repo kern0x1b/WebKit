@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2015-2019 Apple Inc. All rights reserved.
+ * Copyright (C) 2026 Igalia S.L.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -1476,17 +1477,16 @@ public:
         if (!isARM64() && !isX86_64())
             return false;
 
+        uint64_t u64 = static_cast<uint64_t>(value);
+
 #if CPU(ARM64)
         if (ARM64Assembler::canEncodeFPImm<64>(value))
             return true;
 
-        uint64_t u64 = static_cast<uint64_t>(value);
         if (ARM64FPImmediate::create64(u64).isValid())
             return true;
 
 #elif CPU(X86_64)
-        uint64_t u64 = static_cast<uint64_t>(value);
-
         if (u64 == 0xFFFFFFFFFFFFFFFFULL)
             return true;
 
@@ -1630,7 +1630,7 @@ public:
         case CallArg:
             return isValidAddrForm(opcode, offset(), width);
         case Index:
-            return isValidIndexForm(opcode, scale(), offset(), width);
+            return isValidIndexForm(scale(), offset(), width);
         case PreIndex:
         case PostIndex:
             return isValidIncrementIndexForm(offset());
@@ -1752,10 +1752,7 @@ public:
 
     MacroAssembler::TrustedImmPtr asTrustedImmPtr() const
     {
-        if (is64Bit())
-            ASSERT(isBigImm());
-        else
-            ASSERT(isImm());
+        ASSERT(isBigImm());
         return MacroAssembler::TrustedImmPtr(pointerValue());
     }
     

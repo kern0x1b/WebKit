@@ -85,6 +85,25 @@
 #include <wtf/Scope.h>
 #include <wtf/StdLibExtras.h>
 
+// On Windows, there's macros for these which interfere with the opcodes. The
+// undefs have to follow every #include: <windows.h> defines them, so anything
+// that pulls it in later would put them back.
+#pragma push_macro("RotateLeft32")
+#pragma push_macro("RotateLeft64")
+#pragma push_macro("RotateRight32")
+#pragma push_macro("RotateRight64")
+#pragma push_macro("StoreFence")
+#pragma push_macro("LoadFence")
+#pragma push_macro("MemoryFence")
+
+#undef RotateLeft32
+#undef RotateLeft64
+#undef RotateRight32
+#undef RotateRight64
+#undef StoreFence
+#undef LoadFence
+#undef MemoryFence
+
 #if !ASSERT_ENABLED
 IGNORE_RETURN_TYPE_WARNINGS_BEGIN
 #endif
@@ -560,7 +579,7 @@ private:
     }
 
     template<IsLegalOffset Int>
-    std::optional<unsigned> NODELETE scaleForShl(Air::Opcode opcode, Value* shl, Int offset, std::optional<Width> width = std::nullopt)
+    std::optional<unsigned> NODELETE scaleForShl(Value* shl, Int offset, std::optional<Width> width = std::nullopt)
     {
         if (shl->opcode() != Shl)
             return std::nullopt;
@@ -577,7 +596,7 @@ private:
         if (!isRepresentableAs<int32_t>(bigScale))
             return std::nullopt;
         unsigned scale = static_cast<int32_t>(bigScale);
-        if (!Arg::isValidIndexForm(opcode, scale, offset, width))
+        if (!Arg::isValidIndexForm(scale, offset, width))
             return std::nullopt;
         return scale;
     }
@@ -606,7 +625,7 @@ private:
             Value* right = address->child(1);
 
             auto tryIndex = [&] (Value* index, Value* base) -> Arg {
-                std::optional<unsigned> scale = scaleForShl(Air::Move, index, offset, width);
+                std::optional<unsigned> scale = scaleForShl(index, offset, width);
                 if (!scale)
                     return Arg();
                 if (m_locked.contains(index->child(0)) || m_locked.contains(base))
@@ -620,7 +639,7 @@ private:
                 return result;
 
             if (m_locked.contains(left) || m_locked.contains(right)
-                || !Arg::isValidIndexForm(Air::Move, 1, offset, width))
+                || !Arg::isValidIndexForm(1, offset, width))
                 return fallback();
 
             if (isMergeableValue(left, ZExt32) || isMergeableValue(left, SExt32))
@@ -635,7 +654,7 @@ private:
             // amount is greater than 1, then there isn't really anything smart that we could do here.
             // We avoid using baseless indexes because their encoding isn't particularly efficient.
             if (m_locked.contains(left) || !address->child(1)->isInt32(1)
-                || !Arg::isValidIndexForm(Air::Move, 1, offset, width))
+                || !Arg::isValidIndexForm(1, offset, width))
                 return fallback();
 
             return indexArg(tmp(left), left, 1, offset);
@@ -650,18 +669,18 @@ private:
         case WasmAddress: {
             WasmAddressValue* wasmAddress = address->as<WasmAddressValue>();
             Value* pointer = wasmAddress->child(0);
-            // Why don't we need to check m_locked here? WasmAddressValue is purely used for address computation,
+            // Why don't we need to check m_locked for the WasmAddressValue itself? It is purely used for address computation,
             // which is different from the other operations. And we already know that numUses(address) is below the threshold.
             // If we ensure that all use of WasmAddress gets indexArg form, we do not need to have WasmAddressValue's instruction actually.
-            if (!Arg::isValidIndexForm(Air::Move, 1, offset, width))
+            if (!Arg::isValidIndexForm(1, offset, width))
                 return fallback();
 
-            // FIXME: We should support ARM64 LDR 32-bit addressing, which will
-            // allow us to fuse a Shl ptr, 2 into the address. Additionally, and
-            // perhaps more importantly, it would allow us to avoid a truncating
-            // move. See: https://bugs.webkit.org/show_bug.cgi?id=163465
+            Tmp base = Tmp(wasmAddress->pinnedGPR());
+            std::optional<unsigned> scale = scaleForShl(pointer, offset, width);
+            if (scale && !m_locked.contains(pointer->child(0)))
+                return indexArg(base, pointer->child(0), *scale, offset);
 
-            return indexArg(Tmp(wasmAddress->pinnedGPR()), pointer, 1, offset);
+            return indexArg(base, pointer, 1, offset);
         }
 
         default:
@@ -1155,12 +1174,6 @@ private:
         append(opcode, tmp(right), result);
     }
 
-    template<Air::Opcode opcode32, Air::Opcode opcode64, Commutativity commutativity = NotCommutative>
-    void appendBinOp(Value* left, Value* right)
-    {
-        appendBinOp<opcode32, opcode64, Air::Oops, Air::Oops, commutativity>(left, right);
-    }
-
     template<Air::Opcode opcode32, Air::Opcode opcode64>
     void appendShift(Value* value, Value* amount)
     {
@@ -1328,7 +1341,6 @@ private:
             }
             break;
         case Width64:
-            RELEASE_ASSERT(is64Bit());
             switch (bank) {
             case GP:
                 return Move;
@@ -1337,7 +1349,7 @@ private:
             }
             break;
         case Width128:
-            RELEASE_ASSERT(is64Bit() && Options::useWasmSIMD());
+            RELEASE_ASSERT(Options::useWasmSIMD());
             RELEASE_ASSERT(bank == FP);
             return MoveVector;
         }
@@ -1680,35 +1692,9 @@ private:
         }
 
         Tmp maskTmp = m_code.newTmp(FP);
-
-        {
-            v128_t towerOfPower { };
-            switch (simdInfo.lane) {
-            case SIMDLane::i32x4:
-                for (unsigned i = 0; i < 4; ++i)
-                    towerOfPower.u32x4[i] = 1 << i;
-                break;
-            case SIMDLane::i16x8:
-                for (unsigned i = 0; i < 8; ++i)
-                    towerOfPower.u16x8[i] = 1 << i;
-                break;
-            case SIMDLane::i8x16:
-                for (unsigned i = 0; i < 8; ++i)
-                    towerOfPower.u8x16[i] = 1 << i;
-                for (unsigned i = 0; i < 8; ++i)
-                    towerOfPower.u8x16[i + 8] = 1 << i;
-                break;
-            default:
-                RELEASE_ASSERT_NOT_REACHED();
-            }
-
-            // FIXME: this is bad, we should load
-            auto gpTmp = m_code.newTmp(GP);
-            append(Air::Move, Arg::bigImm(towerOfPower.u64x2[0]), gpTmp);
-            append(Air::VectorSplatInt64, gpTmp, maskTmp);
-            append(Air::Move, Arg::bigImm(towerOfPower.u64x2[1]), gpTmp);
-            append(Air::VectorReplaceLaneInt64, Arg::imm(1), gpTmp, maskTmp);
-        }
+        auto gpTmp = m_code.newTmp(GP);
+        append(Air::Move, Arg::immPtr(vectorBitmaskTower(simdInfo.lane)), gpTmp);
+        append(Air::MoveVector, Arg::addr(gpTmp), maskTmp);
 
         Tmp vectorTmp = m_code.newTmp(FP);
 
@@ -1725,15 +1711,16 @@ private:
         append(Air::MoveFloatTo32, vectorTmp, dst);
     }
 
+    // Kept for debugging: emits a runtime print of the given values.
     template<typename... Arguments>
-    void print(Arguments&&... arguments)
+    [[maybe_unused]] void print(Arguments&&... arguments)
     {
         Value* origin = m_value;
         print(origin, std::forward<Arguments>(arguments)...);
     }
 
     template<typename... Arguments>
-    void print(Value* origin, Arguments&&... arguments)
+    [[maybe_unused]] void print(Value* origin, Arguments&&... arguments)
     {
         auto printList = Printer::makePrintRecordList(arguments...);
         auto printSpecial = static_cast<Air::PrintSpecial*>(m_code.addSpecial(makeUnique<Air::PrintSpecial>(printList)));
@@ -1851,6 +1838,11 @@ private:
                 break;
             }
             case ValueRep::LateRegister:
+                // A LateRegister input becomes an Arg::LateUse, whose live range covers both the
+                // early and the late point, so it interferes with either clobber set. Register
+                // becomes an early Arg::Use, which only reaches the early one.
+                stackmap->lateClobbered().remove(value.rep().reg());
+                [[fallthrough]];
             case ValueRep::Register: {
                 stackmap->earlyClobbered().remove(value.rep().reg());
                 Tmp dstTmp = Tmp(value.rep().reg());
@@ -3342,7 +3334,7 @@ private:
         }
         
         auto tryShl = [&] (Value* shl, Value* other) -> bool {
-            std::optional<unsigned> scale = scaleForShl(leaOpcode, shl, offset);
+            std::optional<unsigned> scale = scaleForShl(shl, offset);
             if (!scale)
                 return false;
             if (!canBeInternal(shl))
@@ -4113,6 +4105,35 @@ private:
             };
 
             if (tryAppendMultiplyWithExtend())
+                return;
+
+            auto tryAppendMultiplyNegOperand = [&] () -> bool {
+                // MNEG/FNMUL : d = (-n) * m or d = n * (-m).
+                Air::Opcode airOpcode = tryOpcodeForType(MultiplyNeg32, MultiplyNeg64, MultiplyNegDouble, MultiplyNegFloat, m_value->type());
+                if (!isValidForm(airOpcode, Arg::Tmp, Arg::Tmp, Arg::Tmp))
+                    return false;
+
+                Value* negated = nullptr;
+                Value* other = nullptr;
+                if (left->opcode() == Neg && canBeInternal(left)) {
+                    negated = left;
+                    other = right;
+                } else if (right->opcode() == Neg && canBeInternal(right)) {
+                    negated = right;
+                    other = left;
+                } else
+                    return false;
+
+                Value* negatedInput = negated->child(0);
+                if (m_locked.contains(negatedInput) || m_locked.contains(other))
+                    return false;
+
+                append(airOpcode, tmp(negatedInput), tmp(other), tmp(m_value));
+                commitInternal(negated);
+                return true;
+            };
+
+            if (tryAppendMultiplyNegOperand())
                 return;
 
             appendBinOp<Mul32, Mul64, MulDouble, MulFloat, Commutative>(left, right);

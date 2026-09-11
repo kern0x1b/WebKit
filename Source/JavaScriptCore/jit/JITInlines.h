@@ -42,7 +42,6 @@ ALWAYS_INLINE bool JIT::isOperandConstantDouble(VirtualRegister src)
         return false;
     return getConstantOperand(src).isDouble();
 }
-#endif
 
 ALWAYS_INLINE bool JIT::isOperandConstantInt(VirtualRegister src)
 {
@@ -90,7 +89,7 @@ ALWAYS_INLINE void JIT::emitLoadCharacterString(RegisterID src, RegisterID dst, 
 ALWAYS_INLINE void JIT::updateTopCallFrame()
 {
     uint32_t locationBits = CallSiteIndex(m_bytecodeIndex.offset()).bits();
-    store32(TrustedImm32(locationBits), tagFor(CallFrameSlot::argumentCountIncludingThis));
+    store32(TrustedImm32(locationBits), highWordFor(CallFrameSlot::argumentCountIncludingThis));
     prepareCallOperation(*m_vm);
 }
 
@@ -134,7 +133,7 @@ ALWAYS_INLINE MacroAssembler::Call JIT::appendCallSetJSValueResult(const CodePtr
 {
     updateTopCallFrame();
     MacroAssembler::Call call = appendCall(function);
-    emitPutVirtualRegister(dst, returnValueJSR);
+    emitPutVirtualRegister(dst, returnValueGPR);
     return call;
 }
 
@@ -143,14 +142,14 @@ ALWAYS_INLINE void JIT::appendCallSetJSValueResult(Address function, VirtualRegi
 {
     updateTopCallFrame();
     appendCall(function);
-    emitPutVirtualRegister(dst, returnValueJSR);
+    emitPutVirtualRegister(dst, returnValueGPR);
 }
 
 template<typename OperationType>
 ALWAYS_INLINE MacroAssembler::Call JIT::appendCallWithExceptionCheckSetJSValueResult(const CodePtr<CFunctionPtrTag> function, VirtualRegister dst)
 {
     MacroAssembler::Call call = appendCallWithExceptionCheck<OperationType>(function);
-    emitPutVirtualRegister(dst, returnValueJSR);
+    emitPutVirtualRegister(dst, returnValueGPR);
     return call;
 }
 
@@ -158,15 +157,15 @@ template<typename OperationType>
 ALWAYS_INLINE void JIT::appendCallWithExceptionCheckSetJSValueResult(Address function, VirtualRegister dst)
 {
     appendCallWithExceptionCheck<OperationType>(function);
-    emitPutVirtualRegister(dst, returnValueJSR);
+    emitPutVirtualRegister(dst, returnValueGPR);
 }
 
 template<typename OperationType, typename Bytecode>
 ALWAYS_INLINE MacroAssembler::Call JIT::appendCallWithExceptionCheckSetJSValueResultWithProfile(const Bytecode& bytecode, const CodePtr<CFunctionPtrTag> function, VirtualRegister dst)
 {
     MacroAssembler::Call call = appendCallWithExceptionCheck<OperationType>(function);
-    emitValueProfilingSite(bytecode, returnValueJSR);
-    emitPutVirtualRegister(dst, returnValueJSR);
+    emitValueProfilingSite(bytecode, returnValueGPR);
+    emitPutVirtualRegister(dst, returnValueGPR);
     return call;
 }
 
@@ -174,8 +173,8 @@ template<typename OperationType, typename Bytecode>
 ALWAYS_INLINE void JIT::appendCallWithExceptionCheckSetJSValueResultWithProfile(const Bytecode& bytecode, Address function, VirtualRegister dst)
 {
     appendCallWithExceptionCheck<OperationType>(function);
-    emitValueProfilingSite(bytecode, returnValueJSR);
-    emitPutVirtualRegister(dst, returnValueJSR);
+    emitValueProfilingSite(bytecode, returnValueGPR);
+    emitPutVirtualRegister(dst, returnValueGPR);
 }
 
 ALWAYS_INLINE void JIT::linkAllSlowCasesUpToBytecodeIndex(Vector<SlowCaseEntry>& slowCases, Vector<SlowCaseEntry>::iterator& iter, BytecodeIndex bytecodeIndex)
@@ -530,6 +529,12 @@ template <typename Bytecode>
 ALWAYS_INLINE void JIT::loadPtrFromMetadata(const Bytecode& bytecode, size_t offset, GPRReg result)
 {
     loadPtr(Address(GPRInfo::metadataTableRegister, m_profiledCodeBlock->metadataTable()->offsetInMetadataTable(bytecode) + offset), result);
+}
+
+template <typename Bytecode>
+ALWAYS_INLINE void JIT::loadPairPtrFromMetadata(const Bytecode& bytecode, size_t offset, GPRReg result1, GPRReg result2)
+{
+    loadPairPtr(Address(GPRInfo::metadataTableRegister, m_profiledCodeBlock->metadataTable()->offsetInMetadataTable(bytecode) + offset), result1, result2);
 }
 
 template <typename Bytecode>

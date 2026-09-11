@@ -111,7 +111,7 @@ void OSRExit::emitRestoreArguments(CCallHelpers& jit, VM& vm, const Operands<Val
 
         if (!inlineCallFrame || inlineCallFrame->isVarargs()) {
             jit.load32(
-                AssemblyHelpers::payloadFor(VirtualRegister(stackOffset + CallFrameSlot::argumentCountIncludingThis)),
+                AssemblyHelpers::lowWordFor(VirtualRegister(stackOffset + CallFrameSlot::argumentCountIncludingThis)),
                 GPRInfo::regT1);
         } else {
             jit.move(
@@ -135,7 +135,7 @@ void OSRExit::emitRestoreArguments(CCallHelpers& jit, VM& vm, const Operands<Val
             break;
         }
         jit.call(GPRInfo::nonArgGPR0, OperationPtrTag);
-        jit.storeCell(GPRInfo::returnValueGPR, AssemblyHelpers::addressFor(operand));
+        jit.storeValue(GPRInfo::returnValueGPR, AssemblyHelpers::addressFor(operand));
 
         alreadyAllocatedArguments.add(id, operand.virtualRegister());
     }
@@ -691,7 +691,6 @@ void OSRExit::compileExit(CCallHelpers& jit, VM& vm, const OSRExit& exit, const 
             jit.boxInt52(GPRInfo::regT0, GPRInfo::regT0, GPRInfo::regT1, FPRInfo::fpRegT0);
             jit.store64(GPRInfo::regT0, scratch + index);
             break;
-#endif
 
         default:
             break;
@@ -743,7 +742,7 @@ void OSRExit::compileExit(CCallHelpers& jit, VM& vm, const OSRExit& exit, const 
     jit.emitMaterializeTagCheckRegisters();
 
     if (exit.m_kind == WillThrowOutOfMemoryError) {
-        jit.store32(CCallHelpers::TrustedImm32(exit.m_exitCallSiteIndex.bits()), CCallHelpers::tagFor(CallFrameSlot::argumentCountIncludingThis));
+        jit.store32(CCallHelpers::TrustedImm32(exit.m_exitCallSiteIndex.bits()), CCallHelpers::highWordFor(CallFrameSlot::argumentCountIncludingThis));
         jit.setupArguments<decltype(operationThrowOutOfMemoryError)>(CCallHelpers::TrustedImmPtr(&vm));
         jit.prepareCallOperation(vm);
         jit.move(AssemblyHelpers::TrustedImmPtr(tagCFunction<OperationPtrTag>(operationThrowOutOfMemoryError)), GPRInfo::nonArgGPR0);
@@ -769,7 +768,6 @@ void OSRExit::compileExit(CCallHelpers& jit, VM& vm, const OSRExit& exit, const 
     jit.move(CCallHelpers::TrustedImmPtr(scratch), srcBufferGPR);
     jit.move(CCallHelpers::framePointerRegister, destBufferGPR);
     CCallHelpers::CopySpooler spooler(CCallHelpers::CopySpooler::BufferRegs::AllowModification, jit, srcBufferGPR, destBufferGPR, GPRInfo::regT0, GPRInfo::regT1);
-#endif
     for (size_t index = 0; index < operands.size(); ++index) {
         const ValueRecovery& recovery = operands[index];
         Operand operand = operands.operandForIndex(index);

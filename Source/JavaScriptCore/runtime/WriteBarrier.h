@@ -190,9 +190,6 @@ public:
         return std::bit_cast<JSValue*>(&m_value);
     }
     
-    int32_t* tagPointer() { return &std::bit_cast<EncodedValueDescriptor*>(&m_value)->asBits.tag; }
-    int32_t* payloadPointer() { return &std::bit_cast<EncodedValueDescriptor*>(&m_value)->asBits.payload; }
-    
     explicit operator bool() const { return !!get(); }
     bool operator!() const { return !get(); } 
     

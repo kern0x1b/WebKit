@@ -37,7 +37,7 @@
 #if ENABLE(JIT)
 
 namespace JSC {
-    class JSInterfaceJIT : public CCallHelpers, public GPRInfo, public JSRInfo, public FPRInfo {
+    class JSInterfaceJIT : public CCallHelpers, public GPRInfo, public FPRInfo {
         WTF_MAKE_TZONE_NON_HEAP_ALLOCATABLE(JSInterfaceJIT);
     public:
 
