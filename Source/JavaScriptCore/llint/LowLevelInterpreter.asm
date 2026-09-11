@@ -678,6 +678,9 @@ const FunctionCode = constexpr FunctionCode
 const ModuleCode = constexpr ModuleCode
 
 # The interpreter steals the tag word of the argument count.
+const TagOffset = constexpr TagOffset
+const PayloadOffset = constexpr PayloadOffset
+
 const CallSiteIndex = ArgumentCountIncludingThis + HighWordOffset
 
 # String flags.
