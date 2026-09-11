@@ -320,20 +320,20 @@ void JIT::emit_compareUnsigned(const JSInstruction* instruction, RelationalCondi
 void JIT::emit_compareUnsignedImpl(VirtualRegister dst, VirtualRegister op1, VirtualRegister op2, RelationalCondition condition)
 {
     if (isOperandConstantInt(op2)) {
-        emitGetVirtualRegister(op1, regT0);
+        emitGetVirtualRegisterPayload(op1, regT0);
         int32_t op2imm = getOperandConstantInt(op2);
         compare32(condition, regT0, Imm32(op2imm), regT0);
     } else if (isOperandConstantInt(op1)) {
-        emitGetVirtualRegister(op2, regT0);
+        emitGetVirtualRegisterPayload(op2, regT0);
         int32_t op1imm = getOperandConstantInt(op1);
         compare32(commute(condition), regT0, Imm32(op1imm), regT0);
     } else {
-        emitGetVirtualRegister(op1, regT0);
-        emitGetVirtualRegister(op2, regT1);
+        emitGetVirtualRegisterPayload(op1, regT0);
+        emitGetVirtualRegisterPayload(op2, regT1);
         compare32(condition, regT0, regT1, regT0);
     }
-    boxBoolean(regT0, regT0);
-    emitPutVirtualRegister(dst, regT0);
+    boxBoolean(regT0, jsRegT10);
+    emitPutVirtualRegister(dst, jsRegT10);
 }
 
 template<typename Op, typename SlowOperation>
@@ -344,13 +344,13 @@ void JIT::emit_compareSlow(const JSInstruction* instruction, DoubleCondition con
     VirtualRegister op1 = bytecode.m_lhs;
     VirtualRegister op2 = bytecode.m_rhs;
     auto handleReturnValueGPR = [&]() {
-        boxBoolean(returnValueGPR, regT0);
-        emitPutVirtualRegister(dst, regT0);
+        boxBoolean(returnValueGPR, jsRegT10);
+        emitPutVirtualRegister(dst, jsRegT10);
     };
     auto emitDoubleCompare = [&](FPRReg left, FPRReg right) {
         compareDouble(condition, left, right, regT0);
-        boxBoolean(regT0, regT0);
-        emitPutVirtualRegister(dst, regT0);
+        boxBoolean(regT0, jsRegT10);
+        emitPutVirtualRegister(dst, jsRegT10);
     };
     emit_compareSlowImpl(op1, op2, instruction->size(), operation, iter, handleReturnValueGPR, emitDoubleCompare);
 }
@@ -419,25 +419,25 @@ void JIT::emit_compareSlowImpl(VirtualRegister op1, VirtualRegister op2, size_t 
 
         fail1.link(this);
 
-        emitGetVirtualRegister(op, gpr1);
+        emitGetVirtualRegister(op, jsReg1);
         loadGlobalObject(regT4);
-        callOperation(operation, regT4, regT0, regT2);
+        callOperation(operation, regT4, jsRegT10, jsRegT32);
         handleReturnValueGPR();
         return true;
     };
 
-    if (handleConstantIntOperandSlow(op1, regT0, fpRegT0, regT2, fpRegT1))
+    if (handleConstantIntOperandSlow(op1, jsRegT10, fpRegT0, jsRegT32, fpRegT1))
         return;
-    if (handleConstantIntOperandSlow(op2, regT2, fpRegT1, regT0, fpRegT0))
+    if (handleConstantIntOperandSlow(op2, jsRegT32, fpRegT1, jsRegT10, fpRegT0))
         return;
 
     linkSlowCase(iter); // LHS is not Int.
 
-    Jump fail1 = branchIfNotNumber(regT0);
-    Jump fail2 = branchIfNotNumber(regT2);
-    Jump fail3 = branchIfInt32(regT2);
-    unboxDouble(regT0, fpRegT0);
-    unboxDouble(regT2, fpRegT1);
+    Jump fail1 = branchIfNotNumber(jsRegT10, regT4);
+    Jump fail2 = branchIfNotNumber(jsRegT32, regT4);
+    Jump fail3 = branchIfInt32(jsRegT32);
+    unboxDouble(jsRegT10, fpRegT0);
+    unboxDouble(jsRegT32, fpRegT1);
 
     emitDoubleCompare(fpRegT0, fpRegT1);
 
@@ -449,7 +449,7 @@ void JIT::emit_compareSlowImpl(VirtualRegister op1, VirtualRegister op2, size_t 
 
     linkSlowCase(iter); // RHS is not Int.
     loadGlobalObject(regT4);
-    callOperation(operation, regT4, regT0, regT2);
+    callOperation(operation, regT4, jsRegT10, jsRegT32);
     handleReturnValueGPR();
 }
 
@@ -510,8 +510,8 @@ void JIT::emit_op_mod(const JSInstruction* currentInstruction)
     Jump numeratorPositive = branch32(GreaterThanOrEqual, regT4, TrustedImm32(0));
     addSlowCase(branchTest32(Zero, edx));
     numeratorPositive.link(this);
-    boxInt32(edx, regT0);
-    emitPutVirtualRegister(result, regT0);
+    boxInt32(edx, jsRegT10);
+    emitPutVirtualRegister(result, jsRegT10);
 }
 
 void JIT::emitSlow_op_mod(const JSInstruction*, Vector<SlowCaseEntry>::iterator& iter)
@@ -551,16 +551,16 @@ void JIT::emit_op_mod(const JSInstruction* currentInstruction)
     // Make sure we're not accidentally producing a positive zero when it should be a negative zero.
     Jump numeratorPositive = branch32(GreaterThanOrEqual, dividendGPR, TrustedImm32(0));
     Jump nonZeroRemainder = branchTest32(NonZero, quotientThenRemainderGPR);
-    moveValue(jsDoubleNumber(-0.0), regT0);
+    moveValue(jsDoubleNumber(-0.0), jsRegT10);
     Jump done = jump();
 
     numeratorPositive.link(this);
     nonZeroRemainder.link(this);
 
-    boxInt32(quotientThenRemainderGPR, regT0);
+    boxInt32(quotientThenRemainderGPR, jsRegT10);
     done.link(this);
 
-    emitPutVirtualRegister(result, regT0);
+    emitPutVirtualRegister(result, jsRegT10);
 }
 
 void JIT::emitSlow_op_mod(const JSInstruction*, Vector<SlowCaseEntry>::iterator& iter)
@@ -855,7 +855,7 @@ void JIT::emitMathICFast(JITUnaryMathIC<Generator>* mathIC, const JSInstruction*
     });
 #endif
 
-    emitPutVirtualRegister(result, resultGPR);
+    emitPutVirtualRegister(result, resultRegs);
 }
 
 template <typename Op, typename Generator, typename ProfiledFunction, typename NonProfiledFunction>
@@ -922,7 +922,7 @@ void JIT::emitMathICFast(JITBinaryMathIC<Generator>* mathIC, const JSInstruction
     });
 #endif
 
-    emitPutVirtualRegister(result, resultGPR);
+    emitPutVirtualRegister(result, resultRegs);
 }
 
 template <typename Op, typename Generator, typename ProfiledRepatchFunction, typename ProfiledFunction, typename RepatchFunction>
@@ -960,7 +960,7 @@ void JIT::emitMathICSlow(JITUnaryMathIC<Generator>* mathIC, const JSInstruction*
     });
 #endif
 
-    emitPutVirtualRegister(result, resultGPR);
+    emitPutVirtualRegister(result, resultRegs);
 
     addLinkTask([=, this] (LinkBuffer& linkBuffer) {
         MathICGenerationState& mathICGenerationState = m_instructionToMathICGenerationState.find(currentInstruction)->value.get();
@@ -995,9 +995,9 @@ void JIT::emitMathICSlow(JITBinaryMathIC<Generator>* mathIC, const JSInstruction
     ASSERT(!(Generator::isLeftOperandValidConstant(leftOperand) && Generator::isRightOperandValidConstant(rightOperand)));
 
     if (Generator::isLeftOperandValidConstant(leftOperand))
-        emitGetVirtualRegister(op1, leftGPR);
+        emitGetVirtualRegister(op1, leftRegs);
     else if (Generator::isRightOperandValidConstant(rightOperand))
-        emitGetVirtualRegister(op2, rightGPR);
+        emitGetVirtualRegister(op2, rightRegs);
 
 #if ENABLE(MATH_IC_STATS)
     auto slowPathStart = label();
@@ -1021,7 +1021,7 @@ void JIT::emitMathICSlow(JITBinaryMathIC<Generator>* mathIC, const JSInstruction
     });
 #endif
 
-    emitPutVirtualRegister(result, resultGPR);
+    emitPutVirtualRegister(result, resultRegs);
 
     addLinkTask([=, this] (LinkBuffer& linkBuffer) {
         MathICGenerationState& mathICGenerationState = m_instructionToMathICGenerationState.find(currentInstruction)->value.get();

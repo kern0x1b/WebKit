@@ -48,9 +48,10 @@
 #endif
 #include <wtf/ASCIICType.h>
 #include <wtf/BitVector.h>
-#include <wtf/HexNumber.h>
 #include <wtf/ListDump.h>
 #include <wtf/MathExtras.h>
+#include <wtf/MonotonicTime.h>
+#include <wtf/SetForScope.h>
 #include <wtf/TZoneMallocInlines.h>
 #include <wtf/text/CString.h>
 #include <wtf/text/MakeString.h>
@@ -2413,7 +2414,7 @@ class YarrGenerator final : public YarrJITInfo {
             wordcharCharacterClass = m_pattern.wordcharCharacterClass();
 
         matchCharacterClass(character, scratch, matchDest, wordcharCharacterClass);
-        if (canBeAtStartOfInput(op))
+        if (!term->inputPosition)
             atBegin.link(&m_jit);
 
         // We fall through to here if the last character was not a wordchar.
@@ -2667,8 +2668,8 @@ class YarrGenerator final : public YarrJITInfo {
 
             MacroAssembler::Label outerLoop(&m_jit);
 
-            // PatternIndex and patternTemp should contain the pattern start and end index at this point.
-            computeBackReferenceSizeAndFirstPatternIndex(patternIndex, patternTemp);
+            // PatternTemp should contain pattern end index at this point. Compute pattern size.
+            m_jit.sub32(patternIndex, patternTemp);
             storeToFrame(patternTemp, parenthesesFrameLocation + BackTrackInfoBackReference::backReferenceSizeIndex());
 
             matches.append(checkNotEnoughInput(patternTemp));
@@ -2740,7 +2741,7 @@ class YarrGenerator final : public YarrJITInfo {
             // zero-width progress guard sees the current position even
             // when checkNotEnoughInput bails out early.
             storeToFrame(m_regs.index, parenthesesFrameLocation + BackTrackInfoBackReference::beginIndex());
-            computeBackReferenceSizeAndFirstPatternIndex(patternIndex, patternTemp);
+            m_jit.sub32(patternIndex, patternTemp);
             matches.append(checkNotEnoughInput(patternTemp));
 
             matchBackreference(opIndex, incompleteMatches, characterOrTemp, patternIndex, patternTemp, subpatternIdReg == m_regs.unicodeAndSubpatternIdTemp ? subpatternIdReg : InvalidGPRReg);
@@ -3374,7 +3375,7 @@ class YarrGenerator final : public YarrJITInfo {
             m_jit.lshift32(MacroAssembler::TrustedImm32(1), countRegister);
         }
 
-        rewindIndex(countRegister);
+        m_jit.sub32(countRegister, m_regs.index);
         m_backtrackingState.fallthrough();
     }
 
@@ -3630,7 +3631,7 @@ class YarrGenerator final : public YarrJITInfo {
             loadFromFrame(term->frameLocation + BackTrackInfoCharacterClass::matchAmountIndex(), countRegister);
             if (m_decodeSurrogatePairs && term->characterClass->hasNonBMPCharacters())
                 m_jit.lshift32(MacroAssembler::TrustedImm32(1), countRegister); // 2 code units per match.
-            rewindIndex(countRegister);
+            m_jit.sub32(countRegister, m_regs.index);
             m_backtrackingState.fallthrough();
             return;
         }
@@ -4821,7 +4822,6 @@ class YarrGenerator final : public YarrJITInfo {
                 m_disassembler->setForBacktrack(opIndex, m_jit.label());
 
             YarrOp& op = m_ops[opIndex];
-            m_direction = op.m_direction;
             switch (op.m_op) {
 
             case YarrOpCode::Term:
@@ -5135,7 +5135,7 @@ class YarrGenerator final : public YarrJITInfo {
                     if (!m_backtrackingState.isEmpty()) {
                         // Handle the cases where we need to link the backtracks here.
                         m_backtrackingState.link(*this, op);
-                        rewindIndex(MacroAssembler::Imm32(op.m_checkAdjust));
+                        m_jit.sub32(MacroAssembler::Imm32(op.m_checkAdjust), m_regs.index);
                         if (!isLastAlternative) {
                             // An alternative that is not the last should jump to its successor.
                             m_jit.jump(nextOp.m_reentry);
@@ -6109,10 +6109,7 @@ class YarrGenerator final : public YarrJITInfo {
         switch (term.type) {
         case PatternTerm::Type::AssertionBOL:
         case PatternTerm::Type::AssertionEOL:
-        case PatternTerm::Type::AssertionBOI:
-        case PatternTerm::Type::AssertionEOI:
         case PatternTerm::Type::AssertionWordBoundary:
-        case PatternTerm::Type::ParentheticalAssertion:
             // Conservatively say any assertions just match.
             return cursor;
 
@@ -6341,7 +6338,7 @@ class YarrGenerator final : public YarrJITInfo {
         ASSERT(span.size());
         m_jit.move(MacroAssembler::TrustedImmPtr(span.data()), m_regs.regT1);
         auto loopHead = m_jit.label();
-        readCharacterRaw(checkedOffset - endIndex + 1, m_regs.regT0);
+        readCharacter(checkedOffset - endIndex + 1, m_regs.regT0);
 #if CPU(ARM64) || CPU(RISCV64)
         static_assert(sizeof(BoyerMooreBitmap::Map::WordType) == sizeof(uint64_t));
         static_assert(1 << 6 == 64);
@@ -7782,8 +7779,6 @@ private:
     MacroAssembler::JumpList m_hitMatchLimit;
     MacroAssembler::JumpList m_inlinedMatched;
     MacroAssembler::JumpList m_inlinedFailedMatch;
-
-    MatchDirection m_direction { Forward };
 
     // The regular expression expressed as a linear sequence of operations.
     Vector<YarrOp, 128> m_ops;

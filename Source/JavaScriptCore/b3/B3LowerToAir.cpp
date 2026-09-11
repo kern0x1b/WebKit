@@ -85,25 +85,6 @@
 #include <wtf/Scope.h>
 #include <wtf/StdLibExtras.h>
 
-// On Windows, there's macros for these which interfere with the opcodes. The
-// undefs have to follow every #include: <windows.h> defines them, so anything
-// that pulls it in later would put them back.
-#pragma push_macro("RotateLeft32")
-#pragma push_macro("RotateLeft64")
-#pragma push_macro("RotateRight32")
-#pragma push_macro("RotateRight64")
-#pragma push_macro("StoreFence")
-#pragma push_macro("LoadFence")
-#pragma push_macro("MemoryFence")
-
-#undef RotateLeft32
-#undef RotateLeft64
-#undef RotateRight32
-#undef RotateRight64
-#undef StoreFence
-#undef LoadFence
-#undef MemoryFence
-
 #if !ASSERT_ENABLED
 IGNORE_RETURN_TYPE_WARNINGS_BEGIN
 #endif
@@ -654,7 +635,7 @@ private:
             // amount is greater than 1, then there isn't really anything smart that we could do here.
             // We avoid using baseless indexes because their encoding isn't particularly efficient.
             if (m_locked.contains(left) || !address->child(1)->isInt32(1)
-                || !Arg::isValidIndexForm(1, offset, width))
+                || !Arg::isValidIndexForm(Air::Move, 1, offset, width))
                 return fallback();
 
             return indexArg(tmp(left), left, 1, offset);

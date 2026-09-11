@@ -837,7 +837,7 @@ private:
                     ASSERT(elementType.is<Wasm::Type>());
                     auto unpacked = elementType.unpacked();
                     Type b3Type;
-                    switch (unpacked.kind()) {
+                    switch (unpacked.kind) {
                     case Wasm::TypeKind::I32:
                         b3Type = Int32;
                         break;

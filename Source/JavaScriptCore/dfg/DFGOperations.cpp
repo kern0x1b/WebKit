@@ -4050,8 +4050,11 @@ JSC_DEFINE_JIT_OPERATION(operationStringIndexOfWithIndex, UCPUStrictInt32, (JSGl
 
     auto scope = DECLARE_THROW_SCOPE(vm);
 
+    auto otherView = argument->view(globalObject);
+    OPERATION_RETURN_IF_EXCEPTION(scope, 0);
+
     int32_t length = base->length();
-    unsigned argumentLength = argument->length();
+    unsigned argumentLength = otherView->length();
     unsigned pos = 0;
     if (position >= 0)
         pos = std::min<uint32_t>(position, length);
@@ -4145,13 +4148,13 @@ JSC_DEFINE_JIT_OPERATION(operationStringLastIndexOf, UCPUStrictInt32, (JSGlobalO
 
     auto scope = DECLARE_THROW_SCOPE(vm);
 
-    unsigned length = base->length();
-    unsigned argumentLength = argument->length();
-    if (length < argumentLength)
-        OPERATION_RETURN(scope, toUCPUStrictInt32(-1));
-
     auto otherView = argument->view(globalObject);
     OPERATION_RETURN_IF_EXCEPTION(scope, 0);
+
+    unsigned length = base->length();
+    unsigned argumentLength = otherView->length();
+    if (length < argumentLength)
+        OPERATION_RETURN(scope, toUCPUStrictInt32(-1));
 
     unsigned startPosition = length - argumentLength;
 
@@ -4195,8 +4198,11 @@ JSC_DEFINE_JIT_OPERATION(operationStringLastIndexOfWithIndex, UCPUStrictInt32, (
 
     auto scope = DECLARE_THROW_SCOPE(vm);
 
+    auto otherView = argument->view(globalObject);
+    OPERATION_RETURN_IF_EXCEPTION(scope, 0);
+
     unsigned length = base->length();
-    unsigned argumentLength = argument->length();
+    unsigned argumentLength = otherView->length();
     if (length < argumentLength)
         OPERATION_RETURN(scope, toUCPUStrictInt32(-1));
 
@@ -4456,9 +4462,9 @@ JSC_DEFINE_JIT_OPERATION(operationStringMatchRegExp, EncodedJSValue, (JSGlobalOb
             throwTypeError(globalObject, scope, "@@match method is not callable"_s);
             OPERATION_RETURN(scope, encodedJSValue());
         }
-        auto args = WTF::toArray<EncodedJSValue>({
+        std::array<EncodedJSValue, 1> args { {
             JSValue::encode(thisString),
-        });
+        } };
         JSValue result = call(globalObject, matcher, callData, regexp, ArgList { args.data(), args.size() });
         OPERATION_RETURN_IF_EXCEPTION(scope, encodedJSValue());
         OPERATION_RETURN(scope, JSValue::encode(result));
@@ -4494,9 +4500,9 @@ JSC_DEFINE_JIT_OPERATION(operationStringSearchRegExp, EncodedJSValue, (JSGlobalO
             throwTypeError(globalObject, scope, "@@search method is not callable"_s);
             OPERATION_RETURN(scope, encodedJSValue());
         }
-        auto args = WTF::toArray<EncodedJSValue>({
+        std::array<EncodedJSValue, 1> args { {
             JSValue::encode(thisString),
-        });
+        } };
         JSValue result = call(globalObject, searcher, callData, regexp, ArgList { args.data(), args.size() });
         OPERATION_RETURN_IF_EXCEPTION(scope, encodedJSValue());
         OPERATION_RETURN(scope, JSValue::encode(result));

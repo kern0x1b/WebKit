@@ -2900,9 +2900,7 @@ JSBigInt::ImplResult JSBigInt::subImpl(JSGlobalObject* globalObject, BigIntImpl1
     // x - y == -(y - x)
     // (-x) - (-y) == y - x == -(x - y)
     ComparisonResult comparisonResult = absoluteCompare(x, y);
-    if (comparisonResult == ComparisonResult::Equal)
-        return zeroImpl(globalObject->vm());
-    if (comparisonResult == ComparisonResult::GreaterThan)
+    if (comparisonResult == ComparisonResult::GreaterThan || comparisonResult == ComparisonResult::Equal)
         return absoluteSub(globalObject, x, y, xSign);
 
     return absoluteSub(globalObject, y, x, !xSign);
@@ -3800,7 +3798,7 @@ std::span<JSBigInt::Digit> JSBigInt::absoluteXor(std::span<const Digit> x, std::
 
 std::span<JSBigInt::Digit> JSBigInt::absoluteAddOne(std::span<const Digit> x, std::span<Digit> result)
 {
-    RELEASE_ASSERT(result.size() > x.size());
+    ASSERT(result.size() >= addOneLength(x));
     Digit carry = 1;
     size_t i = 0;
     for (; i < x.size(); i++) {

@@ -221,7 +221,7 @@ AccessGenerationResult PropertyInlineCache::addAccessCase(const GCSafeConcurrent
                 return result;
 
             if (!result.buffered()) {
-                repatchingIC.clearBufferedStructures();
+                clearBufferedStructures();
                 return result;
             }
 

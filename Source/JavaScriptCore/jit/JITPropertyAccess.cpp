@@ -189,21 +189,21 @@ void JIT::emit_op_check_private_brand(const JSInstruction* currentInstruction)
     VirtualRegister base = bytecode.m_base;
     VirtualRegister brand = bytecode.m_brand;
 
-    using BaselineJITRegisters::PrivateBrand::baseGPR;
-    using BaselineJITRegisters::PrivateBrand::propertyGPR;
+    using BaselineJITRegisters::PrivateBrand::baseJSR;
+    using BaselineJITRegisters::PrivateBrand::propertyJSR;
     using BaselineJITRegisters::PrivateBrand::propertyCacheGPR;
 
-    emitGetVirtualRegister(base, baseGPR);
-    emitGetVirtualRegister(brand, propertyGPR);
+    emitGetVirtualRegister(base, baseJSR);
+    emitGetVirtualRegister(brand, propertyJSR);
 
     auto [ propertyCache, propertyCacheIndex ] = addUnlinkedPropertyInlineCache();
     loadPropertyInlineCache(propertyCacheIndex, propertyCacheGPR);
 
-    emitJumpSlowCaseIfNotJSCell(baseGPR, base);
+    emitJumpSlowCaseIfNotJSCell(baseJSR, base);
 
     JITPrivateBrandAccessGenerator gen(
         nullptr, propertyCache, JITType::BaselineJIT, CodeOrigin(m_bytecodeIndex), CallSiteIndex(m_bytecodeIndex), AccessType::CheckPrivateBrand, RegisterSet::stubUnavailableRegisters(),
-        baseGPR, propertyGPR, propertyCacheGPR);
+        baseJSR, propertyJSR, propertyCacheGPR);
 
     gen.generateDataICFastPath(*this);
     addSlowCase();
@@ -353,9 +353,9 @@ void JIT::emit_op_put_getter_by_id(const JSInstruction* currentInstruction)
 void JIT::emit_op_put_setter_by_id(const JSInstruction* currentInstruction)
 {
     auto bytecode = currentInstruction->as<OpPutSetterById>();
-    emitGetVirtualRegister(bytecode.m_base, regT0);
+    emitGetVirtualRegisterPayload(bytecode.m_base, regT0);
     int32_t options = bytecode.m_attributes;
-    emitGetVirtualRegister(bytecode.m_accessor, regT1);
+    emitGetVirtualRegisterPayload(bytecode.m_accessor, regT1);
     loadGlobalObject(regT2);
     callOperation(operationPutSetterById, regT2, regT0, TrustedImmPtr(m_unlinkedCodeBlock->identifier(bytecode.m_property).impl()), options, regT1);
 }
@@ -582,8 +582,8 @@ void JIT::emit_op_get_by_id(const JSInstruction* currentInstruction)
     m_getByIds.append(gen);
 
     setFastPathResumePoint();
-    emitValueProfilingSite(bytecode, resultGPR);
-    emitPutVirtualRegister(resultVReg, resultGPR);
+    emitValueProfilingSite(bytecode, resultJSR);
+    emitPutVirtualRegister(resultVReg, resultJSR);
 }
 
 void JIT::emit_op_get_length(const JSInstruction* currentInstruction)
@@ -618,8 +618,8 @@ void JIT::emit_op_get_length(const JSInstruction* currentInstruction)
     m_getByIds.append(gen);
 
     setFastPathResumePoint();
-    emitValueProfilingSite(bytecode, resultGPR);
-    emitPutVirtualRegister(resultVReg, resultGPR);
+    emitValueProfilingSite(bytecode, resultJSR);
+    emitPutVirtualRegister(resultVReg, resultJSR);
 }
 
 void JIT::emitSlow_op_get_by_id(const JSInstruction*, Vector<SlowCaseEntry>::iterator& iter)
@@ -672,8 +672,8 @@ void JIT::emit_op_get_by_id_with_this(const JSInstruction* currentInstruction)
     m_getByIdsWithThis.append(gen);
 
     setFastPathResumePoint();
-    emitValueProfilingSite(bytecode, resultGPR);
-    emitPutVirtualRegister(resultVReg, resultGPR);
+    emitValueProfilingSite(bytecode, resultJSR);
+    emitPutVirtualRegister(resultVReg, resultJSR);
 }
 
 void JIT::emitSlow_op_get_by_id_with_this(const JSInstruction*, Vector<SlowCaseEntry>::iterator& iter)
@@ -764,7 +764,7 @@ void JIT::emit_op_in_by_id(const JSInstruction* currentInstruction)
 
     resetSP(); // We might OSR exit here, so we need to conservatively reset SP
     setFastPathResumePoint();
-    emitPutVirtualRegister(resultVReg, resultGPR);
+    emitPutVirtualRegister(resultVReg, resultJSR);
 }
 
 void JIT::emitSlow_op_in_by_id(const JSInstruction*, Vector<SlowCaseEntry>::iterator& iter)
@@ -810,7 +810,7 @@ void JIT::emit_op_in_by_val(const JSInstruction* currentInstruction)
 
     resetSP(); // We might OSR exit here, so we need to conservatively reset SP
     setFastPathResumePoint();
-    emitPutVirtualRegister(dst, resultGPR);
+    emitPutVirtualRegister(dst, resultJSR);
 }
 
 void JIT::emitSlow_op_in_by_val(const JSInstruction*, Vector<SlowCaseEntry>::iterator& iter)
@@ -846,7 +846,7 @@ void JIT::emitHasPrivate(VirtualRegister dst, VirtualRegister base, VirtualRegis
 
     resetSP(); // We might OSR exit here, so we need to conservatively reset SP
     setFastPathResumePoint();
-    emitPutVirtualRegister(dst, resultGPR);
+    emitPutVirtualRegister(dst, resultJSR);
 }
 
 void JIT::emitHasPrivateSlow(AccessType type, Vector<SlowCaseEntry>::iterator& iter)
@@ -966,7 +966,7 @@ void JIT::emit_op_resolve_scope(const JSInstruction* currentInstruction)
             else
                 code = vm().getCTIStub(generateOpResolveScopeThunk<GlobalVar>);
 
-            emitGetVirtualRegister(scope, scopeGPR);
+            emitGetVirtualRegisterPayload(scope, scopeGPR);
             move(TrustedImm32(bytecodeOffset), bytecodeOffsetGPR);
             nearCallThunk(CodeLocationLabel { code.retaggedCode<NoPtrTag>() });
             break;
@@ -1016,7 +1016,7 @@ void JIT::emitSlow_op_resolve_scope(const JSInstruction* currentInstruction, Vec
     else
         code = vm().getCTIStub(generateOpResolveScopeThunk<GlobalVar>);
 
-    emitGetVirtualRegister(scope, scopeGPR);
+    emitGetVirtualRegisterPayload(scope, scopeGPR);
     move(TrustedImm32(bytecodeOffset), bytecodeOffsetGPR);
     nearCallThunk(CodeLocationLabel { code.retaggedCode<NoPtrTag>() });
 }
@@ -1175,7 +1175,7 @@ MacroAssemblerCodeRef<JITThunkPtrTag> JIT::slow_op_resolve_scopeGenerator(VM& vm
     jit.emitCTIThunkPrologue(/* returnAddressAlreadyTagged: */ true); // Return address tagged in 'generateOpResolveScopeThunk'
 
     // Call slow operation
-    jit.store32(bytecodeOffsetGPR, highWordFor(CallFrameSlot::argumentCountIncludingThis));
+    jit.store32(bytecodeOffsetGPR, tagFor(CallFrameSlot::argumentCountIncludingThis));
     jit.prepareCallOperation(vm);
     jit.loadPtr(addressFor(CallFrameSlot::codeBlock), scratch1GPR);
     jit.loadPtr(Address(scratch1GPR, CodeBlock::offsetOfGlobalObject()), globalObjectGPR);
@@ -1281,7 +1281,7 @@ void JIT::emit_op_get_from_scope(const JSInstruction* currentInstruction)
             else
                 code = vm().getCTIStub(generateOpGetFromScopeThunk<GlobalVar>);
 
-            emitGetVirtualRegister(scope, scopeGPR);
+            emitGetVirtualRegisterPayload(scope, scopeGPR);
             move(TrustedImm32(bytecodeOffset), bytecodeOffsetGPR);
             nearCallThunk(CodeLocationLabel { code.retaggedCode<NoPtrTag>() });
             break;
@@ -1331,7 +1331,7 @@ void JIT::emitSlow_op_get_from_scope(const JSInstruction* currentInstruction, Ve
     else
         code = vm().getCTIStub(generateOpGetFromScopeThunk<GlobalVar>);
 
-    emitGetVirtualRegister(scope, scopeGPR);
+    emitGetVirtualRegisterPayload(scope, scopeGPR);
     addPtr(TrustedImm32(metadataOffset), GPRInfo::metadataTableRegister, metadataGPR);
     move(TrustedImm32(bytecodeOffset), bytecodeOffsetGPR);
     nearCallThunk(CodeLocationLabel { code.retaggedCode<NoPtrTag>() });
@@ -1485,7 +1485,7 @@ MacroAssemblerCodeRef<JITThunkPtrTag> JIT::slow_op_get_from_scopeGenerator(VM& v
 
     jit.emitCTIThunkPrologue(/* returnAddressAlreadyTagged: */ true); // Return address tagged in 'generateOpGetFromScopeThunk'
 
-    jit.store32(bytecodeOffsetGPR, highWordFor(CallFrameSlot::argumentCountIncludingThis));
+    jit.store32(bytecodeOffsetGPR, tagFor(CallFrameSlot::argumentCountIncludingThis));
     jit.prepareCallOperation(vm);
     jit.loadPtr(addressFor(CallFrameSlot::codeBlock), instructionGPR);
     jit.loadPtr(Address(instructionGPR, CodeBlock::offsetOfGlobalObject()), globalObjectGPR);
@@ -1571,22 +1571,23 @@ void JIT::emit_op_put_to_scope(const JSInstruction* currentInstruction)
         case GlobalVarWithVarInjectionChecks:
         case GlobalLexicalVar:
         case GlobalLexicalVarWithVarInjectionChecks: {
-            static_assert(noOverlap(regT0, regT2, regT3));
+            static_assert(noOverlap(jsRegT10, regT2, regT3));
             emitVarInjectionCheck(needsVarInjectionChecks(resolveType), regT2);
             emitVarReadOnlyCheck(resolveType, regT2);
 
-            loadPairPtr(watchpointSetAddress, regT3, regT2);
+            loadPtr(operandAddress, regT2);
 
             if (!isInitialization(bytecode.m_getPutInfo.initializationMode()) && (resolveType == GlobalLexicalVar || resolveType == GlobalLexicalVarWithVarInjectionChecks)) {
                 // We need to do a TDZ check here because we can't always prove we need to emit TDZ checks statically.
-                loadValue(Address(regT2), regT0);
-                addSlowCase(branchIfEmpty(regT0));
+                loadValue(Address(regT2), jsRegT10);
+                addSlowCase(branchIfEmpty(jsRegT10));
             }
 
+            loadPtr(watchpointSetAddress, regT3);
             emitNotifyWriteWatchpoint(regT3);
 
-            emitGetVirtualRegister(value, regT0);
-            storeValue(regT0, Address(regT2));
+            emitGetVirtualRegister(value, jsRegT10);
+            storeValue(jsRegT10, Address(regT2));
 
             emitWriteBarrier(scope, value, ShouldFilterValue);
             break;
@@ -1594,14 +1595,15 @@ void JIT::emit_op_put_to_scope(const JSInstruction* currentInstruction)
         case ResolvedClosureVar:
         case ClosureVar:
         case ClosureVarWithVarInjectionChecks:
-            static_assert(noOverlap(regT0, regT2, regT3));
+            static_assert(noOverlap(jsRegT10, regT2, regT3));
             emitVarInjectionCheck(needsVarInjectionChecks(resolveType), regT3);
 
-            loadPairPtr(watchpointSetAddress, regT3, regT2);
+            loadPtr(watchpointSetAddress, regT3);
+            loadPtr(operandAddress, regT2);
             emitNotifyWriteWatchpoint(regT3);
-            emitGetVirtualRegister(value, regT0);
-            emitGetVirtualRegister(scope, regT3);
-            storeValue(regT0, BaseIndex(regT3, regT2, TimesEight, JSLexicalEnvironment::offsetOfVariables()));
+            emitGetVirtualRegister(value, jsRegT10);
+            emitGetVirtualRegisterPayload(scope, regT3);
+            storeValue(jsRegT10, BaseIndex(regT3, regT2, TimesEight, JSLexicalEnvironment::offsetOfVariables()));
 
             emitWriteBarrier(scope, value, ShouldFilterValue);
             break;
@@ -1705,7 +1707,7 @@ MacroAssemblerCodeRef<JITThunkPtrTag> JIT::slow_op_put_to_scopeGenerator(VM& vm)
     jit.emitCTIThunkPrologue();
 
     // Call slow operation
-    jit.store32(bytecodeOffsetGPR, highWordFor(CallFrameSlot::argumentCountIncludingThis));
+    jit.store32(bytecodeOffsetGPR, tagFor(CallFrameSlot::argumentCountIncludingThis));
     jit.prepareCallOperation(vm);
     jit.loadPtr(addressFor(CallFrameSlot::codeBlock), codeBlockGPR);
     jit.loadPtr(Address(codeBlockGPR, CodeBlock::offsetOfGlobalObject()), globalObjectGPR);
@@ -1730,10 +1732,10 @@ void JIT::emit_op_get_from_arguments(const JSInstruction* currentInstruction)
     VirtualRegister arguments = bytecode.m_arguments;
     int index = bytecode.m_index;
 
-    emitGetVirtualRegister(arguments, regT0);
-    loadValue(Address(regT0, DirectArguments::storageOffset() + index * sizeof(WriteBarrier<Unknown>)), regT0);
-    emitValueProfilingSite(bytecode, regT0);
-    emitPutVirtualRegister(dst, regT0);
+    emitGetVirtualRegisterPayload(arguments, regT0);
+    loadValue(Address(regT0, DirectArguments::storageOffset() + index * sizeof(WriteBarrier<Unknown>)), jsRegT10);
+    emitValueProfilingSite(bytecode, jsRegT10);
+    emitPutVirtualRegister(dst, jsRegT10);
 }
 
 void JIT::emit_op_put_to_arguments(const JSInstruction* currentInstruction)
@@ -1743,10 +1745,10 @@ void JIT::emit_op_put_to_arguments(const JSInstruction* currentInstruction)
     int index = bytecode.m_index;
     VirtualRegister value = bytecode.m_value;
 
-    static_assert(noOverlap(regT2, regT0));
-    emitGetVirtualRegister(arguments, regT2);
-    emitGetVirtualRegister(value, regT0);
-    storeValue(regT0, Address(regT2, DirectArguments::storageOffset() + index * sizeof(WriteBarrier<Unknown>)));
+    static_assert(noOverlap(regT2, jsRegT10));
+    emitGetVirtualRegisterPayload(arguments, regT2);
+    emitGetVirtualRegister(value, jsRegT10);
+    storeValue(jsRegT10, Address(regT2, DirectArguments::storageOffset() + index * sizeof(WriteBarrier<Unknown>)));
 
     emitWriteBarrier(arguments, value, ShouldFilterValue);
 }
@@ -1758,11 +1760,11 @@ void JIT::emit_op_get_internal_field(const JSInstruction* currentInstruction)
     VirtualRegister base = bytecode.m_base;
     unsigned index = bytecode.m_index;
 
-    emitGetVirtualRegister(base, regT0);
-    loadValue(Address(regT0, JSInternalFieldObjectImpl<>::offsetOfInternalField(index)), regT0);
+    emitGetVirtualRegisterPayload(base, regT0);
+    loadValue(Address(regT0, JSInternalFieldObjectImpl<>::offsetOfInternalField(index)), jsRegT10);
 
-    emitValueProfilingSite(bytecode, regT0);
-    emitPutVirtualRegister(dst, regT0);
+    emitValueProfilingSite(bytecode, jsRegT10);
+    emitPutVirtualRegister(dst, jsRegT10);
 }
 
 void JIT::emit_op_put_internal_field(const JSInstruction* currentInstruction)
@@ -1821,8 +1823,8 @@ void JIT::emit_op_get_by_val_with_this(const JSInstruction* currentInstruction)
 
     resetSP(); // We might OSR exit here, so we need to conservatively reset SP
     setFastPathResumePoint();
-    emitValueProfilingSite(bytecode, resultGPR);
-    emitPutVirtualRegister(dst, resultGPR);
+    emitValueProfilingSite(bytecode, resultJSR);
+    emitPutVirtualRegister(dst, resultJSR);
 }
 
 void JIT::emitSlow_op_get_by_val_with_this(const JSInstruction*, Vector<SlowCaseEntry>::iterator& iter)
@@ -2061,8 +2063,8 @@ void JIT::emit_op_enumerator_get_by_val(const JSInstruction* currentInstruction)
     doneCases.link(this);
 
     setFastPathResumePoint();
-    emitValueProfilingSite(bytecode, returnValueGPR);
-    emitPutVirtualRegister(dst, returnValueGPR);
+    emitValueProfilingSite(bytecode, returnValueJSR);
+    emitPutVirtualRegister(dst, returnValueJSR);
 }
 
 void JIT::emitSlow_op_enumerator_get_by_val(const JSInstruction* currentInstruction, Vector<SlowCaseEntry>::iterator& iter)

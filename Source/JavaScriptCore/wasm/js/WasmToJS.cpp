@@ -442,7 +442,7 @@ std::expected<MacroAssemblerCodeRef<WasmEntryPtrTag>, BindingFailure> wasmToJS(c
         default:  {
             if (Wasm::isRefType(returnType)) {
                 if (!returnType.isNullable()) {
-                    auto isNotNull = jit.branchIfNotNull(GPRInfo::returnValueGPR);
+                    auto isNotNull = jit.branchIfNotNull(JSRInfo::returnValueJSR);
                     jit.move(GPRInfo::wasmContextInstancePointer, GPRInfo::argumentGPR0);
                     emitThrowWasmToJSException(jit, GPRInfo::argumentGPR0, ExceptionType::TypeErrorUnexpectedNullReference);
                     isNotNull.link(&jit);
@@ -484,10 +484,10 @@ std::expected<MacroAssemblerCodeRef<WasmEntryPtrTag>, BindingFailure> wasmToJS(c
         jit.move(CCallHelpers::stackPointerRegister, savedResultsGPR);
         if constexpr (!!maxFrameExtentForSlowPathCall)
             jit.subPtr(CCallHelpers::TrustedImm32(maxFrameExtentForSlowPathCall), CCallHelpers::stackPointerRegister);
-        static_assert(noOverlap(savedResultsGPR, GPRInfo::returnValueGPR));
+        static_assert(noOverlap(savedResultsGPR, JSRInfo::returnValueJSR));
         static_assert(GPRInfo::wasmContextInstancePointer != savedResultsGPR);
         jit.prepareWasmCallOperation(GPRInfo::wasmContextInstancePointer);
-        jit.setupArguments<decltype(operationIterateResults)>(GPRInfo::wasmContextInstancePointer, CCallHelpers::TrustedImmPtr(&signature), GPRInfo::returnValueGPR, savedResultsGPR, CCallHelpers::framePointerRegister);
+        jit.setupArguments<decltype(operationIterateResults)>(GPRInfo::wasmContextInstancePointer, CCallHelpers::TrustedImmPtr(&signature), JSRInfo::returnValueJSR, savedResultsGPR, CCallHelpers::framePointerRegister);
         jit.callOperation<OperationPtrTag>(operationIterateResults);
         if constexpr (!!maxFrameExtentForSlowPathCall)
             jit.addPtr(CCallHelpers::TrustedImm32(maxFrameExtentForSlowPathCall), CCallHelpers::stackPointerRegister);

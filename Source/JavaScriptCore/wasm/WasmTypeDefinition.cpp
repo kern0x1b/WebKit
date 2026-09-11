@@ -1058,9 +1058,8 @@ bool Type::definitelyIsWasmGCObjectOrNull() const
     if (!isRefType(*this))
         return false;
 
-    TypeIndex typeIndex = index();
-    if (isAbstractTypeIndex(typeIndex)) {
-        switch (typeIndexAsTypeKind(typeIndex)) {
+    if (typeIndexIsType(index)) {
+        switch (static_cast<TypeKind>(index)) {
         case TypeKind::Arrayref:
         case TypeKind::Structref:
             return true;

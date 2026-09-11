@@ -488,14 +488,14 @@ private:
             if (node->child1()->shouldSpeculateInt32OrBoolean() && node->canSpeculateInt32(FixupPass)) {
                 node->setOp(ArithNegate);
                 fixIntOrBooleanEdge(node->child1());
-                if (bytecodeCanTruncateInteger(node->arithNodeFlags())) {
+                if (bytecodeCanTruncateInteger(node->arithNodeFlags()))
                     node->setArithMode(Arith::Unchecked);
-                    node->clearFlags(NodeMustGenerate);
-                } else if (bytecodeCanIgnoreNegativeZero(node->arithNodeFlags()))
+                else if (bytecodeCanIgnoreNegativeZero(node->arithNodeFlags()))
                     node->setArithMode(Arith::CheckOverflow);
                 else
                     node->setArithMode(Arith::CheckOverflowAndNegativeZero);
                 node->setResult(NodeResultInt32);
+                node->clearFlags(NodeMustGenerate);
                 break;
             }
             
@@ -641,14 +641,14 @@ private:
         case ArithNegate: {
             if (node->child1()->shouldSpeculateInt32OrBoolean() && node->canSpeculateInt32(FixupPass)) {
                 fixIntOrBooleanEdge(node->child1());
-                if (bytecodeCanTruncateInteger(node->arithNodeFlags())) {
+                if (bytecodeCanTruncateInteger(node->arithNodeFlags()))
                     node->setArithMode(Arith::Unchecked);
-                    node->clearFlags(NodeMustGenerate);
-                } else if (bytecodeCanIgnoreNegativeZero(node->arithNodeFlags()))
+                else if (bytecodeCanIgnoreNegativeZero(node->arithNodeFlags()))
                     node->setArithMode(Arith::CheckOverflow);
                 else
                     node->setArithMode(Arith::CheckOverflowAndNegativeZero);
                 node->setResult(NodeResultInt32);
+                node->clearFlags(NodeMustGenerate);
                 break;
             }
             if (m_graph.unaryArithShouldSpeculateInt52(node, FixupPass)) {
@@ -847,11 +847,11 @@ private:
             if (node->child1()->shouldSpeculateInt32OrBoolean()
                 && node->canSpeculateInt32(FixupPass)) {
                 fixIntOrBooleanEdge(node->child1());
-                if (bytecodeCanTruncateInteger(node->arithNodeFlags())) {
+                if (bytecodeCanTruncateInteger(node->arithNodeFlags()))
                     node->setArithMode(Arith::Unchecked);
-                    node->clearFlags(NodeMustGenerate);
-                } else
+                else
                     node->setArithMode(Arith::CheckOverflow);
+                node->clearFlags(NodeMustGenerate);
                 node->setResult(NodeResultInt32);
                 break;
             }
@@ -1562,29 +1562,32 @@ private:
                     }
 
                     // Right now, we only support the pattern MultiPutByVal(Object, Int32, Int32)
-                    if (node->op() == PutByVal && child2->shouldSpeculateInt32() && child3->shouldSpeculateInt32()) {
-                        ArrayModes arrayModes = 0;
-                        {
-                            CodeBlock* profiledBlock = m_graph.baselineCodeBlockFor(node->origin.semantic);
-                            if (ArrayProfile* arrayProfile = profiledBlock->getArrayProfile(node->origin.semantic.bytecodeIndex()))
-                                arrayModes = arrayProfile->observedArrayModes();
-                        }
-                        if (auto result = refineArrayModesForMultiPutByVal(node, arrayModes)) {
-                            if (m_graph.hasExitSite(node->origin.semantic, OutOfBounds)) {
-                                auto old = node->arrayMode();
-                                old.setSpeculation(Array::OutOfBounds);
-                                node->setArrayMode(old);
+                    if (is64Bit()) {
+                        if (node->op() == PutByVal && child2->shouldSpeculateInt32() && child3->shouldSpeculateInt32()) {
+                            ArrayModes arrayModes = 0;
+                            {
+                                CodeBlock* profiledBlock = m_graph.baselineCodeBlockFor(node->origin.semantic);
+                                ConcurrentJSLocker locker(profiledBlock->m_lock);
+                                if (ArrayProfile* arrayProfile = profiledBlock->getArrayProfile(locker, node->origin.semantic.bytecodeIndex()))
+                                    arrayModes = arrayProfile->observedArrayModes(locker);
                             }
-                            auto arrayMode = node->arrayMode().modeForPut();
-                            fixEdge<CellUse>(m_graph.child(node, 0));
-                            fixEdge<Int32Use>(m_graph.child(node, 1));
-                            fixEdge<Int32Use>(m_graph.child(node, 2));
-                            auto* data = m_graph.m_multiPutByValData.add(MultiPutByValData {
-                                result.value(),
-                                arrayMode,
-                            });
-                            node->convertToMultiPutByVal(data);
-                            break;
+                            if (auto result = refineArrayModesForMultiPutByVal(node, arrayModes)) {
+                                if (m_graph.hasExitSite(node->origin.semantic, OutOfBounds)) {
+                                    auto old = node->arrayMode();
+                                    old.setSpeculation(Array::OutOfBounds);
+                                    node->setArrayMode(old);
+                                }
+                                auto arrayMode = node->arrayMode().modeForPut();
+                                fixEdge<CellUse>(m_graph.child(node, 0));
+                                fixEdge<Int32Use>(m_graph.child(node, 1));
+                                fixEdge<Int32Use>(m_graph.child(node, 2));
+                                auto* data = m_graph.m_multiPutByValData.add(MultiPutByValData {
+                                    result.value(),
+                                    arrayMode,
+                                });
+                                node->convertToMultiPutByVal(data);
+                                break;
+                            }
                         }
                     }
 

@@ -235,6 +235,8 @@ static void marshallJSResult(CCallHelpers& jit, const RTT& signature, const Call
         exceptionChecks.append(jit.branchTestPtr(CCallHelpers::NonZero, CCallHelpers::operationExceptionRegister<ResultType>()));
         if constexpr (!!maxFrameExtentForSlowPathCall)
             jit.addPtr(CCallHelpers::TrustedImm32(maxFrameExtentForSlowPathCall), CCallHelpers::stackPointerRegister);
+
+        jit.boxCell(GPRInfo::returnValueGPR, JSRInfo::returnValueJSR);
     }
 }
 
@@ -614,7 +616,7 @@ CodePtr<JSEntryPtrTag> RTT::jsToWasmICEntrypoint() const
     // https://bugs.webkit.org/show_bug.cgi?id=196564
     if (argumentCount() > 0) {
         slowPath.append(jit.branch32(CCallHelpers::Below,
-            CCallHelpers::lowWordFor(CallFrameSlot::argumentCountIncludingThis), CCallHelpers::TrustedImm32(argumentCount() + 1)));
+            CCallHelpers::payloadFor(CallFrameSlot::argumentCountIncludingThis), CCallHelpers::TrustedImm32(argumentCount() + 1)));
     }
 
     bool haveTagRegisters = false;

@@ -34,7 +34,7 @@
 #include "CCallHelpers.h"  // ios6/armv7: emitDataICCheckStructure/Uid below name
                            // CCallHelpers::Jump and ::JumpList, needing the definition.
 #include "MacroAssembler.h"
-#include "PropertyInlineCache.h"
+#include "PropertyInlineCacheClearingWatchpoint.h"
 #include "ScratchRegisterAllocator.h"
 #include <wtf/Vector.h>
 

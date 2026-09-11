@@ -10651,7 +10651,7 @@ void ByteCodeParser::parseBlock(unsigned limit)
             ResolveType resolveType;
             GetPutInfo getPutInfo(0);
             Structure* structure = nullptr;
-            InlineWatchpointSet* watchpoints = nullptr;
+            WatchpointSet* watchpoints = nullptr;
             uintptr_t operand;
             {
                 ConcurrentJSLocker locker(m_inlineStackTop->m_profiledBlock->m_lock);

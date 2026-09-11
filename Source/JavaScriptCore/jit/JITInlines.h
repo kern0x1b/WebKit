@@ -90,7 +90,7 @@ ALWAYS_INLINE void JIT::emitLoadCharacterString(RegisterID src, RegisterID dst, 
 ALWAYS_INLINE void JIT::updateTopCallFrame()
 {
     uint32_t locationBits = CallSiteIndex(m_bytecodeIndex.offset()).bits();
-    store32(TrustedImm32(locationBits), highWordFor(CallFrameSlot::argumentCountIncludingThis));
+    store32(TrustedImm32(locationBits), tagFor(CallFrameSlot::argumentCountIncludingThis));
     prepareCallOperation(*m_vm);
 }
 
@@ -143,14 +143,14 @@ ALWAYS_INLINE void JIT::appendCallSetJSValueResult(Address function, VirtualRegi
 {
     updateTopCallFrame();
     appendCall(function);
-    emitPutVirtualRegister(dst, returnValueGPR);
+    emitPutVirtualRegister(dst, returnValueJSR);
 }
 
 template<typename OperationType>
 ALWAYS_INLINE MacroAssembler::Call JIT::appendCallWithExceptionCheckSetJSValueResult(const CodePtr<CFunctionPtrTag> function, VirtualRegister dst)
 {
     MacroAssembler::Call call = appendCallWithExceptionCheck<OperationType>(function);
-    emitPutVirtualRegister(dst, returnValueGPR);
+    emitPutVirtualRegister(dst, returnValueJSR);
     return call;
 }
 
@@ -174,8 +174,8 @@ template<typename OperationType, typename Bytecode>
 ALWAYS_INLINE void JIT::appendCallWithExceptionCheckSetJSValueResultWithProfile(const Bytecode& bytecode, Address function, VirtualRegister dst)
 {
     appendCallWithExceptionCheck<OperationType>(function);
-    emitValueProfilingSite(bytecode, returnValueGPR);
-    emitPutVirtualRegister(dst, returnValueGPR);
+    emitValueProfilingSite(bytecode, returnValueJSR);
+    emitPutVirtualRegister(dst, returnValueJSR);
 }
 
 ALWAYS_INLINE void JIT::linkAllSlowCasesUpToBytecodeIndex(Vector<SlowCaseEntry>& slowCases, Vector<SlowCaseEntry>::iterator& iter, BytecodeIndex bytecodeIndex)

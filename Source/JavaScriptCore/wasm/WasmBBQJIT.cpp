@@ -1298,8 +1298,9 @@ Address BBQJIT::materializePointer(Location pointerLocation, uint64_t uoffset, W
 
 [[nodiscard]] PartialResult BBQJIT::atomicCompareExchange(ExtAtomicOpType op, Type valueType, ExpressionType pointer, ExpressionType expected, ExpressionType value, ExpressionType& result, uint64_t uoffset, uint8_t memoryIndex)
 {
-    const bool overflow = m_info.memory(memoryIndex).doesAccessOverflow(uoffset, sizeOfAtomicOpMemoryAccess(op));
-
+    const bool overflow = m_info.memory(memoryIndex).isMemory64()
+        ? sumOverflows<uint64_t>(uoffset, sizeOfAtomicOpMemoryAccess(op))
+        : sumOverflows<uint32_t>(uoffset, sizeOfAtomicOpMemoryAccess(op));
     Location valueLocation = locationOf(value);
     if (overflow) [[unlikely]] {
         // FIXME: Even though this is provably out of bounds, it's not a validation error, so we have to handle it
@@ -1345,8 +1346,6 @@ Address BBQJIT::materializePointer(Location pointerLocation, uint64_t uoffset, W
 
 [[nodiscard]] PartialResult BBQJIT::atomicNotify(ExtAtomicOpType op, ExpressionType pointer, ExpressionType count, ExpressionType& result, uint64_t uoffset, uint8_t memoryIndex)
 {
-    emitZeroExtendAddressOperand(m_info.memory(memoryIndex).isMemory64(), pointer);
-
     Vector<Value, 8> arguments = {
         instanceValue(),
         pointer,
@@ -1530,7 +1529,7 @@ FloatingPointRange BBQJIT::lookupTruncationRange(TruncationKind truncationKind)
 
         consume(operand);
 
-        result = topValue(returnType.kind());
+        result = topValue(returnType.kind);
         Location resultLocation = allocate(result);
 
         LOG_INSTRUCTION("TruncSaturated", operand, operandLocation, RESULT(result));
@@ -1588,7 +1587,7 @@ FloatingPointRange BBQJIT::lookupTruncationRange(TruncationKind truncationKind)
 
     consume(operand); // Allow temp operand location to be reused
 
-    result = topValue(returnType.kind());
+    result = topValue(returnType.kind);
     Location resultLocation = allocate(result);
 
     LOG_INSTRUCTION("TruncSaturated", operand, operandLocation, RESULT(result));
@@ -3987,7 +3986,7 @@ void BBQJIT::emitLoopTierUpCheckAndOSREntryData(const ControlData& data, std::sp
 
     ++m_callSiteIndex;
     if (m_profiledCallee.hasExceptionHandlers()) {
-        m_jit.store32(CCallHelpers::TrustedImm32(m_callSiteIndex), CCallHelpers::highWordFor(CallFrameSlot::argumentCountIncludingThis));
+        m_jit.store32(CCallHelpers::TrustedImm32(m_callSiteIndex), CCallHelpers::tagFor(CallFrameSlot::argumentCountIncludingThis));
         flushRegisters();
     }
     m_jit.move(GPRInfo::wasmContextInstancePointer, GPRInfo::argumentGPR0);
@@ -4000,7 +3999,7 @@ void BBQJIT::prepareForExceptions()
 {
     ++m_callSiteIndex;
     if (m_profiledCallee.hasExceptionHandlers()) {
-        m_jit.store32(CCallHelpers::TrustedImm32(m_callSiteIndex), CCallHelpers::highWordFor(CallFrameSlot::argumentCountIncludingThis));
+        m_jit.store32(CCallHelpers::TrustedImm32(m_callSiteIndex), CCallHelpers::tagFor(CallFrameSlot::argumentCountIncludingThis));
         flushRegistersForException();
     }
 }
@@ -4854,7 +4853,7 @@ void BBQJIT::emitIndirectTailCall(const char* opcode, const Value& callee, GPRRe
         case ValueLocation::Kind::GPRRegister:
         case ValueLocation::Kind::FPRRegister: {
             auto type = signature.argumentType(i);
-            parameterLocations.append(Location::fromArgumentLocation(param, type.kind()));
+            parameterLocations.append(Location::fromArgumentLocation(param, type.kind));
             break;
         }
         case ValueLocation::Kind::StackArgument:
@@ -5100,7 +5099,10 @@ ALWAYS_INLINE void BBQJIT::willParseOpcode()
 
 ALWAYS_INLINE void BBQJIT::willParseExtendedOpcode()
 {
-    recordOpcodeOrigin();
+    auto origin = this->origin();
+    m_pcToCodeOriginMapBuilder.appendItem(m_jit.label(), CodeOrigin(BytecodeIndex(origin.m_opcodeOrigin.location())));
+    if (m_disassembler) [[unlikely]]
+        m_disassembler->setOpcode(m_jit.label(), origin.m_opcodeOrigin);
 
     m_gprAllocator.assertAllValidRegistersAreUnlocked();
     m_fprAllocator.assertAllValidRegistersAreUnlocked();

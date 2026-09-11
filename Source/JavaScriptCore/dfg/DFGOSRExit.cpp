@@ -111,7 +111,7 @@ void OSRExit::emitRestoreArguments(CCallHelpers& jit, VM& vm, const Operands<Val
 
         if (!inlineCallFrame || inlineCallFrame->isVarargs()) {
             jit.load32(
-                AssemblyHelpers::lowWordFor(VirtualRegister(stackOffset + CallFrameSlot::argumentCountIncludingThis)),
+                AssemblyHelpers::payloadFor(VirtualRegister(stackOffset + CallFrameSlot::argumentCountIncludingThis)),
                 GPRInfo::regT1);
         } else {
             jit.move(
@@ -743,7 +743,7 @@ void OSRExit::compileExit(CCallHelpers& jit, VM& vm, const OSRExit& exit, const 
     jit.emitMaterializeTagCheckRegisters();
 
     if (exit.m_kind == WillThrowOutOfMemoryError) {
-        jit.store32(CCallHelpers::TrustedImm32(exit.m_exitCallSiteIndex.bits()), CCallHelpers::highWordFor(CallFrameSlot::argumentCountIncludingThis));
+        jit.store32(CCallHelpers::TrustedImm32(exit.m_exitCallSiteIndex.bits()), CCallHelpers::tagFor(CallFrameSlot::argumentCountIncludingThis));
         jit.setupArguments<decltype(operationThrowOutOfMemoryError)>(CCallHelpers::TrustedImmPtr(&vm));
         jit.prepareCallOperation(vm);
         jit.move(AssemblyHelpers::TrustedImmPtr(tagCFunction<OperationPtrTag>(operationThrowOutOfMemoryError)), GPRInfo::nonArgGPR0);

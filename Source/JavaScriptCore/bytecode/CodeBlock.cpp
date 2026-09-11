@@ -666,7 +666,7 @@ bool CodeBlock::finishCreation(VM& vm, ScriptExecutable* ownerExecutable, Unlink
                     // these captured variables as non-constant, matching ClosureVar semantics.
                     if (metadata.m_watchpointSet
                         && ownerExecutable->isFunctionExecutable()
-                        && isGeneratorOrAsyncFunctionBodyParseMode(uncheckedDowncast<FunctionExecutable>(ownerExecutable)->parseMode())) {
+                        && isGeneratorOrAsyncFunctionBodyParseMode(downcast<FunctionExecutable>(ownerExecutable)->parseMode())) {
                         metadata.m_watchpointSet->invalidate(vm, PutToScopeFireDetail(this, ident));
                     }
                 } else

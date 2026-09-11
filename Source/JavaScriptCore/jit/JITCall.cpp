@@ -593,8 +593,9 @@ void JIT::emitSlow_op_iterator_next(const JSInstruction*, Vector<SlowCaseEntry>:
         linkAllSlowCases(iter);
         JITGetByIdGenerator& gen = m_getByIds[m_getByIdIndex++];
         gen.generateDataICSlowPath(*this);
+        gen.reportBaselineDataICSlowPathBegin(label());
         nearCallThunk(CodeLocationLabel { InlineCacheCompiler::generateSlowPathCode(vm(), gen.accessType()).retaggedCode<NoPtrTag>() });
-        static_assert(BaselineJITRegisters::GetById::resultGPR == returnValueGPR);
+        static_assert(BaselineJITRegisters::GetById::resultJSR == returnValueJSR);
     }
 }
 
@@ -711,7 +712,7 @@ void JIT::emit_op_instanceof(const JSInstruction* instruction)
             nullptr, propertyCache, JITType::BaselineJIT, CodeOrigin(m_bytecodeIndex),
             CallSiteIndex(BytecodeIndex(m_bytecodeIndex.offset())), RegisterSet::stubUnavailableRegisters(),
             CacheableIdentifier::createFromImmortalIdentifier(vm().propertyNames->prototype.impl()),
-            GetById::baseGPR, GetById::resultGPR, GetById::propertyCacheGPR, AccessType::GetById, CacheType::GetByIdSelf);
+            GetById::baseJSR, GetById::resultJSR, GetById::propertyCacheGPR, AccessType::GetById, CacheType::GetByIdSelf);
 
         gen.generateDataICFastPath(*this);
         resetSP(); // We might OSR exit here, so we need to conservatively reset SP
@@ -802,8 +803,9 @@ void JIT::emitSlow_op_instanceof(const JSInstruction* instruction, Vector<SlowCa
     {
         JITGetByIdGenerator& gen = m_getByIds[m_getByIdIndex++];
         gen.generateDataICSlowPath(*this);
+        gen.reportBaselineDataICSlowPathBegin(label());
         nearCallThunk(CodeLocationLabel { InlineCacheCompiler::generateSlowPathCode(vm(), gen.accessType()).retaggedCode<NoPtrTag>() });
-        static_assert(GetById::resultGPR == returnValueGPR);
+        static_assert(GetById::resultJSR == returnValueJSR);
         emitJumpSlowToHotForCheckpoint(jump());
     }
 

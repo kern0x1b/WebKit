@@ -1730,7 +1730,7 @@ static MacroAssemblerCodeRef<JITThunkPtrTag> delByIdSlowPathCodeGenerator(VM& vm
     // Call slow operation
     InlineCacheCompiler::emitDataICPrepareForCall(jit);
     jit.prepareCallOperation(vm);
-    jit.setupArguments<SlowOperation>(baseGPR, propertyCacheGPR);
+    jit.setupArguments<SlowOperation>(baseJSR, propertyCacheGPR);
     static_assert(preferredArgumentGPR<SlowOperation, 1>() == propertyCacheGPR, "Needed for branch to slow operation via PropertyCache");
     jit.call(CCallHelpers::Address(propertyCacheGPR, HandlerPropertyInlineCache::offsetOfSlowOperation()), OperationPtrTag);
     InlineCacheCompiler::emitDataICRestoreAfterCall(jit);
@@ -1761,7 +1761,7 @@ static MacroAssemblerCodeRef<JITThunkPtrTag> delByValSlowPathCodeGenerator(VM& v
     // Call slow operation
     InlineCacheCompiler::emitDataICPrepareForCall(jit);
     jit.prepareCallOperation(vm);
-    jit.setupArguments<SlowOperation>(baseGPR, propertyGPR, propertyCacheGPR);
+    jit.setupArguments<SlowOperation>(baseJSR, propertyJSR, propertyCacheGPR);
     static_assert(preferredArgumentGPR<SlowOperation, 2>() == propertyCacheGPR, "Needed for branch to slow operation via PropertyCache");
     jit.call(CCallHelpers::Address(propertyCacheGPR, HandlerPropertyInlineCache::offsetOfSlowOperation()), OperationPtrTag);
     InlineCacheCompiler::emitDataICRestoreAfterCall(jit);
@@ -2304,7 +2304,7 @@ void InlineCacheCompiler::generateWithGuard(unsigned index, AccessCase& accessCa
         }
 
         if (forInBy(accessCase.m_type))
-            jit.moveTrustedValue(jsBoolean(true), valueGPR);
+            jit.moveTrustedValue(jsBoolean(true), valueRegs);
         else {
 #if USE(LARGE_TYPED_ARRAYS)
             jit.load64(CCallHelpers::Address(baseGPR, JSArrayBufferView::offsetOfLength()), scratchGPR);
@@ -2412,7 +2412,7 @@ void InlineCacheCompiler::generateWithGuard(unsigned index, AccessCase& accessCa
         failAndIgnore.append(jit.branch32(CCallHelpers::AboveOrEqual, propertyGPR, scratchGPR));
 
         if (forInBy(accessCase.m_type))
-            jit.moveTrustedValue(jsBoolean(true), valueGPR);
+            jit.moveTrustedValue(jsBoolean(true), valueRegs);
         else {
             jit.load32(CCallHelpers::Address(scratch2GPR, StringImpl::flagsOffset()), scratchGPR);
             jit.loadPtr(CCallHelpers::Address(scratch2GPR, StringImpl::dataOffset()), scratch2GPR);
@@ -2751,8 +2751,8 @@ void InlineCacheCompiler::generateWithGuard(unsigned index, AccessCase& accessCa
         } else {
             isOutOfBounds.link(&jit);
             failAndIgnore.append(jit.branch32(CCallHelpers::AboveOrEqual, propertyGPR, CCallHelpers::Address(scratchGPR, Butterfly::offsetOfVectorLength())));
-            if (m_propertyCache.arrayProfileGPR() != InvalidGPRReg)
-                jit.or32(CCallHelpers::TrustedImm32(static_cast<uint32_t>(ArrayProfileFlag::MayStoreHole)), CCallHelpers::Address(m_propertyCache.arrayProfileGPR(), ArrayProfile::offsetOfArrayProfileFlags()));
+            if (m_propertyCache.m_arrayProfileGPR != InvalidGPRReg)
+                jit.or32(CCallHelpers::TrustedImm32(static_cast<uint32_t>(ArrayProfileFlag::MayStoreHole)), CCallHelpers::Address(m_propertyCache.m_arrayProfileGPR, ArrayProfile::offsetOfArrayProfileFlags()));
             jit.add32(CCallHelpers::TrustedImm32(1), propertyGPR, scratch2GPR);
             jit.store32(scratch2GPR, CCallHelpers::Address(scratchGPR, Butterfly::offsetOfPublicLength()));
             jit.jump().linkTo(storeResult, &jit);
@@ -3452,9 +3452,9 @@ void InlineCacheCompiler::generateAccessCase(unsigned index, AccessCase& accessC
 
         if (m_propertyCache.isHandlerIC()) {
             callSiteIndexForExceptionHandlingOrOriginal();
-            jit.transfer32(CCallHelpers::Address(m_propertyCache.propertyCacheGPR(), PropertyInlineCache::offsetOfCallSiteIndex()), CCallHelpers::highWordFor(CallFrameSlot::argumentCountIncludingThis));
+            jit.transfer32(CCallHelpers::Address(m_propertyCache.m_propertyCacheGPR, PropertyInlineCache::offsetOfCallSiteIndex()), CCallHelpers::tagFor(CallFrameSlot::argumentCountIncludingThis));
         } else
-            jit.store32(CCallHelpers::TrustedImm32(callSiteIndexForExceptionHandlingOrOriginal().bits()), CCallHelpers::highWordFor(CallFrameSlot::argumentCountIncludingThis));
+            jit.store32(CCallHelpers::TrustedImm32(callSiteIndexForExceptionHandlingOrOriginal().bits()), CCallHelpers::tagFor(CallFrameSlot::argumentCountIncludingThis));
 
         // We do not need to keep globalObject alive since
         // 1. if it is CustomValue, the owner CodeBlock (even if JSGlobalObject* is one of CodeBlock that is inlined and held by DFG CodeBlock) must keep it alive.
@@ -3629,9 +3629,9 @@ void InlineCacheCompiler::generateAccessCase(unsigned index, AccessCase& accessC
         if (m_propertyCache.isHandlerIC()) {
             emitDataICPrepareForCall(jit);
             callSiteIndexForExceptionHandlingOrOriginal();
-            jit.transfer32(CCallHelpers::Address(m_propertyCache.propertyCacheGPR(), PropertyInlineCache::offsetOfCallSiteIndex()), CCallHelpers::highWordFor(CallFrameSlot::argumentCountIncludingThis));
+            jit.transfer32(CCallHelpers::Address(m_propertyCache.m_propertyCacheGPR, PropertyInlineCache::offsetOfCallSiteIndex()), CCallHelpers::tagFor(CallFrameSlot::argumentCountIncludingThis));
         } else
-            jit.store32(CCallHelpers::TrustedImm32(callSiteIndexForExceptionHandlingOrOriginal().bits()), CCallHelpers::highWordFor(CallFrameSlot::argumentCountIncludingThis));
+            jit.store32(CCallHelpers::TrustedImm32(callSiteIndexForExceptionHandlingOrOriginal().bits()), CCallHelpers::tagFor(CallFrameSlot::argumentCountIncludingThis));
 
         ASSERT(baseGPR != scratchGPR);
 
@@ -3716,7 +3716,7 @@ void InlineCacheCompiler::generateAccessCase(unsigned index, AccessCase& accessC
         }
 
         if (isGetter)
-            jit.setupResults(valueGPR);
+            jit.setupResults(valueRegs);
 
         if (m_propertyCache.isHandlerIC()) {
             jit.loadPtr(CCallHelpers::Address(GPRInfo::jitDataRegister, BaselineJITData::offsetOfStackOffset()), scratchGPR);
@@ -3737,7 +3737,7 @@ void InlineCacheCompiler::generateAccessCase(unsigned index, AccessCase& accessC
         if (isGetter) {
             // This is the result value. We don't want to overwrite the result with what we stored to the stack.
             // We sometimes have to store it to the stack just in case we throw an exception and need the original value.
-            dontRestore.add(valueGPR, IgnoreVectors);
+            dontRestore.add(valueRegs, IgnoreVectors);
         }
         restoreLiveRegistersFromStackForCall(spillState, dontRestore);
         succeed();
@@ -3871,14 +3871,14 @@ void InlineCacheCompiler::generateAccessCase(unsigned index, AccessCase& accessC
                 // Handle the case where we are allocating out-of-line using an operation.
                 RegisterSet extraRegistersToPreserve;
                 extraRegistersToPreserve.add(baseGPR, IgnoreVectors);
-                extraRegistersToPreserve.add(valueGPR, IgnoreVectors);
+                extraRegistersToPreserve.add(valueRegs, IgnoreVectors);
                 InlineCacheCompiler::SpillState spillState = preserveLiveRegistersToStackForCall(extraRegistersToPreserve);
 
                 if (m_propertyCache.isHandlerIC()) {
                     callSiteIndexForExceptionHandlingOrOriginal();
-                    jit.transfer32(CCallHelpers::Address(m_propertyCache.propertyCacheGPR(), PropertyInlineCache::offsetOfCallSiteIndex()), CCallHelpers::highWordFor(CallFrameSlot::argumentCountIncludingThis));
+                    jit.transfer32(CCallHelpers::Address(m_propertyCache.m_propertyCacheGPR, PropertyInlineCache::offsetOfCallSiteIndex()), CCallHelpers::tagFor(CallFrameSlot::argumentCountIncludingThis));
                 } else
-                    jit.store32(CCallHelpers::TrustedImm32(callSiteIndexForExceptionHandlingOrOriginal().bits()), CCallHelpers::highWordFor(CallFrameSlot::argumentCountIncludingThis));
+                    jit.store32(CCallHelpers::TrustedImm32(callSiteIndexForExceptionHandlingOrOriginal().bits()), CCallHelpers::tagFor(CallFrameSlot::argumentCountIncludingThis));
 
                 jit.makeSpaceOnStackForCCall();
                 if (m_propertyCache.isHandlerIC())
@@ -4312,9 +4312,9 @@ void InlineCacheCompiler::emitProxyObjectAccess(unsigned index, AccessCase& acce
     if (m_propertyCache.isHandlerIC()) {
         emitDataICPrepareForCall(jit);
         callSiteIndexForExceptionHandlingOrOriginal();
-        jit.transfer32(CCallHelpers::Address(m_propertyCache.propertyCacheGPR(), PropertyInlineCache::offsetOfCallSiteIndex()), CCallHelpers::highWordFor(CallFrameSlot::argumentCountIncludingThis));
+        jit.transfer32(CCallHelpers::Address(m_propertyCache.m_propertyCacheGPR, PropertyInlineCache::offsetOfCallSiteIndex()), CCallHelpers::tagFor(CallFrameSlot::argumentCountIncludingThis));
     } else
-        jit.store32(CCallHelpers::TrustedImm32(callSiteIndexForExceptionHandlingOrOriginal().bits()), CCallHelpers::highWordFor(CallFrameSlot::argumentCountIncludingThis));
+        jit.store32(CCallHelpers::TrustedImm32(callSiteIndexForExceptionHandlingOrOriginal().bits()), CCallHelpers::tagFor(CallFrameSlot::argumentCountIncludingThis));
 
     setSpillStateForJSCall(spillState);
 
@@ -4349,12 +4349,12 @@ void InlineCacheCompiler::emitProxyObjectAccess(unsigned index, AccessCase& acce
 
     CCallHelpers::Address calleeFrame = CCallHelpers::Address(CCallHelpers::stackPointerRegister, -static_cast<ptrdiff_t>(sizeof(CallerFrameAndPC)));
 
-    jit.store32(CCallHelpers::TrustedImm32(numberOfParameters), calleeFrame.withOffset(CallFrameSlot::argumentCountIncludingThis * sizeof(Register) + LowWordOffset));
+    jit.store32(CCallHelpers::TrustedImm32(numberOfParameters), calleeFrame.withOffset(CallFrameSlot::argumentCountIncludingThis * sizeof(Register) + PayloadOffset));
 
-    jit.storeValue(baseGPR, calleeFrame.withOffset(virtualRegisterForArgumentIncludingThis(0).offset() * sizeof(Register)));
+    jit.storeCell(baseGPR, calleeFrame.withOffset(virtualRegisterForArgumentIncludingThis(0).offset() * sizeof(Register)));
 
     if (!hasConstantIdentifier(m_propertyCache.accessType))
-        jit.storeValue(m_propertyCache.propertyGPR(), calleeFrame.withOffset(virtualRegisterForArgumentIncludingThis(1).offset() * sizeof(Register)));
+        jit.storeValue(m_propertyCache.propertyRegs(), calleeFrame.withOffset(virtualRegisterForArgumentIncludingThis(1).offset() * sizeof(Register)));
     else
         jit.storeTrustedValue(accessCase.identifier().cell(), calleeFrame.withOffset(virtualRegisterForArgumentIncludingThis(1).offset() * sizeof(Register)));
 
@@ -4378,7 +4378,7 @@ void InlineCacheCompiler::emitProxyObjectAccess(unsigned index, AccessCase& acce
     switch (accessCase.m_type) {
     case AccessCase::ProxyObjectIn: {
         if (useHandlerIC()) {
-            jit.loadPtr(CCallHelpers::Address(m_propertyCache.propertyCacheGPR(), PropertyInlineCache::offsetOfGlobalObject()), scratchGPR);
+            jit.loadPtr(CCallHelpers::Address(m_propertyCache.m_propertyCacheGPR, PropertyInlineCache::offsetOfGlobalObject()), scratchGPR);
             jit.loadPtr(CCallHelpers::Address(scratchGPR, JSGlobalObject::offsetOfPerformProxyObjectHasFunction()), scratchGPR);
         } else
             jit.move(CCallHelpers::TrustedImmPtr(m_globalObject->performProxyObjectHasFunction()), scratchGPR);
@@ -4386,7 +4386,7 @@ void InlineCacheCompiler::emitProxyObjectAccess(unsigned index, AccessCase& acce
     }
     case AccessCase::IndexedProxyObjectIn: {
         if (useHandlerIC()) {
-            jit.loadPtr(CCallHelpers::Address(m_propertyCache.propertyCacheGPR(), PropertyInlineCache::offsetOfGlobalObject()), scratchGPR);
+            jit.loadPtr(CCallHelpers::Address(m_propertyCache.m_propertyCacheGPR, PropertyInlineCache::offsetOfGlobalObject()), scratchGPR);
             jit.loadPtr(CCallHelpers::Address(scratchGPR, JSGlobalObject::offsetOfPerformProxyObjectHasByValFunction()), scratchGPR);
         } else
             jit.move(CCallHelpers::TrustedImmPtr(m_globalObject->performProxyObjectHasByValFunction()), scratchGPR);
@@ -4394,7 +4394,7 @@ void InlineCacheCompiler::emitProxyObjectAccess(unsigned index, AccessCase& acce
     }
     case AccessCase::ProxyObjectLoad: {
         if (useHandlerIC()) {
-            jit.loadPtr(CCallHelpers::Address(m_propertyCache.propertyCacheGPR(), PropertyInlineCache::offsetOfGlobalObject()), scratchGPR);
+            jit.loadPtr(CCallHelpers::Address(m_propertyCache.m_propertyCacheGPR, PropertyInlineCache::offsetOfGlobalObject()), scratchGPR);
             jit.loadPtr(CCallHelpers::Address(scratchGPR, JSGlobalObject::offsetOfPerformProxyObjectGetFunction()), scratchGPR);
         } else
             jit.move(CCallHelpers::TrustedImmPtr(m_globalObject->performProxyObjectGetFunction()), scratchGPR);
@@ -4402,7 +4402,7 @@ void InlineCacheCompiler::emitProxyObjectAccess(unsigned index, AccessCase& acce
     }
     case AccessCase::IndexedProxyObjectLoad: {
         if (useHandlerIC()) {
-            jit.loadPtr(CCallHelpers::Address(m_propertyCache.propertyCacheGPR(), PropertyInlineCache::offsetOfGlobalObject()), scratchGPR);
+            jit.loadPtr(CCallHelpers::Address(m_propertyCache.m_propertyCacheGPR, PropertyInlineCache::offsetOfGlobalObject()), scratchGPR);
             jit.loadPtr(CCallHelpers::Address(scratchGPR, JSGlobalObject::offsetOfPerformProxyObjectGetByValFunction()), scratchGPR);
         } else
             jit.move(CCallHelpers::TrustedImmPtr(m_globalObject->performProxyObjectGetByValFunction()), scratchGPR);
@@ -4410,7 +4410,7 @@ void InlineCacheCompiler::emitProxyObjectAccess(unsigned index, AccessCase& acce
     }
     case AccessCase::ProxyObjectStore: {
         if (useHandlerIC()) {
-            jit.loadPtr(CCallHelpers::Address(m_propertyCache.propertyCacheGPR(), PropertyInlineCache::offsetOfGlobalObject()), scratchGPR);
+            jit.loadPtr(CCallHelpers::Address(m_propertyCache.m_propertyCacheGPR, PropertyInlineCache::offsetOfGlobalObject()), scratchGPR);
             if (ecmaMode.isStrict())
                 jit.loadPtr(CCallHelpers::Address(scratchGPR, JSGlobalObject::offsetOfPerformProxyObjectSetStrictFunction()), scratchGPR);
             else
@@ -4421,7 +4421,7 @@ void InlineCacheCompiler::emitProxyObjectAccess(unsigned index, AccessCase& acce
     }
     case AccessCase::IndexedProxyObjectStore: {
         if (useHandlerIC()) {
-            jit.loadPtr(CCallHelpers::Address(m_propertyCache.propertyCacheGPR(), PropertyInlineCache::offsetOfGlobalObject()), scratchGPR);
+            jit.loadPtr(CCallHelpers::Address(m_propertyCache.m_propertyCacheGPR, PropertyInlineCache::offsetOfGlobalObject()), scratchGPR);
             if (ecmaMode.isStrict())
                 jit.loadPtr(CCallHelpers::Address(scratchGPR, JSGlobalObject::offsetOfPerformProxyObjectSetByValStrictFunction()), scratchGPR);
             else
@@ -4465,7 +4465,7 @@ void InlineCacheCompiler::emitProxyObjectAccess(unsigned index, AccessCase& acce
     }
 
     if (accessCase.m_type != AccessCase::ProxyObjectStore && accessCase.m_type != AccessCase::IndexedProxyObjectStore)
-        jit.setupResults(valueGPR);
+        jit.setupResults(valueRegs);
 
 
     if (m_propertyCache.isHandlerIC()) {
@@ -4482,7 +4482,7 @@ void InlineCacheCompiler::emitProxyObjectAccess(unsigned index, AccessCase& acce
     if (accessCase.m_type != AccessCase::ProxyObjectStore && accessCase.m_type != AccessCase::IndexedProxyObjectStore) {
         // This is the result value. We don't want to overwrite the result with what we stored to the stack.
         // We sometimes have to store it to the stack just in case we throw an exception and need the original value.
-        dontRestore.add(valueGPR, IgnoreVectors);
+        dontRestore.add(valueRegs, IgnoreVectors);
     }
     restoreLiveRegistersFromStackForCall(spillState, dontRestore);
     succeed();
@@ -4648,7 +4648,7 @@ void InlineCacheCompiler::emitIntrinsicGetter(IntrinsicGetterAccessCase& accessC
             // We can use a bitshift here since on ADDRESS32 platforms TypedArrays cannot have byteLength that overflows an int32.
             jit.lshift32(CCallHelpers::TrustedImm32(logElementSize(type)), valueGPR);
         }
-        jit.boxInt32(valueGPR, valueGPR);
+        jit.boxInt32(valueGPR, valueRegs);
 #endif
         succeed();
         m_failAndIgnore.append(failAndIgnore);
@@ -4730,7 +4730,7 @@ void InlineCacheCompiler::emitIntrinsicGetter(IntrinsicGetterAccessCase& accessC
         // offsetOfAliveEntryCount() is the same for both JSSet::Helper and JSMap::Helper.
         jit.load32(CCallHelpers::Address(scratchGPR, JSSet::Helper::offsetOfAliveEntryCount()), valueGPR);
         nullCase.link(&jit);
-        jit.boxInt32(valueGPR, valueGPR);
+        jit.boxInt32(valueGPR, valueRegs);
         succeed();
         return;
     }
@@ -5946,8 +5946,8 @@ static MacroAssemblerCodeRef<JITThunkPtrTag> putByIdTransitionHandlerImpl(VM& vm
 {
     CCallHelpers jit;
 
-    using BaselineJITRegisters::PutById::baseGPR;
-    using BaselineJITRegisters::PutById::valueGPR;
+    using BaselineJITRegisters::PutById::baseJSR;
+    using BaselineJITRegisters::PutById::valueJSR;
     using BaselineJITRegisters::PutById::propertyCacheGPR;
     using BaselineJITRegisters::PutById::scratch1GPR;
     using BaselineJITRegisters::PutById::scratch2GPR;
@@ -6013,8 +6013,8 @@ MacroAssemblerCodeRef<JITThunkPtrTag> putByIdTransitionReallocatingOutOfLineHand
 {
     CCallHelpers jit;
 
-    using BaselineJITRegisters::PutById::baseGPR;
-    using BaselineJITRegisters::PutById::valueGPR;
+    using BaselineJITRegisters::PutById::baseJSR;
+    using BaselineJITRegisters::PutById::valueJSR;
     using BaselineJITRegisters::PutById::propertyCacheGPR;
     using BaselineJITRegisters::PutById::scratch1GPR;
 
@@ -6083,8 +6083,8 @@ static MacroAssemblerCodeRef<JITThunkPtrTag> putByIdCustomHandlerImpl(VM& vm)
 {
     CCallHelpers jit;
 
-    using BaselineJITRegisters::PutById::baseGPR;
-    using BaselineJITRegisters::PutById::valueGPR;
+    using BaselineJITRegisters::PutById::baseJSR;
+    using BaselineJITRegisters::PutById::valueJSR;
     using BaselineJITRegisters::PutById::propertyCacheGPR;
     using BaselineJITRegisters::PutById::scratch1GPR;
     using BaselineJITRegisters::PutById::scratch2GPR;
@@ -6626,9 +6626,9 @@ static MacroAssemblerCodeRef<JITThunkPtrTag> putByValNonStringPrimitiveKeyTransi
 {
     CCallHelpers jit;
 
-    using BaselineJITRegisters::PutByVal::baseGPR;
-    using BaselineJITRegisters::PutByVal::valueGPR;
-    using BaselineJITRegisters::PutByVal::propertyGPR;
+    using BaselineJITRegisters::PutByVal::baseJSR;
+    using BaselineJITRegisters::PutByVal::valueJSR;
+    using BaselineJITRegisters::PutByVal::propertyJSR;
     using BaselineJITRegisters::PutByVal::propertyCacheGPR;
     using BaselineJITRegisters::PutByVal::scratch1GPR;
     using BaselineJITRegisters::PutByVal::scratch2GPR;
@@ -6674,9 +6674,9 @@ static MacroAssemblerCodeRef<JITThunkPtrTag> putByValNonStringPrimitiveKeyTransi
 {
     CCallHelpers jit;
 
-    using BaselineJITRegisters::PutByVal::baseGPR;
-    using BaselineJITRegisters::PutByVal::valueGPR;
-    using BaselineJITRegisters::PutByVal::propertyGPR;
+    using BaselineJITRegisters::PutByVal::baseJSR;
+    using BaselineJITRegisters::PutByVal::valueJSR;
+    using BaselineJITRegisters::PutByVal::propertyJSR;
     using BaselineJITRegisters::PutByVal::propertyCacheGPR;
     using BaselineJITRegisters::PutByVal::scratch1GPR;
 
@@ -6877,9 +6877,9 @@ static MacroAssemblerCodeRef<JITThunkPtrTag> putByValTransitionHandlerImpl(VM& v
 {
     CCallHelpers jit;
 
-    using BaselineJITRegisters::PutByVal::baseGPR;
-    using BaselineJITRegisters::PutByVal::valueGPR;
-    using BaselineJITRegisters::PutByVal::propertyGPR;
+    using BaselineJITRegisters::PutByVal::baseJSR;
+    using BaselineJITRegisters::PutByVal::valueJSR;
+    using BaselineJITRegisters::PutByVal::propertyJSR;
     using BaselineJITRegisters::PutByVal::propertyCacheGPR;
     using BaselineJITRegisters::PutByVal::scratch1GPR;
     using BaselineJITRegisters::PutByVal::scratch2GPR;
@@ -6975,9 +6975,9 @@ static MacroAssemblerCodeRef<JITThunkPtrTag> putByValTransitionOutOfLineHandlerI
 {
     CCallHelpers jit;
 
-    using BaselineJITRegisters::PutByVal::baseGPR;
-    using BaselineJITRegisters::PutByVal::valueGPR;
-    using BaselineJITRegisters::PutByVal::propertyGPR;
+    using BaselineJITRegisters::PutByVal::baseJSR;
+    using BaselineJITRegisters::PutByVal::valueJSR;
+    using BaselineJITRegisters::PutByVal::propertyJSR;
     using BaselineJITRegisters::PutByVal::propertyCacheGPR;
     using BaselineJITRegisters::PutByVal::scratch1GPR;
 
@@ -7024,9 +7024,9 @@ static MacroAssemblerCodeRef<JITThunkPtrTag> putByValCustomHandlerImpl(VM& vm)
 {
     CCallHelpers jit;
 
-    using BaselineJITRegisters::PutByVal::baseGPR;
-    using BaselineJITRegisters::PutByVal::propertyGPR;
-    using BaselineJITRegisters::PutByVal::valueGPR;
+    using BaselineJITRegisters::PutByVal::baseJSR;
+    using BaselineJITRegisters::PutByVal::propertyJSR;
+    using BaselineJITRegisters::PutByVal::valueJSR;
     using BaselineJITRegisters::PutByVal::propertyCacheGPR;
     using BaselineJITRegisters::PutByVal::scratch1GPR;
     using BaselineJITRegisters::PutByVal::scratch2GPR;
@@ -8284,7 +8284,7 @@ AccessGenerationResult InlineCacheCompiler::compileOneAccessCaseHandler(const Ve
         // of something that isn't patchable. The slow path will decrement "countdown" and will only
         // patch things if the countdown reaches zero. We increment the slow path count here to ensure
         // that the slow path does not try to patch.
-        jit.add8(CCallHelpers::TrustedImm32(1), CCallHelpers::Address(m_propertyCache.propertyCacheGPR(), PropertyInlineCache::offsetOfCountdown()));
+        jit.add8(CCallHelpers::TrustedImm32(1), CCallHelpers::Address(m_propertyCache.m_propertyCacheGPR, PropertyInlineCache::offsetOfCountdown()));
     }
 
     m_failAndRepatch.link(&jit);
@@ -8367,7 +8367,7 @@ MacroAssemblerCodeRef<JITStubRoutinePtrTag> InlineCacheCompiler::compileGetByDOM
         // of something that isn't patchable. The slow path will decrement "countdown" and will only
         // patch things if the countdown reaches zero. We increment the slow path count here to ensure
         // that the slow path does not try to patch.
-        jit.add8(CCallHelpers::TrustedImm32(1), CCallHelpers::Address(m_propertyCache.propertyCacheGPR(), PropertyInlineCache::offsetOfCountdown()));
+        jit.add8(CCallHelpers::TrustedImm32(1), CCallHelpers::Address(m_propertyCache.m_propertyCacheGPR, PropertyInlineCache::offsetOfCountdown()));
     }
 
     m_failAndRepatch.link(&jit);

@@ -258,7 +258,7 @@ void AssemblyHelpers::jitAssertArgumentCountSane()
 {
     if (!Options::useJITAsserts())
         return;
-    Jump ok = branch32(Below, lowWordFor(CallFrameSlot::argumentCountIncludingThis), TrustedImm32(10000000));
+    Jump ok = branch32(Below, payloadFor(CallFrameSlot::argumentCountIncludingThis), TrustedImm32(10000000));
     abortWithReason(AHInsaneArgumentCount);
     ok.link(this);
 }
@@ -647,7 +647,8 @@ std::tuple<AssemblyHelpers::JumpList, AssemblyHelpers::JumpList> AssemblyHelpers
         // we're looking for, or we realize we're comparing against another entity, and go to the
         // slow path anyways.
         load32(Address(uidGPR, UniquedStringImpl::flagsOffset()), scratch2GPR);
-        addUnsignedRightShift32(scratch3GPR, scratch2GPR, TrustedImm32(StringImpl::s_flagCount), scratch3GPR);
+        urshift32(TrustedImm32(StringImpl::s_flagCount), scratch2GPR);
+        add32(scratch2GPR, scratch3GPR);
     }
 
     and32(TrustedImm32(MegamorphicCache::storeCachePrimaryMask), scratch3GPR);
@@ -741,7 +742,8 @@ AssemblyHelpers::JumpList AssemblyHelpers::hasMegamorphicProperty(VM& vm, GPRReg
         // we're looking for, or we realize we're comparing against another entity, and go to the
         // slow path anyways.
         load32(Address(uidGPR, UniquedStringImpl::flagsOffset()), scratch2GPR);
-        addUnsignedRightShift32(scratch3GPR, scratch2GPR, TrustedImm32(StringImpl::s_flagCount), scratch3GPR);
+        urshift32(TrustedImm32(StringImpl::s_flagCount), scratch2GPR);
+        add32(scratch2GPR, scratch3GPR);
     }
 
     and32(TrustedImm32(MegamorphicCache::hasCachePrimaryMask), scratch3GPR);

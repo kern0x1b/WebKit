@@ -1305,40 +1305,40 @@ public:
         return addressFor(operand.virtualRegister());
     }
 
-    static Address highWordFor(VirtualRegister virtualRegister, GPRReg baseGPR)
+    static Address tagFor(VirtualRegister virtualRegister, GPRReg baseGPR)
     {
         ASSERT(virtualRegister.isValid());
-        return Address(baseGPR, virtualRegister.offset() * sizeof(Register) + HighWordOffset);
+        return Address(baseGPR, virtualRegister.offset() * sizeof(Register) + TagOffset);
     }
 
-    static Address highWordFor(VirtualRegister virtualRegister)
+    static Address tagFor(VirtualRegister virtualRegister)
     {
         ASSERT(virtualRegister.isValid());
-        return Address(GPRInfo::callFrameRegister, virtualRegister.offset() * sizeof(Register) + HighWordOffset);
+        return Address(GPRInfo::callFrameRegister, virtualRegister.offset() * sizeof(Register) + TagOffset);
     }
 
-    static Address highWordFor(Operand operand)
+    static Address tagFor(Operand operand)
     {
         ASSERT(!operand.isTmp());
-        return highWordFor(operand.virtualRegister());
+        return tagFor(operand.virtualRegister());
     }
 
-    static Address lowWordFor(VirtualRegister virtualRegister, GPRReg baseGPR)
+    static Address payloadFor(VirtualRegister virtualRegister, GPRReg baseGPR)
     {
         ASSERT(virtualRegister.isValid());
-        return Address(baseGPR, virtualRegister.offset() * sizeof(Register) + LowWordOffset);
+        return Address(baseGPR, virtualRegister.offset() * sizeof(Register) + PayloadOffset);
     }
 
-    static Address lowWordFor(VirtualRegister virtualRegister)
+    static Address payloadFor(VirtualRegister virtualRegister)
     {
         ASSERT(virtualRegister.isValid());
-        return Address(GPRInfo::callFrameRegister, virtualRegister.offset() * sizeof(Register) + LowWordOffset);
+        return Address(GPRInfo::callFrameRegister, virtualRegister.offset() * sizeof(Register) + PayloadOffset);
     }
 
-    static Address lowWordFor(Operand operand)
+    static Address payloadFor(Operand operand)
     {
         ASSERT(!operand.isTmp());
-        return lowWordFor(operand.virtualRegister());
+        return payloadFor(operand.virtualRegister());
     }
 
     // Access to our fixed callee CallFrame.
@@ -1354,24 +1354,24 @@ public:
         return calleeFrameSlot(virtualRegisterForArgumentIncludingThis(argument));
     }
 
-    static Address calleeFrameHighWordSlot(VirtualRegister slot)
+    static Address calleeFrameTagSlot(VirtualRegister slot)
     {
-        return calleeFrameSlot(slot).withOffset(HighWordOffset);
+        return calleeFrameSlot(slot).withOffset(TagOffset);
     }
 
-    static Address calleeFrameLowWordSlot(VirtualRegister slot)
+    static Address calleeFramePayloadSlot(VirtualRegister slot)
     {
-        return calleeFrameSlot(slot).withOffset(LowWordOffset);
+        return calleeFrameSlot(slot).withOffset(PayloadOffset);
     }
 
-    static Address calleeArgumentHighWordSlot(int argument)
+    static Address calleeArgumentTagSlot(int argument)
     {
-        return calleeArgumentSlot(argument).withOffset(HighWordOffset);
+        return calleeArgumentSlot(argument).withOffset(TagOffset);
     }
 
-    static Address calleeArgumentLowWordSlot(int argument)
+    static Address calleeArgumentPayloadSlot(int argument)
     {
-        return calleeArgumentSlot(argument).withOffset(LowWordOffset);
+        return calleeArgumentSlot(argument).withOffset(PayloadOffset);
     }
 
     static Address calleeFrameCallerFrame()

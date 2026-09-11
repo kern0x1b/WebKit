@@ -435,7 +435,7 @@ JSC_DEFINE_JIT_OPERATION(operationWasmToJSExitMarshalArguments, void, (void* sp,
 
     // materializeImportJSCell and store
     *access.operator()<uint64_t>(calleeFrame, CallFrameSlot::callee * sizeof(Register)) = JSValue::encode(importableFunction->importFunction.get());
-    *access.operator()<uint32_t>(calleeFrame, CallFrameSlot::argumentCountIncludingThis * static_cast<int>(sizeof(Register)) + LowWordOffset) = argCount + 1; // including this = +1
+    *access.operator()<uint32_t>(calleeFrame, CallFrameSlot::argumentCountIncludingThis * static_cast<int>(sizeof(Register)) + PayloadOffset) = argCount + 1; // including this = +1
 
     OPERATION_RETURN(scope);
 }
@@ -626,7 +626,7 @@ JSC_DEFINE_JIT_OPERATION(operationWasmToJSExitMarshalReturnValues, void, (void* 
 
         uint64_t unboxedValue = 0;
         const auto& returnType = signature.returnType(index);
-        switch (returnType.kind()) {
+        switch (returnType.kind) {
         case TypeKind::I32:
             unboxedValue = static_cast<uint32_t>(value.toInt32(globalObject));
             OPERATION_RETURN_IF_EXCEPTION(scope);
@@ -660,7 +660,7 @@ JSC_DEFINE_JIT_OPERATION(operationWasmToJSExitMarshalReturnValues, void, (void* 
                         OPERATION_RETURN(scope);
                     }
                     if (Wasm::isRefWithTypeIndex(returnType) && !value.isNull()) {
-                        Wasm::TypeIndex paramIndex = returnType.index();
+                        Wasm::TypeIndex paramIndex = returnType.index;
                         Wasm::TypeIndex argIndex = (wasmFunction ? wasmFunction->rtt() : wasmWrapperFunction->rtt())->asTypeIndex();
                         if (paramIndex != argIndex) {
                             throwTypeError(globalObject, scope, "Argument value did not match the reference type"_s);
@@ -669,7 +669,7 @@ JSC_DEFINE_JIT_OPERATION(operationWasmToJSExitMarshalReturnValues, void, (void* 
                     }
                 } else {
                     value = Wasm::internalizeExternref(value);
-                    if (!Wasm::TypeInformation::isReferenceValueAssignable(value, returnType.isNullable(), returnType.index())) [[unlikely]] {
+                    if (!Wasm::TypeInformation::isReferenceValueAssignable(value, returnType.isNullable(), returnType.index)) [[unlikely]] {
                         throwTypeError(globalObject, scope, "Argument value did not match the reference type"_s);
                         OPERATION_RETURN(scope);
                     }
@@ -1406,7 +1406,7 @@ JSC_DEFINE_JIT_OPERATION(operationIterateResults, void, (JSWebAssemblyInstance* 
 
         uint64_t unboxedValue = 0;
         const auto& returnType = signature->returnType(index);
-        switch (returnType.kind()) {
+        switch (returnType.kind) {
         case TypeKind::I32:
             unboxedValue = static_cast<uint32_t>(value.toInt32(globalObject));
             break;
@@ -1436,7 +1436,7 @@ JSC_DEFINE_JIT_OPERATION(operationIterateResults, void, (JSWebAssemblyInstance* 
                         OPERATION_RETURN(scope);
                     }
                     if (Wasm::isRefWithTypeIndex(returnType) && !value.isNull()) {
-                        Wasm::TypeIndex paramIndex = returnType.index();
+                        Wasm::TypeIndex paramIndex = returnType.index;
                         Wasm::TypeIndex argIndex = (wasmFunction ? wasmFunction->rtt() : wasmWrapperFunction->rtt())->asTypeIndex();
                         if (paramIndex != argIndex) {
                             throwTypeError(globalObject, scope, "Argument value did not match the reference type"_s);
@@ -1445,7 +1445,7 @@ JSC_DEFINE_JIT_OPERATION(operationIterateResults, void, (JSWebAssemblyInstance* 
                     }
                 } else {
                     value = Wasm::internalizeExternref(value);
-                    if (!Wasm::TypeInformation::isReferenceValueAssignable(value, returnType.isNullable(), returnType.index())) [[unlikely]] {
+                    if (!Wasm::TypeInformation::isReferenceValueAssignable(value, returnType.isNullable(), returnType.index)) [[unlikely]] {
                         throwTypeError(globalObject, scope, "Argument value did not match the reference type"_s);
                         OPERATION_RETURN(scope);
                     }
