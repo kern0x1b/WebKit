@@ -1207,6 +1207,7 @@ void testShuffleShiftMixedWidth()
     CHECK(things[4] == static_cast<uint32_t>(40000000000000000ll));
 }
 
+#endif
 
 void testShuffleShiftMemory()
 {
@@ -1466,6 +1467,7 @@ void testShuffleShiftMemoryAllRegsMixedWidth()
     CHECK(memory[1] == 35000000000000ll);
 }
 
+#endif
 
 void testShuffleRotateMemory()
 {
@@ -1711,6 +1713,7 @@ void testShuffleRotateMemoryAllRegsMixedWidth()
     CHECK(memory[1] == 35000000000000ll);
 }
 
+#endif
 
 void testShuffleSwapDouble()
 {
@@ -2186,6 +2189,7 @@ void testLea64()
     int64_t r = compileAndRun<int64_t>(proc, a);
     CHECK(r == a + b);
 }
+#endif
 
 void testLea32()
 {
@@ -2990,6 +2994,7 @@ void testStorePairClobberMemoryLoad()
     CHECK(values1[1] == 43);
 }
 #endif
+#endif
 
 // Test loop-aware live range splitting.
 // Fast tmps create register pressure to steer which side spills.
@@ -3467,6 +3472,7 @@ void run(const char* filter)
     RUN(testStorePairClobber());
     RUN(testStorePairClobberMemoryStore());
     RUN(testStorePairClobberMemoryLoad());
+#endif
 #endif
 
     if (!tasks.isEmpty()) {

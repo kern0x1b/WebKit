@@ -139,6 +139,7 @@ void JITCompiler::linkOSRExits()
         addPtr(GPRInfo::notCellMaskRegister, GPRInfo::jitDataRegister);
         farJump(Address(GPRInfo::jitDataRegister, JITData::ExitVector::Storage::offsetOfData()), OSRExitPtrTag);
     }
+#endif
 }
 
 void JITCompiler::compileEntry()

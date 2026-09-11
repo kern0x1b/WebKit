@@ -3359,6 +3359,9 @@ void BBQJIT::emitEntryTierUpCheck()
 
     MacroAssembler::JumpList overflow;
     JIT_COMMENT(m_jit, "Stack overflow check");
+#if !CPU(ADDRESS64)
+    overflow.append(m_jit.branchPtr(CCallHelpers::Above, wasmScratchGPR, GPRInfo::callFrameRegister));
+#endif
     overflow.append(m_jit.branchPtr(CCallHelpers::LessThan, wasmScratchGPR, CCallHelpers::Address(GPRInfo::wasmContextInstancePointer, JSWebAssemblyInstance::offsetOfSoftStackLimit())));
     overflow.linkThunk(CodeLocationLabel<JITThunkPtrTag>(Thunks::singleton().stub(throwStackOverflowFromWasmThunkGenerator).code()), &m_jit);
 
@@ -3531,7 +3534,12 @@ MacroAssembler::Label BBQJIT::addLoopOSREntrypoint()
     // The loop_osr slow path should have already checked that we have enough space. We have already destroyed the ipint stack, and unwind will see the BBQ catch
     // since we already replaced callee. So, we just assert that this case doesn't happen to avoid reading a corrupted frame from the bbq catch handler.
     MacroAssembler::JumpList overflow;
+#if !CPU(ADDRESS64)
+    overflow.append(m_jit.branchPtr(CCallHelpers::Above, wasmScratchGPR, GPRInfo::callFrameRegister));
+    overflow.append(m_jit.branchPtr(CCallHelpers::LessThanOrEqual, wasmScratchGPR, CCallHelpers::Address(GPRInfo::wasmContextInstancePointer, JSWebAssemblyInstance::offsetOfSoftStackLimit())));
+#else
     overflow.append(m_jit.branchPtr(CCallHelpers::LessThanOrEqual, MacroAssembler::stackPointerRegister, CCallHelpers::Address(GPRInfo::wasmContextInstancePointer, JSWebAssemblyInstance::offsetOfSoftStackLimit())));
+#endif
     overflow.linkThunk(CodeLocationLabel<JITThunkPtrTag>(Thunks::singleton().stub(crashDueToBBQStackOverflowGenerator).code()), &m_jit);
 
     // This operation shuffles around values on the stack, until everything is in the right place. Then,
@@ -5186,7 +5194,10 @@ PartialResult BBQJIT::addFusedBranchCompare(OpType opType, ControlType& target, 
 
         if (operandLocation.isGPR())
             liveScratchGPRs.add(operandLocation.asGPR(), IgnoreVectors);
-        else if (operandLocation.isFPR())
+        else if (operandLocation.isGPR2()) {
+            liveScratchGPRs.add(operandLocation.asGPRlo(), IgnoreVectors);
+            liveScratchGPRs.add(operandLocation.asGPRhi(), IgnoreVectors);
+        } else if (operandLocation.isFPR())
             liveScratchFPRs.add(operandLocation.asFPR(), operand.type() == TypeKind::V128 ? Width128 : Width64);
     }
     if (!liveScratchFPRs.contains(scratches.fpr(0), IgnoreVectors))
@@ -5451,7 +5462,10 @@ PartialResult BBQJIT::addFusedBranchCompare(OpType opType, ControlType& target, 
             emitMove(left, leftLocation = Location::fromFPR(wasmScratchFPR));
         if (leftLocation.isGPR())
             liveScratchGPRs.add(leftLocation.asGPR(), IgnoreVectors);
-        else if (leftLocation.isFPR())
+        else if (leftLocation.isGPR2()) {
+            liveScratchGPRs.add(leftLocation.asGPRlo(), IgnoreVectors);
+            liveScratchGPRs.add(leftLocation.asGPRhi(), IgnoreVectors);
+        } else if (leftLocation.isFPR())
             liveScratchFPRs.add(leftLocation.asFPR(), left.type() == TypeKind::V128 ? Width128 : Width64);
 
         if (!right.isConst())
@@ -5460,7 +5474,10 @@ PartialResult BBQJIT::addFusedBranchCompare(OpType opType, ControlType& target, 
             emitMove(right, rightLocation = Location::fromFPR(wasmScratchFPR));
         if (rightLocation.isGPR())
             liveScratchGPRs.add(rightLocation.asGPR(), IgnoreVectors);
-        else if (rightLocation.isFPR())
+        else if (rightLocation.isGPR2()) {
+            liveScratchGPRs.add(rightLocation.asGPRlo(), IgnoreVectors);
+            liveScratchGPRs.add(rightLocation.asGPRhi(), IgnoreVectors);
+        } else if (rightLocation.isFPR())
             liveScratchFPRs.add(rightLocation.asFPR(), right.type() == TypeKind::V128 ? Width128 : Width64);
     }
     consume(left);

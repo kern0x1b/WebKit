@@ -178,11 +178,21 @@ AccessGenerationResult PropertyInlineCache::addAccessCase(const GCSafeConcurrent
             if (result.shouldResetStubAndFireWatchpoints())
                 return result;
 
-            if (!result.buffered())
+            if (!result.buffered()) {
+                clearBufferedStructures();
                 return result;
+            }
             setCacheType(locker, CacheType::Stub);
 
             RELEASE_ASSERT(!result.generatedSomeCode());
+
+            // If we didn't buffer any cases then bail. If this made no changes then we'll just try again
+            // subject to cool-down.
+            if (!result.buffered()) {
+                dataLogLnIf(PropertyInlineCacheInternal::verbose, "Didn't buffer anything, bailing.");
+                clearBufferedStructures();
+                return result;
+            }
 
             InlineCacheCompiler compiler(codeBlock->jitType(), vm, globalObject, ecmaMode, *this);
             return compiler.compileHandler(locker, WTF::move(list), codeBlock, accessCase.get());

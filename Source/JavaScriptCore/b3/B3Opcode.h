@@ -515,7 +515,9 @@ std::optional<Opcode> NODELETE invertedCompare(Opcode, Type);
 
 inline Opcode constPtrOpcode()
 {
-    return Const64;
+    if (is64Bit())
+        return Const64;
+    return Const32;
 }
 
 inline bool isConstant(Opcode opcode)

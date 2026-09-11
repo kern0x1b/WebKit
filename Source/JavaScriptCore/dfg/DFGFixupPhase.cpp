@@ -84,18 +84,21 @@ private:
 
     void fixupArithDivInt32(Node* node, Edge& leftChild, Edge& rightChild)
     {
-        if (optimizeForX86() || optimizeForARM64()) {
+        if (optimizeForX86() || optimizeForARM64() || optimizeForARMv7IDIVSupported()) {
             fixIntOrBooleanEdge(leftChild);
             fixIntOrBooleanEdge(rightChild);
             // We need to be careful about skipping overflow check because div / mod can generate non integer values
             // from (Int32, Int32) inputs. For now, we always check non-zero divisor.
-            if (bytecodeCanTruncateInteger(node->arithNodeFlags()) && bytecodeCanIgnoreNaNAndInfinity(node->arithNodeFlags()) && bytecodeCanIgnoreNegativeZero(node->arithNodeFlags())) {
+            if (bytecodeCanTruncateInteger(node->arithNodeFlags()) && bytecodeCanIgnoreNaNAndInfinity(node->arithNodeFlags()) && bytecodeCanIgnoreNegativeZero(node->arithNodeFlags()))
                 node->setArithMode(Arith::Unchecked);
-                node->clearFlags(NodeMustGenerate);
-            } else if (bytecodeCanIgnoreNegativeZero(node->arithNodeFlags()))
+            else if (bytecodeCanIgnoreNegativeZero(node->arithNodeFlags()))
                 node->setArithMode(Arith::CheckOverflow);
             else
                 node->setArithMode(Arith::CheckOverflowAndNegativeZero);
+            // Regardless of whether we have a check, we clear MustGenerate flag. If nobody is using the output (including MovHint),
+            // we do not need to perform checks and keep this node.
+            // This condition is met only when we are not utilizing this checks as an additional constraint in integer-range-optimization.
+            node->clearFlags(NodeMustGenerate);
             return;
         }
 
@@ -476,7 +479,7 @@ private:
                 node->setArithMode(Arith::CheckOverflow);
             else {
                 node->setArithMode(Arith::DoOverflow);
-                node->setResult(NodeResultInt52);
+                node->setResult(enableInt52() ? NodeResultInt52 : NodeResultDouble);
             }
             break;
         }
@@ -2620,8 +2623,10 @@ private:
         }
 
         case ObjectToString: {
+#if USE(JSVALUE64)
             if (node->child1()->shouldSpeculateObject())
                 fixEdge<ObjectUse>(node->child1());
+#endif
             break;
         }
 
@@ -2687,7 +2692,7 @@ private:
         }
 
         case InstanceOf: {
-            if (node->child1()->shouldSpeculateCell() && node->child2()->shouldSpeculateCell()) {
+            if (node->child1()->shouldSpeculateCell() && node->child2()->shouldSpeculateCell() && is64Bit()) {
                 fixEdge<CellUse>(node->child1());
                 fixEdge<CellUse>(node->child2());
                 break;
@@ -2696,8 +2701,11 @@ private:
         }
 
         case InstanceOfMegamorphic: {
-            fixEdge<CellUse>(node->child1());
-            fixEdge<CellUse>(node->child2());
+            if (is64Bit()) {
+                fixEdge<CellUse>(node->child1());
+                fixEdge<CellUse>(node->child2());
+                break;
+            }
             break;
         }
 
@@ -3096,9 +3104,13 @@ private:
                     break;
                 }
 
-                fixEdge<AnyIntUse>(node->child1());
-                node->remove(m_graph);
-                break;
+                if (enableInt52()) {
+                    fixEdge<AnyIntUse>(node->child1());
+                    node->remove(m_graph);
+                    break;
+                }
+
+                // Must not perform fixEdge<NumberUse> here since the type set only includes TypeAnyInt. Double values should be logged.
             }
 
             if (typeSet->doesTypeConformTo(TypeNumber | TypeAnyInt)) {
@@ -3207,6 +3219,7 @@ private:
             else
                 RELEASE_ASSERT_NOT_REACHED();
 
+#if USE(JSVALUE64)
             if (node->child2()->shouldSpeculateBoolean())
                 fixEdge<BooleanUse>(node->child2());
             else if (node->child2()->shouldSpeculateInt32())
@@ -3227,6 +3240,9 @@ private:
                 fixEdge<CellUse>(node->child2());
             else
                 fixEdge<UntypedUse>(node->child2());
+#else
+            fixEdge<UntypedUse>(node->child2());
+#endif // USE(JSVALUE64)
 
             fixEdge<Int32Use>(node->child3());
             break;
@@ -3275,6 +3291,7 @@ private:
             break;
 
         case MapHash: {
+#if USE(JSVALUE64)
             if (node->child1()->shouldSpeculateBoolean()) {
                 fixEdge<BooleanUse>(node->child1());
                 break;
@@ -3318,6 +3335,9 @@ private:
             }
 
             fixEdge<UntypedUse>(node->child1());
+#else
+            fixEdge<UntypedUse>(node->child1());
+#endif // USE(JSVALUE64)
             break;
         }
 
@@ -4920,7 +4940,13 @@ private:
 
     bool NODELETE alwaysUnboxSimplePrimitives()
     {
+#if USE(JSVALUE64)
         return false;
+#else
+        // Any boolean, int, or cell value is profitable to unbox on 32-bit because it
+        // reduces traffic.
+        return true;
+#endif
     }
 
     template<UseKind useKind>
@@ -5364,6 +5390,7 @@ private:
         // FTL has object allocation sinking, and keeping this node non-double-result makes that phase much simpler.
         // So FTL will do conversion of this in ValueRepReduction phase instead.
         UNUSED_PARAM(node);
+#if USE(JSVALUE64)
         if (!m_graph.m_plan.isFTL()) {
             if (!m_graph.hasExitSite(node->origin.semantic, BadType)) {
                 if (!node->shouldSpeculateInt32() && node->shouldSpeculateNumber()) {
@@ -5373,6 +5400,7 @@ private:
                 }
             }
         }
+#endif
         return false;
     }
 
@@ -5383,6 +5411,7 @@ private:
         // So FTL will do conversion of this in ValueRepReduction phase instead.
         UNUSED_PARAM(node);
         UNUSED_PARAM(edge);
+#if USE(JSVALUE64)
         if (!m_graph.m_plan.isFTL()) {
             if (!m_graph.hasExitSite(node->origin.semantic, BadType)) {
                 if (!edge->shouldSpeculateInt32() && edge->shouldSpeculateNumber()) {
@@ -5391,6 +5420,7 @@ private:
                 }
             }
         }
+#endif
         return false;
     }
 
@@ -5735,6 +5765,7 @@ private:
             node->setOpAndDefaultFlags(CompareStrictEq);
             return;
         }
+#if USE(JSVALUE64)
         if (node->child1()->shouldSpeculateNeitherDoubleNorHeapBigInt()
             && node->child2()->shouldSpeculateNotDouble()) {
             fixEdge<NeitherDoubleNorHeapBigIntUse>(node->child1());
@@ -5749,6 +5780,7 @@ private:
             node->setOpAndDefaultFlags(CompareStrictEq);
             return;
         }
+#endif // USE(JSVALUE64)
 #endif // !USE(BIGINT32)
     }
 

@@ -85,8 +85,15 @@ void AssemblyHelpers::decrementSuperSamplerCount()
 void AssemblyHelpers::purifyNaN(FPRReg inputFPR, FPRReg resultFPR)
 {
     ASSERT(inputFPR != fpTempRegister);
+#if CPU(ADDRESS64)
     move64ToDouble(TrustedImm64(std::bit_cast<uint64_t>(PNaN)), fpTempRegister);
     moveDoubleConditionallyDouble(DoubleEqualAndOrdered, inputFPR, inputFPR, inputFPR, fpTempRegister, resultFPR);
+#else
+    moveDouble(inputFPR, resultFPR);
+    auto notNaN = branchIfNotNaN(resultFPR);
+    move64ToDouble(TrustedImm64(std::bit_cast<uint64_t>(PNaN)), resultFPR);
+    notNaN.link(this);
+#endif
 }
 
 #if ENABLE(SAMPLING_FLAGS)
@@ -792,13 +799,16 @@ AssemblyHelpers::JumpList AssemblyHelpers::hasMegamorphicProperty(VM& vm, GPRReg
 
     return slowCases;
 }
+#endif
 
 AssemblyHelpers::JumpList AssemblyHelpers::loadCacheableIdentifierImpl(GPRReg propertyGPR, GPRReg destGPR, bool propertyIsString, bool propertyIsSymbol, bool canBeRope)
 {
     JumpList slowCases;
     if (propertyIsString) {
         loadPtr(Address(propertyGPR, JSString::offsetOfValue()), destGPR);
-        slowCases.append(branchIfNotAtomStringImpl(propertyGPR, destGPR, canBeRope));
+        if (canBeRope)
+            slowCases.append(branchIfRopeStringImpl(destGPR));
+        slowCases.append(branchTest32(Zero, Address(destGPR, StringImpl::flagsOffset()), TrustedImm32(StringImpl::flagIsAtom())));
     } else if (propertyIsSymbol)
         loadPtr(Address(propertyGPR, Symbol::offsetOfSymbolImpl()), destGPR);
     else {
@@ -975,6 +985,7 @@ void AssemblyHelpers::emitRandomThunk(VM& vm, GPRReg scratch0, GPRReg scratch1, 
 
     emitRandomThunkImpl(*this, scratch0, scratch1, scratch2, result, loadFromHigh, storeToHigh, loadFromLow, storeToLow);
 }
+#endif
 
 void AssemblyHelpers::emitAllocateWithNonNullAllocator(GPRReg resultGPR, const JITAllocator& allocator, GPRReg allocatorGPR, GPRReg scratchGPR, JumpList& slowPath, SlowAllocationResult slowAllocationResult)
 {
@@ -1590,6 +1601,9 @@ void AssemblyHelpers::storeWasmContextInstance(GPRReg src)
 void AssemblyHelpers::prepareWasmCallOperation(GPRReg instanceGPR)
 {
     UNUSED_PARAM(instanceGPR);
+#if !USE(BUILTIN_FRAME_ADDRESS) || ASSERT_ENABLED
+    storePtr(GPRInfo::callFrameRegister, Address(instanceGPR, JSWebAssemblyInstance::offsetOfTemporaryCallFrame()));
+#endif
 }
 
 #endif // ENABLE(WEBASSEMBLY)

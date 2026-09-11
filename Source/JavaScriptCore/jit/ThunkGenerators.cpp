@@ -246,6 +246,9 @@ static MacroAssemblerCodeRef<JITThunkPtrTag> virtualThunkFor(VM& vm, CallMode mo
         slowCase.append(jit.branchIfNotCell(GPRInfo::regT0, DoNotHaveTagRegisters));
     } else
         slowCase.append(jit.branchIfNotCell(GPRInfo::regT0));
+#else
+    slowCase.append(jit.branchIfNotCell(GPRInfo::regT1));
+#endif
     auto notJSFunction = jit.branchIfNotFunction(GPRInfo::regT0);
 
     // Now we know we have a JSFunction.
@@ -781,6 +784,7 @@ MacroAssemblerCodeRef<JITThunkPtrTag> stringEqualThunkGenerator(VM& vm)
     LinkBuffer patchBuffer(jit, GLOBAL_THUNK_ID, LinkBuffer::Profile::Thunk);
     return FINALIZE_THUNK(patchBuffer, JITThunkPtrTag, "StringEqual"_s, "String equal stub");
 }
+#endif
 
 enum class RelativeNegativeIndex : bool { No, Yes };
 template <RelativeNegativeIndex relativeNegativeIndex>
@@ -1302,6 +1306,20 @@ MacroAssemblerCodeRef<JITThunkPtrTag> absThunkGenerator(VM& vm)
     integerIsIntMin.link(&jit);
     jit.convertInt32ToDouble(GPRInfo::regT0, FPRInfo::fpRegT0);
     jit.jump().linkTo(absFPR0Label, &jit);
+#else
+    MacroAssembler::Jump nonIntJump;
+    jit.loadInt32Argument(0, SpecializedThunkJIT::regT0, nonIntJump);
+    jit.rshift32(SpecializedThunkJIT::regT0, MacroAssembler::TrustedImm32(31), SpecializedThunkJIT::regT1);
+    jit.add32(SpecializedThunkJIT::regT1, SpecializedThunkJIT::regT0);
+    jit.xor32(SpecializedThunkJIT::regT1, SpecializedThunkJIT::regT0);
+    jit.appendFailure(jit.branchTest32(MacroAssembler::Signed, SpecializedThunkJIT::regT0));
+    jit.returnInt32(SpecializedThunkJIT::regT0);
+    nonIntJump.link(&jit);
+    // Shame about the double int conversion here.
+    jit.loadDoubleArgument(0, SpecializedThunkJIT::fpRegT0, SpecializedThunkJIT::regT0);
+    jit.absDouble(SpecializedThunkJIT::fpRegT0, SpecializedThunkJIT::fpRegT1);
+    jit.returnDouble(SpecializedThunkJIT::fpRegT1);
+#endif
     return jit.finalize(vm.jitStubs->ctiNativeTailCall(vm), "abs");
 }
 

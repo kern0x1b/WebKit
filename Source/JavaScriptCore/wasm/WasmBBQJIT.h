@@ -103,7 +103,8 @@ public:
             Gpr = 2,
             Fpr = 3,
             Global = 4,
-            StackArgument = 5
+            StackArgument = 5,
+            Gpr2 = 6
         };
 
         Location()
@@ -1161,8 +1162,7 @@ public:
 
             if (sumOverflows<uint64_t>(constantPointer, boundary)) {
                 recordJumpToThrowException(ExceptionType::OutOfBoundsMemoryAccess, m_jit.jump());
-                consume(pointer);
-                return Location::fromGPR(wasmScratchGPR);
+                return Location::fromGPR(wasmBaseMemoryPointer);
             }
 
             pointerLocation = Location::fromGPR(scratches.gpr(0));

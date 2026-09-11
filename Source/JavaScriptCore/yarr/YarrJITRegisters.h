@@ -162,6 +162,7 @@ public:
 #endif
 };
 
+#if ENABLE(YARR_JIT_REGEXP_TEST_INLINE)
 class YarrJITRegisters {
 public:
     YarrJITRegisters() = default;
@@ -227,6 +228,8 @@ public:
     static constexpr FPRReg vectorScratch2 = InvalidFPRReg;
     static constexpr FPRReg vectorScratch3 = InvalidFPRReg;
 };
+#endif
+
 
 } } // namespace JSC::Yarr
 

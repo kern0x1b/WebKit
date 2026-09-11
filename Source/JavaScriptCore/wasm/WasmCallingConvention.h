@@ -156,7 +156,7 @@ private:
         Width width = widthForBytes(alignedSize);
 
         if (count < regArgs.size())
-            return ArgumentLocation { ValueLocation { regArgs[count++] }, width };
+            return marshallRegs(regArgs, count, valueSize, width);
 
         count++;
         ArgumentLocation result = { role == CallRole::Caller ? ValueLocation::stackArgument(stackOffset) : ValueLocation::stack(stackOffset), width };

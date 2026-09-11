@@ -662,15 +662,17 @@ void JIT::emit_op_jneq(const JSInstruction* currentInstruction)
     addJump(branch32(NotEqual, regT0, regT1), target);
 }
 
+#endif
+
 void JIT::emit_op_throw(const JSInstruction* currentInstruction)
 {
     auto bytecode = currentInstruction->as<OpThrow>();
     uint32_t bytecodeOffset = m_bytecodeIndex.offset();
 
-    using BaselineJITRegisters::Throw::thrownValueGPR;
+    using BaselineJITRegisters::Throw::thrownValueJSR;
     using BaselineJITRegisters::Throw::bytecodeOffsetGPR;
 
-    emitGetVirtualRegister(bytecode.m_value, thrownValueGPR);
+    emitGetVirtualRegister(bytecode.m_value, thrownValueJSR);
     move(TrustedImm32(bytecodeOffset), bytecodeOffsetGPR);
     jumpThunk(CodeLocationLabel { vm().getCTIStub(op_throw_handlerGenerator).retaggedCode<NoPtrTag>() });
 }
@@ -1100,6 +1102,8 @@ void JIT::emitSlow_op_jnstricteq(const JSInstruction* currentInstruction, Vector
     callOperation(operationCompareStrictEq, regT2, regT0, regT1);
     emitJumpSlowToHot(branchTest32(Zero, returnValueGPR), target);
 }
+
+#endif
 
 void JIT::emit_op_to_number(const JSInstruction* currentInstruction)
 {

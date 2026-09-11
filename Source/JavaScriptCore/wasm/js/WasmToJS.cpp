@@ -211,6 +211,7 @@ std::expected<MacroAssemblerCodeRef<WasmEntryPtrTag>, BindingFailure> wasmToJS(c
                 hasMaterializedDoubleEncodeOffset = true;
             }
         };
+#endif
 
         unsigned marshalledGPRs = 0;
         unsigned marshalledFPRs = 0;

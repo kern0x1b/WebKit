@@ -1650,6 +1650,7 @@ void testSpillUseLargerThanDef()
                 jit.move(CCallHelpers::TrustedImm64(0xffffffffffffffff), reg.gpr());
             });
         });
+#endif
 
     Value* phi = tail->appendNew<Value>(proc, Phi, Int64, Origin());
     thenResult->setPhi(phi);

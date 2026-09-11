@@ -4207,9 +4207,6 @@ JSC_DEFINE_JIT_OPERATION(operationStringLastIndexOfWithIndex, UCPUStrictInt32, (
     else
         startPosition = std::min<uint32_t>(position, maxStart);
 
-    auto otherView = argument->view(globalObject);
-    OPERATION_RETURN_IF_EXCEPTION(scope, 0);
-
     if (argumentLength == 1)
         OPERATION_RETURN(scope, stringLastIndexOfOneCharOperation(globalObject, scope, base, otherView[0], startPosition));
 

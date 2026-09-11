@@ -119,6 +119,9 @@ public:
     }
 
     EncodedJSValue encodedBits() const { return reinterpret_cast<EncodedJSValue>(m_ptr); }
+#else
+#error "Unsupported configuration"
+#endif
 
     static EncodedJSValue encodeNativeCallee(NativeCallee* callee)
     {

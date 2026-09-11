@@ -968,6 +968,7 @@ void testLoadBaseIndexShift2()
 
 void testLoadBaseIndexShift32()
 {
+#if CPU(ADDRESS64)
     Procedure proc;
     BasicBlock* root = proc.addBlock();
     auto arguments = cCallArgumentValues<intptr_t, intptr_t>(proc, root);
@@ -987,6 +988,7 @@ void testLoadBaseIndexShift32()
     char* ptr = std::bit_cast<char*>(&value);
     for (unsigned i = 0; i < 10; ++i)
         CHECK_EQ(invoke<int32_t>(*code, ptr - (static_cast<intptr_t>(1) << static_cast<intptr_t>(32)) * i, i), 12341234);
+#endif
 }
 
 void testOptimizeMaterialization()

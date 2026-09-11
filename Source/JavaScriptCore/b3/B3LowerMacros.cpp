@@ -1055,6 +1055,7 @@ private:
                 m_changed = true;
                 break;
             }
+#endif
 
             default:
                 break;
@@ -1668,8 +1669,9 @@ private:
 
         return result;
     }
+#endif
 
-    PatchpointValue* emitWasmGCAllocationPatchpoint(BasicBlock* allocBlock, Value* allocator, BasicBlock* fastInit, BasicBlock* slowPath, std::optional<unsigned> constantCellSize = std::nullopt)
+    PatchpointValue* emitWasmGCAllocationPatchpoint(BasicBlock* allocBlock, Value* allocator, BasicBlock* fastInit, BasicBlock* slowPath)
     {
         PatchpointValue* patchpoint = allocBlock->appendNew<PatchpointValue>(m_proc, pointerType(), m_origin);
         if (isARM64()) {

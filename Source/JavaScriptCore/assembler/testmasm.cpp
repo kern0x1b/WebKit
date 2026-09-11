@@ -344,13 +344,25 @@ void testGetEffectiveAddress(size_t pointer, ptrdiff_t length, int32_t offset, C
 void testBranchTruncateDoubleToInt32(double val, int32_t expected)
 {
     const uint64_t valAsUInt = std::bit_cast<uint64_t>(val);
+#if CPU(BIG_ENDIAN)
+    const bool isBigEndian = true;
+#else
+    const bool isBigEndian = false;
+#endif
     CHECK_EQ(compileAndRun<int>([&] (CCallHelpers& jit) {
         emitFunctionPrologue(jit);
         jit.subPtr(CCallHelpers::TrustedImm32(stackAlignmentBytes()), MacroAssembler::stackPointerRegister);
-        jit.store32(CCallHelpers::TrustedImm32(valAsUInt & 0xffffffff),
-            MacroAssembler::Address(MacroAssembler::stackPointerRegister));
-        jit.store32(CCallHelpers::TrustedImm32(valAsUInt >> 32),
-            MacroAssembler::Address(MacroAssembler::stackPointerRegister, 4));
+        if (isBigEndian) {
+            jit.store32(CCallHelpers::TrustedImm32(valAsUInt >> 32),
+                MacroAssembler::Address(MacroAssembler::stackPointerRegister));
+            jit.store32(CCallHelpers::TrustedImm32(valAsUInt & 0xffffffff),
+                MacroAssembler::Address(MacroAssembler::stackPointerRegister, 4));
+        } else {
+            jit.store32(CCallHelpers::TrustedImm32(valAsUInt & 0xffffffff),
+                MacroAssembler::Address(MacroAssembler::stackPointerRegister));
+            jit.store32(CCallHelpers::TrustedImm32(valAsUInt >> 32),
+                MacroAssembler::Address(MacroAssembler::stackPointerRegister, 4));
+        }
         jit.loadDouble(MacroAssembler::Address(MacroAssembler::stackPointerRegister), FPRInfo::fpRegT0);
 
         MacroAssembler::Jump done;
@@ -4686,6 +4698,8 @@ void testLoad16SignedExtendTo32_voidp_RegisterID()
 #endif
 }
 
+#if CPU(ADDRESS64)
+
 struct SignedLoad8to64Scenario {
     int8_t src;
     int64_t expected;
@@ -4913,6 +4927,8 @@ void testLoad32SignedExtendTo64_voidp_RegisterID()
         });
 #endif
 }
+
+#endif // CPU(ADDRESS64)
 
 #if CPU(ARM64)
 void testLoadStorePair64Int64()
@@ -6439,7 +6455,9 @@ void testLoadBaseIndex()
         });
         uint16_t array[] = { 1, 2, 0x7ff3, 0x8000, 5, };
         CHECK_EQ(invoke<uint32_t>(test, array, static_cast<UCPURegister>(3)), 0x7ff3);
+#if CPU(REGISTER64)
         CHECK_EQ(invoke<uint64_t>(test, array, static_cast<UCPURegister>(4)), 0xffff8000);
+#endif
     }
     {
         auto test = compile([=](CCallHelpers& jit) {
@@ -6450,7 +6468,9 @@ void testLoadBaseIndex()
         });
         uint16_t array[] = { UINT16_MAX - 1, UINT16_MAX - 2, UINT16_MAX - 3, UINT16_MAX - 4, static_cast<uint16_t>(-1), };
         CHECK_EQ(invoke<uint32_t>(test, array, static_cast<UCPURegister>(3)), static_cast<uint32_t>(-1));
+#if CPU(REGISTER64)
         CHECK_EQ(invoke<uint64_t>(test, array, static_cast<UCPURegister>(3)), static_cast<uint32_t>(-1));
+#endif
     }
 
     // load8
@@ -6485,7 +6505,9 @@ void testLoadBaseIndex()
         });
         uint8_t array[] = { 1, 2, 0x73, 0x80, 5, };
         CHECK_EQ(invoke<uint32_t>(test, array, static_cast<UCPURegister>(3)), 0x73);
+#if CPU(REGISTER64)
         CHECK_EQ(invoke<uint64_t>(test, array, static_cast<UCPURegister>(4)), 0xffffff80);
+#endif
     }
     {
         auto test = compile([=](CCallHelpers& jit) {
@@ -6496,7 +6518,9 @@ void testLoadBaseIndex()
         });
         uint8_t array[] = { UINT8_MAX - 1, UINT8_MAX - 2, UINT8_MAX - 3, UINT8_MAX - 4, static_cast<uint8_t>(-1), };
         CHECK_EQ(invoke<uint32_t>(test, array, static_cast<UCPURegister>(3)), static_cast<uint32_t>(-1));
+#if CPU(REGISTER64)
         CHECK_EQ(invoke<uint64_t>(test, array, static_cast<UCPURegister>(3)), static_cast<uint32_t>(-1));
+#endif
     }
 
     // loadDouble
@@ -8601,6 +8625,7 @@ void run(const char* filter) WTF_IGNORES_THREAD_SAFETY_ANALYSIS
 
     RUN(testLoadStorePair32());
 
+#if CPU(ADDRESS64)
     RUN(testLoadAcq8SignedExtendTo64_Address_RegisterID());
     RUN(testLoad8SignedExtendTo64_Address_RegisterID());
     RUN(testLoad8SignedExtendTo64_BaseIndex_RegisterID());
@@ -8615,6 +8640,7 @@ void run(const char* filter) WTF_IGNORES_THREAD_SAFETY_ANALYSIS
     RUN(testLoad32SignedExtendTo64_Address_RegisterID());
     RUN(testLoad32SignedExtendTo64_BaseIndex_RegisterID());
     RUN(testLoad32SignedExtendTo64_voidp_RegisterID());
+#endif
 
 #if CPU(ARM64)
     RUN(testLoadStorePair64Int64());

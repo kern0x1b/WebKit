@@ -57,6 +57,20 @@ public:
     {
     }
 
+    // Wrapper to encode JSCell GPR into JSValue.
+    class CellValue {
+    public:
+        explicit CellValue(GPRReg gpr)
+            : m_gpr(gpr)
+        {
+        }
+
+        GPRReg gpr() const { return m_gpr; }
+
+    private:
+        GPRReg m_gpr;
+    };
+
     // Base class for constant materializers.
     // It offers DerivedClass::materialize and poke functions.
     class ConstantMaterializer { };
@@ -198,8 +212,8 @@ private:
             crossDestinations.fill(InvalidGPRReg);
         }
 
-        template<unsigned a, unsigned b, unsigned c, unsigned d, unsigned e, unsigned f, unsigned g>
-        ArgCollection(ArgCollection<a, b, c, d, e, f, g>& other)
+        template<unsigned a, unsigned b, unsigned c, unsigned d, unsigned e, unsigned f, unsigned g, unsigned h>
+        ArgCollection(ArgCollection<a, b, c, d, e, f, g, h>& other)
         {
             gprSources = other.gprSources;
             gprDestinations = other.gprDestinations;
@@ -209,55 +223,69 @@ private:
             crossDestinations = other.crossDestinations;
         }
 
-        ArgCollection<numGPRArgs + 1, numGPRSources + 1, numFPRArgs, numFPRSources, numCrossSources, nonArgGPRs, extraPoke> pushRegArg(GPRReg argument, GPRReg destination)
+        ArgCollection<numGPRArgs + 1, numGPRSources + 1, numFPRArgs, numFPRSources, numCrossSources, extraGPRArgs, nonArgGPRs, extraPoke> pushRegArg(GPRReg argument, GPRReg destination)
         {
-            ArgCollection<numGPRArgs + 1, numGPRSources + 1, numFPRArgs, numFPRSources, numCrossSources, nonArgGPRs, extraPoke> result(*this);
+            ArgCollection<numGPRArgs + 1, numGPRSources + 1, numFPRArgs, numFPRSources, numCrossSources, extraGPRArgs, nonArgGPRs, extraPoke> result(*this);
 
             result.gprSources[numGPRSources] = argument;
             result.gprDestinations[numGPRSources] = destination;
             return result;
         }
 
-        ArgCollection<numGPRArgs, numGPRSources, numFPRArgs + 1, numFPRSources + 1, numCrossSources, nonArgGPRs, extraPoke> pushRegArg(FPRReg argument, FPRReg destination)
+        ArgCollection<numGPRArgs, numGPRSources, numFPRArgs + 1, numFPRSources + 1, numCrossSources, extraGPRArgs, nonArgGPRs, extraPoke> pushRegArg(FPRReg argument, FPRReg destination)
         {
-            ArgCollection<numGPRArgs, numGPRSources, numFPRArgs + 1, numFPRSources + 1, numCrossSources, nonArgGPRs, extraPoke> result(*this);
+            ArgCollection<numGPRArgs, numGPRSources, numFPRArgs + 1, numFPRSources + 1, numCrossSources, extraGPRArgs, nonArgGPRs, extraPoke> result(*this);
 
             result.fprSources[numFPRSources] = argument;
             result.fprDestinations[numFPRSources] = destination;
             return result;
         }
 
-        ArgCollection<numGPRArgs, numGPRSources, numFPRArgs + 1, numFPRSources, numCrossSources + 1, nonArgGPRs, extraPoke> pushRegArg(FPRReg argument, GPRReg destination)
+        ArgCollection<numGPRArgs, numGPRSources, numFPRArgs + 1, numFPRSources, numCrossSources + 1, extraGPRArgs, nonArgGPRs, extraPoke> pushRegArg(FPRReg argument, GPRReg destination)
         {
-            ArgCollection<numGPRArgs, numGPRSources, numFPRArgs + 1, numFPRSources, numCrossSources + 1, nonArgGPRs, extraPoke> result(*this);
+            ArgCollection<numGPRArgs, numGPRSources, numFPRArgs + 1, numFPRSources, numCrossSources + 1, extraGPRArgs, nonArgGPRs, extraPoke> result(*this);
 
             result.crossSources[numCrossSources] = argument;
             result.crossDestinations[numCrossSources] = destination;
             return result;
         }
 
-        ArgCollection<numGPRArgs, numGPRSources + 1, numFPRArgs, numFPRSources, numCrossSources, nonArgGPRs + 1, extraPoke> pushNonArg(GPRReg argument, GPRReg destination)
+        ArgCollection<numGPRArgs, numGPRSources + 1, numFPRArgs, numFPRSources, numCrossSources, extraGPRArgs + 1, nonArgGPRs, extraPoke> pushExtraRegArg(GPRReg argument, GPRReg destination)
         {
-            ArgCollection<numGPRArgs, numGPRSources + 1, numFPRArgs, numFPRSources, numCrossSources, nonArgGPRs + 1, extraPoke> result(*this);
+            ArgCollection<numGPRArgs, numGPRSources + 1, numFPRArgs, numFPRSources, numCrossSources, extraGPRArgs + 1, nonArgGPRs, extraPoke> result(*this);
 
             result.gprSources[numGPRSources] = argument;
             result.gprDestinations[numGPRSources] = destination;
             return result;
         }
 
-        ArgCollection<numGPRArgs + 1, numGPRSources, numFPRArgs, numFPRSources, numCrossSources, nonArgGPRs, extraPoke> addGPRArg()
+        ArgCollection<numGPRArgs, numGPRSources + 1, numFPRArgs, numFPRSources, numCrossSources, extraGPRArgs, nonArgGPRs + 1, extraPoke> pushNonArg(GPRReg argument, GPRReg destination)
         {
-            return ArgCollection<numGPRArgs + 1, numGPRSources, numFPRArgs, numFPRSources, numCrossSources, nonArgGPRs, extraPoke>(*this);
+            ArgCollection<numGPRArgs, numGPRSources + 1, numFPRArgs, numFPRSources, numCrossSources, extraGPRArgs, nonArgGPRs + 1, extraPoke> result(*this);
+
+            result.gprSources[numGPRSources] = argument;
+            result.gprDestinations[numGPRSources] = destination;
+            return result;
         }
 
-        ArgCollection<numGPRArgs + 1, numGPRSources, numFPRArgs, numFPRSources, numCrossSources, nonArgGPRs, extraPoke> addStackArg(GPRReg)
+        ArgCollection<numGPRArgs + 1, numGPRSources, numFPRArgs, numFPRSources, numCrossSources, extraGPRArgs, nonArgGPRs, extraPoke> addGPRArg()
         {
-            return ArgCollection<numGPRArgs + 1, numGPRSources, numFPRArgs, numFPRSources, numCrossSources, nonArgGPRs, extraPoke>(*this);
+            return ArgCollection<numGPRArgs + 1, numGPRSources, numFPRArgs, numFPRSources, numCrossSources, extraGPRArgs, nonArgGPRs, extraPoke>(*this);
         }
 
-        ArgCollection<numGPRArgs, numGPRSources, numFPRArgs + 1, numFPRSources, numCrossSources, nonArgGPRs, extraPoke> addStackArg(FPRReg)
+        ArgCollection<numGPRArgs, numGPRSources, numFPRArgs, numFPRSources, numCrossSources, extraGPRArgs + 1, nonArgGPRs, extraPoke> addGPRExtraArg()
         {
-            return ArgCollection<numGPRArgs, numGPRSources, numFPRArgs + 1, numFPRSources, numCrossSources, nonArgGPRs, extraPoke>(*this);
+            return ArgCollection<numGPRArgs, numGPRSources, numFPRArgs, numFPRSources, numCrossSources, extraGPRArgs + 1, nonArgGPRs, extraPoke>(*this);
+        }
+
+        ArgCollection<numGPRArgs + 1, numGPRSources, numFPRArgs, numFPRSources, numCrossSources, extraGPRArgs, nonArgGPRs, extraPoke> addStackArg(GPRReg)
+        {
+            return ArgCollection<numGPRArgs + 1, numGPRSources, numFPRArgs, numFPRSources, numCrossSources, extraGPRArgs, nonArgGPRs, extraPoke>(*this);
+        }
+
+        ArgCollection<numGPRArgs, numGPRSources, numFPRArgs + 1, numFPRSources, numCrossSources, extraGPRArgs, nonArgGPRs, extraPoke> addStackArg(FPRReg)
+        {
+            return ArgCollection<numGPRArgs, numGPRSources, numFPRArgs + 1, numFPRSources, numCrossSources, extraGPRArgs, nonArgGPRs, extraPoke>(*this);
         }
 
         ArgCollection<numGPRArgs, numGPRSources, numFPRArgs + 1, numFPRSources, numCrossSources, extraGPRArgs + 2, nonArgGPRs, extraPoke> addFPRArgInGPRs()
@@ -267,10 +295,10 @@ private:
 
         ArgCollection<numGPRArgs, numGPRSources, numFPRArgs, numFPRSources, numCrossSources, extraGPRArgs, nonArgGPRs, extraPoke + 1> addPoke()
         {
-            return ArgCollection<numGPRArgs, numGPRSources, numFPRArgs, numFPRSources, numCrossSources, nonArgGPRs, extraPoke + 1>(*this);
+            return ArgCollection<numGPRArgs, numGPRSources, numFPRArgs, numFPRSources, numCrossSources, extraGPRArgs, nonArgGPRs, extraPoke + 1>(*this);
         }
 
-        unsigned argCount(GPRReg) { return numGPRArgs; }
+        unsigned argCount(GPRReg) { return numGPRArgs + extraGPRArgs; }
         unsigned argCount(FPRReg) { return numFPRArgs; }
 
         // store GPR -> GPR assignments
@@ -305,7 +333,7 @@ private:
         return result;
     }
 
-    ALWAYS_INLINE unsigned calculatePokeOffset(unsigned currentGPRArgument, unsigned currentFPRArgument, unsigned numCrossSources, unsigned nonArgGPRs, unsigned extraPoke)
+    ALWAYS_INLINE unsigned calculatePokeOffset(unsigned currentGPRArgument, unsigned currentFPRArgument, unsigned numCrossSources, unsigned extraGPRArgs, unsigned nonArgGPRs, unsigned extraPoke)
     {
         // Clang claims that it cannot find the symbol for FPRReg/GPRReg::numberOfArgumentRegisters when they are passed directly to std::max... seems like a bug
         unsigned numberOfFPArgumentRegisters = FPRInfo::numberOfArgumentRegisters;
@@ -313,6 +341,7 @@ private:
 
         UNUSED_PARAM(nonArgGPRs);
 
+        currentGPRArgument += extraGPRArgs;
         currentFPRArgument -= numCrossSources;
 
         IGNORE_WARNINGS_BEGIN("type-limits")
@@ -326,18 +355,18 @@ private:
     }
 
     template<typename ArgType>
-    ALWAYS_INLINE void pokeForArgument(ArgType arg, unsigned currentGPRArgument, unsigned currentFPRArgument, unsigned numCrossSources, unsigned nonArgGPRs, unsigned extraPoke)
+    ALWAYS_INLINE void pokeForArgument(ArgType arg, unsigned currentGPRArgument, unsigned currentFPRArgument, unsigned numCrossSources, unsigned extraGPRArgs, unsigned nonArgGPRs, unsigned extraPoke)
     {
-        unsigned pokeOffset = calculatePokeOffset(currentGPRArgument, currentFPRArgument, numCrossSources, nonArgGPRs, extraPoke);
+        unsigned pokeOffset = calculatePokeOffset(currentGPRArgument, currentFPRArgument, numCrossSources, extraGPRArgs, nonArgGPRs, extraPoke);
         if constexpr (std::derived_from<ArgType, ConstantMaterializer>)
             arg.store(*this, addressForPoke(pokeOffset));
         else
             poke(arg, pokeOffset);
     }
 
-    ALWAYS_INLINE bool stackAligned(unsigned currentGPRArgument, unsigned currentFPRArgument, unsigned numCrossSources, unsigned nonArgGPRs, unsigned extraPoke)
+    ALWAYS_INLINE bool stackAligned(unsigned currentGPRArgument, unsigned currentFPRArgument, unsigned numCrossSources, unsigned extraGPRArgs, unsigned nonArgGPRs, unsigned extraPoke)
     {
-        unsigned pokeOffset = calculatePokeOffset(currentGPRArgument, currentFPRArgument, numCrossSources, nonArgGPRs, extraPoke);
+        unsigned pokeOffset = calculatePokeOffset(currentGPRArgument, currentFPRArgument, numCrossSources, extraGPRArgs, nonArgGPRs, extraPoke);
         return !(pokeOffset & 1);
     }
 
@@ -674,7 +703,7 @@ private:
         }
 
 
-        pokeForArgument(arg, numGPRArgs, numFPRArgs, numCrossSources, nonArgGPRs, extraPoke);
+        pokeForArgument(arg, numGPRArgs, numFPRArgs, numCrossSources, extraGPRArgs, nonArgGPRs, extraPoke);
         setupArgumentsImpl<OperationType>(argSourceRegs.addGPRArg(), args...);
     }
 
@@ -774,19 +803,19 @@ public:
     template<typename OperationType, typename... Args>
     ALWAYS_INLINE void setupArguments(Args... args)
     {
-        setupArgumentsEntryImpl<OperationType>(ArgCollection<0, 0, 0, 0, 0, 0, 0>(), args...);
+        setupArgumentsEntryImpl<OperationType>(ArgCollection<0, 0, 0, 0, 0, 0, 0, 0>(), args...);
     }
 
     template<typename OperationType, typename... Args>
     ALWAYS_INLINE void setupArgumentsForIndirectCall(GPRReg functionGPR, Args... args)
     {
-        setupArgumentsEntryImpl<OperationType>(ArgCollection<0, 0, 0, 0, 0, 0, 0>().pushNonArg(functionGPR, GPRInfo::nonArgGPR0), args...);
+        setupArgumentsEntryImpl<OperationType>(ArgCollection<0, 0, 0, 0, 0, 0, 0, 0>().pushNonArg(functionGPR, GPRInfo::nonArgGPR0), args...);
     }
 
     template<typename OperationType, typename... Args>
     ALWAYS_INLINE void setupArgumentsForIndirectCall(Address address, Args... args)
     {
-        setupArgumentsEntryImpl<OperationType>(ArgCollection<0, 0, 0, 0, 0, 0, 0>().pushNonArg(address.base, GPRInfo::nonArgGPR0), args...);
+        setupArgumentsEntryImpl<OperationType>(ArgCollection<0, 0, 0, 0, 0, 0, 0, 0>().pushNonArg(address.base, GPRInfo::nonArgGPR0), args...);
     }
 
     void setupResults(GPRReg destA, GPRReg destB = InvalidGPRReg)
@@ -849,6 +878,18 @@ public:
         else
             return GPRInfo::returnValueGPR2;
     }
+#else
+    template<typename T>
+    requires (isExceptionOperationResult<T>)
+    static constexpr GPRReg operationExceptionRegister()
+    {
+        static_assert(assertNotOperationSignature<T>);
+        if constexpr (std::is_same_v<T, ExceptionOperationResult<void>>)
+            return GPRInfo::returnValueGPR;
+        else
+            return GPRInfo::returnValueGPR2;
+    }
+#endif
 
     template<typename T>
     requires (!isExceptionOperationResult<T>)
@@ -879,7 +920,7 @@ public:
             GPRReg oldFrameSizeGPR = temp2;
             {
                 GPRReg argCountGPR = oldFrameSizeGPR;
-                load32(Address(framePointerRegister, CallFrameSlot::argumentCountIncludingThis * static_cast<int>(sizeof(Register)) + LowWordOffset), argCountGPR);
+                load32(Address(framePointerRegister, CallFrameSlot::argumentCountIncludingThis * static_cast<int>(sizeof(Register)) + PayloadOffset), argCountGPR);
 
                 {
                     GPRReg numParametersGPR = temp1;
@@ -907,7 +948,7 @@ public:
             // The new frame size is just the number of arguments plus the
             // frame header size, aligned
             ASSERT(newFrameSizeGPR != newFramePointer);
-            load32(Address(stackPointerRegister, CallFrameSlot::argumentCountIncludingThis * static_cast<int>(sizeof(Register)) + LowWordOffset - sizeof(CallerFrameAndPC)),
+            load32(Address(stackPointerRegister, CallFrameSlot::argumentCountIncludingThis * static_cast<int>(sizeof(Register)) + PayloadOffset - sizeof(CallerFrameAndPC)),
                 newFrameSizeGPR);
             add32(TrustedImm32(stackAlignmentRegisters() + CallFrame::headerSizeInRegisters - 1), newFrameSizeGPR);
             and32(TrustedImm32(-stackAlignmentRegisters()), newFrameSizeGPR);
@@ -954,7 +995,7 @@ public:
         return calleeFrame.withOffset(CallFrameSlot::callee * static_cast<int>(sizeof(Register)))
             // calleeFrame is from the caller's perspective
             .withOffset(-safeCast<int>(sizeof(CallerFrameAndPC)))
-            .withOffset(LowWordOffset)
+            .withOffset(PayloadOffset)
             .withOffset(offset);
     }
 

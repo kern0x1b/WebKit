@@ -311,10 +311,12 @@ void testCheckMegaCombo()
     auto arguments = cCallArgumentValues<intptr_t, size_t>(proc, root);
     Value* base = arguments[0];
     Value* index = arguments[1];
-    index = root->appendNew<Value>(
-        proc, ZExt32, Origin(),
-        root->appendNew<Value>(
-            proc, Trunc, Origin(), index));
+    if (is64Bit()) {
+        index = root->appendNew<Value>(
+            proc, ZExt32, Origin(),
+            root->appendNew<Value>(
+                proc, Trunc, Origin(), index));
+    }
 
     Value* ptr = root->appendNew<Value>(
         proc, Add, Origin(), base,
@@ -366,8 +368,10 @@ void testCheckTrickyMegaCombo()
     auto arguments = cCallArgumentValues<intptr_t, size_t>(proc, root);
     Value* base = arguments[0];
     Value* index = arguments[1];
-    index = root->appendNew<Value>(proc, ZExt32, Origin(),
-        root->appendNew<Value>(proc, Trunc, Origin(), index));
+    if (is64Bit()) {
+        index = root->appendNew<Value>(proc, ZExt32, Origin(),
+            root->appendNew<Value>(proc, Trunc, Origin(), index));
+    }
     index = root->appendNew<Value>(proc, Add, Origin(),
         index,
         root->appendNew<ConstPtrValue>(proc, Origin(), 1));
@@ -422,10 +426,12 @@ void testCheckTwoMegaCombos()
     auto arguments = cCallArgumentValues<intptr_t, size_t>(proc, root);
     Value* base = arguments[0];
     Value* index = arguments[1];
-    index = root->appendNew<Value>(
-        proc, ZExt32, Origin(),
-        root->appendNew<Value>(
-            proc, Trunc, Origin(), index));
+    if (is64Bit()) {
+        index = root->appendNew<Value>(
+            proc, ZExt32, Origin(),
+            root->appendNew<Value>(
+                proc, Trunc, Origin(), index));
+    }
 
     Value* ptr = root->appendNew<Value>(
         proc, Add, Origin(), base,
@@ -493,10 +499,12 @@ void testCheckTwoNonRedundantMegaCombos()
 
     Value* base = arguments[0];
     Value* index = arguments[1];
-    index = root->appendNew<Value>(
-        proc, ZExt32, Origin(),
-        root->appendNew<Value>(
-            proc, Trunc, Origin(), index));
+    if (is64Bit()) {
+        index = root->appendNew<Value>(
+            proc, ZExt32, Origin(),
+            root->appendNew<Value>(
+                proc, Trunc, Origin(), index));
+    }
     Value* branchPredicate = root->appendNew<Value>(
         proc, BitAnd, Origin(),
         arguments[2],
@@ -758,6 +766,7 @@ void testCheckAdd64()
                 jit.addDouble(FPRInfo::fpRegT1, FPRInfo::fpRegT0);
                 jit.emitFunctionEpilogue();
                 jit.ret();
+#endif
     });
     root->appendNewControlValue(
         proc, Return, Origin(),
@@ -770,6 +779,7 @@ void testCheckAdd64()
     CHECK_EQ(invoke<double>(*code, 42ll, 42ll), 84.0);
     CHECK_EQ(invoke<double>(*code, 9223372036854775807ll, 42ll), static_cast<double>(9223372036854775807ll) + 42.0);
 }
+#endif
 
 void testCheckAdd64Range()
 {
@@ -1250,6 +1260,7 @@ void testCheckSub64()
     CHECK_EQ(invoke<double>(*code, 42ll, 42ll), 0.0);
     CHECK_EQ(invoke<double>(*code, -9223372036854775807ll, 42ll), doubleSub(static_cast<double>(-9223372036854775807ll), 42.0));
 }
+#endif
 
 void testCheckSubFold(int a, int b)
 {
@@ -1361,6 +1372,7 @@ void testCheckNeg64()
     CHECK_EQ(invoke<double>(*code, 42ll), -42.0);
     CHECK_EQ(invoke<double>(*code, -9223372036854775807ll - 1), 9223372036854775808.0);
 }
+#endif
 
 void testCheckMul()
 {
@@ -1526,6 +1538,7 @@ void testCheckMul64()
     CHECK_EQ(invoke<double>(*code, 42, 42), 42.0 * 42.0);
     CHECK_EQ(invoke<double>(*code, 9223372036854775807ll, 42), static_cast<double>(9223372036854775807ll) * 42.0);
 }
+#endif
 
 void testCheckMulFold(int a, int b)
 {
@@ -1691,6 +1704,7 @@ void testCheckMul64SShr()
     CHECK_EQ(invoke<double>(*code, 42ll, 42ll), (42.0 / 2.0) * (42.0 / 2.0));
     CHECK_EQ(invoke<double>(*code, 10000000000ll, 10000000000ll), 25000000000000000000.0);
 }
+#endif
 
 template<typename LeftFunctor, typename RightFunctor, typename InputType>
 void genericTestCompare(

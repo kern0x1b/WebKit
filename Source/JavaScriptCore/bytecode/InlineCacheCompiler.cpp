@@ -1615,6 +1615,7 @@ static MacroAssemblerCodeRef<JITThunkPtrTag> getByValWithThisSlowPathCodeGenerat
     LinkBuffer patchBuffer(jit, GLOBAL_THUNK_ID, LinkBuffer::Profile::InlineCache);
     return FINALIZE_THUNK(patchBuffer, JITThunkPtrTag, "get_by_val_with_this_slow"_s, "DataIC get_by_val_with_this_slow");
 }
+#endif
 
 static MacroAssemblerCodeRef<JITThunkPtrTag> putByIdSlowPathCodeGenerator(VM& vm)
 {
@@ -3131,6 +3132,7 @@ void InlineCacheCompiler::generateWithGuard(unsigned index, AccessCase& accessCa
             restoreLiveRegistersFromStackForCall(spillState, { });
             jit.jump().linkTo(doneLabel, &jit);
         }
+#endif
         return;
     }
 
@@ -3756,7 +3758,7 @@ void InlineCacheCompiler::generateAccessCase(unsigned index, AccessCase& accessC
 
         if (isInlineOffset(accessCase.m_offset)) {
             jit.storeValue(
-                valueGPR,
+                valueRegs,
                 CCallHelpers::Address(
                     base,
                     JSObject::offsetOfInlineStorage() +
@@ -3764,7 +3766,7 @@ void InlineCacheCompiler::generateAccessCase(unsigned index, AccessCase& accessC
         } else {
             jit.loadPtr(CCallHelpers::Address(base, JSObject::butterflyOffset()), scratchGPR);
             jit.storeValue(
-                valueGPR,
+                valueRegs,
                 CCallHelpers::Address(
                     scratchGPR, offsetInButterfly(accessCase.m_offset) * sizeof(JSValue)));
         }
@@ -3913,7 +3915,7 @@ void InlineCacheCompiler::generateAccessCase(unsigned index, AccessCase& accessC
 
         if (isInlineOffset(accessCase.m_offset)) {
             jit.storeValue(
-                valueGPR,
+                valueRegs,
                 CCallHelpers::Address(
                     baseGPR,
                     JSObject::offsetOfInlineStorage() +
@@ -3922,7 +3924,7 @@ void InlineCacheCompiler::generateAccessCase(unsigned index, AccessCase& accessC
             if (!allocating)
                 jit.loadPtr(CCallHelpers::Address(baseGPR, JSObject::butterflyOffset()), scratchGPR);
             jit.storeValue(
-                valueGPR,
+                valueRegs,
                 CCallHelpers::Address(scratchGPR, offsetInButterfly(accessCase.m_offset) * sizeof(JSValue)));
         }
 
@@ -4575,13 +4577,14 @@ void InlineCacheCompiler::emitIntrinsicGetter(IntrinsicGetterAccessCase& accessC
             succeed();
             return;
         }
+#endif
 
 #if USE(LARGE_TYPED_ARRAYS)
         jit.load64(MacroAssembler::Address(baseGPR, JSArrayBufferView::offsetOfLength()), valueGPR);
         jit.boxInt52(valueGPR, valueGPR, m_scratchGPR, m_scratchFPR);
 #else
         jit.load32(MacroAssembler::Address(baseGPR, JSArrayBufferView::offsetOfLength()), valueGPR);
-        jit.boxInt32(valueGPR, valueGPR);
+        jit.boxInt32(valueGPR, valueRegs);
 #endif
         succeed();
         return;
@@ -4619,7 +4622,7 @@ void InlineCacheCompiler::emitIntrinsicGetter(IntrinsicGetterAccessCase& accessC
 #if USE(LARGE_TYPED_ARRAYS)
             jit.boxInt52(valueGPR, valueGPR, m_scratchGPR, m_scratchFPR);
 #else
-            jit.boxInt32(valueGPR, valueGPR);
+            jit.boxInt32(valueGPR, valueRegs);
 #endif
             allocator.restoreReusedRegistersByPopping(jit, preservedState);
             succeed();
@@ -4632,6 +4635,7 @@ void InlineCacheCompiler::emitIntrinsicGetter(IntrinsicGetterAccessCase& accessC
                 m_failAndIgnore.append(postPushFailAndIgnore);
             return;
         }
+#endif
 
 #if USE(LARGE_TYPED_ARRAYS)
         jit.load64(MacroAssembler::Address(baseGPR, JSArrayBufferView::offsetOfLength()), valueGPR);
@@ -4673,19 +4677,20 @@ void InlineCacheCompiler::emitIntrinsicGetter(IntrinsicGetterAccessCase& accessC
 #if USE(LARGE_TYPED_ARRAYS)
             jit.boxInt52(valueGPR, valueGPR, m_scratchGPR, m_scratchFPR);
 #else
-            jit.boxInt32(valueGPR, valueGPR);
+            jit.boxInt32(valueGPR, valueRegs);
 #endif
             allocator.restoreReusedRegistersByPopping(jit, preservedState);
             succeed();
             return;
         }
+#endif
 
 #if USE(LARGE_TYPED_ARRAYS)
         jit.load64(MacroAssembler::Address(baseGPR, JSArrayBufferView::offsetOfByteOffset()), valueGPR);
         jit.boxInt52(valueGPR, valueGPR, m_scratchGPR, m_scratchFPR);
 #else
         jit.load32(MacroAssembler::Address(baseGPR, JSArrayBufferView::offsetOfByteOffset()), valueGPR);
-        jit.boxInt32(valueGPR, valueGPR);
+        jit.boxInt32(valueGPR, valueRegs);
 #endif
         succeed();
         return;
@@ -4934,6 +4939,7 @@ RefPtr<AccessCase> InlineCacheCompiler::tryFoldToMegamorphic(CodeBlock* codeBloc
 
             return AccessCase::create(vm(), codeBlock, AccessCase::IndexedMegamorphicLoad, nullptr);
         }
+#endif
         case AccessType::PutByIdStrict:
         case AccessType::PutByIdSloppy: {
             auto identifier = m_propertyCache.m_identifier;
@@ -5045,6 +5051,7 @@ RefPtr<AccessCase> InlineCacheCompiler::tryFoldToMegamorphic(CodeBlock* codeBloc
 
             return AccessCase::create(vm(), codeBlock, AccessCase::IndexedMegamorphicIn, nullptr);
         }
+#endif
         default:
             break;
         }

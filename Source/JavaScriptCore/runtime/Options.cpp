@@ -563,15 +563,6 @@ static void scaleJITPolicy()
 static void disableAllSignalHandlerBasedOptions();
 #endif
 
-#if OS(DARWIN) && CPU(ARM64)
-static unsigned numberOfSuperAndPerformanceCores()
-{
-    if (int32_t coresOverride = Options::numberOfSuperAndPerformanceCoresOverride(); coresOverride > 0)
-        return coresOverride;
-    return hwNumberOfCores(CoreCategory::Super) + hwNumberOfCores(CoreCategory::Performance);
-}
-#endif
-
 static void overrideDefaults()
 {
 #if OS(DARWIN)
@@ -1401,7 +1392,7 @@ void Options::dumpAllOptions(DumpLevel level, ASCIILiteral title)
 {
     StringBuilder builder;
     dumpAllOptions(builder, level, title, { }, "   "_s, "\n"_s, DumpDefaults);
-    dataLog(builder.toString());
+    dataLog(builder.toString().utf8().data());
 }
 
 void Options::dumpOption(StringBuilder& builder, DumpLevel level, Options::ID id,

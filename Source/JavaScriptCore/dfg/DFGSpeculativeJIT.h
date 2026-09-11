@@ -969,6 +969,7 @@ public:
         m_gprs.retain(reg, virtualRegister, SpillOrderJS);
         info.initJSValue(node, refCount, reg, format);
     }
+#endif
 
     void cellTupleResultWithoutUsingChildren(GPRReg reg, Node* node, unsigned index)
     {

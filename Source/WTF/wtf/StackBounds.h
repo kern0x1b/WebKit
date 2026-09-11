@@ -145,15 +145,6 @@ private:
         return result;
     }
 
-    // Obtaining stack bounds from the OS may be slow; only Thread class should do it.
-    // Other callers should use the cached bounds via Thread::currentSingleton().stack()
-    static StackBounds currentThreadStackBounds()
-    {
-        auto result = currentThreadStackBoundsInternal();
-        result.checkConsistency();
-        return result;
-    }
-
     void checkConsistency() const
     {
 #if ASSERT_ENABLED

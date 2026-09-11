@@ -140,6 +140,7 @@ public:
         else
             store64(src.gpr(), dst);
     }
+#endif
     
     void store32FromReg(Reg src, Address dst)
     {
@@ -174,6 +175,7 @@ public:
         else
             load64(src, dst.gpr());
     }
+#endif
     
     void load32ToReg(Address src, Reg dst)
     {

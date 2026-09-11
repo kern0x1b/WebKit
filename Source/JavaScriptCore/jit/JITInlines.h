@@ -42,6 +42,7 @@ ALWAYS_INLINE bool JIT::isOperandConstantDouble(VirtualRegister src)
         return false;
     return getConstantOperand(src).isDouble();
 }
+#endif
 
 ALWAYS_INLINE bool JIT::isOperandConstantInt(VirtualRegister src)
 {

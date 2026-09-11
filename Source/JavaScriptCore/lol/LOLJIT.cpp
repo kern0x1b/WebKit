@@ -144,6 +144,11 @@ RefPtr<BaselineJITCode> LOLJIT::compileAndLinkWithoutFinalizing(JITCompilationEf
     int frameTopOffset = stackPointerOffsetFor(m_unlinkedCodeBlock) * sizeof(Register);
     addPtr(TrustedImm32(frameTopOffset), callFrameRegister, regT1);
     JumpList stackOverflow;
+#if !CPU(ADDRESS64)
+    unsigned maxFrameSize = -frameTopOffset;
+    if (maxFrameSize > Options::reservedZoneSize()) [[unlikely]]
+        stackOverflow.append(branchPtr(Above, regT1, callFrameRegister));
+#endif
     stackOverflow.append(branchPtr(GreaterThan, AbsoluteAddress(m_vm->addressOfSoftStackLimit()), regT1));
 
     move(regT1, stackPointerRegister);

@@ -264,6 +264,7 @@ void JIT::compileOpCall(const JSInstruction* instruction)
         store.link(this);
         storePtrToMetadata(BaselineJITRegisters::Call::callLinkInfoGPR, bytecode, Op::Metadata::offsetOfCachedCallee());
         done.link(this);
+#endif
     }
 
     materializePointerIntoMetadata(bytecode, Op::Metadata::offsetOfCallLinkInfo(), BaselineJITRegisters::Call::callLinkInfoGPR);

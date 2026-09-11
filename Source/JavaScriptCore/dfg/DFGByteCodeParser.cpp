@@ -4497,12 +4497,15 @@ auto ByteCodeParser::handleIntrinsicCall(Node* callee, Operand resultOperand, Ca
                 return CallOptimizationResult::DidNothing;
             insertChecks();
             VirtualRegister operand = virtualRegisterForArgumentIncludingThis(1, registerOffset);
-            setResult(addToGraph(FiatInt52, get(operand)));
+            if (enableInt52())
+                setResult(addToGraph(FiatInt52, get(operand)));
+            else
+                setResult(get(operand));
             return CallOptimizationResult::Inlined;
         }
 
         case JSMapGetIntrinsic: {
-            if (argumentCountIncludingThis < 2)
+            if (argumentCountIncludingThis < 2 || !is64Bit())
                 return CallOptimizationResult::DidNothing;
 
             insertChecks();
@@ -4519,7 +4522,7 @@ auto ByteCodeParser::handleIntrinsicCall(Node* callee, Operand resultOperand, Ca
 
         case JSSetHasIntrinsic:
         case JSMapHasIntrinsic: {
-            if (argumentCountIncludingThis < 2)
+            if (argumentCountIncludingThis < 2 || !is64Bit())
                 return CallOptimizationResult::DidNothing;
 
             insertChecks();
@@ -5544,6 +5547,9 @@ auto ByteCodeParser::handleIntrinsicCall(Node* callee, Operand resultOperand, Ca
             Node* resultNode = addToGraph(Node::VarArg, FunctionBind, OpInfo(0), OpInfo(static_cast<unsigned>(argumentCountIncludingThis >= 2 ? argumentCountIncludingThis - 2 : 0)));
             setResult(resultNode);
             return CallOptimizationResult::Inlined;
+#else
+            return CallOptimizationResult::DidNothing;
+#endif
         }
 
         case NumberConstructorIntrinsic: {
@@ -5977,6 +5983,10 @@ bool ByteCodeParser::handleDOMJITCall(Node* callTarget, Operand result, const DO
 template<typename ChecksFunctor>
 bool ByteCodeParser::handleIntrinsicGetter(Operand result, SpeculatedType prediction, const GetByVariant& variant, Node* thisNode, Node* unwrapped, const ChecksFunctor& insertChecks)
 {
+#if USE(LARGE_TYPED_ARRAYS)
+    static_assert(enableInt52());
+#endif
+
     if (thisNode != unwrapped)
         return false;
 
@@ -7757,24 +7767,26 @@ void ByteCodeParser::handlePutById(
     if (putByStatus.viaGlobalProxy())
         unwrapped = addToGraph(UnwrapGlobalProxy, Edge(base, GlobalProxyUse));
 
-    if (putByStatus.isCustomAccessor()) {
-        if (putByStatus.numVariants() == 1) {
-            // Special path for custom accessors since custom's offset does not have any meanings.
-            // So, this is completely different from Simple one. But we have a chance to optimize it.
-            auto variant = putByStatus[0];
-            if (m_graph.compilation()) [[unlikely]]
-                m_graph.compilation()->noticeInlinedPutById();
-            addToGraph(FilterPutByStatus, OpInfo(m_graph.m_plan.recordedStatuses().addPutByStatus(currentCodeOrigin(), putByStatus)), base);
-            if (!check(variant.conditionSet())) {
-                emitPutById(base, identifier, value, putByStatus, isDirect, ecmaMode);
+    if (is64Bit()) {
+        if (putByStatus.isCustomAccessor()) {
+            if (putByStatus.numVariants() == 1) {
+                // Special path for custom accessors since custom's offset does not have any meanings.
+                // So, this is completely different from Simple one. But we have a chance to optimize it.
+                auto variant = putByStatus[0];
+                if (m_graph.compilation()) [[unlikely]]
+                    m_graph.compilation()->noticeInlinedPutById();
+                addToGraph(FilterPutByStatus, OpInfo(m_graph.m_plan.recordedStatuses().addPutByStatus(currentCodeOrigin(), putByStatus)), base);
+                if (!check(variant.conditionSet())) {
+                    emitPutById(base, identifier, value, putByStatus, isDirect, ecmaMode);
+                    return;
+                }
+                auto* data = m_graph.m_callCustomAccessorData.add();
+                data->m_customAccessor = variant.customAccessorSetter();
+                data->m_identifier = identifier;
+                addToGraph(CheckStructure, OpInfo(m_graph.addStructureSet(variant.oldStructure())), unwrapped);
+                addToGraph(CallCustomAccessorSetter, OpInfo(data), OpInfo(SpecNone), base, value);
                 return;
             }
-            auto* data = m_graph.m_callCustomAccessorData.add();
-            data->m_customAccessor = variant.customAccessorSetter();
-            data->m_identifier = identifier;
-            addToGraph(CheckStructure, OpInfo(m_graph.addStructureSet(variant.oldStructure())), unwrapped);
-            addToGraph(CallCustomAccessorSetter, OpInfo(data), OpInfo(SpecNone), base, value);
-            return;
         }
     }
 

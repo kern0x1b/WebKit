@@ -92,6 +92,7 @@ void JITDivGenerator::generateFastPath(CCallHelpers& jit)
 
         jit.mulDouble(m_rightFPR, m_leftFPR);
     } else
+#endif
     {
         loadOperand(jit, m_rightOperand, m_right, m_rightFPR);
 

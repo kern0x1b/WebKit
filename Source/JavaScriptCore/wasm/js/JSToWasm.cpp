@@ -265,6 +265,9 @@ MacroAssemblerCodeRef<JITThunkPtrTag> createJSToWasmJITShared()
         jit.load32(CCallHelpers::Address(GPRInfo::regWS0, WebAssemblyFunction::offsetOfFrameSize()), GPRInfo::regWS1);
         jit.subPtr(CCallHelpers::stackPointerRegister, GPRInfo::regWS1, GPRInfo::regWS1);
 
+#if !CPU(ADDRESS64)
+        stackOverflow.append(jit.branchPtr(CCallHelpers::Above, GPRInfo::regWS1, GPRInfo::callFrameRegister));
+#endif
         stackOverflow.append(jit.branchPtr(CCallHelpers::LessThanOrEqual, GPRInfo::regWS1, CCallHelpers::Address(GPRInfo::wasmContextInstancePointer, JSWebAssemblyInstance::offsetOfSoftStackLimit())));
 
         jit.move(GPRInfo::regWS1, CCallHelpers::stackPointerRegister);

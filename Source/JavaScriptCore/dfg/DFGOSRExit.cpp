@@ -691,6 +691,7 @@ void OSRExit::compileExit(CCallHelpers& jit, VM& vm, const OSRExit& exit, const 
             jit.boxInt52(GPRInfo::regT0, GPRInfo::regT0, GPRInfo::regT1, FPRInfo::fpRegT0);
             jit.store64(GPRInfo::regT0, scratch + index);
             break;
+#endif
 
         default:
             break;
@@ -768,6 +769,7 @@ void OSRExit::compileExit(CCallHelpers& jit, VM& vm, const OSRExit& exit, const 
     jit.move(CCallHelpers::TrustedImmPtr(scratch), srcBufferGPR);
     jit.move(CCallHelpers::framePointerRegister, destBufferGPR);
     CCallHelpers::CopySpooler spooler(CCallHelpers::CopySpooler::BufferRegs::AllowModification, jit, srcBufferGPR, destBufferGPR, GPRInfo::regT0, GPRInfo::regT1);
+#endif
     for (size_t index = 0; index < operands.size(); ++index) {
         const ValueRecovery& recovery = operands[index];
         Operand operand = operands.operandForIndex(index);
