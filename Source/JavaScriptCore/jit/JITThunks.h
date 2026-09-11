@@ -201,6 +201,7 @@ public:
     CodePtr<JITThunkPtrTag> ctiInternalFunctionConstruct(VM&);
 
     MacroAssemblerCodeRef<JITThunkPtrTag> ctiStub(CommonJITThunkID);
+    MacroAssemblerCodeRef<JITThunkPtrTag> ctiStub(VM&, CommonJITThunkID thunkID) { return ctiStub(thunkID); }
     MacroAssemblerCodeRef<JITThunkPtrTag> ctiStub(VM&, ThunkGenerator);
     MacroAssemblerCodeRef<JITThunkPtrTag> ctiSlowPathFunctionStub(VM&, SlowPathFunction);
 

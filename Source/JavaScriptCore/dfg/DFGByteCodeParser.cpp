@@ -10221,7 +10221,7 @@ void ByteCodeParser::parseBlock(unsigned limit)
             ResolveType resolveType;
             GetPutInfo getPutInfo(0);
             Structure* structure = nullptr;
-            WatchpointSet* watchpoints = nullptr;
+            InlineWatchpointSet* watchpoints = nullptr;
             uintptr_t operand;
             {
                 ConcurrentJSLocker locker(m_inlineStackTop->m_profiledBlock->m_lock);
@@ -10280,14 +10280,14 @@ void ByteCodeParser::parseBlock(unsigned limit)
             case GlobalLexicalVar:
             case GlobalLexicalVarWithVarInjectionChecks: {
                 addToGraph(Phantom, get(bytecode.m_scope));
-                WatchpointSet* watchpointSet;
+                InlineWatchpointSet* watchpointSet = nullptr;
                 ScopeOffset offset;
                 JSSegmentedVariableObject* scopeObject = uncheckedDowncast<JSSegmentedVariableObject>(JSScope::constantScopeForCodeBlock(resolveType, m_inlineStackTop->m_codeBlock));
                 {
                     ConcurrentJSLocker locker(scopeObject->symbolTable()->m_lock);
-                    SymbolTableEntry entry = scopeObject->symbolTable()->get(locker, uid);
-                    watchpointSet = entry.watchpointSet();
-                    offset = entry.scopeOffset();
+                    offset = scopeObject->symbolTable()->get(locker, uid).scopeOffset();
+                    if (SymbolTableEntry* entry = scopeObject->symbolTable()->entryFor(locker, offset))
+                        watchpointSet = entry->watchpointSet();
                 }
                 if (watchpointSet && watchpointSet->state() == IsWatched) {
                     // This has a fun concurrency story. There is the possibility of a race in two
@@ -10414,7 +10414,7 @@ void ByteCodeParser::parseBlock(unsigned limit)
             ResolveType resolveType;
             GetPutInfo getPutInfo(0);
             Structure* structure = nullptr;
-            WatchpointSet* watchpoints = nullptr;
+            InlineWatchpointSet* watchpoints = nullptr;
             uintptr_t operand;
             {
                 ConcurrentJSLocker locker(m_inlineStackTop->m_profiledBlock->m_lock);
@@ -10473,8 +10473,10 @@ void ByteCodeParser::parseBlock(unsigned limit)
 
                 JSSegmentedVariableObject* scopeObject = uncheckedDowncast<JSSegmentedVariableObject>(JSScope::constantScopeForCodeBlock(resolveType, m_inlineStackTop->m_codeBlock));
                 if (watchpoints) {
-                    SymbolTableEntry entry = scopeObject->symbolTable()->get(uid);
-                    ASSERT_UNUSED(entry, watchpoints == entry.watchpointSet());
+                    ConcurrentJSLocker locker(scopeObject->symbolTable()->m_lock);
+                    ScopeOffset entryOffset = scopeObject->symbolTable()->get(locker, uid).scopeOffset();
+                    SymbolTableEntry* entry = scopeObject->symbolTable()->entryFor(locker, entryOffset);
+                    ASSERT_UNUSED(entry, entry && watchpoints == entry->watchpointSet());
                 }
                 Node* valueNode = get(bytecode.m_value);
                 addToGraph(PutGlobalVariable, OpInfo(operand), weakJSConstant(scopeObject), valueNode);

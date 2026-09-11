@@ -696,19 +696,32 @@ JSValue JSBigInt::exponentiate(JSGlobalObject* globalObject, int32_t base, int32
 }
 #endif
 
-#if USE(JSVALUE32_64)
-using TwoDigit = uint64_t;
-#else
+#if CPU(REGISTER64)
 using TwoDigit = UInt128;
+#else
+using TwoDigit = uint64_t;
 #endif
 
-template<size_t N>
-class CombaAccumulator {
+// Where a column's carry lives between the three accumulator digits. Keeping it in the condition
+// flags is the shortest instruction sequence, but there is only one flag register, so a scheduler
+// interleaving several accumulations has to save and restore it. Materializing the carry as a value
+// costs an instruction per term and lets those accumulations overlap freely.
+enum class CarryForm : uint8_t { Flags, Value };
+
+template<CarryForm carryForm>
+class DigitColumnAccumulator {
     using Digit = JSBigInt::Digit;
 public:
     ALWAYS_INLINE void mac(Digit a, Digit b)
     {
         TwoDigit prod = static_cast<TwoDigit>(a) * b;
+        if constexpr (carryForm == CarryForm::Value) {
+            Digit carry = 0;
+            t0 = addCarrying(t0, static_cast<Digit>(prod), 0, carry);
+            t1 = addCarrying(t1, static_cast<Digit>(prod >> JSBigInt::digitBits), carry, carry);
+            t2 += carry;
+            return;
+        }
         TwoDigit sum0 = static_cast<TwoDigit>(t0) + static_cast<Digit>(prod);
         t0 = static_cast<Digit>(sum0);
         TwoDigit sum1 = static_cast<TwoDigit>(t1) + static_cast<Digit>(prod >> JSBigInt::digitBits) + static_cast<Digit>(sum0 >> JSBigInt::digitBits);
@@ -746,13 +759,53 @@ public:
         return result;
     }
 
+    ALWAYS_INLINE Digit low() const { return t0; }
+
+    // True once the running sum fits in the single digit low() returns, which is what callers rely
+    // on at the final column.
+    ALWAYS_INLINE bool fitsInLow() const { return !t1 && !t2; }
+
+private:
+    ALWAYS_INLINE static Digit addCarrying(Digit a, Digit b, Digit carryIn, Digit& carryOut)
+    {
+#if COMPILER(GCC) && GCC_VERSION < 150000
+        Digit sum = 0;
+        bool carry0 = __builtin_add_overflow(a, b, &sum);
+        Digit result = 0;
+        bool carry1 = __builtin_add_overflow(sum, carryIn, &result);
+        carryOut = static_cast<Digit>(carry0 | carry1);
+        return result;
+#else
+        if constexpr (sizeof(Digit) == sizeof(unsigned long long)) {
+            unsigned long long out = 0;
+            Digit result = __builtin_addcll(a, b, carryIn, &out);
+            carryOut = static_cast<Digit>(out);
+            return result;
+        } else {
+            unsigned out = 0;
+            Digit result = __builtin_addc(a, b, carryIn, &out);
+            carryOut = static_cast<Digit>(out);
+            return result;
+        }
+#endif
+    }
+
+    Digit t0 { 0 };
+    Digit t1 { 0 };
+    Digit t2 { 0 };
+};
+
+template<size_t N>
+class CombaAccumulator {
+    using Digit = JSBigInt::Digit;
+public:
     template<size_t K, size_t I = 0>
     ALWAYS_INLINE void computeColumn(std::span<const Digit, N> a, std::span<const Digit, N> b)
     {
         if constexpr (I < N) {
             constexpr int J = static_cast<int>(K) - static_cast<int>(I);
             if constexpr (J >= 0 && J < static_cast<int>(N))
-                mac(a[I], b[J]);
+                m_accumulator.mac(a[I], b[J]);
             computeColumn<K, I + 1>(a, b);
         }
     }
@@ -930,6 +983,8 @@ std::span<JSBigInt::Digit> JSBigInt::multiplySchoolbook(std::span<const Digit> x
     ASSERT(!temp);
     return resultSpan.first(i);
 }
+
+#undef MULTIPLY_BODY
 
 // For the needs of cachedMod, computes only the low result.size() digits of X * Y.
 void JSBigInt::multiplySpecialLow(std::span<const Digit> xSpan, std::span<const Digit> ySpan, std::span<Digit> resultSpan)
@@ -1574,7 +1629,7 @@ JSBigInt::Digit JSBigInt::inplaceSub(std::span<Digit> z, std::span<const Digit> 
 
 bool JSBigInt::greaterThanOrEqual(std::span<const Digit> a, std::span<const Digit> b)
 {
-    ASSERT(a.size() == b.size());
+    RELEASE_ASSERT(a.size() == b.size());
     for (size_t i = a.size(); i-- > 0;) {
         if (a[i] != b[i])
             return a[i] > b[i];
@@ -1595,7 +1650,7 @@ static std::span<JSBigInt::Digit> spanCopy(std::span<JSBigInt::Digit> z, std::sp
 std::span<JSBigInt::Digit> JSBigInt::leftShift(std::span<Digit> z, std::span<const Digit> x, unsigned shift)
 {
     ASSERT(shift < digitBits);
-    ASSERT(z.size() >= x.size());
+    RELEASE_ASSERT(z.size() >= x.size());
     if (shift == 0)
         return spanCopy(z, x);
 
@@ -2900,7 +2955,9 @@ JSBigInt::ImplResult JSBigInt::subImpl(JSGlobalObject* globalObject, BigIntImpl1
     // x - y == -(y - x)
     // (-x) - (-y) == y - x == -(x - y)
     ComparisonResult comparisonResult = absoluteCompare(x, y);
-    if (comparisonResult == ComparisonResult::GreaterThan || comparisonResult == ComparisonResult::Equal)
+    if (comparisonResult == ComparisonResult::Equal)
+        return zeroImpl(globalObject->vm());
+    if (comparisonResult == ComparisonResult::GreaterThan)
         return absoluteSub(globalObject, x, y, xSign);
 
     return absoluteSub(globalObject, y, x, !xSign);
@@ -3734,7 +3791,7 @@ inline std::span<JSBigInt::Digit> JSBigInt::absoluteBitwiseOp(std::span<const Di
     if (x.size() < y.size())
         std::swap(x, y);
 
-    ASSERT(x.size() >= y.size());
+    RELEASE_ASSERT(x.size() >= y.size());
 
     size_t numPairs = y.size();
     size_t maxLength = x.size();
@@ -3798,7 +3855,7 @@ std::span<JSBigInt::Digit> JSBigInt::absoluteXor(std::span<const Digit> x, std::
 
 std::span<JSBigInt::Digit> JSBigInt::absoluteAddOne(std::span<const Digit> x, std::span<Digit> result)
 {
-    ASSERT(result.size() >= addOneLength(x));
+    RELEASE_ASSERT(result.size() > x.size());
     Digit carry = 1;
     size_t i = 0;
     for (; i < x.size(); i++) {
@@ -3814,7 +3871,7 @@ std::span<JSBigInt::Digit> JSBigInt::absoluteAddOne(std::span<const Digit> x, st
 std::span<JSBigInt::Digit> JSBigInt::absoluteSubOne(std::span<const Digit> x, std::span<Digit> result)
 {
     ASSERT(!x.empty());
-    ASSERT(result.size() >= subOneLength(x));
+    RELEASE_ASSERT(result.size() >= x.size());
     Digit borrow = 1;
     for (size_t i = 0; i < x.size(); i++) {
         Digit newBorrow = 0;
@@ -4303,6 +4360,8 @@ JSValue JSBigInt::parseInt(JSGlobalObject* nullOrGlobalObjectForOOM, VM& vm, std
     unsigned limita = 'a' + (static_cast<int32_t>(radix) - 10);
     unsigned limitA = 'A' + (static_cast<int32_t>(radix) - 10);
     unsigned initialLength = length - p;
+    ASSERT(2 <= radix && radix <= 36);
+    size_t bitsPerChar = maxBitsPerCharTable[radix];
     Vector<Digit, 16> resultVector;
     while (p < length) {
         Checked<uint64_t, CrashOnOverflow> digit = 0;

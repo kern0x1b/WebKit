@@ -1200,6 +1200,12 @@ static ALWAYS_INLINE uint64_t copyEightBytesAndLoad(const CharType* source, Char
 
 static ALWAYS_INLINE uint32_t copyFourBytesAndLoad(const Latin1Character* source, Latin1Character* destination)
 {
+#if defined(WEBKIT_IOS6)
+    if constexpr (sizeof(CharType) == 1) {
+        memcpySpan(std::span<CharType> { cursor, span.size() }, span);
+        return latin1SpanNeedsJSONEscaping(span);
+    }
+#endif
     uint32_t word = WTF::unalignedLoad<uint32_t>(source);
     WTF::unalignedStore<uint32_t>(destination, word);
     return word;
@@ -1226,13 +1232,6 @@ static constexpr size_t narrowStride = sizeof(uint64_t);
 template<typename CharType, bool useShortCopyTier = false>
 static ALWAYS_INLINE bool stringCopySameType(std::span<const CharType> span, CharType* cursor)
 {
-#if defined(WEBKIT_IOS6)
-    if constexpr (sizeof(CharType) == 1) {
-        memcpySpan(std::span<CharType> { cursor, span.size() }, span);
-        return latin1SpanNeedsJSONEscaping(span);
-    }
-#endif
-#if (CPU(ARM64) || CPU(X86_64)) && COMPILER(CLANG)
 #if JSON_STRING_COPY_HAS_SIMD
     constexpr size_t stride = SIMD::stride<CharType>;
     if (span.size() >= stride) {
@@ -1379,6 +1378,7 @@ static ALWAYS_INLINE bool stringCopyUpconvert(std::span<const Latin1Character> s
         *cursor++ = character;
     }
     return false;
+#endif
 #endif
 }
 

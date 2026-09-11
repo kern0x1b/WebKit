@@ -830,7 +830,11 @@ static ThunkGenerator NODELETE thunkGeneratorForIntrinsic(Intrinsic intrinsic)
     case RandomIntrinsic:
         return randomThunkGenerator;
     case ObjectIsIntrinsic:
+#if USE(JSVALUE64)
         return objectIsThunkGenerator;
+#else
+        return nullptr;
+#endif
     case BoundFunctionCallIntrinsic:
         return boundFunctionCallGenerator;
     case RemoteFunctionCallIntrinsic:

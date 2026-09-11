@@ -48,6 +48,7 @@
 #endif
 #include <wtf/ASCIICType.h>
 #include <wtf/BitVector.h>
+#include <wtf/HexNumber.h>
 #include <wtf/ListDump.h>
 #include <wtf/MathExtras.h>
 #include <wtf/MonotonicTime.h>

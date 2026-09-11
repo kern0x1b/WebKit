@@ -780,6 +780,15 @@ inline JSValue::operator bool() const
     return tag() != EmptyValueTag;
 }
 
+inline int64_t reinterpretDoubleToInt64(double value)
+{
+    return std::bit_cast<int64_t>(value);
+}
+inline double reinterpretInt64ToDouble(int64_t value)
+{
+    return std::bit_cast<double>(value);
+}
+
 inline bool JSValue::operator==(const JSValue& other) const
 {
     return u.asInt64 == other.u.asInt64;
@@ -1015,15 +1024,6 @@ inline bool JSValue::isCell() const
 inline bool JSValue::isInt32() const
 {
     return (u.asInt64 & NumberTag) == NumberTag;
-}
-
-inline int64_t reinterpretDoubleToInt64(double value)
-{
-    return std::bit_cast<int64_t>(value);
-}
-inline double reinterpretInt64ToDouble(int64_t value)
-{
-    return std::bit_cast<double>(value);
 }
 
 ALWAYS_INLINE JSValue::JSValue(EncodeAsDoubleTag, double d)

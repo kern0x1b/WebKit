@@ -3376,6 +3376,7 @@ std::optional<char16_t> CharacterClass::hasSharedLeadSurrogate() const
     return commonLeadSurrogate;
 }
 
+
 } } // namespace JSC::Yarr
 
 WTF_ALLOW_UNSAFE_BUFFER_USAGE_END

@@ -162,6 +162,18 @@ inline bool canUseMegamorphicGetById(VM& vm, UniquedStringImpl* uid)
     return !parseIndex(*uid) && canUseMegamorphicGetByIdExcludingIndex(vm, uid);
 }
 
+inline bool NODELETE canUseMegamorphicPutFastPath(Structure* structure)
+{
+    while (true) {
+        if (structure->hasReadOnlyOrGetterSetterPropertiesExcludingProto() || structure->typeInfo().overridesGetPrototype() || structure->typeInfo().overridesPut() || structure->hasPolyProto())
+            return false;
+        JSValue prototype = structure->storedPrototype();
+        if (prototype.isNull())
+            return true;
+        structure = asObject(prototype)->structure();
+    }
+}
+
 inline bool canUseMegamorphicInById(VM& vm, UniquedStringImpl* uid)
 {
     return canUseMegamorphicGetById(vm, uid);
