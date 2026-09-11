@@ -829,6 +829,8 @@ end
 
 if C_LOOP or ARM64 or ARM64E or X86_64 or RISCV64
     const CalleeSaveRegisterCount = 0
+elsif ARMv7
+    const CalleeSaveRegisterCount = 5 + 2 * 2
 end
 
 const CalleeRegisterSaveSize = CalleeSaveRegisterCount * MachineRegisterSize
