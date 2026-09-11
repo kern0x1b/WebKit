@@ -388,7 +388,7 @@
 #elif BTSAN_ENABLED
 #define BUSE_SYSTEM_MALLOC 1
 #else
-#if BOS(DARWIN) && !BCPU(ADDRESS64)
+#if BOS(DARWIN) && !BCPU(ADDRESS64) && !defined(WEBKIT_IOS6_BMALLOC)
 #define BUSE_SYSTEM_MALLOC 1
 #else
 #define BUSE_SYSTEM_MALLOC 0
@@ -416,8 +416,16 @@
 #endif
 #endif
 
+#if !defined(BUSE_CLASSIC_BMALLOC)
+#if defined(WEBKIT_IOS6_BMALLOC) && !BUSE(LIBPAS) && !BUSE(MIMALLOC) && !BUSE(SYSTEM_MALLOC)
+#define BUSE_CLASSIC_BMALLOC 1
+#else
+#define BUSE_CLASSIC_BMALLOC 0
+#endif
+#endif
+
 #if BUSE(LIBPAS)
-#if BUSE(MIMALLOC) || BUSE(SYSTEM_MALLOC)
+#if BUSE(MIMALLOC) || BUSE(SYSTEM_MALLOC) || BUSE(CLASSIC_BMALLOC)
 #error "libpas, mimalloc, and system malloc are exclusive"
 #endif
 #elif BUSE(MIMALLOC)
@@ -430,6 +438,10 @@
 #endif
 #if BOS(WINDOWS)
 #error "System malloc configuration is not supported in Windows since aligned memory cannot be freed via ::free. Use mimalloc instead"
+#endif
+#elif BUSE(CLASSIC_BMALLOC)
+#if BUSE(LIBPAS) || BUSE(MIMALLOC) || BUSE(SYSTEM_MALLOC)
+#error "libpas, mimalloc, system malloc, and classic bmalloc are exclusive"
 #endif
 #else
 #error "libpas, mimalloc, or system malloc needs to be specified"

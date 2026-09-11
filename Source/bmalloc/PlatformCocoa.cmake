@@ -9,6 +9,12 @@ list(APPEND bmalloc_SOURCES
 )
 
 find_library(FOUNDATION_LIBRARY Foundation)
+
+if (NOT FOUNDATION_LIBRARY)  # ios6: allow missing frameworks
+
+    set(FOUNDATION_LIBRARY "")
+
+endif ()
 list(APPEND bmalloc_LIBRARIES ${FOUNDATION_LIBRARY})
 
 target_compile_options(bmalloc PRIVATE -fno-threadsafe-statics)
