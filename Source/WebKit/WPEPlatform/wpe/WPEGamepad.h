@@ -50,7 +50,7 @@ struct _WPEGamepadClass
                                   gdouble     weak_magnitude,
                                   guint       duration_ms);
 
-    gpointer padding[8];
+    gpointer padding[32];
 };
 
 /**

@@ -70,11 +70,9 @@
 #include <WebCore/FrameTreeSyncData.h>
 #include <WebCore/Image.h>
 #include <WebCore/LayoutRect.h>
-#include <WebCore/LocalDOMWindow.h>
 #include <WebCore/MIMETypeRegistry.h>
 #include <WebCore/NavigationScheduler.h>
 #include <WebCore/RemoteFrameLayoutInfo.h>
-#include <WebCore/SecurityOrigin.h>
 #include <WebCore/SecurityOriginData.h>
 #include <WebCore/SecurityPolicy.h>
 #include <WebCore/ShareableBitmapHandle.h>
@@ -358,7 +356,6 @@ void WebFrameProxy::didCommitLoad(const String& contentType, bool containsPlugin
     m_containsPluginDocument = containsPluginDocument;
     m_documentSecurityPolicy = WTF::move(documentSecurityPolicy);
     m_cspOriginsThatUpgradeInsecureNavigations = WTF::move(cspOriginsThatUpgradeInsecureNavigations);
-    m_lastActivationTimestamp = -MonotonicTime::infinity();
 
     RefPtr creator = parentFrame() ? parentFrame() : opener();
     updateDocumentSecurityOrigin(creator.get());
@@ -1061,35 +1058,6 @@ Ref<WebFrameProxy> WebFrameProxy::rootFrame()
     return rootFrame;
 }
 
-// https://html.spec.whatwg.org/multipage/interaction.html#activation-notification
-// Mirrors LocalDOMWindow::notifyActivated. We track activation in the UIProcess so that a
-// compromised WebContent process cannot fabricate transient activation when calling APIs
-// such as RequestDOMPasteAccess.
-void WebFrameProxy::notifyActivated(MonotonicTime activationTime)
-{
-    m_lastActivationTimestamp = activationTime;
-
-    for (RefPtr ancestor = m_parentFrame.get(); ancestor; ancestor = ancestor->m_parentFrame.get())
-        ancestor->m_lastActivationTimestamp = activationTime;
-
-    propagateActivationToSameOriginDescendants(securityOrigin()->data(), activationTime);
-}
-
-void WebFrameProxy::propagateActivationToSameOriginDescendants(const WebCore::SecurityOriginData& rootOrigin, MonotonicTime activationTime)
-{
-    for (Ref child : m_childFrames) {
-        if (child->securityOrigin()->data() == rootOrigin)
-            child->m_lastActivationTimestamp = activationTime;
-        child->propagateActivationToSameOriginDescendants(rootOrigin, activationTime);
-    }
-}
-
-bool WebFrameProxy::hasTransientActivation() const
-{
-    auto now = MonotonicTime::now();
-    return now >= m_lastActivationTimestamp && now < (m_lastActivationTimestamp + WebCore::LocalDOMWindow::transientActivationDuration());
-}
-
 bool WebFrameProxy::isMainFrame() const
 {
     return m_frameLoadState.isMainFrame() == IsMainFrame::Yes;
@@ -1262,7 +1230,7 @@ void WebFrameProxy::updateDocumentSecurityOrigin(WebFrameProxy* creator, ForInit
     m_documentSecurityOrigin = SecurityOrigin::create(url());
 }
 
-WebCore::CertificateInfo WebFrameProxy::provisionalCertificateInfoFromNetworkProcess(const URL& url) const
+WebCore::CertificateInfo WebFrameProxy::certificateInfoFromNetworkProcess(const URL& url) const
 {
     String hostAndPort = url.hostAndPort();
     if (!decltype(m_hostAndPortToCertificateInfo)::isValidKey(hostAndPort))
@@ -1294,7 +1262,7 @@ WebCore::CertificateInfo WebFrameProxy::provisionalCertificateInfoFromNetworkPro
 
 void WebFrameProxy::commitCertificateInfo(const URL& url, bool hasCertificateInfo)
 {
-    m_certificateInfo = hasCertificateInfo ? provisionalCertificateInfoFromNetworkProcess(url) : CertificateInfo();
+    m_certificateInfo = hasCertificateInfo ? certificateInfoFromNetworkProcess(url) : CertificateInfo();
 }
 
 void WebFrameProxy::receivedMainResourceResponseWithCertificateInfo(String&& hostAndPort, WebCore::CertificateInfo&& certificateInfo)
@@ -1306,13 +1274,13 @@ void WebFrameProxy::receivedMainResourceResponseWithCertificateInfo(String&& hos
         m_hostAndPortToCertificateInfo.set(WTF::move(hostAndPort), WTF::move(certificateInfo));
 }
 
-void WebFrameProxy::setCertificateInfoForProcessSwapOnNavigationResponse(const URL& url, WebCore::CertificateInfo&& certificateInfo)
+void WebFrameProxy::copyCertificateInfoForProcessSwapOnNavigationResponse(const URL& url, const WebFrameProxy& oldMainFrame)
 {
     ASSERT(isMainFrame());
-    ASSERT(!certificateInfo.isEmpty());
+    ASSERT(oldMainFrame.isMainFrame());
     ASSERT(m_hostAndPortToCertificateInfo.isEmpty());
 
-    m_hostAndPortToCertificateInfo.set(url.hostAndPort(), WTF::move(certificateInfo));
+    m_hostAndPortToCertificateInfo.set(url.hostAndPort(), oldMainFrame.certificateInfoFromNetworkProcess(url));
 }
 
 } // namespace WebKit

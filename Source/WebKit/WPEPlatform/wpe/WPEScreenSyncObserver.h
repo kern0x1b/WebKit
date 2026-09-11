@@ -57,7 +57,7 @@ struct _WPEScreenSyncObserverClass
     void (* stop)  (WPEScreenSyncObserver *observer);
     void (* sync)  (WPEScreenSyncObserver *observer);
 
-    gpointer padding[8];
+    gpointer padding[32];
 };
 
 WPE_API guint    wpe_screen_sync_observer_add_callback    (WPEScreenSyncObserver        *observer,
