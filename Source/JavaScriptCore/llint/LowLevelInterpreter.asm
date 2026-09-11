@@ -280,90 +280,36 @@ const VMSoftStackLimitOffset = VM::m_threadContext + VMThreadContext::m_traps + 
 
 # Registers
 
-if X86_64
-    const a0 = t6
-    const a1 = t1
-    const a2 = t2
-    const a3 = t3
-    const a4 = t4
-    const a5 = t7
-    const a6 = invalidGPR
-    const a7 = invalidGPR
+if JSVALUE64
+    const PC = t4 # When changing this, make sure LLIntPC is up to date in LLIntPCRanges.h
+    if ARM64 or ARM64E or RISCV64
+        const metadataTable = csr6
+        const PB = csr7
+        const numberTag = csr8
+        const notCellMask = csr9
+    elsif X86_64
+        const metadataTable = csr1
+        const PB = csr2
+        const numberTag = csr3
+        const notCellMask = csr4
+    elsif C_LOOP
+        const PB = csr0
+        const numberTag = csr1
+        const notCellMask = csr2
+        const metadataTable = csr3
+    end
 
-    const wa0 = a0
-    const wa1 = a1
-    const wa2 = a2
-    const wa3 = a3
-    const wa4 = a4
-    const wa5 = a5
-    const wa6 = a6
-    const wa7 = a7
-
-    const ws0 = t0
-    const ws1 = t5
-    const ws2 = invalidGPR
-    const ws3 = invalidGPR
-
-    const r0 = t0
-    const r1 = t2
-
-    const fa0 = ft0
-    const fa1 = ft1
-    const fa2 = ft2
-    const fa3 = ft3
-
-    const wfa0 = fa0
-    const wfa1 = fa1
-    const wfa2 = fa2
-    const wfa3 = fa3
-    const wfa4 = ft4
-    const wfa5 = ft5
-    const wfa6 = ft6
-    const wfa7 = ft7
-
-    const fr = fa0
 else
-    const a0 = t0
-    const a1 = t1
-    const a2 = t2
-    const a3 = t3
-    const a4 = t4
-    const a5 = t5
-    const a6 = t6
-    const a7 = t7
-
-    const wa0 = a0
-    const wa1 = a1
-    const wa2 = a2
-    const wa3 = a3
-    const wa4 = a4
-    const wa5 = a5
-    const wa6 = a6
-    const wa7 = a7
-
-    const ws0 = t9 # ws0 must be a non-argument/non-return GPR
-    const ws1 = t10
-    const ws2 = t11
-    const ws3 = t12
-
-    const r0 = a0
-    const r1 = a1
-
-    const fa0 = ft0
-    const fa1 = ft1
-    const fa2 = ft2
-    const fa3 = ft3
-
-    const wfa0 = fa0
-    const wfa1 = fa1
-    const wfa2 = fa2
-    const wfa3 = fa3
-    const wfa4 = ft4
-    const wfa5 = ft5
-    const wfa6 = ft6
-    const wfa7 = ft7
-
-    const fr = fa0
+    const PC = t4 # When changing this, make sure LLIntPC is up to date in LLIntPCRanges.h
+    if C_LOOP
+        const PB = csr0
+        const metadataTable = csr3
+    elsif ARMv7
+        const metadataTable = csr0
+        const PB = csr1
+    else
+        error
+    end
 end
 
 # Some register conventions.
@@ -732,7 +678,7 @@ const VectorSizeOffset = Vector::m_size
 
 # Some common utilities.
 macro crash()
-    if C_LOOP or ARMv7
+    if C_LOOP
         cloopCrash
     else
         call _llint_crash
@@ -902,7 +848,7 @@ end
 
 macro preserveCalleeSavesUsedByLLInt()
     subp CalleeSaveSpaceStackAligned, sp
-    if C_LOOP or ARMv7
+    if C_LOOP
         storep metadataTable, -PtrSize[cfr]
     elsif ARM64 or ARM64E
         storepairq csr8, csr9, -16[cfr]
@@ -921,7 +867,7 @@ macro preserveCalleeSavesUsedByLLInt()
 end
 
 macro restoreCalleeSavesUsedByLLInt()
-    if C_LOOP or ARMv7
+    if C_LOOP
         loadp -PtrSize[cfr], metadataTable
     elsif ARM64 or ARM64E
         loadpairq -32[cfr], csr6, csr7
@@ -940,7 +886,7 @@ macro restoreCalleeSavesUsedByLLInt()
 end
 
 macro forEachGPCalleeSave(func)
-    if ARM64 or ARM64E or ARMv7
+    if ARM64 or ARM64E
         func(csr0, 0)
         func(csr1, 1)
         func(csr2, 2)
@@ -963,7 +909,7 @@ macro forEachGPCalleeSave(func)
 end
 
 macro forEachFPCalleeSave(func)
-    if ARM64 or ARM64E or ARMv7
+    if ARM64 or ARM64E
         func(csfr0, 0)
         func(csfr1, 1)
         func(csfr2, 2)
@@ -979,7 +925,7 @@ macro forEachFPCalleeSave(func)
 end
 
 macro copyCalleeSavesToBuffer(buffer)
-    if ARM64 or ARM64E or ARMv7
+    if ARM64 or ARM64E
         storepairq csr0, csr1, [buffer]
         storepairq csr2, csr3, 16[buffer]
         storepairq csr4, csr5, 32[buffer]
@@ -1038,7 +984,7 @@ macro copyCalleeSavesToVMEntryFrameCalleeSavesBuffer(vm, temp)
 end
 
 macro restoreCalleeSavesFromBuffer(buffer)
-    if ARM64 or ARM64E or ARMv7
+    if ARM64 or ARM64E
         loadpairq [buffer], csr0, csr1
         loadpairq 16[buffer], csr2, csr3
         loadpairq 32[buffer], csr4, csr5
@@ -1138,7 +1084,7 @@ end
 macro restoreStackPointerAfterCall()
     loadp CodeBlock[cfr], t2
     getFrameRegisterSizeForCodeBlock(t2, t2)
-    if ARM64 or ARM64E or ARMv7
+    if ARM64 or ARM64E
         subp cfr, t2, sp
     else
         subp cfr, t2, t2
@@ -1176,7 +1122,7 @@ if ARM64E
 end
 
 macro callTargetFunction(opcodeName, size, opcodeStruct, dispatchAfterCall, valueProfileName, dstVirtualRegister, dispatch, callee, callPtrTag)
-    if C_LOOP or ARMv7
+    if C_LOOP
         cloopCallJSFunction callee
     elsif ARM64E
         macro callNarrow()
@@ -1627,12 +1573,12 @@ end
     subp cfr, t0, t0
 
 .stackHeightOK:
-    if X86_64 or ARM64 or ARM64E or ARMv7
+    if X86_64 or ARM64 or ARM64E
         # We need to start zeroing from sp as it has been adjusted after saving callee saves.
         move sp, t2
         move t0, sp
         bpeq t0, t2, .zeroStackDone
-        if ARM64 or ARM64E or ARMv7
+        if ARM64 or ARM64E
         .zeroStackLoop:
             subp 2 * PtrSize, t2
             storepairq zr, zr, [t2]
@@ -1652,8 +1598,10 @@ end
 
     loadp CodeBlock::m_metadata[t1], metadataTable
 
-    move TagNumber, numberTag
-    addq TagOther, numberTag, notCellMask
+    if JSVALUE64
+        move TagNumber, numberTag
+        addq TagOther, numberTag, notCellMask
+    end
 end
 
 # Expects that CodeBlock is in t1, which is what prologue() leaves behind.
@@ -1700,7 +1648,7 @@ end
 # EncodedJSValue vmEntryToNativeFunction(void* code, VM* vm, ProtoCallFrame* protoFrame)
 
 macro frameForCalleeSaveVerification()
-    if ARM64 or ARM64E or ARMv7
+    if ARM64 or ARM64E
         const scratch = t9
     else
         const scratch = t5
@@ -1739,7 +1687,7 @@ macro frameForCalleeSaveVerification()
 .continue:
 end
 
-if C_LOOP or ARMv7
+if C_LOOP
     _llint_vm_entry_to_javascript:
 else
     global _vmEntryToJavaScript
@@ -1755,7 +1703,7 @@ if ((ARM64E or ARM64) or X86_64) and ADDRESS64 and not C_LOOP
     macro vmEntryToJavaScriptSetup()
         functionPrologue()
         vmEntryRecord(cfr, sp)
-        if ARM64 or ARM64E or ARMv7
+        if ARM64 or ARM64E
             storepairq a1, a5, VMEntryRecord::m_vm[sp]
             loadpairq VM::topCallFrame[a1], t8, t9 # topCallFrame and topEntryFrame
             storepairq t8, t9, VMEntryRecord::m_prevTopCallFrame[sp]
@@ -1771,7 +1719,7 @@ if ((ARM64E or ARM64) or X86_64) and ADDRESS64 and not C_LOOP
 
     macro vmEntryToJavaScriptStoreHeader(scratch, argCount)
         move argCount, scratch
-        if ARM64 or ARM64E or ARMv7
+        if ARM64 or ARM64E
             storepairq a2, a3, CodeBlock + (SlotSize * 0)[sp]
             storepairq scratch, a4, CodeBlock + (SlotSize * 2)[sp]
         else
@@ -1783,7 +1731,7 @@ if ((ARM64E or ARM64) or X86_64) and ADDRESS64 and not C_LOOP
     end
 
     macro vmEntryToJavaScriptSetTopCallFrame()
-        if ARM64 or ARM64E or ARMv7
+        if ARM64 or ARM64E
             move sp, t8
             storepairq t8, cfr, VM::topCallFrame[a1] # topCallFrame and topEntryFrame
         else
@@ -1800,7 +1748,7 @@ if ((ARM64E or ARM64) or X86_64) and ADDRESS64 and not C_LOOP
         # entry must be a0
         vmEntryToJavaScriptSetup()
         subp ((CallFrameHeaderSize + 1 * SlotSize + StackAlignment - 1) & ~StackAlignmentMask), sp
-        if ARM64 or ARM64E or ARMv7
+        if ARM64 or ARM64E
             vmEntryToJavaScriptStoreHeader(t8, 1)
         else
             vmEntryToJavaScriptStoreHeader(t0, 1)
@@ -1815,7 +1763,7 @@ if ((ARM64E or ARM64) or X86_64) and ADDRESS64 and not C_LOOP
         # entry must be a0
         vmEntryToJavaScriptSetup()
         subp ((CallFrameHeaderSize + 2 * SlotSize + StackAlignment - 1) & ~StackAlignmentMask), sp
-        if ARM64 or ARM64E or ARMv7
+        if ARM64 or ARM64E
             vmEntryToJavaScriptStoreHeader(t8, 2)
             storepairq a6, a6, CodeBlock + (SlotSize * 4)[sp]
         else
@@ -1833,7 +1781,7 @@ if ((ARM64E or ARM64) or X86_64) and ADDRESS64 and not C_LOOP
         # entry must be a0
         vmEntryToJavaScriptSetup()
         subp ((CallFrameHeaderSize + 3 * SlotSize + StackAlignment - 1) & ~StackAlignmentMask), sp
-        if ARM64 or ARM64E or ARMv7
+        if ARM64 or ARM64E
             vmEntryToJavaScriptStoreHeader(t8, 3)
             storepairq a6, a7, CodeBlock + (SlotSize * 4)[sp]
         else
@@ -1853,7 +1801,7 @@ if ((ARM64E or ARM64) or X86_64) and ADDRESS64 and not C_LOOP
         # entry must be a0
         vmEntryToJavaScriptSetup()
         subp ((CallFrameHeaderSize + 4 * SlotSize + StackAlignment - 1) & ~StackAlignmentMask), sp
-        if ARM64 or ARM64E or ARMv7
+        if ARM64 or ARM64E
             loadq 16[cfr], t9 # Load arg2 from stack
             vmEntryToJavaScriptStoreHeader(t8, 4)
             storepairq a6, a7, CodeBlock + (SlotSize * 4)[sp]
@@ -1877,7 +1825,7 @@ if ((ARM64E or ARM64) or X86_64) and ADDRESS64 and not C_LOOP
         # entry must be a0
         vmEntryToJavaScriptSetup()
         subp ((CallFrameHeaderSize + 5 * SlotSize + StackAlignment - 1) & ~StackAlignmentMask), sp
-        if ARM64 or ARM64E or ARMv7
+        if ARM64 or ARM64E
             loadpairq 16[cfr], t9, t10
             vmEntryToJavaScriptStoreHeader(t8, 5)
             storepairq a6, a7, CodeBlock + (SlotSize * 4)[sp]
@@ -1903,7 +1851,7 @@ if ((ARM64E or ARM64) or X86_64) and ADDRESS64 and not C_LOOP
         # entry must be a0
         vmEntryToJavaScriptSetup()
         subp ((CallFrameHeaderSize + 6 * SlotSize + StackAlignment - 1) & ~StackAlignmentMask), sp
-        if ARM64 or ARM64E or ARMv7
+        if ARM64 or ARM64E
             loadpairq 16[cfr], t9, t10
             loadq 32[cfr], t11
             vmEntryToJavaScriptStoreHeader(t8, 6)
@@ -1933,7 +1881,7 @@ if ((ARM64E or ARM64) or X86_64) and ADDRESS64 and not C_LOOP
         # entry must be a0
         vmEntryToJavaScriptSetup()
         subp ((CallFrameHeaderSize + 7 * SlotSize + StackAlignment - 1) & ~StackAlignmentMask), sp
-        if ARM64 or ARM64E or ARMv7
+        if ARM64 or ARM64E
             loadpairq 16[cfr], t9, t10
             loadpairq 32[cfr], t11, t12 # Load arg4 and arg5 from stack
             vmEntryToJavaScriptStoreHeader(t8, 7)
@@ -1959,7 +1907,7 @@ if ((ARM64E or ARM64) or X86_64) and ADDRESS64 and not C_LOOP
         jmp _llint_call_javascript
 end
 
-if C_LOOP or ARMv7
+if C_LOOP
     _llint_vm_entry_to_native:
 else
     global _vmEntryToNative
@@ -2161,7 +2109,7 @@ if ARM64E
         jmp _llint_function_for_construct_arity_check
 end
 
-if C_LOOP or ARMv7
+if C_LOOP
     # Dummy entry point the C Loop uses to initialize.
     _llint_entry:
         crash()
@@ -2181,6 +2129,11 @@ else
             leap [map, t4, PtrSize], t4
             tagCodePtr t3, BytecodePtrTag, AddressDiversified, t4
             storep t3, [t4]
+        elsif ARMv7
+            mvlbl (label - _%kind%_relativePCBase), t4
+            addp t4, t3, t4
+            move index, t5
+            storep t4, [map, t5, 4]
         else # X86_64, ARM64, RISCV64
             pcrtoaddr label, t3
             move index, t4
