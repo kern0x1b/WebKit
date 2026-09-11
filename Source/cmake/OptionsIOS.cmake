@@ -66,6 +66,27 @@ WEBKIT_OPTION_DEFAULT_PORT_VALUE(USE_JPEGXL PRIVATE OFF)
 WEBKIT_OPTION_DEFAULT_PORT_VALUE(USE_LCMS PRIVATE OFF)
 WEBKIT_OPTION_DEFAULT_PORT_VALUE(USE_WOFF2 PRIVATE OFF)
 
+# ImageIO decodes WebP from iOS 14, so this port builds the decoder WebKit
+# carries for platforms that cannot. The image Accept header follows this: see
+# acceptHeaderValueForImageResource in CachedResourceRequest.cpp.
+if (USE_WEBP)
+    find_package(WebP COMPONENTS demux)
+    if (NOT WebP_FOUND)
+        message(FATAL_ERROR "libwebp is required for USE_WEBP")
+    endif ()
+    SET_AND_EXPOSE_TO_BUILD(USE_WEBP ON)
+endif ()
+
+# Off by default because the system font parser handles WOFF2 from iOS 7 onward.
+# It does not on the release this port targets, so the build turns it on and
+# supplies the library; every other port that does this calls find_package here.
+if (USE_WOFF2)
+    find_package(WOFF2 1.0.2 COMPONENTS dec)
+    if (NOT WOFF2_FOUND)
+        message(FATAL_ERROR "libwoff2dec is required for USE_WOFF2")
+    endif ()
+endif ()
+
 # FIXME: Derived features manually mirrored from PlatformEnableCocoa.h because
 # IDL/CSS generators don't evaluate it. https://bugs.webkit.org/show_bug.cgi?id=312033
 WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_MEDIA_SOURCE_IN_WORKERS PRIVATE ON)
@@ -230,4 +251,15 @@ endif ()
 if (CMAKE_OSX_SYSROOT AND EXISTS "${CMAKE_OSX_SYSROOT}/usr/local/include")
     add_compile_options("$<$<NOT:$<COMPILE_LANGUAGE:Swift>>:-isystem${CMAKE_OSX_SYSROOT}/usr/local/include>")
     add_compile_options("$<$<COMPILE_LANGUAGE:Swift>:SHELL:-Xcc -isystem${CMAKE_OSX_SYSROOT}/usr/local/include>")
+endif ()
+
+if (ENABLE_WEBGL AND NOT TARGET OpenGL::GLES)
+    # WebCore links OpenGL::GLES when WebGL is on, and the finder that defines
+    # that target looks for a pkg-config glesv2 and a GLES2/gl2.h - a Linux
+    # install. Here GLES is a framework, and its headers are under OpenGLES/ES2.
+    find_library(OPENGLES_FRAMEWORK OpenGLES)
+    if (OPENGLES_FRAMEWORK)
+        add_library(OpenGL::GLES INTERFACE IMPORTED)
+        set_target_properties(OpenGL::GLES PROPERTIES INTERFACE_LINK_LIBRARIES "${OPENGLES_FRAMEWORK}")
+    endif ()
 endif ()

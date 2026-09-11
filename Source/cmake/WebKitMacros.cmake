@@ -767,6 +767,7 @@ function(WEBKIT_COPY_FILES target_name)
     cmake_parse_arguments(opt "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
     set(files ${opt_FILES})
     set(dst_files)
+    file(MAKE_DIRECTORY ${opt_DESTINATION})
 
     if (opt_PRUNE_STALE)
         WEBKIT_PRUNE_STALE_DESTINATION(${opt_DESTINATION} "${opt_FLATTENED}" ${files})

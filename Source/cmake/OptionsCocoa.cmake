@@ -1,4 +1,8 @@
-set(SWIFT_REQUIRED ON)
+# swiftc has no armv7 target, so this port builds the Swift sources' C++
+# counterparts instead.
+if (NOT DEFINED SWIFT_REQUIRED)
+    set(SWIFT_REQUIRED ON)
+endif ()
 
 if (PORT STREQUAL "Mac" AND USE_APPLE_INTERNAL_SDK)
     set(WEBKIT_CODE_SIGN_IDENTITY "Safari Engineering")
@@ -14,7 +18,11 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 set(WebKitTestRunner_DERIVED_SOURCES_DIR "${CMAKE_BINARY_DIR}/DerivedSources/WebKitTestRunner")
 set(TestRunnerShared_DERIVED_SOURCES_DIR "${CMAKE_BINARY_DIR}/DerivedSources/TestRunnerShared")
 
-SET_AND_EXPOSE_TO_BUILD(USE_LIBWEBRTC TRUE)
+if (WTF_CPU_ARM)
+    SET_AND_EXPOSE_TO_BUILD(USE_LIBWEBRTC FALSE)
+else ()
+    SET_AND_EXPOSE_TO_BUILD(USE_LIBWEBRTC TRUE)
+endif ()
 
 if (NOT ENABLE_WEBGPU)
     set(_webgpu_fwd "${CMAKE_BINARY_DIR}/WebGPU-stub/WebGPU")
@@ -32,14 +40,18 @@ else ()
 endif ()
 
 set(ENABLE_WEBKIT_LEGACY ON)
-set(ENABLE_WEBKIT ON)
+if (NOT DEFINED CACHE{ENABLE_WEBKIT})
+    set(ENABLE_WEBKIT ON)
+endif ()
 
 # OBJECT libraries don't produce .swiftmodule files.
 set(PAL_LIBRARY_TYPE STATIC)
 
 set(CMAKE_LINK_DEPENDS_NO_SHARED ON)
 
-set(USE_ANGLE_EGL ON)
+if (NOT DEFINED CACHE{USE_ANGLE_EGL})
+    set(USE_ANGLE_EGL ON)
+endif ()
 
 function(WEBKIT_ADD_SDK_IMPORTED_LIBRARY _target _library)
     if (NOT TARGET ${_target})
@@ -64,7 +76,10 @@ find_package(Threads REQUIRED)
 
 # Replace the SDK's availability headers with stubs that defuse availability
 # checks.
-if (NOT USE_APPLE_INTERNAL_SDK)
+# The overlay exists to defuse availability checks when building against a
+# newer SDK than the deployment target. Here the SDK is older than anything
+# WebKit's overlay headers expect, so the SDK's own macros are the right ones.
+if (NOT USE_APPLE_INTERNAL_SDK AND NOT WEBKIT_NO_AVAILABILITY_OVERLAY)
     set(_availability_overlay_dir "${CMAKE_SOURCE_DIR}/WebKitLibraries/AvailabilityOverlay")
     set(_availability_overlay_yaml "${CMAKE_BINARY_DIR}/availability-overlay.yaml")
     file(WRITE "${_availability_overlay_yaml}.tmp"
@@ -169,11 +184,47 @@ add_link_options(-Wl,-dead_strip_dylibs)
 
 # Linked globally because PAL has Swift sources that get force-loaded into WebCore,
 # and WebCore does not link JavaScriptCore directly on all platforms.
-find_library(SWIFTCORE_LIBRARY swiftCore HINTS ${CMAKE_OSX_SYSROOT}/usr/lib/swift REQUIRED)
-link_libraries(${SWIFTCORE_LIBRARY})
+# No Swift runtime exists for armv7, and the CMake build compiles no Swift
+# sources, so this is optional here.
+find_library(SWIFTCORE_LIBRARY swiftCore HINTS ${CMAKE_OSX_SYSROOT}/usr/lib/swift)
+if (NOT SWIFTCORE_LIBRARY)  # ios6: allow missing frameworks
+    set(SWIFTCORE_LIBRARY "")
+endif ()
+if (SWIFTCORE_LIBRARY)
+    link_libraries(${SWIFTCORE_LIBRARY})
+endif ()
+
+# iOS 6 compatibility: symbols that only appeared in later releases, the 32-bit
+# compiler-rt builtins that live in libgcc_s here, and objc_msgSend_stret, which
+# exists on armv7 devices but is absent from this SDK's stub library.
+if (WEBKIT_IOS6_COMPAT_LIB)
+    link_libraries(${WEBKIT_IOS6_COMPAT_LIB})
+    add_link_options("/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/clang/21/lib/darwin/libclang_rt.ios.a" "SHELL:-Wl,-U,_objc_msgSend_stret" "SHELL:-Wl,-not_for_dyld_shared_cache")
+    # ios6/armv7: the modern linker refuses -U/-undefined dynamic_lookup on a dylib it
+    # considers shared-cache eligible ("Shared cache eligible dylibs cannot use
+    # '-undefined dynamic_lookup' or '-U'"). Nothing we build ever goes into a dyld
+    # shared cache, so opt out rather than drop the -U that _objc_msgSend_stret needs.
+endif ()
+
+# iOS 6 has no Swift runtime and therefore no CryptoKit, which is where the Cocoa
+# Web Crypto backend performs AES-GCM, AES-KW, HKDF, HMAC and every curve
+# algorithm. WebKit carries a complete OpenSSL backend for the ports that have no
+# CryptoKit either, and this port already builds OpenSSL 3.0 for its TLS - the
+# version that backend targets. Using it is what makes Web Crypto real here, and
+# it brings ECDSA, ECDH, RSA, PBKDF2 and the remaining AES modes with it.
+if (WEBKIT_IOS6_CRYPTO_LIB)
+    SET_AND_EXPOSE_TO_BUILD(USE_OPENSSL ON)
+    link_libraries(${WEBKIT_IOS6_CRYPTO_LIB})
+endif ()
+
+# iOS 6 ships a 2012 libc++ with no std::filesystem and no C++17 runtime,
+# so every binary links the one built alongside this port.
+if (WEBKIT_IOS6_LIBCXX_DIR)
+    add_link_options(-nostdlib++ -L${WEBKIT_IOS6_LIBCXX_DIR}/lib -lc++ -lc++abi)
+endif ()
 
 WEBKIT_XCRUN(_libtool -f libtool)
-if (CMAKE_GENERATOR STREQUAL "Ninja")
+if (TRUE)
     set(CMAKE_CXX_ARCHIVE_CREATE "${_libtool} -static -no_warning_for_no_symbols -o <TARGET> <OBJECTS>")
     set(CMAKE_C_ARCHIVE_CREATE "${_libtool} -static -no_warning_for_no_symbols -o <TARGET> <OBJECTS>")
     set(CMAKE_CXX_ARCHIVE_APPEND "${_libtool} -static -no_warning_for_no_symbols -o <TARGET> <TARGET> <OBJECTS>")
