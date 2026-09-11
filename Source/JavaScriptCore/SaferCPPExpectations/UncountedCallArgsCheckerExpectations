@@ -9,8 +9,6 @@ API/JSRetainPtr.h
 API/JSScript.mm
 API/JSTypedArray.cpp
 API/JSWrapperMap.mm
-API/tests/CompareAndSwapTest.cpp
-API/tests/testapi.cpp
 assembler/LinkBuffer.cpp
 b3/B3PatchpointSpecial.cpp
 b3/B3Procedure.cpp
@@ -73,14 +71,10 @@ inspector/ConsoleMessage.cpp
 inspector/JSGlobalObjectInspectorController.cpp
 inspector/JSJavaScriptCallFrame.cpp
 inspector/ScriptCallStack.cpp
-inspector/agents/InspectorAgent.cpp
-inspector/agents/InspectorAuditAgent.cpp
-inspector/agents/InspectorConsoleAgent.cpp
 inspector/agents/InspectorDebuggerAgent.cpp
 inspector/agents/InspectorHeapAgent.cpp
 inspector/agents/InspectorRuntimeAgent.cpp
 inspector/agents/InspectorScriptProfilerAgent.cpp
-inspector/agents/JSGlobalObjectRuntimeAgent.cpp
 jit/BaselineJITPlan.cpp
 jit/ExecutableAllocator.cpp
 jit/GCAwareJITStubRoutine.cpp
@@ -91,7 +85,6 @@ jit/JITWorklist.cpp
 jit/JITWorklistInlines.h
 jit/JITWorklistThread.cpp
 jit/PolymorphicCallStubRoutine.cpp
-jsc.cpp
 llint/LLIntSlowPaths.cpp
 parser/Lexer.cpp
 parser/Parser.cpp
@@ -124,7 +117,6 @@ runtime/JSGlobalObject.cpp
 runtime/JSObject.cpp
 runtime/JSObjectInlines.h
 runtime/JSRunLoopTimer.cpp
-runtime/JSSymbolTableObject.cpp
 runtime/ModuleProgramExecutable.cpp
 runtime/NativeExecutable.cpp
 runtime/ProgramExecutable.cpp
@@ -142,6 +134,7 @@ runtime/Watchdog.cpp
 tools/FunctionOverrides.cpp
 tools/JSDollarVM.cpp
 wasm/WasmBBQJIT.cpp
+wasm/WasmBBQJIT64.cpp
 wasm/WasmCallee.cpp
 wasm/WasmCalleeGroup.cpp
 wasm/WasmEntryPlan.cpp

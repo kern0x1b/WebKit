@@ -29,7 +29,9 @@
 #if ENABLE(FTL_JIT)
 
 #include "FTLState.h"
+#include "JSCJSValueInlines.h"
 #include "JSCPtrTag.h"
+#include "TrackedReferences.h"
 
 WTF_ALLOW_UNSAFE_BUFFER_USAGE_BEGIN
 
@@ -141,6 +143,8 @@ void JITCode::shrinkToFit()
     common.shrinkToFit();
     m_osrExit.shrinkToFit();
     osrExitDescriptors.shrinkToFit();
+    osrExitConstants.shrinkToFit();
+    osrExitValueReps.shrinkToFit();
     lazySlowPaths.shrinkToFit();
 }
 
@@ -148,8 +152,10 @@ void JITCode::validateReferences(const TrackedReferences& trackedReferences)
 {
     common.validateReferences(trackedReferences);
     
-    for (OSRExit& exit : m_osrExit)
-        exit.m_descriptor->validateReferences(trackedReferences);
+    for (EncodedJSValue constant : osrExitConstants)
+        trackedReferences.check(JSValue::decode(constant));
+    for (OSRExitDescriptor& descriptor : osrExitDescriptors)
+        descriptor.validateReferences(trackedReferences);
 }
 
 RegisterSet JITCode::liveRegistersToPreserveAtExceptionHandlingCallSite(CodeBlock*, CallSiteIndex callSiteIndex)
@@ -158,7 +164,7 @@ RegisterSet JITCode::liveRegistersToPreserveAtExceptionHandlingCallSite(CodeBloc
         if (exit.m_exceptionHandlerCallSiteIndex.bits() == callSiteIndex.bits()) {
             RELEASE_ASSERT(exit.isExceptionHandler());
             RELEASE_ASSERT(exit.isGenericUnwindHandler());
-            return ValueRep::usedRegisters(/* isSIMDContext = */ false, exit.m_valueReps);
+            return ValueRep::usedRegisters(/* isSIMDContext = */ false, exit.valueReps(*this));
         }
     }
     return { };
@@ -166,16 +172,16 @@ RegisterSet JITCode::liveRegistersToPreserveAtExceptionHandlingCallSite(CodeBloc
 
 std::optional<CodeOrigin> JITCode::findPC(CodeBlock* codeBlock, void* pc)
 {
-    for (OSRExit& exit : m_osrExit) {
-        if (ExecutableMemoryHandle* handle = exit.m_code.executableMemory()) {
-            if (handle->start().untaggedPtr() <= pc && pc < handle->end().untaggedPtr())
-                return std::optional<CodeOrigin>(exit.m_codeOriginForExitProfile);
+    for (const OSRExitStub& stub : m_osrExitStubs) {
+        if (ExecutableMemoryHandle* handle = stub.code.executableMemory()) {
+            if (handle->contains(pc))
+                return std::optional<CodeOrigin>(m_osrExit[stub.exitIndex].m_codeOriginForExitProfile);
         }
     }
 
     for (std::unique_ptr<LazySlowPath>& lazySlowPath : lazySlowPaths) {
         if (ExecutableMemoryHandle* handle = lazySlowPath->stub().executableMemory()) {
-            if (handle->start().untaggedPtr() <= pc && pc < handle->end().untaggedPtr())
+            if (handle->contains(pc))
                 return std::optional<CodeOrigin>(codeBlock->codeOrigin(lazySlowPath->callSiteIndex()));
         }
     }

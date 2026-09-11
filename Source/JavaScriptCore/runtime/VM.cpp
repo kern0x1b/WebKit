@@ -45,6 +45,7 @@
 #include "CrossTaskToken.h"
 #include "CustomGetterSetterInlines.h"
 #include "DOMAttributeGetterSetterInlines.h"
+#include "DateInstance.h"
 #include "Debugger.h"
 #include "DeferredWorkTimer.h"
 #include "Disassembler.h"
@@ -61,6 +62,7 @@
 #include "GigacageAlignedMemoryAllocator.h"
 #include "HasOwnPropertyCache.h"
 #include "Heap.h"
+#include "HeapIterationScope.h"
 #include "HeapProfiler.h"
 #include "IncrementalSweeper.h"
 #include "Interpreter.h"
@@ -126,6 +128,7 @@
 #include "SideDataRepository.h"
 #include "SimpleTypedArrayController.h"
 #include "SourceProviderCache.h"
+#include "StringSplitCache.h"
 #include "StrongInlines.h"
 #include "StructureChainInlines.h"
 #include "StructureInlines.h"
@@ -292,6 +295,10 @@ VM::VM(VMType vmType, HeapType heapType, WTF::RunLoop* runLoop, bool* success)
             ref.set(makeUniqueRef<MegamorphicCache>());
         });
 
+        m_stringSplitCache.initLater([](VM&, auto& ref) {
+            ref.set(makeUniqueRef<StringSplitCache>());
+        });
+
         m_shadowChicken.initLater([](VM&, auto& ref) {
             ref.set(makeUniqueRef<ShadowChicken>());
         });
@@ -319,6 +326,16 @@ VM::VM(VMType vmType, HeapType heapType, WTF::RunLoop* runLoop, bool* success)
 
     // Need to be careful to keep everything consistent here
     JSLockHolder lock(this);
+
+    // A VM interns on the order of two thousand identifiers while starting up: CommonIdentifiers,
+    // BuiltinNames, SmallStrings, and whatever the embedder adds on top. On a fresh thread the table
+    // starts empty and rehashes its way up to that size, so size it once up front instead. Only when
+    // it is still empty, so a thread that already has atoms keeps whatever it has grown to.
+    if (m_atomStringTable->table().isEmpty()) {
+        m_atomStringTable->table().clear();
+        m_atomStringTable->table().reserveInitialCapacity(2048);
+    }
+
     AtomStringTable* existingEntryAtomStringTable = Thread::currentSingleton().setCurrentAtomStringTable(m_atomStringTable);
     structureStructure.setWithoutWriteBarrier(Structure::createStructure(*this));
     structureRareDataStructure.setWithoutWriteBarrier(StructureRareData::createStructure(*this, nullptr, jsNull()));
@@ -812,10 +829,8 @@ static ThunkGenerator NODELETE thunkGeneratorForIntrinsic(Intrinsic intrinsic)
 #endif
     case RandomIntrinsic:
         return randomThunkGenerator;
-#if USE(JSVALUE64)
     case ObjectIsIntrinsic:
         return objectIsThunkGenerator;
-#endif
     case BoundFunctionCallIntrinsic:
         return boundFunctionCallGenerator;
     case RemoteFunctionCallIntrinsic:
@@ -846,7 +861,7 @@ MacroAssemblerCodeRef<JITThunkPtrTag> VM::getCTIStub(ThunkGenerator generator)
 
 MacroAssemblerCodeRef<JITThunkPtrTag> VM::getCTIStub(CommonJITThunkID thunkID)
 {
-    return jitStubs->ctiStub(thunkID);
+    return jitStubs->ctiStub(*this, thunkID);
 }
 
 #endif // ENABLE(JIT)
@@ -1046,7 +1061,7 @@ SourceProviderCache* VM::addSourceProviderCache(SourceProvider* sourceProvider)
 {
     auto addResult = sourceProviderCacheMap.add(sourceProvider, nullptr);
     if (addResult.isNewEntry)
-        addResult.iterator->value = adoptRef(new SourceProviderCache);
+        addResult.iterator->value = SourceProviderCache::create(sourceProvider->source().length());
     return addResult.iterator->value.get();
 }
 
@@ -1089,6 +1104,21 @@ void VM::throwTerminationException()
     setException(terminationException());
     if (m_executionForbiddenOnTermination)
         setExecutionForbidden();
+}
+
+void VM::throwTerminationExceptionIfNeeded()
+{
+    if (hasPendingTerminationException())
+        return;
+
+    if (traps().needHandling(VMTraps::NeedTermination))
+        traps().handleTraps(VMTraps::NeedTermination);
+
+    if (hasPendingTerminationException())
+        return;
+
+    if (hasTerminationRequest() && !traps().isDeferringTermination())
+        throwTerminationException();
 }
 
 Exception* VM::throwException(JSGlobalObject* globalObject, Exception* exceptionToThrow)
@@ -1434,11 +1464,11 @@ void VM::callPromiseRejectionCallback(Strong<JSPromise>& promise)
     auto callData = JSC::getCallDataInline(callback);
     ASSERT(callData.type != CallData::Type::None);
 
-    MarkedArgumentBuffer args;
-    args.append(promise.get());
-    args.append(promise->result());
-    ASSERT(!args.hasOverflowed());
-    call(promise->realm(), callback, callData, jsNull(), args);
+    auto args = WTF::toArray<EncodedJSValue>({
+        JSValue::encode(promise.get()),
+        JSValue::encode(promise->result()),
+    });
+    call(promise->realm(), callback, callData, jsNull(), ArgList { args.data(), args.size() });
     scope.clearException();
 }
 
@@ -1766,6 +1796,13 @@ void VM::executeEntryScopeServicesOnEntry()
     if (dateCache.hasTimeZoneChange()) [[unlikely]] {
         intlCache().clearForTimeZoneChange();
         dateCache.clearForTimeZoneChange();
+        if (dateCache.takeMayHaveCachedLocalGregorianDateTime()) {
+            HeapIterationScope iterationScope(heap);
+            heap.dateInstanceSpace.forEachLiveCell([](HeapCell* cell, HeapCell::Kind) {
+                SUPPRESS_MEMORY_UNSAFE_CAST auto* date = static_cast<DateInstance*>(cell);
+                date->invalidateCachedLocalGregorianDateTime();
+            });
+        }
     }
 
     if (intlCache().hasLanguageChange()) [[unlikely]]
@@ -1873,9 +1910,14 @@ void VM::beginMarking()
     });
 }
 
-void VM::finalizeUnconditionally()
+void VM::reconcileWeakReferencesAtGCEnd()
 {
-    m_syncResumeCallCache->finalizeUnconditionally(*this);
+    m_syncResumeCallCache->reconcileWeakReferencesAtGCEnd(*this);
+}
+
+void VM::clearMicrotaskCallCaches()
+{
+    m_syncResumeCallCache->clear();
 }
 
 template<typename Visitor>

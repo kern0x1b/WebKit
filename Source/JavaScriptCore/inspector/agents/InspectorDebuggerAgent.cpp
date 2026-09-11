@@ -36,11 +36,13 @@
 #include "DeferGC.h"
 #include "ExecutableBaseInlines.h"
 #include "HeapIterationScope.h"
+#include "IdentifiersFactory.h"
 #include "InjectedScript.h"
 #include "InjectedScriptManager.h"
 #include "InternalFunction.h"
 #include "JITCode.h"
 #include "JITThunks.h"
+#include "JSGlobalObject.h"
 #include "JSJavaScriptCallFrame.h"
 #include "JavaScriptCallFrame.h"
 #include "MarkedSpaceInlines.h"
@@ -87,6 +89,27 @@ static JSC::Debugger::BlackboxRange NODELETE blackboxRange(const JSC::Debugger::
         { OrdinalNumber::fromZeroBasedInt(script.startLine), OrdinalNumber::fromZeroBasedInt(script.startColumn) },
         { OrdinalNumber::fromZeroBasedInt(script.endLine), OrdinalNumber::fromZeroBasedInt(script.endColumn) },
     };
+}
+
+static Protocol::Debugger::ScriptType scriptTypeForScript(const JSC::Debugger::Script& script)
+{
+    if (!script.sourceProvider)
+        return Protocol::Debugger::ScriptType::Program;
+
+    switch (script.sourceProvider->sourceType()) {
+    case JSC::SourceProviderSourceType::Module:
+        return Protocol::Debugger::ScriptType::Module;
+    case JSC::SourceProviderSourceType::WebAssembly:
+        return Protocol::Debugger::ScriptType::WebAssembly;
+    case JSC::SourceProviderSourceType::Program:
+    case JSC::SourceProviderSourceType::JSON:
+    case JSC::SourceProviderSourceType::Text:
+    case JSC::SourceProviderSourceType::ImportMap:
+        return Protocol::Debugger::ScriptType::Program;
+    }
+
+    ASSERT_NOT_REACHED();
+    return Protocol::Debugger::ScriptType::Program;
 }
 
 static std::optional<JSC::Breakpoint::Action::Type> breakpointActionTypeForString(Protocol::ErrorString& errorString, const String& typeString)
@@ -243,7 +266,7 @@ RefPtr<JSC::Breakpoint> InspectorDebuggerAgent::debuggerBreakpointFromPayload(Pr
 InspectorDebuggerAgent::InspectorDebuggerAgent(AgentContext& context)
     : InspectorAgentBase("Debugger"_s)
     , m_frontendDispatcher(makeUniqueRef<DebuggerFrontendDispatcher>(context.frontendRouter))
-    , m_backendDispatcher(DebuggerBackendDispatcher::create(context.backendDispatcher, this))
+    , m_backendDispatcher(DebuggerBackendDispatcher::create(protect(context.backendDispatcher), this))
     , m_debugger(*CheckedRef { context.environment }->debugger())
     , m_injectedScriptManager(context.injectedScriptManager)
 {
@@ -633,6 +656,10 @@ void InspectorDebuggerAgent::didSetBreakpoint(ProtocolBreakpoint& protocolBreakp
 
 bool InspectorDebuggerAgent::resolveBreakpoint(const JSC::Debugger::Script& script, JSC::Breakpoint& debuggerBreakpoint)
 {
+    // FIXME: Support breakpoints in WebAssembly.
+    if (scriptTypeForScript(script) == Protocol::Debugger::ScriptType::WebAssembly)
+        return false;
+
     if (debuggerBreakpoint.lineNumber() < static_cast<unsigned>(script.startLine) || static_cast<unsigned>(script.endLine) < debuggerBreakpoint.lineNumber())
         return false;
 
@@ -829,9 +856,8 @@ static JSC::EncodedJSValue internalFunctionWithDebuggerHook(JSC::JSGlobalObject*
         }
     }
 
-    globalObject->vm().forEachDebugger([&] (JSC::Debugger& debugger) {
-        debugger.willCallInternalFunction(*internalFunction);
-    });
+    if (auto* debugger = globalObject->debugger())
+        debugger->willCallInternalFunction(*internalFunction);
 
     return original(globalObject, callFrame);
 }
@@ -909,10 +935,10 @@ Protocol::ErrorStringOr<void> InspectorDebuggerAgent::addSymbolicBreakpoint(cons
             auto& existingReplacedThunks = replacedThunks();
 
             for (auto* nativeExecutable : WTF::move(foundNativeExecutables)) {
-                if (auto existingIndex = existingReplacedThunks.find(nativeExecutable); existingIndex != notFound)
-                    ++existingReplacedThunks[existingIndex]->matchCount;
-                else
+                if (auto existingIndex = existingReplacedThunks.find(nativeExecutable); existingIndex == notFound)
                     newNativeExecutables.append(nativeExecutable);
+                else if (symbolicBreakpoint.matches(functionName(*nativeExecutable)))
+                    ++existingReplacedThunks[existingIndex]->matchCount;
             }
         }
         for (auto* nativeExecutable : WTF::move(newNativeExecutables))
@@ -924,10 +950,10 @@ Protocol::ErrorStringOr<void> InspectorDebuggerAgent::addSymbolicBreakpoint(cons
             auto& existingReplacedInternalFunctions = replacedInternalFunctions();
 
             for (auto* internalFunction : WTF::move(foundInternalFunctions)) {
-                if (auto existingIndex = existingReplacedInternalFunctions.find(internalFunction); existingIndex != notFound)
-                    ++existingReplacedInternalFunctions[existingIndex]->matchCount;
-                else
+                if (auto existingIndex = existingReplacedInternalFunctions.find(internalFunction); existingIndex == notFound)
                     newInternalFunctions.append(internalFunction);
+                else if (symbolicBreakpoint.matches(functionName(*internalFunction)))
+                    ++existingReplacedInternalFunctions[existingIndex]->matchCount;
             }
         }
         for (auto* internalFunction : WTF::move(newInternalFunctions))
@@ -1146,6 +1172,10 @@ Protocol::ErrorStringOr<Ref<JSON::ArrayOf<Protocol::Debugger::Location>>> Inspec
     auto scriptIterator = m_scripts.find(startSourceID);
     if (scriptIterator == m_scripts.end())
         return makeUnexpected("Missing script for scriptId in given start"_s);
+
+    // FIXME: Support breakpoints in WebAssembly.
+    if (scriptTypeForScript(scriptIterator->value) == Protocol::Debugger::ScriptType::WebAssembly)
+        return makeUnexpected("WebAssembly breakpoints are not supported"_s);
 
     auto protocolLocations = JSON::ArrayOf<Protocol::Debugger::Location>::create();
     m_debugger.forEachBreakpointLocation(startSourceID, scriptIterator->value.sourceProvider.get(), startLineNumber, startColumnNumber, endLineNumber, endColumnNumber, [&] (int lineNumber, int columnNumber) {
@@ -1511,6 +1541,10 @@ Protocol::ErrorStringOr<void> InspectorDebuggerAgent::setShouldBlackboxURL(const
 
 void InspectorDebuggerAgent::setBlackboxConfiguration(JSC::SourceID sourceID, const JSC::Debugger::Script& script)
 {
+    // FIXME: Support blackboxing in WebAssembly.
+    if (scriptTypeForScript(script) == Protocol::Debugger::ScriptType::WebAssembly)
+        return;
+
     JSC::Debugger::BlackboxConfiguration blackboxConfiguration;
 
     if (!m_pauseForInternalScripts && isWebKitInjectedScript(script.sourceURL)) {
@@ -1568,6 +1602,14 @@ Ref<JSON::ArrayOf<Protocol::Debugger::CallFrame>> InspectorDebuggerAgent::curren
 String InspectorDebuggerAgent::sourceMapURLForScript(const JSC::Debugger::Script& script)
 {
     return script.sourceMappingURL;
+}
+
+String InspectorDebuggerAgent::requestIdForScript(JSC::JSGlobalObject*, const JSC::Debugger::Script& script)
+{
+    if (!script.requestIdentifier)
+        return { };
+
+    return IdentifiersFactory::requestId(script.requestIdentifier);
 }
 
 Protocol::ErrorStringOr<void> InspectorDebuggerAgent::setPauseForInternalScripts(bool shouldPause)
@@ -1815,16 +1857,21 @@ JSC::JSObject* InspectorDebuggerAgent::debuggerScopeExtensionObject(JSC::Debugge
     return injectedScript.createCommandLineAPIObject(callFrame);
 }
 
-void InspectorDebuggerAgent::didParseSource(JSC::SourceID sourceID, const JSC::Debugger::Script& script)
+void InspectorDebuggerAgent::didParseSource(JSC::JSGlobalObject* globalObject, JSC::SourceID sourceID, const JSC::Debugger::Script& script)
 {
     String scriptIDStr = String::number(sourceID);
     bool hasSourceURL = !script.sourceURL.isEmpty();
     String sourceURL = script.sourceURL;
     String sourceMappingURL = sourceMapURLForScript(script);
+    String requestId = requestIdForScript(globalObject, script);
 
-    m_frontendDispatcher->scriptParsed(scriptIDStr, script.url, script.startLine, script.startColumn, script.endLine, script.endColumn, script.isContentScript, sourceURL, sourceMappingURL, script.sourceProvider->sourceType() == JSC::SourceProviderSourceType::Module);
+    m_frontendDispatcher->scriptParsed(scriptIDStr, script.url, script.startLine, script.startColumn, script.endLine, script.endColumn, injectedScriptManager().injectedScriptIdFor(globalObject), scriptTypeForScript(script), script.isContentScript, sourceURL, sourceMappingURL, script.displayName, requestId);
 
     m_scripts.set(sourceID, script);
+
+    // FIXME: Support breakpoints and blackboxing in WebAssembly.
+    if (scriptTypeForScript(script) == Protocol::Debugger::ScriptType::WebAssembly)
+        return;
 
     String scriptURLForBreakpoints = hasSourceURL ? script.sourceURL : script.url;
     if (scriptURLForBreakpoints.isEmpty())
@@ -2117,8 +2164,7 @@ void InspectorDebuggerAgent::clearInspectorBreakpointState()
             if (!replacedInternalFunction->internalFunction)
                 return true;
 
-
-            if (&replacedInternalFunction->internalFunction->vm() == &m_debugger.vm())
+            if (&replacedInternalFunction->internalFunction->vm() != &m_debugger.vm())
                 return false;
 
             for (auto& symbolicBreakpoint : m_symbolicBreakpoints) {

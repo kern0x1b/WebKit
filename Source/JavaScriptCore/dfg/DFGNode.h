@@ -342,7 +342,7 @@ public:
     Node(const Node&) = default;
 
     Node(NodeType op, NodeOrigin nodeOrigin, const AdjacencyList& children)
-        : origin(nodeOrigin)
+        : origin(WTF::move(nodeOrigin))
         , children(children)
         , m_virtualRegister(VirtualRegister())
         , m_refCount(1)
@@ -355,7 +355,7 @@ public:
     
     // Construct a node with up to 3 children, no immediate value.
     Node(NodeType op, NodeOrigin nodeOrigin, Edge child1 = Edge(), Edge child2 = Edge(), Edge child3 = Edge())
-        : origin(nodeOrigin)
+        : origin(WTF::move(nodeOrigin))
         , children(AdjacencyList::Fixed, child1, child2, child3)
         , m_virtualRegister(VirtualRegister())
         , m_refCount(1)
@@ -369,7 +369,7 @@ public:
 
     // Construct a node with up to 3 children, no immediate value.
     Node(NodeFlags result, NodeType op, NodeOrigin nodeOrigin, Edge child1 = Edge(), Edge child2 = Edge(), Edge child3 = Edge())
-        : origin(nodeOrigin)
+        : origin(WTF::move(nodeOrigin))
         , children(AdjacencyList::Fixed, child1, child2, child3)
         , m_virtualRegister(VirtualRegister())
         , m_refCount(1)
@@ -384,7 +384,7 @@ public:
 
     // Construct a node with up to 3 children and an immediate value.
     Node(NodeType op, NodeOrigin nodeOrigin, OpInfo imm, Edge child1 = Edge(), Edge child2 = Edge(), Edge child3 = Edge())
-        : origin(nodeOrigin)
+        : origin(WTF::move(nodeOrigin))
         , children(AdjacencyList::Fixed, child1, child2, child3)
         , m_virtualRegister(VirtualRegister())
         , m_refCount(1)
@@ -399,7 +399,7 @@ public:
 
     // Construct a node with up to 3 children and an immediate value.
     Node(NodeFlags result, NodeType op, NodeOrigin nodeOrigin, OpInfo imm, Edge child1 = Edge(), Edge child2 = Edge(), Edge child3 = Edge())
-        : origin(nodeOrigin)
+        : origin(WTF::move(nodeOrigin))
         , children(AdjacencyList::Fixed, child1, child2, child3)
         , m_virtualRegister(VirtualRegister())
         , m_refCount(1)
@@ -415,7 +415,7 @@ public:
 
     // Construct a node with up to 3 children and two immediate values.
     Node(NodeType op, NodeOrigin nodeOrigin, OpInfo imm1, OpInfo imm2, Edge child1 = Edge(), Edge child2 = Edge(), Edge child3 = Edge())
-        : origin(nodeOrigin)
+        : origin(WTF::move(nodeOrigin))
         , children(AdjacencyList::Fixed, child1, child2, child3)
         , m_virtualRegister(VirtualRegister())
         , m_refCount(1)
@@ -431,7 +431,7 @@ public:
     
     // Construct a node with a variable number of children and two immediate values.
     Node(VarArgTag, NodeType op, NodeOrigin nodeOrigin, OpInfo imm1, OpInfo imm2, unsigned firstChild, unsigned numChildren)
-        : origin(nodeOrigin)
+        : origin(WTF::move(nodeOrigin))
         , children(AdjacencyList::Variable, firstChild, numChildren)
         , m_virtualRegister(VirtualRegister())
         , m_refCount(1)
@@ -1056,11 +1056,6 @@ public:
         return isConstant() && constant()->value().isBoolean();
     }
      
-    bool asBoolean()
-    {
-        return constant()->value().asBoolean();
-    }
-
     bool isUndefinedOrNullConstant()
     {
         return isConstant() && constant()->value().isUndefinedOrNull();
@@ -1983,6 +1978,17 @@ public:
         return m_opInfo.as<Yarr::Flags>();
     }
 
+    bool hasUTC()
+    {
+        return op() == DateGetStorage;
+    }
+
+    bool isUTC()
+    {
+        ASSERT(hasUTC());
+        return m_opInfo.as<bool>();
+    }
+
     bool hasIntrinsic()
     {
         switch (op()) {
@@ -2211,6 +2217,7 @@ public:
         case DataViewGetInt:
         case DataViewGetFloat:
         case DateGetInt32OrNaN:
+        case DateGetMilliseconds:
         case NewArrayWithSpecies:
             return true;
         default:
@@ -2322,10 +2329,10 @@ public:
         return op() == NotifyWrite;
     }
     
-    WatchpointSet* watchpointSet()
+    InlineWatchpointSet* watchpointSet()
     {
         ASSERT(hasWatchpointSet());
-        return m_opInfo.as<WatchpointSet*>();
+        return m_opInfo.as<InlineWatchpointSet*>();
     }
     
     bool hasStoragePointer()
@@ -3223,12 +3230,12 @@ public:
         // However, we only emit such an add if both inputs can be Int52, and Int32
         // can trivially become Int52.
         //
-        return enableInt52() && isInt32OrInt52Speculation(prediction());
+        return isInt32OrInt52Speculation(prediction());
     }
 
     bool shouldSpeculateInt52OrOther()
     {
-        return enableInt52() && isInt32OrInt52OrOtherSpeculation(prediction());
+        return isInt32OrInt52OrOtherSpeculation(prediction());
     }
 
     bool shouldSpeculateDouble()
@@ -3532,7 +3539,7 @@ public:
     
     static bool shouldSpeculateInt52(Node* op1, Node* op2)
     {
-        return enableInt52() && op1->shouldSpeculateInt52() && op2->shouldSpeculateInt52();
+        return op1->shouldSpeculateInt52() && op2->shouldSpeculateInt52();
     }
     
     static bool shouldSpeculateNumber(Node* op1, Node* op2)

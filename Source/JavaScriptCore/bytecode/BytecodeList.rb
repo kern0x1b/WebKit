@@ -61,7 +61,7 @@ types [
     :ToThisStatus,
     :TypeLocation,
     :WasmBoundLabel,
-    :WatchpointSet,
+    :InlineWatchpointSet,
     :WriteBarrierStructureID,
 
     :ValueProfileAndVirtualRegisterBuffer,
@@ -486,16 +486,22 @@ op :call_ignore_result,
         arrayProfile: ArrayProfile,
     }
 
-# dst = next.call(iterator), or -- if next is the fast async generator driver sentinel -- enqueue
-# onto the producer instead (dst unused; the result is awaited via a separate op_yield). Unlike
-# op_iterator_next there are no getDone/getValue checkpoints: the intervening await makes .done/.value
-# separate get_by_id bytecodes after suspension.
+# dst = next.call(iterator [, value]), or -- if next is the fast async generator driver sentinel --
+# enqueue value onto the producer instead (dst unused; the result is awaited via a separate op_yield).
+# The resume value (yield* passes the received value; for-await leaves hasValue false, so next() is
+# called with just `this`) is call argument index 1: like op_call's argc/argv model, there's no separate
+# VirtualRegister field for it -- its register is derived from stackOffset via
+# virtualRegisterForArgumentIncludingThis(1, -stackOffset) whenever hasValue is set. This keeps every
+# arg field a plain unsigned/bool, so an absent resume value never forces this bytecode to Wide32
+# encoding. Unlike op_iterator_next there are no getDone/getValue checkpoints: the intervening await
+# makes .done/.value separate get_by_id bytecodes after suspension.
 op :async_iterator_next,
     args: {
         dst: VirtualRegister,
         next: VirtualRegister,
         iterator: VirtualRegister,
         driver: VirtualRegister,
+        hasValue: bool,
         stackOffset: unsigned,
         valueProfile: unsigned,
     },
@@ -546,7 +552,7 @@ op :get_from_scope,
     metadata: {
         getPutInfo: GetPutInfo,
         _: {
-            watchpointSet: WatchpointSet.*,
+            watchpointSet: InlineWatchpointSet.*,
             structureID: WriteBarrierStructureID,
         },
         operand: uintptr_t,
@@ -569,7 +575,7 @@ op :put_to_scope,
         getPutInfo: GetPutInfo,
         _: {
             structureID: WriteBarrierStructureID,
-            watchpointSet: WatchpointSet.*,
+            watchpointSet: InlineWatchpointSet.*,
         },
         operand: uintptr_t,
     },

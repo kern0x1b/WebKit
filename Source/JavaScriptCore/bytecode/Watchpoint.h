@@ -45,7 +45,7 @@ struct ArrayBufferViewWatchpointAdaptor;
 class VM;
 
 class FireDetail {
-    void* operator new(size_t) = delete;
+    WTF_FORBID_HEAP_ALLOCATION;
     
 public:
     virtual ~FireDetail() = default;
@@ -69,17 +69,18 @@ private:
     const char* m_string;
 };
 
+template<ConstInvocable<void(PrintStream&)> Functor>
 class LazyFireDetail final : public FireDetail {
 public:
-    LazyFireDetail(ScopedLambda<void(PrintStream&)>& lambda)
-        : m_lambda(lambda)
+    LazyFireDetail(Functor functor)
+        : m_functor(WTF::move(functor))
     {
     }
 
-    void dump(PrintStream& out) const final { m_lambda(out); }
+    void dump(PrintStream& out) const final { m_functor(out); }
 
 private:
-    ScopedLambda<void(PrintStream&)>& m_lambda;
+    Functor m_functor;
 };
 
 class WatchpointSet;
@@ -281,13 +282,13 @@ private:
     SentinelLinkedList<Watchpoint, BasicRawSentinelNode<Watchpoint>> m_set;
 };
 
-// InlineWatchpointSet is a low-overhead, non-copyable watchpoint set in which
-// it is not possible to quickly query whether it is being watched in a single
-// branch. There is a fairly simple tradeoff between WatchpointSet and
-// InlineWatchpointSet:
+// InlineWatchpointSet is a low-overhead, non-copyable watchpoint set. There is
+// a fairly simple tradeoff between WatchpointSet and InlineWatchpointSet:
 //
-// Do you have to emit JIT code that rapidly tests whether the watchpoint set
-// is being watched?  If so, use WatchpointSet.
+// Do you have to emit JIT code that tests whether the watchpoint set is being
+// watched? Both work, but WatchpointSet needs a single branch while
+// InlineWatchpointSet needs a few more instructions to handle both its thin and
+// fat forms. If the test is on a very hot path, use WatchpointSet.
 //
 // Do you need multiple parties to have pointers to the same WatchpointSet?
 // If so, use WatchpointSet.
@@ -302,6 +303,7 @@ private:
 
 class InlineWatchpointSet {
     WTF_MAKE_NONCOPYABLE(InlineWatchpointSet);
+    friend class LLIntOffsetsExtractor;
 public:
     InlineWatchpointSet(WatchpointState state)
         : m_data(encodeState(state))
@@ -376,6 +378,8 @@ public:
     void touch(VM& vm, const FireDetail& detail)
     {
         if (isFat()) {
+            if (fat()->state() == IsInvalidated)
+                return;
             protect(fat())->touch(vm, detail);
             return;
         }
@@ -444,9 +448,26 @@ public:
             return fat();
         return inflateSlow();
     }
-    
-private:
+
+    // Safe to call from another thread. Once inflated, the WatchpointSet never changes.
+    WatchpointSet* inflatedSetConcurrently() const
+    {
+        uintptr_t data = m_data;
+        if (isFat(data))
+            return fat(data);
+        return nullptr;
+    }
+
+    static constexpr ptrdiff_t offsetOfData() { return OBJECT_OFFSETOF(InlineWatchpointSet, m_data); }
+
     static constexpr uintptr_t IsThinFlag        = 1;
+
+    static constexpr uintptr_t encodeState(WatchpointState state)
+    {
+        return (static_cast<uintptr_t>(state) << StateShift) | IsThinFlag;
+    }
+
+private:
     static constexpr uintptr_t StateMask         = 6;
     static constexpr uintptr_t StateShift        = 1;
     
@@ -457,11 +478,6 @@ private:
     {
         ASSERT(isThin(data));
         return static_cast<WatchpointState>((data & StateMask) >> StateShift);
-    }
-    
-    static uintptr_t encodeState(WatchpointState state)
-    {
-        return (static_cast<uintptr_t>(state) << StateShift) | IsThinFlag;
     }
     
     bool isThin() const { return isThin(m_data); }

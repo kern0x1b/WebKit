@@ -96,7 +96,7 @@ public:
     
     JSC::Heap& heap() const;
     
-    void lastChanceToFinalize(); // Must call stopAllocatingForGood first.
+    void lastChanceToFinalize();
     void freeMemory();
 
     static size_t optimalSizeFor(size_t);
@@ -115,7 +115,6 @@ public:
     void didFinishIterating();
 
     void stopAllocating();
-    void stopAllocatingForGood();
     void resumeAllocating(); // If we just stopped allocation but we didn't do a collection, we need to resume allocation.
     
     void NODELETE prepareForMarking();
@@ -150,8 +149,6 @@ public:
     size_t size();
     size_t NODELETE capacity();
 
-    bool isPagedOut();
-    
     HeapVersion markingVersion() const { return m_markingVersion; }
     HeapVersion newlyAllocatedVersion() const { return m_newlyAllocatedVersion; }
     HeapVersion edenVersion() const { return m_edenVersion; }
@@ -189,7 +186,7 @@ private:
     friend class WeakSet;
     friend class Subspace;
     friend class IsoSubspace;
-    
+
     // Use this version when calling from within the GC where we know that the directories
     // have already been stopped.
     template<typename Functor> void forEachLiveCell(const Functor&);

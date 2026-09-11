@@ -74,20 +74,7 @@ void BytecodeGeneratorBase<Traits>::reclaimFreeRegisters()
 template<typename Traits>
 void BytecodeGeneratorBase<Traits>::emitLabel(GenericLabel<Traits>& label)
 {
-    unsigned newLabelIndex = m_writer.position();
-    label.setLocation(*this, newLabelIndex);
-
-    if (m_codeBlock->numberOfJumpTargets()) {
-        unsigned lastLabelIndex = m_codeBlock->lastJumpTarget();
-        ASSERT(lastLabelIndex <= newLabelIndex);
-        if (newLabelIndex == lastLabelIndex) {
-            // Peephole optimizations have already been disabled by emitting the last label
-            return;
-        }
-    }
-
-    m_codeBlock->addJumpTarget(newLabelIndex);
-
+    label.setLocation(*this, m_writer.position());
     m_lastOpcodeID = Traits::opcodeForDisablingOptimizations;
 }
 
@@ -97,30 +84,6 @@ void BytecodeGeneratorBase<Traits>::recordOpcode(typename Traits::OpcodeID opcod
     ASSERT(m_lastOpcodeID == Traits::opcodeForDisablingOptimizations || (m_lastOpcodeID == m_lastInstruction->opcodeID() && m_writer.position() == m_lastInstruction.offset() + m_lastInstruction->size()));
     m_lastInstruction = m_writer.ref();
     m_lastOpcodeID = opcodeID;
-}
-
-template<typename Traits>
-void BytecodeGeneratorBase<Traits>::alignWideOpcode16()
-{
-#if CPU(NEEDS_ALIGNED_ACCESS)
-    static_assert(Traits::OpcodeTraits::maxOpcodeIDWidth == OpcodeSize::Narrow);
-    size_t opcodeSize = 1;
-    size_t prefixAndOpcodeSize = opcodeSize + PaddingBySize<OpcodeSize::Wide16>::value;
-    while ((m_writer.position() + prefixAndOpcodeSize) % OpcodeSize::Wide16)
-        Traits::OpNop::template emit<OpcodeSize::Narrow>(this);
-#endif
-}
-
-template<typename Traits>
-void BytecodeGeneratorBase<Traits>::alignWideOpcode32()
-{
-#if CPU(NEEDS_ALIGNED_ACCESS)
-    static_assert(Traits::OpcodeTraits::maxOpcodeIDWidth == OpcodeSize::Narrow);
-    size_t opcodeSize = 1;
-    size_t prefixAndOpcodeSize = opcodeSize + PaddingBySize<OpcodeSize::Wide32>::value;
-    while ((m_writer.position() + prefixAndOpcodeSize) % OpcodeSize::Wide32)
-        Traits::OpNop::template emit<OpcodeSize::Narrow>(this);
-#endif
 }
 
 template<typename Traits>

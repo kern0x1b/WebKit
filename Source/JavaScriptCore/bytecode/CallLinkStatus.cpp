@@ -152,8 +152,8 @@ CallLinkStatus CallLinkStatus::computeFromCallLinkInfo(
     // them. So, there is no way for either the caller of CallLinkInfo::unlock() or unlock()
     // itself to figure out which lock to lock.
     //
-    // Fortunately, that doesn't matter. The only things we ask of CallLinkInfo - the slow
-    // path count, the stub, and the target - can all be asked racily. Stubs and targets can
+    // Fortunately, that doesn't matter. The only things we ask of CallLinkInfo - the stub
+    // and the target - can all be asked racily. Stubs and targets can
     // only be deleted at next GC, so if we load a non-null one, then it must contain data
     // that is still marginally valid (i.e. the pointers ain't stale). This kind of raciness
     // is probably OK for now.
@@ -188,7 +188,7 @@ CallLinkStatus CallLinkStatus::computeFromCallLinkInfo(
         RELEASE_ASSERT(edges.first().count() >= edges.last().count());
         
         double totalCallsToKnown = 0;
-        double totalCallsToUnknown = callLinkInfo.slowPathCount();
+        double totalCallsToUnknown = 0;
         CallVariantList variants;
         for (size_t i = 0; i < edges.size(); ++i) {
             CallEdge edge = edges[i];
@@ -234,9 +234,6 @@ CallLinkStatus CallLinkStatus::computeFromCallLinkInfo(
         result.m_variants.append(variant);
     }
     
-    result.m_couldTakeSlowPath = !!callLinkInfo.slowPathCount();
-
-
     return result;
 }
 
@@ -388,10 +385,10 @@ void CallLinkStatus::makeClosureCall()
     m_variants = despecifiedVariantList(m_variants);
 }
 
-bool CallLinkStatus::finalize(VM& vm)
+bool CallLinkStatus::isStillLive(VM& vm)
 {
     for (CallVariant& variant : m_variants) {
-        if (!variant.finalize(vm))
+        if (!variant.isStillLive(vm))
             return false;
     }
     return true;

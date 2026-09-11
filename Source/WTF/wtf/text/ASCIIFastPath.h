@@ -27,6 +27,7 @@
 #include <wtf/BitSet.h>
 #include <wtf/SIMDHelpers.h>
 #include <wtf/StdLibExtras.h>
+#include <wtf/UnalignedAccess.h>
 #include <wtf/text/ASCIILiteral.h>
 #include <wtf/text/Latin1Character.h>
 

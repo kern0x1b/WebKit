@@ -121,51 +121,30 @@ inline IndexingHeader baseIndexingHeaderForArrayStorage(unsigned length)
     return indexingHeaderForArrayStorage(length, BASE_ARRAY_STORAGE_VECTOR_LEN);
 }
 
-#if USE(JSVALUE64)
 JS_EXPORT_PRIVATE void clearArrayMemset(WriteBarrier<Unknown>* base, unsigned count);
 JS_EXPORT_PRIVATE void clearArrayMemset(double* base, unsigned count);
-#endif // USE(JSVALUE64)
 
 ALWAYS_INLINE void clearArray(WriteBarrier<Unknown>* base, unsigned count)
 {
-#if USE(JSVALUE64)
     const unsigned minCountForMemset = 100;
     if (count >= minCountForMemset) {
         clearArrayMemset(base, count);
         return;
     }
-#elif OS(DARWIN)
-    const unsigned minCountForMemset = 12;
-    if (count >= minCountForMemset) {
-        WriteBarrier<Unknown> hole;
-        static_assert(sizeof(WriteBarrier<Unknown>) == sizeof(uint64_t));
-        memset_pattern8(static_cast<void*>(base), &hole, sizeof(WriteBarrier<Unknown>) * static_cast<size_t>(count));
-        return;
-    }
-#endif
-
-    for (unsigned i = 0; i < count; ++i)
+    
+    for (unsigned i = count; i--;)
         base[i].clear();
 }
 
 ALWAYS_INLINE void clearArray(double* base, unsigned count)
 {
-#if USE(JSVALUE64)
     const unsigned minCountForMemset = 100;
     if (count >= minCountForMemset) {
         clearArrayMemset(base, count);
         return;
     }
-#elif OS(DARWIN)
-    const unsigned minCountForMemset = 12;
-    if (count >= minCountForMemset) {
-        constexpr double pattern = PNaN;
-        memset_pattern8(static_cast<void*>(base), &pattern, sizeof(double) * static_cast<size_t>(count));
-        return;
-    }
-#endif
-
-    for (unsigned i = 0; i < count; ++i)
+    
+    for (unsigned i = count; i--;)
         base[i] = PNaN;
 }
 

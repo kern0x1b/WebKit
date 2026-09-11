@@ -36,7 +36,6 @@ WTF_ALLOW_UNSAFE_BUFFER_USAGE_BEGIN
 #include <JavaScriptCore/Weak.h>
 #include <wtf/CagedPtr.h>
 #include <wtf/CheckedArithmetic.h>
-#include <wtf/Expected.h>
 #include <wtf/SharedTask.h>
 #include <wtf/StdLibExtras.h>
 #include <wtf/TZoneMalloc.h>
@@ -86,8 +85,14 @@ public:
 
     Mode mode() const { return m_mode; }
 
-    Expected<int64_t, GrowFailReason> grow(VM&, size_t newByteLength, bool requirePageMultiple);
-    Expected<int64_t, GrowFailReason> grow(const AbstractLocker&, VM&, size_t newByteLength, bool requirePageMultiple);
+    std::expected<int64_t, GrowFailReason> grow(VM&, size_t newByteLength, bool requirePageMultiple);
+
+    // One attempt, which cannot collect because it takes no VM. Reports what the caller owes the heap
+    // once it has released the memory handle's lock: asking for a collection of either kind can run
+    // finalizers on the calling thread, so neither may be asked for while that lock is held. On
+    // SyncTryToReclaimMemory the caller must recompute the whole attempt, since the size it was working
+    // from can move while unlocked.
+    std::expected<int64_t, GrowFailReason> tryGrow(const AbstractLocker&, size_t newByteLength, bool requirePageMultiple, BufferMemoryResult::Kind&);
 
     void updateSize(size_t sizeInBytes, std::memory_order order = std::memory_order_seq_cst)
     {
@@ -108,6 +113,7 @@ private:
         , m_hasMaxByteLength(!!maxByteLength)
         , m_mode(mode)
     {
+        RELEASE_ASSERT(m_maxByteLength <= MAX_ARRAY_BUFFER_SIZE);
 #if ASSERT_ENABLED
         if (m_hasMaxByteLength)
             ASSERT(m_memoryHandle);
@@ -308,8 +314,8 @@ public:
 
     JS_EXPORT_PRIVATE static Ref<SharedTask<void(void*)>> primitiveGigacageDestructor();
 
-    Expected<int64_t, GrowFailReason> grow(VM&, size_t newByteLength);
-    Expected<int64_t, GrowFailReason> resize(VM&, size_t newByteLength);
+    std::expected<int64_t, GrowFailReason> grow(VM&, size_t newByteLength);
+    std::expected<int64_t, GrowFailReason> resize(VM&, size_t newByteLength);
 
     std::span<uint8_t> mutableSpan() LIFETIME_BOUND { return { static_cast<uint8_t*>(data()), byteLength() }; }
     std::span<const uint8_t> span() const LIFETIME_BOUND { return { static_cast<const uint8_t*>(data()), byteLength() }; }

@@ -41,6 +41,7 @@
 #include "JITScannable.h"
 #include "JumpTable.h"
 #include "MethodOfGettingAValueProfile.h"
+#include <wtf/BitSet.h>
 #include <wtf/BitVector.h>
 #include <wtf/GenericHashKey.h>
 #include <wtf/HashMap.h>
@@ -58,6 +59,9 @@ namespace JSC {
 class CodeBlock;
 class CallFrame;
 class IRDumpDebugInfo;
+class RegExp;
+
+enum class FirstCharacterFilterPosition : uint8_t;
 
 namespace DFG {
 
@@ -252,14 +256,14 @@ public:
     template<typename... Params>
     Node* addNode(Params... params)
     {
-        Node* node = m_nodes.addNew(params...);
+        Node* node = m_nodes.addNew(WTF::move(params)...);
         return node;
     }
 
     template<typename... Params>
     Node* addNode(SpeculatedType type, Params... params)
     {
-        Node* node = addNode(params...);
+        Node* node = addNode(WTF::move(params)...);
         node->predict(type);
         return node;
     }
@@ -376,9 +380,6 @@ public:
     
     bool addShouldSpeculateInt52(Node* add)
     {
-        if (!enableInt52())
-            return false;
-        
         Node* left = add->child1().node();
         Node* right = add->child2().node();
 
@@ -422,9 +423,6 @@ public:
     {
         // This is much more relaxed compared to addShouldSpeculateInt52.
         // The reason is double mod is so costly, so it is worth trying with much more aggressively compared to addShouldSpeculateInt52.
-        if (!enableInt52())
-            return false;
-
         Node* left = node->child1().node();
         Node* right = node->child2().node();
 
@@ -459,9 +457,6 @@ public:
     
     bool binaryArithShouldSpeculateInt52(Node* node, PredictionPass pass)
     {
-        if (!enableInt52())
-            return false;
-        
         Node* left = node->child1().node();
         Node* right = node->child2().node();
 
@@ -478,8 +473,6 @@ public:
     
     bool unaryArithShouldSpeculateInt52(Node* node, PredictionPass pass)
     {
-        if (!enableInt52())
-            return false;
         return node->child1()->shouldSpeculateInt52()
             && node->canSpeculateInt52(pass)
             && !hasExitSite(node, Int52Overflow);
@@ -1091,6 +1084,10 @@ public:
 
     DesiredIdentifiers& identifiers() LIFETIME_BOUND { return m_plan.identifiers(); }
     DesiredWatchpoints& watchpoints() LIFETIME_BOUND { return m_plan.watchpoints(); }
+
+    const WTF::BitSet<256>* tryGetConstantRegExpFirstCharacterBitmap(Node*, FirstCharacterFilterPosition);
+    const WTF::BitSet<256>* regExpFirstCharacterBitmap(RegExp*, FirstCharacterFilterPosition);
+    std::optional<unsigned> tryGetConstantRegExpTestMinimumSize(Node*);
 
     // Returns false if the key is already invalid or unwatchable. If this is a Presence condition,
     // this also makes it cheap to query if the condition holds. Also makes sure that the GC knows

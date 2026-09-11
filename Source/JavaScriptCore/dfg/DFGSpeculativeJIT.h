@@ -160,7 +160,7 @@ public:
     
     void createOSREntries();
     void linkOSREntries(LinkBuffer&);
-    Vector<VariableEvent> finalizeEventStream() { return m_stream.finalize(); }
+    VariableEventStream finalizeEventStream() { return m_stream.finalize(); }
 
     BasicBlock* nextBlock()
     {
@@ -1470,7 +1470,7 @@ public:
         SwitchData*, const Vector<StringSwitchCase>&, unsigned numChecked,
         unsigned begin, unsigned end, GPRReg buffer, GPRReg length, GPRReg temp,
         unsigned alreadyCheckedLength, bool checkedExactLength);
-    void emitSwitchStringOnString(Node*, SwitchData*, GPRReg string, Edge stringEdge);
+    void emitSwitchStringOnString(Node*, SwitchData*, GPRReg stringGPR, Edge stringEdge);
     void emitSwitchString(Node*, SwitchData*);
     void emitSwitch(Node*);
     
@@ -1525,12 +1525,14 @@ public:
     void compileLoadMapValue(Node*);
     void compileIsEmptyStorage(Node*);
     void compileMapIteratorNext(Node*);
+    void loadMapEntryData(bool isMap, GPRReg storageGPR, GPRReg entryGPR, GPRReg scratchGPR, GPRReg resultGPR, int32_t indexAdjust);
     void compileMapIteratorKey(Node*);
     void compileMapIteratorValue(Node*);
     void compileMapStorage(Node*);
     void compileMapStorageOrSentinel(Node*);
     void compileMapIterationNext(Node*);
     void compileMapIterationEntry(Node*);
+    void compileMapIterationEntryData(Node*, unsigned dataOffset);
     void compileMapIterationEntryKey(Node*);
     void compileMapIterationEntryValue(Node*);
     void compileMapOrSetSize(Node*);
@@ -1603,6 +1605,7 @@ public:
     void compileValueRep(Node*);
     void compileDoubleRep(Node*);
     
+    void emitDoubleToInt32(FPRReg, GPRReg);
     void compileValueToInt32(Node*);
     void compileUInt32ToNumber(Node*);
     void compileDoubleAsInt32(Node*);
@@ -1730,10 +1733,15 @@ public:
     void compileRegExpExec(Node*);
     void compileRegExpExecNonGlobalOrSticky(Node*);
     void compileRegExpExecSticky(Node*);
+    void emitFirstCharacterBitmapMatch(const uint8_t* bitmap, GPRReg characterGPR, GPRReg scratch1GPR, GPRReg scratch2GPR, JumpList& matchMaybeCases);
+    void emitRegExpAnchoredFirstCharacterFilterGuards(const uint8_t* bitmap, GPRReg argumentGPR, GPRReg scratch1GPR, GPRReg scratch2GPR, GPRReg scratch3GPR, JumpList& slowCases);
+    void emitRegExpStickyFirstCharacterFilterGuards(const uint8_t* bitmap, GPRReg baseGPR, GPRReg argumentGPR, GPRReg scratch1GPR, GPRReg scratch2GPR, GPRReg scratch3GPR, JumpList& slowCases);
+    void emitRegExpMinimumLengthFilterGuards(std::optional<unsigned> constantMinimumSize, GPRReg baseGPR, GPRReg argumentGPR, bool argumentCanBeRope, GPRReg scratch1GPR, GPRReg scratch2GPR, JumpList& slowCases);
     void compileRegExpMatchFast(Node*);
     void compileRegExpMatchFastGlobal(Node*);
     void compileRegExpSplitFast(Node*);
     void compileRegExpTest(Node*);
+    void emitRegExpTestWithFilter(Node*, GPRReg globalObjectGPR, GPRReg baseGPR, GPRReg argumentGPR, Edge baseEdge, Edge argumentEdge);
     void compileRegExpTestInline(Node*);
     void compileRegExpSearch(Node*);
     void compileRegExpStringIteratorNext(Node*);
@@ -1774,8 +1782,7 @@ public:
     void compileDefineAccessorProperty(Node*);
     void compileObjectDefineProperty(Node*);
     void compileObjectDefinePropertyFromFields(Node*);
-    void compileStringSlice(Node*);
-    void compileStringSubstring(Node*);
+    void compileStringSliceOrSubstring(Node*);
     void compileStringSubstr(Node*);
     void compileToUpperCase(Node*);
     void compileToLowerCase(Node*);
@@ -1938,6 +1945,7 @@ public:
     void emitGetCallee(CodeOrigin, GPRReg calleeGPR);
     void emitGetArgumentStart(CodeOrigin, GPRReg startGPR);
     void emitPopulateSliceIndex(Edge&, std::optional<GPRReg> indexGPR, GPRReg lengthGPR, GPRReg resultGPR);
+    void emitPopulateSubstringIndex(Edge&, GPRReg indexGPR, GPRReg lengthGPR, GPRReg resultGPR);
     
     // Generate an OSR exit fuzz check. Returns Jump() if OSR exit fuzz is not enabled, or if
     // it's in training mode.
@@ -2426,7 +2434,6 @@ public:
         else
             m_gpr = m_jit->allocate();
     }
-    GPRTemporary(SpeculativeJIT*, ReuseTag, JSValueOperand&, WhichValueWord);
 
     GPRTemporary(const GPRTemporary&) = delete;
 
@@ -2554,6 +2561,7 @@ private:
 // These classes lock the result of a call to a C++ helper function.
 
 class GPRFlushedCallResult : public GPRTemporary {
+    WTF_MAKE_SEQUESTERED_ARENA_ALLOCATED(GPRFlushedCallResult);
 public:
     GPRFlushedCallResult(SpeculativeJIT* jit)
         : GPRTemporary(jit, GPRInfo::returnValueGPR)
@@ -2562,6 +2570,7 @@ public:
 };
 
 class GPRFlushedCallResult2 : public GPRTemporary {
+    WTF_MAKE_SEQUESTERED_ARENA_ALLOCATED(GPRFlushedCallResult2);
 public:
     GPRFlushedCallResult2(SpeculativeJIT* jit)
         : GPRTemporary(jit, GPRInfo::returnValueGPR2)
@@ -2570,6 +2579,7 @@ public:
 };
 
 class FPRResult : public FPRTemporary {
+    WTF_MAKE_SEQUESTERED_ARENA_ALLOCATED(FPRResult);
 public:
     FPRResult(SpeculativeJIT* jit)
         : FPRTemporary(jit, lockedResult(jit))

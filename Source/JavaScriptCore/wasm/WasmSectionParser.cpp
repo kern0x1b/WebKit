@@ -70,29 +70,29 @@ auto SectionParser::parseType() -> PartialResult
         // When GC is enabled, recursive references can show up in any of these cases.
         SetForScope<RecursionGroupInformation> recursionGroupInfo(m_typeSection.recursionGroupInformation, RecursionGroupInformation { true, m_info->typeCount(), m_info->typeCount() + 1 });
 
-        switch (static_cast<TypeKind>(typeKind)) {
-        case TypeKind::Func: {
+        switch (static_cast<DefinedTypeKind>(typeKind)) {
+        case DefinedTypeKind::Func: {
             WASM_FAIL_IF_HELPER_FAILS(parseFunctionType(i, signature));
             break;
         }
-        case TypeKind::Struct: {
+        case DefinedTypeKind::Struct: {
             WASM_FAIL_IF_HELPER_FAILS(parseStructType(i, signature));
             break;
         }
-        case TypeKind::Array: {
+        case DefinedTypeKind::Array: {
             WASM_FAIL_IF_HELPER_FAILS(parseArrayType(i, signature));
             break;
         }
-        case TypeKind::Rec: {
+        case DefinedTypeKind::Rec: {
             WASM_FAIL_IF_HELPER_FAILS(parseRecursionGroup(i));
             ++recursionGroupCount;
             WASM_PARSER_FAIL_IF(recursionGroupCount > maxNumberOfRecursionGroups, "number of recursion groups exceeded the limit of "_s, maxNumberOfRecursionGroups);
             continue; // RecursionGroup parsing is done inside parseRecursionGroup.
         }
-        case TypeKind::Sub:
-        case TypeKind::Subfinal: {
+        case DefinedTypeKind::Sub:
+        case DefinedTypeKind::Subfinal: {
             Vector<TypeIndex> noRecursionGroup;
-            WASM_FAIL_IF_HELPER_FAILS(parseSubtype(i, signature, noRecursionGroup, static_cast<TypeKind>(typeKind) == TypeKind::Subfinal));
+            WASM_FAIL_IF_HELPER_FAILS(parseSubtype(i, signature, noRecursionGroup, static_cast<DefinedTypeKind>(typeKind) == DefinedTypeKind::Subfinal));
             break;
         }
         default:
@@ -344,7 +344,6 @@ auto SectionParser::parseTableHelper(bool isImport) -> PartialResult
     ASSERT(!isShared);
     if (!limits) [[unlikely]]
         return makeUnexpected(WTF::move(limits.error()));
-    WASM_PARSER_FAIL_IF(initial > maxTableEntries, "Table's initial page count of "_s, initial, " is too big, maximum "_s, maxTableEntries);
 
     ASSERT(!maximum || *maximum >= initial);
 
@@ -354,7 +353,7 @@ auto SectionParser::parseTableHelper(bool isImport) -> PartialResult
         bool isExtendedConstantExpression;
         v128_t unusedVector { };
         WASM_FAIL_IF_HELPER_FAILS(parseInitExpr(initOpcode, isExtendedConstantExpression, initialBitsOrImportNumber, unusedVector, type, typeForInitOpcode));
-        WASM_PARSER_FAIL_IF(!isSubtype(typeForInitOpcode, type), "Table init_expr opcode of type "_s, typeForInitOpcode.kind, " doesn't match table's type "_s, type.kind);
+        WASM_PARSER_FAIL_IF(!isSubtype(typeForInitOpcode, type), "Table init_expr opcode of type "_s, typeForInitOpcode.kind(), " doesn't match table's type "_s, type.kind());
 
         if (isExtendedConstantExpression)
             tableInitType = TableInformation::FromExtendedExpression;
@@ -409,17 +408,14 @@ auto SectionParser::parseMemoryHelper(bool isImport) -> PartialResult
         if (!limits) [[unlikely]]
             return makeUnexpected(WTF::move(limits.error()));
         ASSERT(!maximum || *maximum >= initial);
-        WASM_PARSER_FAIL_IF(!PageCount::isValid(initial), "Memory's initial page count of "_s, initial, " is invalid"_s);
 
-        // FIXME(wasm-memory64): for now IPInt checks m_cachedIsMemory64 (flag if memory 0 is 64-bit)
-        // no matter which memory is being accessed
-        if (isMemory64)
-            WASM_PARSER_FAIL_IF(m_info->memoryCount(), "if using memory64 then multiple memories are illegal for now");
+        const uint64_t maxDeclarablePageCount = maxDeclarablePages(AddressType { isMemory64 });
+        WASM_PARSER_FAIL_IF(initial > maxDeclarablePageCount, "Memory's initial page count of "_s, initial, " is invalid"_s);
 
         initialPageCount = PageCount(initial);
 
         if (maximum) {
-            WASM_PARSER_FAIL_IF(!PageCount::isValid(*maximum), "Memory's maximum page count of "_s, *maximum, " is invalid"_s);
+            WASM_PARSER_FAIL_IF(*maximum > maxDeclarablePageCount, "Memory's maximum page count of "_s, *maximum, " is invalid"_s);
             maximumPageCount = PageCount(*maximum);
         }
     }
@@ -485,7 +481,7 @@ auto SectionParser::parseGlobal() -> PartialResult
             global.initializationType = GlobalInformation::FromRefFunc;
         else
             global.initializationType = GlobalInformation::FromExpression;
-        WASM_PARSER_FAIL_IF(!isSubtype(typeForInitOpcode, global.type), "Global init_expr opcode of type "_s, typeForInitOpcode.kind, " doesn't match global's type "_s, global.type.kind);
+        WASM_PARSER_FAIL_IF(!isSubtype(typeForInitOpcode, global.type), "Global init_expr opcode of type "_s, typeForInitOpcode.kind(), " doesn't match global's type "_s, global.type.kind());
 
         if (initOpcode == RefFunc) {
             ASSERT(global.initializationType != GlobalInformation::FromVector);
@@ -829,7 +825,7 @@ auto SectionParser::parseInitExpr(uint8_t& opcode, bool& isExtendedConstantExpre
             TypeIndex typeIndex = m_info->rtt(ModuleInformation::typeSignatureIndexFromHeapType(heapType)).asTypeIndex();
             typeOfNull = Type { TypeKind::RefNull, typeIndex };
         } else
-            typeOfNull = Type { TypeKind::RefNull, static_cast<TypeIndex>(heapType) };
+            typeOfNull = Type { TypeKind::RefNull, typeIndexFromTypeKind(static_cast<TypeKind>(heapType)) };
         resultType = typeOfNull;
         bitsOrImportNumber = JSValue::encode(jsNull());
         break;
@@ -868,10 +864,11 @@ auto SectionParser::parseInitExpr(uint8_t& opcode, bool& isExtendedConstantExpre
     // If an End doesn't appear, we have to assume it's an extended constant expression
     // and use the full Wasm expression parser to validate.
     size_t initExprOffset;
+    uint32_t maxStackHeight = 0;
     const size_t offsetOfExprInSource = initialOffset + m_offsetInSource;
-    WASM_FAIL_IF_HELPER_FAILS(parseExtendedConstExpr(source().subspan(initialOffset), offsetOfExprInSource, initExprOffset, m_info, expectedType));
+    WASM_FAIL_IF_HELPER_FAILS(parseExtendedConstExpr(source().subspan(initialOffset), offsetOfExprInSource, initExprOffset, maxStackHeight, m_info, expectedType));
     m_offset += (initExprOffset - (m_offset - initialOffset));
-    WASM_PARSER_FAIL_IF(!m_info->constantExpressions.tryConstructAndAppend(std::make_pair(source().subspan(initialOffset, initExprOffset), offsetOfExprInSource)), "could not allocate memory for init expr"_s);
+    WASM_PARSER_FAIL_IF(!m_info->constantExpressions.tryConstructAndAppend(ModuleInformation::ConstantExpression { source().subspan(initialOffset, initExprOffset), offsetOfExprInSource, maxStackHeight }), "could not allocate memory for init expr"_s);
     bitsOrImportNumber = m_info->constantExpressions.size() - 1;
     isExtendedConstantExpression = true;
     resultType = expectedType;
@@ -1042,22 +1039,22 @@ auto SectionParser::parseRecursionGroup(uint32_t position) -> PartialResult
         int8_t typeKind;
         WASM_PARSER_FAIL_IF(!parseInt7(typeKind), "can't get recursion group's "_s, i, "th Type's type"_s);
         ParsedDef signature;
-        switch (static_cast<TypeKind>(typeKind)) {
-        case TypeKind::Func: {
+        switch (static_cast<DefinedTypeKind>(typeKind)) {
+        case DefinedTypeKind::Func: {
             WASM_FAIL_IF_HELPER_FAILS(parseFunctionType(i, signature));
             break;
         }
-        case TypeKind::Struct: {
+        case DefinedTypeKind::Struct: {
             WASM_FAIL_IF_HELPER_FAILS(parseStructType(i, signature));
             break;
         }
-        case TypeKind::Array: {
+        case DefinedTypeKind::Array: {
             WASM_FAIL_IF_HELPER_FAILS(parseArrayType(i, signature));
             break;
         }
-        case TypeKind::Sub:
-        case TypeKind::Subfinal: {
-            WASM_FAIL_IF_HELPER_FAILS(parseSubtype(i, signature, types, static_cast<TypeKind>(typeKind) == TypeKind::Subfinal));
+        case DefinedTypeKind::Sub:
+        case DefinedTypeKind::Subfinal: {
+            WASM_FAIL_IF_HELPER_FAILS(parseSubtype(i, signature, types, static_cast<DefinedTypeKind>(typeKind) == DefinedTypeKind::Subfinal));
             break;
         }
         default:
@@ -1212,16 +1209,16 @@ auto SectionParser::parseSubtype(uint32_t position, ParsedDef& subtype, Vector<T
     int8_t typeKind;
     WASM_PARSER_FAIL_IF(!parseInt7(typeKind), "can't get subtype's underlying Type's type"_s);
     ParsedDef underlyingType;
-    switch (static_cast<TypeKind>(typeKind)) {
-    case TypeKind::Func: {
+    switch (static_cast<DefinedTypeKind>(typeKind)) {
+    case DefinedTypeKind::Func: {
         WASM_FAIL_IF_HELPER_FAILS(parseFunctionType(position, underlyingType));
         break;
     }
-    case TypeKind::Struct: {
+    case DefinedTypeKind::Struct: {
         WASM_FAIL_IF_HELPER_FAILS(parseStructType(position, underlyingType));
         break;
     }
-    case TypeKind::Array: {
+    case DefinedTypeKind::Array: {
         WASM_FAIL_IF_HELPER_FAILS(parseArrayType(position, underlyingType));
         break;
     }
@@ -1269,11 +1266,11 @@ auto SectionParser::parseElementKind(uint8_t& resultElementKind) -> PartialResul
 
 auto SectionParser::parseIndexCountForElementSection(uint32_t& resultIndexCount, const unsigned elementNum) -> PartialResult
 {
-    static_assert(maxTableInitializationEntries < std::numeric_limits<uint32_t>::max());
+    static_assert(maxTableEntries < std::numeric_limits<uint32_t>::max());
 
     uint32_t indexCount;
     WASM_PARSER_FAIL_IF(!parseVarUInt32(indexCount), "can't get "_s, elementNum, "th index count for Element section"_s);
-    WASM_PARSER_FAIL_IF(indexCount > maxTableInitializationEntries, "Element section's "_s, elementNum, "th index count of "_s, indexCount, " is too big, maximum "_s, maxTableInitializationEntries);
+    WASM_PARSER_FAIL_IF(indexCount > maxTableEntries, "Element section's "_s, elementNum, "th index count of "_s, indexCount, " is too big, maximum "_s, maxTableEntries);
     resultIndexCount = indexCount;
 
     return { };
@@ -1290,7 +1287,7 @@ auto SectionParser::parseElementSegmentVectorOfExpressions(Type elementType, Vec
         bool isExtendedConstantExpression;
         v128_t unusedVector { };
         WASM_FAIL_IF_HELPER_FAILS(parseInitExpr(initOpcode, isExtendedConstantExpression, initialBitsOrIndex, unusedVector, elementType, typeForInitOpcode));
-        WASM_PARSER_FAIL_IF(!isSubtype(typeForInitOpcode, elementType), "Element section's "_s, elementNum, "th element's init_expr opcode of type "_s, typeForInitOpcode.kind, " doesn't match element's type "_s, elementType.kind);
+        WASM_PARSER_FAIL_IF(!isSubtype(typeForInitOpcode, elementType), "Element section's "_s, elementNum, "th element's init_expr opcode of type "_s, typeForInitOpcode.kind(), " doesn't match element's type "_s, elementType.kind());
 
         if (isExtendedConstantExpression)
             initType = Element::InitializationType::FromExtendedExpression;
@@ -1449,7 +1446,7 @@ auto SectionParser::parseException() -> PartialResult
 {
     uint32_t exceptionCount;
     WASM_PARSER_FAIL_IF(!parseVarUInt32(exceptionCount), "can't get Exception section's count"_s);
-    WASM_PARSER_FAIL_IF(exceptionCount > maxExceptions, "Export section's count is too big "_s, exceptionCount, " maximum "_s, maxExceptions);
+    WASM_PARSER_FAIL_IF(exceptionCount > maxExceptions, "Exception section's count is too big "_s, exceptionCount, " maximum "_s, maxExceptions);
     RELEASE_ASSERT(!m_info->internalExceptionTypeSignatureIndices.capacity());
     WASM_ALLOCATOR_FAIL_IF(!m_info->internalExceptionTypeSignatureIndices.tryReserveInitialCapacity(exceptionCount), "can't allocate enough memory for "_s, exceptionCount, " exceptions"_s);
 

@@ -591,24 +591,24 @@ static void overrideDefaults()
 #if OS(DARWIN) && CPU(ARM64)
     {
         // Example topologies.
-        //                P0       P1       GC
-        // M1       :      4        4        6
-        // M1 Pro   :      6        2        6
-        // M1 Max   :      8        2        7
-        // M1 Ultra :     16        4        7
-        // M4       :    3-4      4-6      6-7
-        // M4 Pro   :   8-10        4        7
-        // M4 Max   :  10-12        4        7
-        // M5       :    3-4        6        7
-        // M5 Pro   :    5-6    10-12        7
-        // M5 Max   :      6       12        7
-        // A18      :      2        4        4
-        unsigned p0 = hwNumberOfP0Cores();
-        unsigned p1 = hwNumberOfP1Cores();
+        //           Super  Performance  Efficiency   GC
+        // M1            0            4           4    6
+        // M1 Pro        0            6           2    6
+        // M1 Max        0            8           2    7
+        // M1 Ultra      0           16           4    7
+        // M4            0          3-4         4-6  6-7
+        // M4 Pro        0         8-10           4    7
+        // M4 Max        0        10-12           4    7
+        // M5            0          3-4           6    7
+        // M5 Pro      5-6        10-12           0    7
+        // M5 Max        6           12           0    7
+        // A18           0            2           4    4
+        unsigned performanceCores = numberOfSuperAndPerformanceCores();
+        unsigned efficiencyCores = hwNumberOfCores(CoreCategory::Efficiency);
         unsigned gcMarkers = 0;
-        if (p0 < 3)
+        if (performanceCores < 3)
             gcMarkers = std::min<unsigned>(4, kernTCSMAwareNumberOfProcessorCores());
-        else if ((p0 + p1) < 9)
+        else if ((performanceCores + efficiencyCores) < 9)
             gcMarkers = std::min<unsigned>(6, kernTCSMAwareNumberOfProcessorCores());
         else
             gcMarkers = std::min<unsigned>(7, kernTCSMAwareNumberOfProcessorCores());
@@ -1392,7 +1392,7 @@ void Options::dumpAllOptions(DumpLevel level, ASCIILiteral title)
 {
     StringBuilder builder;
     dumpAllOptions(builder, level, title, { }, "   "_s, "\n"_s, DumpDefaults);
-    dataLog(builder.toString().utf8().legacyCStringPointer());
+    dataLog(builder.toString().utf8().data());
 }
 
 void Options::dumpOption(StringBuilder& builder, DumpLevel level, Options::ID id,

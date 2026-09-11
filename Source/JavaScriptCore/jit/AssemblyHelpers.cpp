@@ -520,8 +520,7 @@ AssemblyHelpers::JumpList AssemblyHelpers::findMegamorphicCacheEntry(VM& vm, GPR
         // we're looking for, or we realize we're comparing against another entity, and go to the
         // slow path anyways.
         load32(Address(uidGPR, UniquedStringImpl::flagsOffset()), scratch2GPR);
-        urshift32(TrustedImm32(StringImpl::s_flagCount), scratch2GPR);
-        add32(scratch2GPR, scratch3GPR);
+        addUnsignedRightShift32(scratch3GPR, scratch2GPR, TrustedImm32(StringImpl::s_flagCount), scratch3GPR);
     }
 
     and32(TrustedImm32(primaryMask), scratch3GPR);
@@ -823,9 +822,7 @@ AssemblyHelpers::JumpList AssemblyHelpers::loadCacheableIdentifierImpl(GPRReg pr
 
         isString.link(this);
         loadPtr(Address(propertyGPR, JSString::offsetOfValue()), destGPR);
-        if (canBeRope)
-            slowCases.append(branchIfRopeStringImpl(destGPR));
-        slowCases.append(branchTest32(Zero, Address(destGPR, StringImpl::flagsOffset()), TrustedImm32(StringImpl::flagIsAtom())));
+        slowCases.append(branchIfNotAtomStringImpl(propertyGPR, destGPR, canBeRope));
 
         done.link(this);
     }
@@ -1028,8 +1025,8 @@ void AssemblyHelpers::emitAllocateWithNonNullAllocator(GPRReg resultGPR, const J
     loadPairPtr(allocatorGPR, TrustedImm32(LocalAllocator::offsetOfFreeList() + FreeList::offsetOfIntervalStart()), resultGPR, scratchGPR);
     popPath = branchPtr(RelationalCondition::AboveOrEqual, resultGPR, scratchGPR);
     auto bumpLabel = label();
-    if (allocator.isConstant())
-        addPtr(TrustedImm32(allocator.allocator().cellSize()), resultGPR, scratchGPR);
+    if (allocator.hasConstantCellSize())
+        addPtr(TrustedImm32(allocator.constantCellSize()), resultGPR, scratchGPR);
     else {
         load32(Address(allocatorGPR, LocalAllocator::offsetOfCellSize()), scratchGPR);
         addPtr(resultGPR, scratchGPR);
@@ -1054,8 +1051,8 @@ void AssemblyHelpers::emitAllocateWithNonNullAllocator(GPRReg resultGPR, const J
     loadPtr(Address(allocatorGPR, LocalAllocator::offsetOfFreeList() + FreeList::offsetOfIntervalStart()), resultGPR);
     popPath = branchPtr(RelationalCondition::AboveOrEqual, resultGPR, Address(allocatorGPR, LocalAllocator::offsetOfFreeList() + FreeList::offsetOfIntervalEnd()));
     auto bumpLabel = label();
-    if (allocator.isConstant())
-        add64(TrustedImm32(allocator.allocator().cellSize()), Address(allocatorGPR, LocalAllocator::offsetOfFreeList() + FreeList::offsetOfIntervalStart()));
+    if (allocator.hasConstantCellSize())
+        add64(TrustedImm32(allocator.constantCellSize()), Address(allocatorGPR, LocalAllocator::offsetOfFreeList() + FreeList::offsetOfIntervalStart()));
     else {
         load32(Address(allocatorGPR, LocalAllocator::offsetOfCellSize()), scratchGPR);
         add64(scratchGPR, Address(allocatorGPR, LocalAllocator::offsetOfFreeList() + FreeList::offsetOfIntervalStart()));
@@ -1083,9 +1080,9 @@ void AssemblyHelpers::emitAllocateWithNonNullAllocator(GPRReg resultGPR, const J
     loadPtr(Address(allocatorGPR, LocalAllocator::offsetOfFreeList() + FreeList::offsetOfIntervalEnd()), scratchGPR);
     popPath = branchPtr(RelationalCondition::AboveOrEqual, resultGPR, scratchGPR);
     auto bumpLabel = label();
-    if (allocator.isConstant()) {
+    if (allocator.hasConstantCellSize()) {
         move(resultGPR, scratchGPR);
-        addPtr(TrustedImm32(allocator.allocator().cellSize()), scratchGPR);
+        addPtr(TrustedImm32(allocator.constantCellSize()), scratchGPR);
     } else {
         load32(Address(allocatorGPR, LocalAllocator::offsetOfCellSize()), scratchGPR);
         addPtr(resultGPR, scratchGPR);
@@ -1132,6 +1129,7 @@ void AssemblyHelpers::emitAllocate(GPRReg resultGPR, const JITAllocator& allocat
         slowPath.append(branchTestPtr(Zero, allocatorGPR));
         break;
     case JITAllocator::VariableNonNull:
+    case JITAllocator::VariableNonNullWithConstantCellSize:
         break;
     }
 

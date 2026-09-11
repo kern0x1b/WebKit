@@ -144,7 +144,7 @@ static void marshallJSResult(CCallHelpers& jit, const RTT& signature, const Call
                     auto readLocation = CCallHelpers::Address(CCallHelpers::stackPointerRegister, loc.offsetFromSP() + stackResultReadOffset);
                     auto writeLocation = CCallHelpers::Address(CCallHelpers::stackPointerRegister, loc.offsetFromSP());
                     ValueLocation tmp;
-                    switch (type.kind) {
+                    switch (type.kind()) {
                     case TypeKind::F32:
                         tmp = ValueLocation { fprScratch };
                         jit.loadFloat(readLocation, fprScratch);

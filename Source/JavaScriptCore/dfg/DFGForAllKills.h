@@ -43,7 +43,7 @@ namespace JSC { namespace DFG {
 // This tells you those things that die on the boundary between nodeBefore and nodeAfter. It is
 // conservative in the sense that it might resort to telling you some things that are still live at
 // nodeAfter.
-template<WTF::ConstInvocable<void(Operand)> Functor>
+template<ConstInvocable<void(Operand)> Functor>
 void forAllKilledOperands(Graph& graph, Node* nodeBefore, Node* nodeAfter, const Functor& functor)
 {
     CodeOrigin before = nodeBefore->origin.forExit;
@@ -121,7 +121,7 @@ void forAllKilledOperands(Graph& graph, Node* nodeBefore, Node* nodeAfter, const
 }
     
 // Tells you all of the nodes that would no longer be live across the node at this nodeIndex.
-template<WTF::ConstInvocable<void(Node*)> Functor>
+template<ConstInvocable<void(Node*)> Functor>
 void forAllKilledNodesAtNodeIndex(
     Graph& graph, AvailabilityMap& availabilityMap, BasicBlock* block, unsigned nodeIndex,
     const Functor& functor)

@@ -26,8 +26,7 @@
 #include "config.h"
 
 #include "CodeBlock.h"
-#include "CompilationResult.h"  // ios6/armv7: setupJIT() is #if ENABLE(JIT); with the
-                                  // JIT off this enum was only ever forward-declared.
+#include "CompilationResult.h"
 #include "Debugger.h"
 #include "EvalCodeBlock.h"
 #include "FunctionCodeBlock.h"

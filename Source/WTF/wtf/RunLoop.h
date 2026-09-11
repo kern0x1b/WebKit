@@ -416,6 +416,11 @@ inline void assertIsCurrent(const RunLoop& runLoop) WTF_ASSERTS_ACQUIRED_CAPABIL
     RELEASE_ASSERT(runLoop.isCurrent());
 }
 
+inline void releaseAssertIsCurrent(const RunLoop& runLoop) WTF_ASSERTS_ACQUIRED_CAPABILITY(runLoop)
+{
+    RELEASE_ASSERT(runLoop.isCurrent());
+}
+
 WTF_EXPORT_PRIVATE void callOnRunLoop(RunLoop&, Function<void()>&&);
 
 } // namespace WTF
@@ -423,4 +428,5 @@ WTF_EXPORT_PRIVATE void callOnRunLoop(RunLoop&, Function<void()>&&);
 using WTF::RunLoop;
 using WTF::RunLoopMode;
 using WTF::assertIsCurrent;
+using WTF::releaseAssertIsCurrent;
 using WTF::callOnRunLoop;

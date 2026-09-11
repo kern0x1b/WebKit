@@ -68,15 +68,15 @@ public:
         m_targets.clear();
     }
 
-    void setWantedJSValueRegs(JSValueRegs jsValueRegs)
+    void setWantedGPR(GPRReg gpr)
     {
         ASSERT(m_wantedFPR == InvalidFPRReg);
-        m_wantedJSValueRegs = jsValueRegs;
+        m_wantedGPR = gpr;
     }
 
     void setWantedFPR(FPRReg fpr)
     {
-        ASSERT(!m_wantedJSValueRegs);
+        ASSERT(m_wantedGPR == InvalidGPRReg);
         m_wantedFPR = fpr;
     }
 
@@ -86,15 +86,10 @@ public:
     // result of these calls will stay valid after loads and/or stores.
     bool boxingRequiresGPR() const
     {
-#if USE(JSVALUE64)
         return recovery().dataFormat() == DataFormatDouble;
-#else
-        return false;
-#endif
     }
     bool boxingRequiresFPR() const
     {
-#if USE(JSVALUE64)
         switch (recovery().dataFormat()) {
         case DataFormatInt52:
         case DataFormatStrictInt52:
@@ -103,9 +98,6 @@ public:
         default:
             return false;
         }
-#else
-        return false;
-#endif
     }
     
     // This is used to determine what kind of register we need to be
@@ -119,13 +111,13 @@ public:
 
     void setRecovery(ValueRecovery recovery) { m_recovery = recovery; }
 
-    JSValueRegs wantedJSValueRegs() const { return m_wantedJSValueRegs; }
+    GPRReg wantedGPR() const { return m_wantedGPR; }
 
     FPRReg wantedFPR() const { return m_wantedFPR; }
 private:
     Vector<VirtualRegister, 1> m_targets;
     ValueRecovery m_recovery;
-    JSValueRegs m_wantedJSValueRegs;
+    GPRReg m_wantedGPR { InvalidGPRReg };
     FPRReg m_wantedFPR { InvalidFPRReg };
 };
 

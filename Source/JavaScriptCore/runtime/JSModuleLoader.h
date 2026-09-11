@@ -92,7 +92,7 @@ public:
     // APIs to control the module loader.
     void provideFetch(JSGlobalObject*, const Identifier& key, ScriptFetchParameters::Type, SourceCode&&);
     void provideFetch(JSGlobalObject*, const Identifier& key, ScriptFetchParameters::Type, JSSourceCode*);
-    JSPromise* loadModule(JSGlobalObject*, const Identifier& moduleName, RefPtr<ScriptFetchParameters>, RefPtr<ScriptFetcher>, OptionSet<ModuleLoadFlag>);
+    JSPromise* loadModule(JSGlobalObject*, const Identifier& moduleName, RefPtr<ScriptFetchParameters>, RefPtr<ScriptFetcher>, OptionSet<ModuleLoadFlag>, const String& referrer = { });
     JSPromise* linkAndEvaluateModule(JSGlobalObject*, const Identifier& moduleKey, RefPtr<ScriptFetchParameters>, RefPtr<ScriptFetcher>);
     JSPromise* requestImportModule(JSGlobalObject*, const Identifier& moduleName, const Identifier& referrer, RefPtr<ScriptFetchParameters>, RefPtr<ScriptFetcher>, bool deferred = false);
 
@@ -100,7 +100,7 @@ public:
     JSPromise* importModule(JSGlobalObject*, JSString* moduleName, JSValue parameters, const SourceOrigin& referrer, bool deferred = false);
     Identifier resolve(JSGlobalObject*, JSValue name, JSValue referrer, RefPtr<ScriptFetcher>, bool useImportMap);
     Identifier resolve(JSGlobalObject*, const Identifier& name, const Identifier& referrer, RefPtr<ScriptFetcher>, bool useImportMap);
-    JSPromise* fetch(JSGlobalObject*, JSValue key, RefPtr<ScriptFetchParameters>, RefPtr<ScriptFetcher>);
+    JSPromise* fetch(JSGlobalObject*, JSValue key, const String& referrer, RefPtr<ScriptFetchParameters>, RefPtr<ScriptFetcher>);
     JSObject* createImportMetaProperties(JSGlobalObject*, JSValue key, JSModuleRecord*, RefPtr<ScriptFetcher>);
 
     // Additional platform dependent hooked APIs.
@@ -114,7 +114,6 @@ public:
     DECLARE_VISIT_CHILDREN;
 
     static AbstractModuleRecord* getImportedModule(AbstractModuleRecord* referrer, const AbstractModuleRecord::ModuleRequest&);
-    static AbstractModuleRecord* maybeGetImportedModule(AbstractModuleRecord* referrer, const Identifier& moduleKey);
 
     // Options correspond to Script Records, Cyclic Module Records and Realm Records, in that order.
     struct ModuleReferrer : Variant<ProgramExecutable*, CyclicModuleRecord*, JSGlobalObject*> {
@@ -175,11 +174,14 @@ public:
 
     ModuleRegistryEntry* ensureRegistered(JSGlobalObject*, const Identifier& key, ScriptFetchParameters::Type);
 
+    // https://html.spec.whatwg.org/multipage/webappapis.html#fetch-a-single-module-script step 13.1.2.
+    void removeFailedFetchEntry(ModuleRegistryEntry*);
+
+    ModuleRegistryEntry* getRegisteredMayBeNull(const Identifier& key, ScriptFetchParameters::Type);
+
 private:
     JSModuleLoader(VM&, Structure*);
     void finishCreation(JSGlobalObject*, VM&);
-
-    ModuleRegistryEntry* getRegisteredMayBeNull(const Identifier& key, ScriptFetchParameters::Type);
 
     void addResolutionFailure(VM&, const ResolutionMapKey&, JSValue error);
 

@@ -221,9 +221,7 @@ private:
                     child2.setNode(m_node->child1().node());
                     m_changed = true;
                     break;
-#if USE(JSVALUE64)
                 case Int52RepUse:
-#endif
                 case Int32Use:
                     // For integers, we can only convert compatible modes.
                     // ArithAdd does handle do negative zero check for example.
@@ -732,6 +730,9 @@ private:
             if (!regExp)
                 break;
 
+            if (!regExp->isValid())
+                break;
+
             m_node->convertToNewRegExp(m_graph.freezeStrong(regExp), m_insertionSet.insertConstantForUse(m_nodeIndex, m_node->origin, jsNumber(0), UntypedUse));
             m_changed = true;
             break;
@@ -1142,15 +1143,11 @@ private:
                 return true;
             };
 
-#if ENABLE(YARR_JIT_REGEXP_TEST_INLINE)
             auto convertTestToTestInline = [&] {
                 if (m_node->op() != RegExpTest)
                     return false;
 
                 if (regExp->globalOrSticky())
-                    return false;
-
-                if (regExp->eitherUnicode())
                     return false;
 
                 auto jitCodeBlock = regExp->getRegExpJITCodeBlock();
@@ -1170,7 +1167,7 @@ private:
                 unsigned alignedFrameSize = WTF::roundUpToMultipleOf<stackAlignmentBytes()>(inlineCodeStats8Bit.stackSize());
 
                 if (alignedFrameSize)
-                    m_graph.m_parameterSlots = std::max(m_graph.m_parameterSlots, argumentCountForStackSize(alignedFrameSize));
+                    m_graph.m_parameterSlots = std::max<unsigned>(m_graph.m_parameterSlots, alignedFrameSize / sizeof(Register));
 
                 NodeOrigin origin = m_node->origin;
                 m_insertionSet.insertNode(m_nodeIndex, SpecNone, Check, origin, m_node->children.justChecks());
@@ -1179,7 +1176,6 @@ private:
                 m_changed = true;
                 return true;
             };
-#endif
 
             auto convertToStatic = [&] {
                 if (m_node->op() != RegExpExec)
@@ -1218,10 +1214,8 @@ private:
                     break;
             }
 
-#if ENABLE(YARR_JIT_REGEXP_TEST_INLINE)
             if (convertTestToTestInline())
                 break;
-#endif
 
             if (convertToStatic())
                 break;
@@ -1321,6 +1315,11 @@ private:
                     startPosition++;
                     if (startPosition > string.length())
                         break;
+                    if (regExp->eitherUnicode() && U16_IS_LEAD(string[startPosition - 1]) && U16_IS_TRAIL(string[startPosition])) {
+                        startPosition++;
+                        if (startPosition > string.length())
+                            break;
+                    }
                 }
             } while (regExp->global());
             if (!ok)
@@ -1854,7 +1853,7 @@ private:
                 for (unsigned index = 0; index < signature->argumentCount(); ++index) {
                     auto type = signature->argumentType(index);
                     Edge argument = m_graph.varArgChild(m_node, 2 + index);
-                    switch (type.kind) {
+                    switch (type.kind()) {
                     case Wasm::TypeKind::I32: {
                         if (!argument->shouldSpeculateInt32())
                             success = false;
@@ -1890,7 +1889,7 @@ private:
                 if (!signature->returnsVoid()) {
                     ASSERT(signature->returnCount() == 1);
                     auto type = signature->returnType(0);
-                    switch (type.kind) {
+                    switch (type.kind()) {
                     case Wasm::TypeKind::I32:
                     case Wasm::TypeKind::I64:
                     case Wasm::TypeKind::Ref:
@@ -1923,7 +1922,7 @@ private:
                 if (!checkIndexValue)
                     break;
 
-                if (!success || !is64Bit() || !m_graph.m_plan.isFTL())
+                if (!success || !m_graph.m_plan.isFTL())
                     break;
 
                 unsigned numAllocatedArgs = static_cast<unsigned>(signature->argumentCount()) + /* |this| for wasm */ 1;
@@ -1934,7 +1933,7 @@ private:
                     auto type = signature->argumentType(index);
                     Edge argument = m_graph.varArgChild(m_node, 2 + index);
                     Node* argumentNode = argument.node();
-                    switch (type.kind) {
+                    switch (type.kind()) {
                     case Wasm::TypeKind::I32: {
                         m_insertionSet.insertCheck(checkIndex, m_node->origin, Edge(argumentNode, Int32Use));
                         m_graph.varArgChild(m_node, 2 + index) = Edge(argumentNode, KnownInt32Use);
@@ -1972,7 +1971,7 @@ private:
 
                 if (!signature->returnsVoid()) {
                     auto type = signature->returnType(0);
-                    switch (type.kind) {
+                    switch (type.kind()) {
                     case Wasm::TypeKind::I32: {
                         m_node->setResult(NodeResultInt32);
                         break;

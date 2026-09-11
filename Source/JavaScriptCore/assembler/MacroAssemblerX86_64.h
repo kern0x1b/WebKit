@@ -2519,6 +2519,15 @@ public:
         return branch32(branchType ? NotEqual : Equal, dest, TrustedImm32(0x80000000));
     }
 
+    Jump branchTruncateDoubleToInt32ViaInt64(FPRegisterID src, RegisterID dest)
+    {
+        truncateDoubleToInt64(src, dest);
+        m_assembler.cmpq_ir(1, dest);
+        Jump failed(m_assembler.jo());
+        zeroExtend32ToWord(dest, dest);
+        return failed;
+    }
+
     void truncateDoubleToInt32(FPRegisterID src, RegisterID dest)
     {
         if (supportsAVX())
@@ -3719,6 +3728,12 @@ public:
         case GreaterThanOrEqual:
             return PositiveOrZero;
             break;
+        case Above:
+            // Unsigned x > 0 is exactly x != 0.
+            return NonZero;
+        case BelowOrEqual:
+            // Unsigned x <= 0 is exactly x == 0.
+            return Zero;
         default:
             return std::nullopt;
         }
@@ -5116,6 +5131,9 @@ public:
 
     void add64(TrustedImm32 imm, RegisterID srcDest)
     {
+        if (!imm.m_value)
+            return;
+
         if (imm.m_value == 1)
             m_assembler.incq_r(srcDest);
         else
@@ -5124,6 +5142,9 @@ public:
 
     void add64(TrustedImm64 imm, RegisterID dest)
     {
+        if (!imm.m_value)
+            return;
+
         if (imm.m_value == 1)
             m_assembler.incq_r(dest);
         else {
@@ -5134,11 +5155,21 @@ public:
 
     void add64(TrustedImm32 imm, RegisterID src, RegisterID dest)
     {
+        if (!imm.m_value) {
+            move(src, dest);
+            return;
+        }
+
         m_assembler.leaq_mr(imm.m_value, src, dest);
     }
 
     void add64(TrustedImm64 imm, RegisterID src, RegisterID dest)
     {
+        if (!imm.m_value) {
+            move(src, dest);
+            return;
+        }
+
         if (WTF::isRepresentableAs<int32_t>(imm.m_value))
             m_assembler.leaq_mr(imm.m_value, src, dest);
         else {
@@ -5779,6 +5810,9 @@ public:
 
     void sub64(TrustedImm32 imm, RegisterID dest)
     {
+        if (!imm.m_value)
+            return;
+
         if (imm.m_value == 1)
             m_assembler.decq_r(dest);
         else
@@ -5787,6 +5821,11 @@ public:
 
     void sub64(RegisterID a, TrustedImm32 imm, RegisterID dest)
     {
+        if (!imm.m_value) {
+            move(a, dest);
+            return;
+        }
+
         if (a == dest) {
             sub64(imm, dest);
             return;
@@ -5801,6 +5840,9 @@ public:
 
     void sub64(TrustedImm64 imm, RegisterID dest)
     {
+        if (!imm.m_value)
+            return;
+
         if (imm.m_value == 1)
             m_assembler.decq_r(dest);
         else {
@@ -5811,6 +5853,11 @@ public:
 
     void sub64(RegisterID src, TrustedImm64 imm, RegisterID dest)
     {
+        if (!imm.m_value) {
+            move(src, dest);
+            return;
+        }
+
         if (src == dest) {
             sub64(imm, dest);
             return;

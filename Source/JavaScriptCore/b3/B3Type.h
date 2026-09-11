@@ -104,6 +104,7 @@ inline constexpr TypeKind simdB3ScalarTypeKind(SIMDLane lane)
         RELEASE_ASSERT_NOT_REACHED();
         return Int64;
     }
+    RELEASE_ASSERT_NOT_REACHED();
 }
 
 inline Type simdB3ScalarType(SIMDLane lane)
@@ -145,8 +146,6 @@ inline bool Type::isVector() const
 
 constexpr Type pointerType()
 {
-    if (is32Bit())
-        return Int32;
     return Int64;
 }
 
@@ -157,9 +156,7 @@ constexpr Type wasmRefType()
 
 constexpr Type registerType()
 {
-    if (isRegister64Bit())
-        return Int64;
-    return Int32;
+    return Int64;
 }
 
 inline size_t sizeofType(Type type)

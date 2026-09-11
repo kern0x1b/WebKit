@@ -49,8 +49,8 @@ namespace JSC {
 
 const ClassInfo CyclicModuleRecord::s_info = { "CyclicModuleRecord"_s, &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(CyclicModuleRecord) };
 
-CyclicModuleRecord::CyclicModuleRecord(VM& vm, Structure* structure, const Identifier& moduleKey)
-    : Base(vm, structure, moduleKey)
+CyclicModuleRecord::CyclicModuleRecord(VM& vm, Structure* structure, const Identifier& moduleKey, SourceProviderSourceType sourceType)
+    : Base(vm, structure, moduleKey, sourceType)
 {
 }
 
@@ -153,7 +153,7 @@ void CyclicModuleRecord::initializeEnvironment(JSGlobalObject* globalObject, Ref
     if (jsModule) {
         for (const auto& [key, in] : importEntries()) {
             // 7.a. Let importedModule be GetImportedModule(module, in.[[ModuleRequest]]).
-            AbstractModuleRecord* importedModule = hostResolveImportedModule(globalObject, in.moduleRequest);
+            AbstractModuleRecord* importedModule = hostResolveImportedModule(globalObject, in.moduleRequest, in.moduleRequestType);
             RETURN_IF_EXCEPTION(scope, void());
 #if CPU(ADDRESS64)
             // rdar://107531050: Speculative crash mitigation
@@ -250,10 +250,11 @@ void CyclicModuleRecord::initializeEnvironment(JSGlobalObject* globalObject, Ref
 #endif
 
     // 18. Let code be module.[[ECMAScriptCode]].
+    UnlinkedModuleProgramCodeBlock* unlinkedCodeBlock = moduleProgramExecutable->unlinkedCodeBlock();
     // 19. Let varDeclarations be the VarScopedDeclarations of code.
     // 20. Let declaredVarNames be a new empty List.
     // 21. For each element d of varDeclarations, do
-    for (const auto& variable : jsModule->declaredVariables()) {
+    for (const auto& variable : unlinkedCodeBlock->variableDeclarations()) {
         // 21.a. For each element dn of the BoundNames of d, do
         // 21.a.i. If declaredVarNames does not contain dn, then
         // 21.a.i.1. Perform ! env.CreateMutableBinding(dn, false).
@@ -262,7 +263,7 @@ void CyclicModuleRecord::initializeEnvironment(JSGlobalObject* globalObject, Ref
         // Module environment contains the heap allocated "var", "function", "let", "const", and "class".
         // When creating the environment, we initialized all the slots with empty, it's ok for lexical values.
         // But for "var" and "function", we should initialize it with undefined. They are contained in the declared variables.
-        SymbolTableEntry entry = symbolTable->get(variable.key.get());
+        SymbolTableEntry::Fast entry = symbolTable->get(variable.key.get());
         VarOffset offset = entry.varOffset();
         if (!offset.isStack()) {
             bool putResult = false;
@@ -272,7 +273,6 @@ void CyclicModuleRecord::initializeEnvironment(JSGlobalObject* globalObject, Ref
     }
 
     // 22. Let lexDeclarations be the LexicallyScopedDeclarations of code.
-    UnlinkedModuleProgramCodeBlock* unlinkedCodeBlock = moduleProgramExecutable->unlinkedCodeBlock();
     // 23. Let privateEnv be null.
     // 24. For each element d of lexDeclarations, do
     for (size_t i = 0, numberOfFunctions = unlinkedCodeBlock->numberOfFunctionDecls(); i < numberOfFunctions; ++i) {
@@ -282,7 +282,7 @@ void CyclicModuleRecord::initializeEnvironment(JSGlobalObject* globalObject, Ref
         // 24.a.ii. Else,
         // 24.a.ii.1. Perform ! env.CreateMutableBinding(dn, false).
         UnlinkedFunctionExecutable* unlinkedFunctionExecutable = unlinkedCodeBlock->functionDecl(i);
-        SymbolTableEntry entry = symbolTable->get(unlinkedFunctionExecutable->name().impl());
+        SymbolTableEntry::Fast entry = symbolTable->get(unlinkedFunctionExecutable->name().impl());
         VarOffset offset = entry.varOffset();
         if (!offset.isStack()) {
             ASSERT(!unlinkedFunctionExecutable->name().isEmpty());

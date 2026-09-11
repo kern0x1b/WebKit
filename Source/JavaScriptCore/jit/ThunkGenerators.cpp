@@ -424,28 +424,28 @@ static MacroAssemblerCodeRef<JITThunkPtrTag> polymorphicThunkFor(VM&, ClosureMod
         isClosureCall ? "closure" : "normal");
 }
 
-MacroAssemblerCodeRef<JITThunkPtrTag> polymorphicThunk(VM& vm)
+MacroAssemblerCodeRef<JITThunkPtrTag> polymorphicThunk()
 {
     constexpr bool isTopTier = false;
-    return polymorphicThunkFor(vm, ClosureMode::No, isTopTier);
+    return polymorphicThunkFor(ClosureMode::No, isTopTier);
 }
 
-MacroAssemblerCodeRef<JITThunkPtrTag> polymorphicThunkForClosure(VM& vm)
+MacroAssemblerCodeRef<JITThunkPtrTag> polymorphicThunkForClosure()
 {
     constexpr bool isTopTier = false;
-    return polymorphicThunkFor(vm, ClosureMode::Yes, isTopTier);
+    return polymorphicThunkFor(ClosureMode::Yes, isTopTier);
 }
 
-MacroAssemblerCodeRef<JITThunkPtrTag> polymorphicTopTierThunk(VM& vm)
+MacroAssemblerCodeRef<JITThunkPtrTag> polymorphicTopTierThunk()
 {
     constexpr bool isTopTier = true;
-    return polymorphicThunkFor(vm, ClosureMode::No, isTopTier);
+    return polymorphicThunkFor(ClosureMode::No, isTopTier);
 }
 
-MacroAssemblerCodeRef<JITThunkPtrTag> polymorphicTopTierThunkForClosure(VM& vm)
+MacroAssemblerCodeRef<JITThunkPtrTag> polymorphicTopTierThunkForClosure()
 {
     constexpr bool isTopTier = true;
-    return polymorphicThunkFor(vm, ClosureMode::Yes, isTopTier);
+    return polymorphicThunkFor(ClosureMode::Yes, isTopTier);
 }
 
 enum ThunkEntryType { EnterViaCall, EnterViaJumpWithSavedTags, EnterViaJumpWithoutSavedTags };
@@ -1441,8 +1441,8 @@ MacroAssemblerCodeRef<JITThunkPtrTag> boundFunctionCallGenerator(VM& vm)
     CCallHelpers::Label loop = jit.label();
     jit.sub32(CCallHelpers::TrustedImm32(1), GPRInfo::regT3);
     jit.sub32(CCallHelpers::TrustedImm32(1), GPRInfo::regT1);
-    jit.loadValue(CCallHelpers::addressFor(virtualRegisterForArgumentIncludingThis(1)).indexedBy(GPRInfo::regT3, CCallHelpers::TimesEight), valueRegs);
-    jit.storeValue(valueRegs, CCallHelpers::calleeArgumentSlot(1).indexedBy(GPRInfo::regT1, CCallHelpers::TimesEight));
+    jit.loadValue(CCallHelpers::addressFor(virtualRegisterForArgumentIncludingThis(1)).indexedBy(GPRInfo::regT3, CCallHelpers::TimesEight), valueGPR);
+    jit.storeValue(valueGPR, CCallHelpers::calleeArgumentSlot(1).indexedBy(GPRInfo::regT1, CCallHelpers::TimesEight));
     jit.branchTest32(CCallHelpers::NonZero, GPRInfo::regT3).linkTo(loop, &jit);
     
     done.link(&jit);
@@ -1453,8 +1453,8 @@ MacroAssemblerCodeRef<JITThunkPtrTag> boundFunctionCallGenerator(VM& vm)
         jit.loadPtr(CCallHelpers::Address(GPRInfo::regT0, JSBoundFunction::offsetOfBoundArgs()), GPRInfo::regT3);
         CCallHelpers::Label loopBound = jit.label();
         jit.sub32(CCallHelpers::TrustedImm32(1), GPRInfo::regT1);
-        jit.loadValue(CCallHelpers::BaseIndex(GPRInfo::regT3, GPRInfo::regT1, CCallHelpers::TimesEight, JSCellButterfly::offsetOfData()), valueRegs);
-        jit.storeValue(valueRegs, CCallHelpers::calleeArgumentSlot(1).indexedBy(GPRInfo::regT1, CCallHelpers::TimesEight));
+        jit.loadValue(CCallHelpers::BaseIndex(GPRInfo::regT3, GPRInfo::regT1, CCallHelpers::TimesEight, JSCellButterfly::offsetOfData()), valueGPR);
+        jit.storeValue(valueGPR, CCallHelpers::calleeArgumentSlot(1).indexedBy(GPRInfo::regT1, CCallHelpers::TimesEight));
         jit.branchTest32(CCallHelpers::NonZero, GPRInfo::regT1).linkTo(loopBound, &jit);
         argsPushed.append(jit.jump());
     }
@@ -1462,14 +1462,14 @@ MacroAssemblerCodeRef<JITThunkPtrTag> boundFunctionCallGenerator(VM& vm)
     {
         CCallHelpers::Label loopBound = jit.label();
         jit.sub32(CCallHelpers::TrustedImm32(1), GPRInfo::regT1);
-        jit.loadValue(CCallHelpers::BaseIndex(GPRInfo::regT0, GPRInfo::regT1, CCallHelpers::TimesEight, JSBoundFunction::offsetOfBoundArgs()), valueRegs);
-        jit.storeValue(valueRegs, CCallHelpers::calleeArgumentSlot(1).indexedBy(GPRInfo::regT1, CCallHelpers::TimesEight));
+        jit.loadValue(CCallHelpers::BaseIndex(GPRInfo::regT0, GPRInfo::regT1, CCallHelpers::TimesEight, JSBoundFunction::offsetOfBoundArgs()), valueGPR);
+        jit.storeValue(valueGPR, CCallHelpers::calleeArgumentSlot(1).indexedBy(GPRInfo::regT1, CCallHelpers::TimesEight));
         jit.branchTest32(CCallHelpers::NonZero, GPRInfo::regT1).linkTo(loopBound, &jit);
     }
     argsPushed.link(&jit);
 
     jit.loadPtr(CCallHelpers::Address(GPRInfo::regT0, JSBoundFunction::offsetOfTargetFunction()), GPRInfo::regT2);
-    jit.storeCell(GPRInfo::regT2, CCallHelpers::calleeFrameSlot(CallFrameSlot::callee));
+    jit.storeValue(GPRInfo::regT2, CCallHelpers::calleeFrameSlot(CallFrameSlot::callee));
     
     jit.loadPtr(CCallHelpers::Address(GPRInfo::regT2, JSFunction::offsetOfExecutableOrRareData()), GPRInfo::regT1);
     auto hasExecutable = jit.branchTestPtr(CCallHelpers::Zero, GPRInfo::regT1, CCallHelpers::TrustedImm32(JSFunction::rareDataTag));
@@ -1731,7 +1731,7 @@ MacroAssemblerCodeRef<JITThunkPtrTag> remoteFunctionCallGenerator(VM& vm)
     return FINALIZE_THUNK(linkBuffer, JITThunkPtrTag, "remote"_s, "Specialized thunk for remote function calls");
 }
 
-MacroAssemblerCodeRef<JITThunkPtrTag> returnFromBaselineGenerator(VM&)
+MacroAssemblerCodeRef<JITThunkPtrTag> returnFromBaselineGenerator()
 {
     CCallHelpers jit;
 

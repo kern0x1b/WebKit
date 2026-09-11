@@ -545,14 +545,14 @@ inline JSString* replaceUsingStringSearch(VM& vm, JSGlobalObject* globalObject, 
             replacement = cachedCall->callWithArguments(globalObject, jsUndefined(), substring, jsNumber(matchStart), jsString);
             RETURN_IF_EXCEPTION(scope, nullptr);
         } else {
-            MarkedArgumentBuffer args;
             auto* substring = jsSubstring(globalObject, vm, jsString, matchStart, searchString.impl()->length());
             RETURN_IF_EXCEPTION(scope, nullptr);
-            args.append(substring);
-            args.append(jsNumber(matchStart));
-            args.append(jsString);
-            ASSERT(!args.hasOverflowed());
-            replacement = call(globalObject, replaceValue, callData, jsUndefined(), args);
+            auto args = WTF::toArray<EncodedJSValue>({
+                JSValue::encode(substring),
+                JSValue::encode(jsNumber(matchStart)),
+                JSValue::encode(jsString),
+            });
+            replacement = call(globalObject, replaceValue, callData, jsUndefined(), ArgList { args.data(), args.size() });
             RETURN_IF_EXCEPTION(scope, nullptr);
         }
         replaceString = replacement.toWTFString(globalObject);
@@ -1517,6 +1517,11 @@ ALWAYS_INLINE JSString* replaceOneWithStringUsingRegExpSearch(VM& vm, JSGlobalOb
 {
     auto scope = DECLARE_THROW_SCOPE(vm);
 
+    if (replacementString.isEmpty()) {
+        if (auto* result = tryTrimSpaces(vm, globalObject, source, string, regExp))
+            return result;
+    }
+
     int* ovector;
     MatchResult result = globalObject->regExpGlobalData().performMatch(globalObject, regExp, string, source, 0, &ovector);
     RETURN_IF_EXCEPTION(scope, nullptr);
@@ -1599,6 +1604,11 @@ ALWAYS_INLINE JSString* replace(VM& vm, JSGlobalObject* globalObject, JSValue th
     RETURN_IF_EXCEPTION(scope, nullptr);
 
     RELEASE_AND_RETURN(scope, replaceUsingStringSearch<replaceMode>(vm, globalObject, string, thisString, WTF::move(searchString), replaceValue));
+}
+
+ALWAYS_INLINE bool isASCIIIdentifierStart(char16_t ch)
+{
+    return isASCIIAlpha(ch) || ch == '_' || ch == '$';
 }
 
 ALWAYS_INLINE char32_t codePointAt(const String& string, unsigned position, unsigned length)

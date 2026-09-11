@@ -53,8 +53,9 @@ namespace WTF {
 
 template<typename FunctionType> class ScopedLambda;
 template<typename ResultType, typename... ArgumentTypes>
-class ScopedLambda<ResultType(ArgumentTypes...)> {
+class ScopedLambda<ResultType(ArgumentTypes...)> final {
     WTF_FORBID_HEAP_ALLOCATION;
+    WTF_MAKE_NONMOVABLE(ScopedLambda);
 public:
     ScopedLambda(ResultType (*impl)(void* arg, ArgumentTypes...) = nullptr, void* arg = nullptr)
         : m_impl(impl)
@@ -91,135 +92,6 @@ private:
     void *m_arg;
 };
 
-template<typename FunctionType, typename Functor> class ScopedLambdaFunctor;
-template<typename ResultType, typename... ArgumentTypes, typename Functor>
-class ScopedLambdaFunctor<ResultType (ArgumentTypes...), Functor> : public ScopedLambda<ResultType (ArgumentTypes...)> {
-public:
-    template<typename PassedFunctor>
-    ScopedLambdaFunctor(PassedFunctor&& functor)
-        : ScopedLambda<ResultType (ArgumentTypes...)>(implFunction, this)
-        , m_functor(std::forward<PassedFunctor>(functor))
-    {
-    }
-    
-    // We need to make sure that copying and moving ScopedLambdaFunctor results in a ScopedLambdaFunctor
-    // whose ScopedLambda supertype still points to this rather than other.
-    ScopedLambdaFunctor(const ScopedLambdaFunctor& other)
-        : ScopedLambda<ResultType (ArgumentTypes...)>(implFunction, this)
-        , m_functor(other.m_functor)
-    {
-    }
-
-    ScopedLambdaFunctor(ScopedLambdaFunctor&& other)
-        : ScopedLambda<ResultType (ArgumentTypes...)>(implFunction, this)
-        , m_functor(WTF::move(other.m_functor))
-    {
-    }
-    
-    ScopedLambdaFunctor& operator=(const ScopedLambdaFunctor& other)
-    {
-        m_functor = other.m_functor;
-        return *this;
-    }
-    
-    ScopedLambdaFunctor& operator=(ScopedLambdaFunctor&& other)
-    {
-        m_functor = WTF::move(other.m_functor);
-        return *this;
-    }
-
-private:
-    static ResultType implFunction(void* argument, ArgumentTypes... arguments)
-    {
-        return static_cast<ScopedLambdaFunctor*>(argument)->m_functor(arguments...);
-    }
-
-    Functor m_functor;
-};
-
-// Can't simply rely on perfect forwarding because then the ScopedLambdaFunctor would point to the functor
-// by const reference. This would be surprising in situations like:
-//
-// auto scopedLambda = scopedLambda<Foo(Bar)>([&] (Bar) -> Foo { ... });
-//
-// We expected scopedLambda to be valid for its entire lifetime, but if it computed the lambda by reference
-// then it would be immediately invalid.
-template<typename FunctionType, typename Functor>
-ScopedLambdaFunctor<FunctionType, Functor> scopedLambda(const Functor& functor)
-{
-    return ScopedLambdaFunctor<FunctionType, Functor>(functor);
-}
-
-template<typename FunctionType, typename Functor>
-ScopedLambdaFunctor<FunctionType, Functor> scopedLambda(Functor&& functor)
-{
-    return ScopedLambdaFunctor<FunctionType, Functor>(std::forward<Functor>(functor));
-}
-
-template<typename FunctionType, typename Functor> class ScopedLambdaRefFunctor;
-template<typename ResultType, typename... ArgumentTypes, typename Functor>
-class ScopedLambdaRefFunctor<ResultType (ArgumentTypes...), Functor> : public ScopedLambda<ResultType (ArgumentTypes...)> {
-public:
-    ScopedLambdaRefFunctor(const Functor& functor)
-        : ScopedLambda<ResultType (ArgumentTypes...)>(implFunction, this)
-        , m_functor(&functor)
-    {
-    }
-    
-    // We need to make sure that copying and moving ScopedLambdaRefFunctor results in a
-    // ScopedLambdaRefFunctor whose ScopedLambda supertype still points to this rather than
-    // other.
-    ScopedLambdaRefFunctor(const ScopedLambdaRefFunctor& other)
-        : ScopedLambda<ResultType (ArgumentTypes...)>(implFunction, this)
-        , m_functor(other.m_functor)
-    {
-    }
-
-    ScopedLambdaRefFunctor(ScopedLambdaRefFunctor&& other)
-        : ScopedLambda<ResultType (ArgumentTypes...)>(implFunction, this)
-        , m_functor(other.m_functor)
-    {
-    }
-    
-    ScopedLambdaRefFunctor& operator=(const ScopedLambdaRefFunctor& other)
-    {
-        m_functor = other.m_functor;
-        return *this;
-    }
-    
-    ScopedLambdaRefFunctor& operator=(ScopedLambdaRefFunctor&& other)
-    {
-        m_functor = other.m_functor;
-        return *this;
-    }
-
-private:
-    static ResultType implFunction(void* argument, ArgumentTypes... arguments)
-    {
-        return (*static_cast<ScopedLambdaRefFunctor*>(argument)->m_functor)(arguments...);
-    }
-
-    const Functor* m_functor;
-};
-
-// This is for when you already refer to a functor by reference, and you know its lifetime is
-// good. This just creates a ScopedLambda that points to your functor.
-//
-// Note that this is always wrong:
-//
-// auto ref = scopedLambdaRef([...] (...) {...});
-//
-// Because the scopedLambdaRef will refer to the lambda by reference, and the lambda will die after the
-// semicolon. Use scopedLambda() in that case.
-template<typename FunctionType, typename Functor>
-ScopedLambdaRefFunctor<FunctionType, Functor> scopedLambdaRef(const Functor& functor)
-{
-    return ScopedLambdaRefFunctor<FunctionType, Functor>(functor);
-}
-
-
 } // namespace WTF
 
 using WTF::ScopedLambda;
-using WTF::scopedLambda;
-using WTF::scopedLambdaRef;

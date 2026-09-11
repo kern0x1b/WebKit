@@ -38,6 +38,7 @@
 #import <wtf/BlockPtr.h>
 #import <wtf/Logging.h>
 #import <wtf/RunLoop.h>
+#import <wtf/Threading.h>
 
 #if USE(WEB_THREAD)
 #import <wtf/ios/WebCoreThread.h>

@@ -51,7 +51,7 @@ namespace BBQJITImpl {
 class BBQJIT {
 public:
     using ErrorType = String;
-    using PartialResult = Expected<void, ErrorType>;
+    using PartialResult = std::expected<void, ErrorType>;
     using Address = MacroAssembler::Address;
     using BaseIndex = MacroAssembler::BaseIndex;
     using Imm32 = MacroAssembler::Imm32;
@@ -119,8 +119,6 @@ public:
 
         static Location NODELETE fromGPR(GPRReg gpr);
 
-        static Location fromGPR2(GPRReg hi, GPRReg lo);
-
         static Location NODELETE fromFPR(FPRReg fpr);
 
         static Location NODELETE fromGlobal(int32_t globalOffset);
@@ -132,8 +130,6 @@ public:
         bool NODELETE isNone() const;
 
         bool NODELETE isGPR() const;
-
-        bool NODELETE isGPR2() const;
 
         bool NODELETE isFPR() const;
 
@@ -165,10 +161,6 @@ public:
         FPRReg NODELETE asFPR() const;
         Reg asReg() const { return isGPR() ? Reg(asGPR()) : Reg(asFPR()); }
 
-        GPRReg NODELETE asGPRlo() const;
-
-        GPRReg NODELETE asGPRhi() const;
-
         void dump(PrintStream& out) const;
 
         bool NODELETE operator==(Location other) const;
@@ -191,10 +183,6 @@ public:
                 Kind m_padFpr;
                 FPRReg m_fpr;
             };
-            struct {
-                Kind m_padGpr2;
-                GPRReg m_gprhi, m_gprlo;
-            };
         };
     };
 
@@ -205,8 +193,6 @@ public:
     static TypeKind NODELETE pointerType();
 
     static bool NODELETE isFloatingPointType(TypeKind type);
-
-    static bool typeNeedsGPR2(TypeKind type);
 
 public:
     static uint32_t sizeOfType(TypeKind type);
@@ -410,18 +396,11 @@ public:
             : m_kind(None)
         { }
 
-        int32_t asI64hi() const;
-
-        int32_t asI64lo() const;
-
         void dump(PrintStream& out) const;
 
     private:
         union {
             int32_t m_i32;
-            struct {
-                int32_t lo, hi;
-            } m_i32_pair;
             int64_t m_i64;
             float m_f32;
             double m_f64;
@@ -650,10 +629,6 @@ public:
                 m_preserved.add(location.asGPR(), IgnoreVectors);
             else if (location.isFPR())
                 m_preserved.add(location.asFPR(), Width::Width128);
-            else if (location.isGPR2()) {
-                m_preserved.add(location.asGPRlo(), IgnoreVectors);
-                m_preserved.add(location.asGPRhi(), IgnoreVectors);
-            }
             initializedPreservedSet(args...);
         }
 
@@ -834,7 +809,7 @@ public:
             for (unsigned i = 0; i < predecessor.resultLocations().size(); ++i) {
                 unsigned offset = expressionStack.size() - predecessor.resultLocations().size();
                 // Intentionally not using implicitSlots since results should not include implicit slot.
-                expressionStack[i + offset].value() = Value::fromTemp(expressionStack[i + offset].type().kind, predecessor.enclosedHeight() + i);
+                expressionStack[i + offset].value() = Value::fromTemp(expressionStack[i + offset].type().kind(), predecessor.enclosedHeight() + i);
                 generator.bind(expressionStack[i + offset].value(), predecessor.resultLocations()[i]);
             }
         }
@@ -1148,13 +1123,16 @@ public:
 
     [[nodiscard]] PartialResult setGlobal(uint32_t index, Value value);
 
+    void emitZeroExtendAddressOperand(bool is64Bit, Value operand);
+
     // Memory
 
     inline Location emitCheckAndPreparePointer(Value pointer, uint64_t uoffset, uint32_t sizeOfOperation, uint8_t memoryIndex)
     {
-        if (WTF::sumOverflows<uint64_t>(static_cast<uint64_t>(sizeOfOperation), uoffset)) {
+        if (m_info.memory(memoryIndex).doesAccessOverflow(uoffset, sizeOfOperation)) {
             recordJumpToThrowException(ExceptionType::OutOfBoundsMemoryAccess, m_jit.jump());
-            return Location::fromGPR(wasmBaseMemoryPointer);
+            consume(pointer);
+            return Location::fromGPR(wasmScratchGPR);
         }
 
         ScratchScope<1, 0> scratches(*this);
@@ -1224,7 +1202,7 @@ public:
         }
 
         case MemoryMode::Signaling: {
-            RELEASE_ASSERT(!m_info.memory(memoryIndex).isMemory64());
+            RELEASE_ASSERT_WITH_SECURITY_IMPLICATION(!m_info.memory(memoryIndex).isMemory64());
             // We've virtually mapped 4GiB+redzone for this memory. Only the user-allocated pages are addressable, contiguously in range [0, current],
             // and everything above is mapped PROT_NONE. We don't need to perform any explicit bounds check in the 4GiB range because WebAssembly register
             // memory accesses are 32-bit. However WebAssembly register + offset accesses perform the addition in 64-bit which can push an access above
@@ -1235,7 +1213,7 @@ public:
             // PROT_NONE region, but it's better if we use a smaller immediate because it can codegens better. We know that anything equal to or greater
             // than the declared 'maximum' will trap, so we can compare against that number. If there was no declared 'maximum' then we still know that
             // any access equal to or greater than 4GiB will trap, no need to add the redzone.
-            if (uoffset >= Memory::fastMappedRedzoneBytes()) {
+            if (boundary >= Memory::fastMappedRedzoneBytes()) {
                 uint64_t maximum = m_info.memory(memoryIndex).maximum() ? m_info.memory(memoryIndex).maximum().bytes() : std::numeric_limits<uint32_t>::max();
                 m_jit.zeroExtend32ToWord(pointerLocation.asGPR(), wasmScratchGPR);
                 if (boundary)
@@ -1317,7 +1295,7 @@ public:
         RELEASE_ASSERT_NOT_REACHED();
     }
 
-    Address materializePointer(Location pointerLocation, uint32_t uoffset);
+    Address materializePointer(Location pointerLocation, uint64_t uoffset, Width accessWidth);
 
     constexpr static const char* LOAD_OP_NAMES[14] = {
         "I32Load", "I64Load", "F32Load", "F64Load",
@@ -1481,6 +1459,10 @@ public:
     [[nodiscard]] PartialResult addArrayNewFixed(TypeSignatureIndex typeIndex, ArgumentList& args, ExpressionType& result);
 
     void emitArrayGetPayload(StorageType, GPRReg arrayGPR, GPRReg payloadGPR);
+    void emitZeroExtendI32(Value, GPRReg resultGPR);
+    void emitGetArraySizeWithNullCheck(TypedExpression array, GPRReg lengthGPR);
+    void emitArrayRangeCheck(GPRReg lengthGPR, Value offset, Value size, ExceptionType);
+    void emitArrayElementAddress(StorageType elementType, Value array, Value index, GPRReg resultGPR);
 
     [[nodiscard]] PartialResult addArrayGet(ExtGCOpType arrayGetKind, TypeSignatureIndex typeIndex, TypedExpression arrayref, ExpressionType index, ExpressionType& result);
 
@@ -1970,7 +1952,7 @@ public:
 
     [[nodiscard]] PartialResult addRefIsNull(Value operand, Value& result);
 
-    [[nodiscard]] PartialResult addRefAsNonNull(Value value, Value& result);
+    [[nodiscard]] PartialResult addRefAsNonNull(TypedExpression value, Value& result);
 
     [[nodiscard]] PartialResult addRefEq(Value ref0, Value ref1, Value& result);
 
@@ -2031,7 +2013,7 @@ public:
 
     [[nodiscard]] PartialResult addRethrow(unsigned, ControlType& data);
 
-    [[nodiscard]] PartialResult addThrowRef(ExpressionType exception, std::span<TypedExpression>);
+    [[nodiscard]] PartialResult addThrowRef(TypedExpression exception, std::span<TypedExpression>);
 
     void prepareForExceptions();
 
@@ -2128,9 +2110,9 @@ public:
 
     void NODELETE notifyFunctionUsesSIMD();
 
-    PartialResult addSIMDLoad(ExpressionType, uint32_t, ExpressionType&, uint8_t);
+    PartialResult addSIMDLoad(ExpressionType, uint64_t, ExpressionType&, uint8_t);
 
-    PartialResult addSIMDStore(ExpressionType, ExpressionType, uint32_t, uint8_t);
+    PartialResult addSIMDStore(ExpressionType, ExpressionType, uint64_t, uint8_t);
 
     PartialResult addSIMDSplat(SIMDLane, ExpressionType, ExpressionType&);
 
@@ -2140,15 +2122,15 @@ public:
 
     PartialResult addSIMDExtmul(SIMDLaneOperation, SIMDInfo, ExpressionType, ExpressionType, ExpressionType&);
 
-    PartialResult addSIMDLoadSplat(SIMDLaneOperation, ExpressionType, uint32_t, ExpressionType&, uint8_t);
+    PartialResult addSIMDLoadSplat(SIMDLaneOperation, ExpressionType, uint64_t, ExpressionType&, uint8_t);
 
-    PartialResult addSIMDLoadLane(SIMDLaneOperation, ExpressionType, ExpressionType, uint32_t, uint8_t, ExpressionType&, uint8_t);
+    PartialResult addSIMDLoadLane(SIMDLaneOperation, ExpressionType, ExpressionType, uint64_t, uint8_t, ExpressionType&, uint8_t);
 
-    PartialResult addSIMDStoreLane(SIMDLaneOperation, ExpressionType, ExpressionType, uint32_t, uint8_t, uint8_t);
+    PartialResult addSIMDStoreLane(SIMDLaneOperation, ExpressionType, ExpressionType, uint64_t, uint8_t, uint8_t);
 
-    PartialResult addSIMDLoadExtend(SIMDLaneOperation, ExpressionType, uint32_t, ExpressionType&, uint8_t);
+    PartialResult addSIMDLoadExtend(SIMDLaneOperation, ExpressionType, uint64_t, ExpressionType&, uint8_t);
 
-    PartialResult addSIMDLoadPad(SIMDLaneOperation, ExpressionType, uint32_t, ExpressionType&, uint8_t);
+    PartialResult addSIMDLoadPad(SIMDLaneOperation, ExpressionType, uint64_t, ExpressionType&, uint8_t);
 
     void materializeVectorConstant(v128_t, Location);
 
@@ -2285,8 +2267,8 @@ private:
     void emitRestoreCalleeSaves();
 
     WasmOrigin origin();
+    void recordOpcodeOrigin();
 
-    CompilationContext& m_context;
     CCallHelpers& m_jit;
     Module& m_module;
     CalleeGroup& m_calleeGroup;
@@ -2359,7 +2341,7 @@ using MinOrMax = BBQJIT::MinOrMax;
 } // namespace JSC::Wasm::BBQJITImpl
 
 using BBQJIT = BBQJITImpl::BBQJIT;
-Expected<std::unique_ptr<InternalFunction>, String> parseAndCompileBBQ(CompilationContext&, IPIntCallee&, BBQCallee&, const FunctionData&, const RTT&, Vector<UnlinkedWasmToWasmCall>&, Module&, CalleeGroup&, const ModuleInformation&, MemoryMode, FunctionCodeIndex functionIndex);
+std::expected<std::unique_ptr<InternalFunction>, String> parseAndCompileBBQ(CompilationContext&, IPIntCallee&, BBQCallee&, const FunctionData&, const RTT&, Vector<UnlinkedWasmToWasmCall>&, Module&, CalleeGroup&, const ModuleInformation&, MemoryMode, FunctionCodeIndex functionIndex);
 
 } } // namespace JSC::Wasm
 

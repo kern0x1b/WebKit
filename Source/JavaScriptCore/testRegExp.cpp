@@ -396,7 +396,7 @@ static bool runFromFiles(GlobalObject* globalObject, const Vector<String>& files
         FILE* testCasesFile = fopen(files[i].utf8().legacyCStringPointer(), "rb");
 
         if (!testCasesFile) {
-            printf("Unable to open test data file \"%s\"\n", files[i].utf8().legacyCStringPointer());
+            SAFE_PRINTF("Unable to open test data file \"%s\"\n", files[i].utf8());
             continue;
         }
             
