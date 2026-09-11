@@ -7,7 +7,6 @@ PACKAGES=(
     atk-devel
     bubblewrap
     cairo-devel
-    clang
     cmake
     flite-devel
     gcc-c++

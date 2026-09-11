@@ -33,7 +33,6 @@ PACKAGES=(
     autopoint
     autotools-dev
     bubblewrap
-    clang
     cmake
     flite1-dev
     gawk

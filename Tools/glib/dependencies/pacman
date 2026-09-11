@@ -6,7 +6,6 @@ PACKAGES=(
     autoconf
     automake
     bubblewrap
-    clang
     cmake
     file
     findutils

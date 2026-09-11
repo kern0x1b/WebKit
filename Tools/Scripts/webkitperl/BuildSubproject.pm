@@ -142,8 +142,6 @@ if ($forceCLoop) {
 }
 
 if (isCMakeBuild()) {
-    determineDefaultCompiler(@cmakeArgs);
-
     if (scalar(@ARGV) > 0) {
         foreach (@ARGV) {
             my $arg = $_;
