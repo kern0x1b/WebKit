@@ -67,6 +67,29 @@ RefPtr<StringImpl> tryMakeStringImplFromAdaptersInternal(unsigned length, bool a
     return result;
 }
 
+#if defined(WEBKIT_IOS6)
+template<typename Adapter> constexpr bool adapterCanShareStringImpl = requires(const Adapter& adapter) {
+    { adapter.existingStringImpl() } -> std::same_as<StringImpl*>;
+};
+
+template<typename... StringTypeAdapters>
+String tryShareSingleNonEmptyAdapter(unsigned length, bool areAllAdapters8Bit, const StringTypeAdapters&... adapters)
+{
+    StringImpl* shared = nullptr;
+    ([&] {
+        if constexpr (adapterCanShareStringImpl<StringTypeAdapters>) {
+            if (!shared && adapters.length() == length) {
+                if (auto* impl = adapters.existingStringImpl()) {
+                    if (impl->is8Bit() == areAllAdapters8Bit)
+                        shared = impl;
+                }
+            }
+        }
+    }(), ...);
+    return shared ? String { shared } : String { };
+}
+#endif
+
 template<typename... StringTypeAdapters>
 String tryMakeStringFromAdapters(StringTypeAdapters&&... adapters)
 {
@@ -87,6 +110,13 @@ String tryMakeStringFromAdapters(StringTypeAdapters&&... adapters)
             return String();
 
         bool areAllAdapters8Bit = are8Bit(adapters...);
+#if defined(WEBKIT_IOS6)
+        unsigned totalLength = sum;
+        if (!totalLength)
+            return emptyString();
+        if (auto shared = tryShareSingleNonEmptyAdapter(totalLength, areAllAdapters8Bit, adapters...); !shared.isNull())
+            return shared;
+#endif
         return tryMakeStringImplFromAdaptersInternal(sum, areAllAdapters8Bit, adapters...);
     }
 }

@@ -205,7 +205,10 @@ public:
     template<typename OtherCollection>
     bool isSubset(const OtherCollection&);
 
-    // Overloads for smart pointer values that take the raw pointer type as the parameter.
+#if defined(WEBKIT_IOS6)
+    template<SmartPtr V = ValueType> AddResult add(typename GetPtrHelper<V>::UnderlyingType*) LIFETIME_BOUND;
+#endif
+
     template<SmartPtr V = ValueType> iterator find(std::add_const_t<typename GetPtrHelper<V>::UnderlyingType>*) const LIFETIME_BOUND;
     template<SmartPtr V = ValueType> bool contains(std::add_const_t<typename GetPtrHelper<V>::UnderlyingType>*) const;
     template<SmartPtr V = ValueType> bool remove(std::add_const_t<typename GetPtrHelper<V>::UnderlyingType>*);
@@ -366,6 +369,15 @@ inline auto HashSet<T, U, V, W, shouldValidateKey>::add(ValueType&& value) LIFET
 {
     return m_impl.template add<shouldValidateKey>(WTF::move(value));
 }
+
+#if defined(WEBKIT_IOS6)
+template<typename T, typename U, typename V, typename W, ShouldValidateKey shouldValidateKey>
+template<SmartPtr Ptr>
+inline auto HashSet<T, U, V, W, shouldValidateKey>::add(typename GetPtrHelper<Ptr>::UnderlyingType* value) LIFETIME_BOUND -> AddResult
+{
+    return m_impl.template add<HashSetTranslator<ValueTraits, HashFunctions>, shouldValidateKey>(value, [&]() ALWAYS_INLINE_LAMBDA -> ValueType { return value; });
+}
+#endif
 
 template<typename T, typename U, typename V, typename W, ShouldValidateKey shouldValidateKey>
 inline void HashSet<T, U, V, W, shouldValidateKey>::addVoid(const ValueType& value)

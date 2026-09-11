@@ -521,7 +521,13 @@ DECLARE_ALLOCATOR_WITH_HEAP_IDENTIFIER(HashTable);
         static bool isWeakNullBucket(const ValueType& value) { return isHashTraitsWeakNullValue<KeyTraits>(Extractor::extract(value)); }
         static bool isDeletedBucket(const ValueType& value) { return KeyTraits::isDeletedValue(Extractor::extract(value)); }
         static bool isEmptyOrDeletedBucket(const ValueType& value) { return isEmptyBucket(value) || isDeletedBucket(value); }
-        static bool isEmptyOrDeletedOrWeakNullBucket(const ValueType& value) { return isEmptyBucket(value) || isDeletedBucket(value) || isWeakNullBucket(value); }
+        static bool isEmptyOrDeletedOrWeakNullBucket(const ValueType& value)
+        {
+            if constexpr (KeyTraits::hasIsWeakNullValueFunction)
+                return isEmptyBucket(value) || isDeletedBucket(value) || isWeakNullBucket(value);
+            else
+                return isEmptyBucket(value) || isDeletedBucket(value);
+        }
 
         bool isValidKey(const ValueType& value) { return !isEmptyOrDeletedOrWeakNullBucket(value); }
 
@@ -573,14 +579,42 @@ DECLARE_ALLOCATOR_WITH_HEAP_IDENTIFIER(HashTable);
         void deleteWeakNullEntries();
 
         static constexpr unsigned computeBestTableSize(unsigned keyCount);
-        bool shouldExpand() const { return HashTableSizePolicy::shouldExpand(keyCount() + deletedCount(), tableSize()); }
-        bool mustRehashInPlace() const { return keyCount() * minLoad < tableSize() * 2; }
-        bool shouldShrink() const { return keyCount() * minLoad < tableSize() && tableSize() > KeyTraits::minimumTableSize; }
-        ValueType* expand(ValueType* entry = nullptr);
-        void shrink() { rehash(tableSize() / 2, nullptr); }
-        void shrinkToBestSize();
 
-        ValueType* rehash(Checked<unsigned> newTableSize, ValueType* entry);
+        bool shouldExpand() const
+        {
+            ASSERT(m_table);
+            const unsigned* metadata = reinterpret_cast_ptr<const unsigned*>(m_table);
+            unsigned countAndDeleted = metadata[keyCountOffset] + metadata[deletedCountOffset];
+            unsigned size = metadata[tableSizeOffset];
+#if defined(WEBKIT_IOS6)
+            if (size <= maxSmallTableCapacity)
+                return countAndDeleted >= size - (size >> 2);
+            return countAndDeleted >= (size >> 1);
+#else
+            return HashTableSizePolicy::shouldExpand(countAndDeleted, size);
+#endif
+        }
+
+        bool mustRehashInPlace() const { return keyCount() * minLoad < tableSize() * 2; }
+
+        bool shouldShrink() const
+        {
+            if (!m_table)
+                return false;
+            const unsigned* metadata = reinterpret_cast_ptr<const unsigned*>(m_table);
+            unsigned size = metadata[tableSizeOffset];
+#if defined(WEBKIT_IOS6)
+            static constexpr unsigned smallestTableWorthShrinking = 32;
+            if (size <= smallestTableWorthShrinking)
+                return false;
+#endif
+            return metadata[keyCountOffset] * minLoad < size && size > KeyTraits::minimumTableSize;
+        }
+        NEVER_INLINE ValueType* expand(ValueType* entry = nullptr);
+        void shrink() { rehash(tableSize() / 2, nullptr); }
+        NEVER_INLINE void shrinkToBestSize();
+
+        NEVER_INLINE ValueType* rehash(Checked<unsigned> newTableSize, ValueType* entry);
         ValueType* reinsert(ValueType&&);
 
         static void initializeBucket(ValueType& bucket);
@@ -617,10 +651,12 @@ DECLARE_ALLOCATOR_WITH_HEAP_IDENTIFIER(HashTable);
 
         unsigned tableSize() const { return m_table ? reinterpret_cast_ptr<unsigned*>(m_table)[tableSizeOffset] : 0; }
         void setTableSize(unsigned size) const { ASSERT(m_table); reinterpret_cast_ptr<unsigned*>(m_table)[tableSizeOffset] = size; }
-        unsigned tableSizeMask() const { ASSERT(m_table); return m_table ? reinterpret_cast_ptr<unsigned*>(m_table)[tableSizeMaskOffset] : 0; }
+        unsigned tableSizeMask() const { ASSERT(m_table); return reinterpret_cast_ptr<unsigned*>(m_table)[tableSizeMaskOffset]; }
         void setTableSizeMask(unsigned mask) { ASSERT(m_table); reinterpret_cast_ptr<unsigned*>(m_table)[tableSizeMaskOffset] = mask; }
         unsigned keyCount() const { return m_table ? reinterpret_cast_ptr<unsigned*>(m_table)[keyCountOffset] : 0; }
         void setKeyCount(unsigned count) const { ASSERT(m_table); reinterpret_cast_ptr<unsigned*>(m_table)[keyCountOffset] = count; }
+        void adjustKeyCount(int delta) const { ASSERT(m_table); reinterpret_cast_ptr<unsigned*>(m_table)[keyCountOffset] += delta; }
+        void adjustDeletedCount(int delta) const { ASSERT(m_table); reinterpret_cast_ptr<unsigned*>(m_table)[deletedCountOffset] += delta; }
         unsigned deletedCount() const { ASSERT(m_table); return reinterpret_cast_ptr<unsigned*>(m_table)[deletedCountOffset]; }
         void setDeletedCount(unsigned count) const { ASSERT(m_table); reinterpret_cast_ptr<unsigned*>(m_table)[deletedCountOffset] = count; }
 
@@ -928,12 +964,12 @@ DECLARE_ALLOCATOR_WITH_HEAP_IDENTIFIER(HashTable);
         if (deletedEntry) {
             initializeBucket(*deletedEntry);
             entry = deletedEntry;
-            setDeletedCount(deletedCount() - 1);
+            adjustDeletedCount(-1);
         }
 
         HashTranslator::translate(*entry, std::forward<T>(key), functor);
         validateKey<shouldValidateKey>(*entry);
-        setKeyCount(keyCount() + 1);
+        adjustKeyCount(1);
         
         if (shouldExpand())
             entry = expand(entry);
@@ -965,12 +1001,12 @@ DECLARE_ALLOCATOR_WITH_HEAP_IDENTIFIER(HashTable);
         
         if (isDeletedBucket(*entry)) {
             initializeBucket(*entry);
-            setDeletedCount(deletedCount() - 1);
+            adjustDeletedCount(-1);
         }
 
         HashTranslator::translate(*entry, std::forward<T>(key), functor, h);
         validateKey<shouldValidateKey>(*entry);
-        setKeyCount(keyCount() + 1);
+        adjustKeyCount(1);
 
         if (shouldExpand())
             entry = expand(entry);
@@ -1064,8 +1100,8 @@ DECLARE_ALLOCATOR_WITH_HEAP_IDENTIFIER(HashTable);
 #endif
 
         deleteBucket(*pos);
-        setDeletedCount(deletedCount() + 1);
-        setKeyCount(keyCount() - 1);
+        adjustDeletedCount(1);
+        adjustKeyCount(-1);
 
         if (shouldShrink())
             shrink();
@@ -1152,8 +1188,8 @@ DECLARE_ALLOCATOR_WITH_HEAP_IDENTIFIER(HashTable);
             ++removedBucketCount;
         }
         if (removedBucketCount) {
-            setDeletedCount(deletedCount() + removedBucketCount);
-            setKeyCount(keyCount() - removedBucketCount);
+            adjustDeletedCount(static_cast<int>(removedBucketCount));
+            adjustKeyCount(-static_cast<int>(removedBucketCount));
         }
 
         internalCheckTableConsistency();
@@ -1185,8 +1221,8 @@ DECLARE_ALLOCATOR_WITH_HEAP_IDENTIFIER(HashTable);
             ++removedBucketCount;
         }
         if (removedBucketCount) {
-            setDeletedCount(deletedCount() + removedBucketCount);
-            setKeyCount(keyCount() - removedBucketCount);
+            adjustDeletedCount(static_cast<int>(removedBucketCount));
+            adjustKeyCount(-static_cast<int>(removedBucketCount));
         }
 
         if (shouldShrink())
@@ -1342,7 +1378,7 @@ DECLARE_ALLOCATOR_WITH_HEAP_IDENTIFIER(HashTable);
             if (isWeakNullBucket(oldEntry)) {
                 ASSERT(std::addressof(oldEntry) != entry);
                 oldEntry.~ValueType();
-                setKeyCount(keyCount() - 1);
+                adjustKeyCount(-1);
                 continue;
             }
 

@@ -139,6 +139,17 @@ static void* lib##Library(bool = false) \
         return frameworkLibrary; \
     }
 
+/* On iOS 6 a private framework that 2.54 soft-links is usually absent because the
+ * feature it belongs to was invented later. Asserting turns that ordinary
+ * absence into SIGTRAP the first time any canLoad_ helper asks for it - and
+ * canLoad_ asks in the non-optional mode. Leaving the library null instead lets
+ * every caller's own availability check do its job. */
+#if defined(WEBKIT_IOS6)
+#define SOFT_LINK_FRAMEWORK_MUST_LOAD(library) ((void)(library))
+#else
+#define SOFT_LINK_FRAMEWORK_MUST_LOAD(library) RELEASE_ASSERT_WITH_MESSAGE(library, "%s", dlerror())
+#endif
+
 #define SOFT_LINK_FRAMEWORK_IN_UMBRELLA_FOR_SOURCE_WITH_EXPORT(functionNamespace, umbrella, framework, export) \
     namespace functionNamespace { \
     export void* framework##Library(bool isOptional); \
@@ -149,7 +160,7 @@ static void* lib##Library(bool = false) \
         dispatch_once(&once, ^{ \
             frameworkLibrary = dlopen("/System/Library/Frameworks/" #umbrella ".framework/Frameworks/" #framework ".framework/" #framework, RTLD_NOW); \
             if (!isOptional) \
-                RELEASE_ASSERT_WITH_MESSAGE(frameworkLibrary, "%s", dlerror()); \
+                SOFT_LINK_FRAMEWORK_MUST_LOAD(frameworkLibrary); \
         }); \
         return frameworkLibrary; \
     } \
@@ -251,7 +262,6 @@ static void* lib##Library(bool = false) \
         framework##Library(); \
         _STORE_IN_GETCLASS_SECTION static char const auditedClassName[] = #className; \
         class##className.classObject = objc_getClass(auditedClassName); \
-        RELEASE_ASSERT(class##className.classObject); \
         get##className##ClassSingleton = className##Function; \
         return class##className.classObject; \
     } \
@@ -307,8 +317,8 @@ static void* lib##Library(bool = false) \
     { \
         _STORE_IN_DLSYM_SECTION static char const auditedName[] = #name; \
         void** pointer = static_cast<void**>(dlsym(framework##Library(false), auditedName)); \
-        RELEASE_ASSERT_WITH_MESSAGE(pointer, "%s", dlerror()); \
-        pointer##name = static_cast<type>(*pointer); \
+        if (pointer) \
+            pointer##name = static_cast<type>(*pointer); \
         get##name = name##Function; \
         SUPPRESS_UNRETAINED_ARG return pointer##name; \
     }
@@ -348,7 +358,10 @@ static void* lib##Library(bool = false) \
     { \
         _STORE_IN_DLSYM_SECTION static char const auditedName[] = #name; \
         void* constant = dlsym(framework##Library(false), auditedName); \
-        RELEASE_ASSERT_WITH_MESSAGE(constant, "%s", dlerror()); \
+        if (!constant) { \
+            get##name##Singleton = name##Function; \
+            return constant##name.constant; \
+        } \
         constant##name.constant = *static_cast<type const *>(constant); \
         get##name##Singleton = name##Function; \
         return constant##name.constant; \
@@ -432,7 +445,7 @@ static void* lib##Library(bool = false) \
         dispatch_once(&once, ^{ \
             frameworkLibrary = dlopen("/System/Library/Frameworks/" #framework ".framework/" #framework, flags); \
             if (!isOptional) \
-                RELEASE_ASSERT_WITH_MESSAGE(frameworkLibrary, "%s", dlerror()); \
+                SOFT_LINK_FRAMEWORK_MUST_LOAD(frameworkLibrary); \
         }); \
         return frameworkLibrary; \
     } \
@@ -457,7 +470,7 @@ static void* lib##Library(bool = false) \
         dispatch_once(&once, ^{ \
             frameworkLibrary = dlopen("/System/Library/PrivateFrameworks/" #framework ".framework/" #framework, RTLD_NOW); \
             if (!isOptional) \
-                RELEASE_ASSERT_WITH_MESSAGE(frameworkLibrary, "%s", dlerror()); \
+                SOFT_LINK_FRAMEWORK_MUST_LOAD(frameworkLibrary); \
         }); \
         return frameworkLibrary; \
     } \
@@ -555,7 +568,7 @@ static void* lib##Library(bool = false) \
         dispatch_once(&once, ^{ \
             _STORE_IN_DLSYM_SECTION static char const auditedName[] = #variableName; \
             void* constant = dlsym(framework##Library(false), auditedName); \
-            RELEASE_ASSERT_WITH_MESSAGE(constant, "%s", dlerror()); \
+            RELEASE_ASSERT_WITH_MESSAGE(constant, "soft-linked constant %s is not in %s: %s", auditedName, #framework, dlerror() ? dlerror() : "no error reported"); \
             constant##framework##variableName = *static_cast<variableType const *>(constant); \
         }); \
         return constant##framework##variableName; \
@@ -572,7 +585,7 @@ static void* lib##Library(bool = false) \
         dispatch_once(&once, ^{ \
             _STORE_IN_DLSYM_SECTION static char const auditedName[] = #variableName; \
             void* constant = dlsym(framework##Library(false), auditedName); \
-            RELEASE_ASSERT_WITH_MESSAGE(constant, "%s", dlerror()); \
+            RELEASE_ASSERT_WITH_MESSAGE(constant, "soft-linked constant %s is not in %s: %s", auditedName, #framework, dlerror() ? dlerror() : "no error reported"); \
             constant##framework##variableName = *static_cast<variableType const *>(constant); \
         }); \
         return constant##framework##variableName; \

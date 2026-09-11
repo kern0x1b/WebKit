@@ -248,7 +248,7 @@
 #endif
 
 #if !defined(USE_SYSTEM_MALLOC)
-#if OS(DARWIN) && !CPU(ADDRESS64)
+#if OS(DARWIN) && !CPU(ADDRESS64) && !defined(WEBKIT_IOS6_BMALLOC)
 #define USE_SYSTEM_MALLOC 1
 #else
 #define USE_SYSTEM_MALLOC 0
@@ -406,4 +406,12 @@
 
 #if PLATFORM(IOS) || PLATFORM(VISION)
 #define USE_ITP_TCC_CHECK 1
+#endif
+
+/* ---- iOS 6 port ---- */
+#if defined(WEBKIT_IOS6)
+#undef USE_CORE_IMAGE
+#define USE_CORE_IMAGE 0
+#undef USE_MEDIAPARSERD
+#define USE_MEDIAPARSERD 0
 #endif

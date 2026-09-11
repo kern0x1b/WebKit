@@ -64,7 +64,9 @@ WTF_DECLARE_TOLL_FREE_BRIDGING_TRAITS(CTFont, NSFont)
 #else
 WTF_DECLARE_TOLL_FREE_BRIDGING_TRAITS(CTFont, UIFont)
 #endif
+#if HAVE(IOSURFACE)
 WTF_DECLARE_TOLL_FREE_BRIDGING_TRAITS(IOSurface, ::IOSurface)
+#endif
 
 template<> struct CFTollFreeBridgingTraits<CFBooleanRef> { using BridgedType = NSNumber *; };
 

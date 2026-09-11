@@ -256,11 +256,11 @@ private:
         return m_willExpand && keyCount * 2 >= tableSize;
     }
     bool shouldShrink() const { return keyCount() * minLoad < tableSize() && tableSize() > KeyTraits::minimumTableSize; }
-    void expand();
+    NEVER_INLINE void expand();
     void shrink() { rehash(tableSize() / 2); }
-    void shrinkToBestSize();
+    NEVER_INLINE void shrinkToBestSize();
 
-    void rehash(unsigned newTableSize);
+    NEVER_INLINE void rehash(unsigned newTableSize);
     void reinsert(ValueType&&);
 
     static void initializeBucket(ValueType& bucket);
@@ -352,7 +352,7 @@ ALWAYS_INLINE auto RobinHoodHashTable<Key, Value, Extractor, HashFunctions, Trai
     unsigned distance = 0;
 
     while (true) {
-        ValueType* entry = m_table + index;
+        ValueType* entry = table + index;
         if (isEmptyBucket(*entry))
             return nullptr;
 

@@ -38,11 +38,23 @@ TextBreakIterator::Backing TextBreakIterator::mapModeToBackingIterator(StringVie
             return TextBreakIteratorCF(string, priorContext, TextBreakIteratorCF::Mode::LineBreak, locale);
         return TextBreakIteratorICU(string, priorContext, TextBreakIteratorICU::LineMode { lineMode.behavior }, locale);
     }, [string, priorContext, &locale](TextBreakIterator::CaretMode) -> TextBreakIterator::Backing {
+#if defined(WEBKIT_IOS6)
+        return TextBreakIteratorICU(string, priorContext, TextBreakIteratorICU::CharacterMode { }, locale);
+#else
         return TextBreakIteratorCF(string, priorContext, TextBreakIteratorCF::Mode::ComposedCharacter, locale);
+#endif
     }, [string, priorContext, &locale](TextBreakIterator::DeleteMode) -> TextBreakIterator::Backing {
+#if defined(WEBKIT_IOS6)
+        return TextBreakIteratorICU(string, priorContext, TextBreakIteratorICU::CharacterMode { }, locale);
+#else
         return TextBreakIteratorCF(string, priorContext, TextBreakIteratorCF::Mode::BackwardDeletion, locale);
+#endif
     }, [string, priorContext, &locale](TextBreakIterator::CharacterMode) -> TextBreakIterator::Backing {
+#if defined(WEBKIT_IOS6)
+        return TextBreakIteratorICU(string, priorContext, TextBreakIteratorICU::CharacterMode { }, locale);
+#else
         return TextBreakIteratorCF(string, priorContext, TextBreakIteratorCF::Mode::ComposedCharacter, locale);
+#endif
     });
 }
 

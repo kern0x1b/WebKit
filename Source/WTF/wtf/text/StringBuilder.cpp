@@ -158,6 +158,13 @@ void StringBuilder::append(std::span<const char16_t> characters)
         return;
     }
     RELEASE_ASSERT(characters.size() < std::numeric_limits<uint32_t>::max());
+#if defined(WEBKIT_IOS6)
+    if (is8Bit() && charactersAreAllLatin1(characters)) {
+        if (auto destination = extendBufferForAppending<Latin1Character>(saturatingSum<uint32_t>(m_length, static_cast<uint32_t>(characters.size()))); destination.data())
+            StringImpl::copyCharacters(destination, characters);
+        return;
+    }
+#endif
     if (auto destination = extendBufferForAppendingWithUpconvert(saturatingSum<uint32_t>(m_length, static_cast<uint32_t>(characters.size()))); destination.data())
         StringImpl::copyCharacters(destination, characters);
 }

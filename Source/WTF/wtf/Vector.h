@@ -60,14 +60,47 @@ enum class NulloptBehavior : bool { Ignore, Abort };
 
 WTF_ALLOW_UNSAFE_BUFFER_USAGE_BEGIN
 
+#if defined(WEBKIT_IOS6)
+
+ALWAYS_INLINE void vectorCopyBytes(void* destination, const void* source, size_t bytes)
+{
+    if (bytes >= 32) {
+        memcpy(destination, source, bytes);
+        return;
+    }
+    auto* to = static_cast<uint8_t*>(destination);
+    auto* from = static_cast<const uint8_t*>(source);
+    while (bytes >= 4) {
+        uint32_t word;
+        __builtin_memcpy(&word, from, sizeof(word));
+        __builtin_memcpy(to, &word, sizeof(word));
+        to += 4;
+        from += 4;
+        bytes -= 4;
+    }
+    while (bytes) {
+        *to++ = *from++;
+        --bytes;
+    }
+}
+
+#define WTF_VECTOR_COPY_BYTES(destination, source, bytes) ::WTF::vectorCopyBytes(destination, source, bytes)
+
+#else
+
+#define WTF_VECTOR_COPY_BYTES(destination, source, bytes) memcpy(destination, source, bytes)
+
+#endif
+
 template<typename T>
 struct VectorCopier {
     template<typename U, std::size_t Extent>
     static void uninitializedCopy(std::span<const U, Extent> src, std::span<T> dst)
     {
-        if constexpr (std::is_trivially_copyable_v<T> && std::is_trivially_default_constructible_v<T> && std::same_as<T, U>)
-            memcpySpan(dst, src);
-        else {
+        if constexpr (std::is_trivially_copyable_v<T> && std::is_trivially_default_constructible_v<T> && std::same_as<T, U>) {
+            RELEASE_ASSERT(dst.size() >= src.size());
+            WTF_VECTOR_COPY_BYTES(static_cast<void*>(dst.data()), static_cast<const void*>(src.data()), src.size_bytes());
+        } else {
             for (size_t i = 0; i < src.size(); ++i)
                 new (NotNull, &dst[i]) T(src[i]);
         }
@@ -119,7 +152,7 @@ struct VectorTypeOperations
     static void move(T* src, T* srcEnd, T* dst)
     {
         if constexpr (VectorTraits<T>::canMoveWithMemcpy)
-            memcpy(static_cast<void*>(dst), static_cast<void*>(const_cast<T*>(src)), reinterpret_cast<const char*>(srcEnd) - reinterpret_cast<const char*>(src));
+            WTF_VECTOR_COPY_BYTES(static_cast<void*>(dst), static_cast<const void*>(src), static_cast<size_t>(reinterpret_cast<const char*>(srcEnd) - reinterpret_cast<const char*>(src)));
         else {
             while (src != srcEnd) {
                 new (NotNull, dst) T(WTF::move(*src));
@@ -162,9 +195,10 @@ struct VectorTypeOperations
     template<std::size_t Extent>
     static void uninitializedCopy(std::span<const T, Extent> src, std::span<T> dst)
     {
-        if constexpr (VectorTraits<T>::canCopyWithMemcpy)
-            memcpySpan(asMutableByteSpan(dst), asByteSpan(src));
-        else {
+        if constexpr (VectorTraits<T>::canCopyWithMemcpy) {
+            RELEASE_ASSERT(dst.size() >= src.size());
+            WTF_VECTOR_COPY_BYTES(static_cast<void*>(dst.data()), static_cast<const void*>(src.data()), src.size_bytes());
+        } else {
             for (size_t i = 0; i < src.size(); ++i)
                 new (NotNull, &dst[i]) T(src[i]);
         }
@@ -173,9 +207,10 @@ struct VectorTypeOperations
     template<typename U, std::size_t Extent>
     static void uninitializedMove(std::span<U, Extent> source, std::span<T> destination)
     {
-        if constexpr (std::same_as<T, U> && std::is_trivially_copyable_v<T>)
-            memcpySpan(destination, source);
-        else {
+        if constexpr (std::same_as<T, U> && std::is_trivially_copyable_v<T>) {
+            RELEASE_ASSERT(destination.size() >= source.size());
+            WTF_VECTOR_COPY_BYTES(static_cast<void*>(destination.data()), static_cast<const void*>(source.data()), source.size_bytes());
+        } else {
             for (size_t i = 0; i < source.size(); ++i)
                 new (NotNull, std::addressof(destination[i])) T(WTF::move(source[i]));
         }
@@ -238,7 +273,9 @@ public:
             if (!newBuffer) [[unlikely]]
                 return false;
         }
-        m_capacity = sizeToAllocate / sizeof(T);
+        // isValidCapacityForVector<T>() has already bounded newCapacity, so the product is
+        // exact and dividing it back out is the identity.
+        m_capacity = newCapacity;
         m_buffer = newBuffer;
         return true;
     }
@@ -257,7 +294,7 @@ public:
         if (newCapacity > std::numeric_limits<size_t>::max() / sizeof(T))
             CRASH();
         size_t sizeToAllocate = newCapacity * sizeof(T);
-        m_capacity = sizeToAllocate / sizeof(T);
+        m_capacity = newCapacity;
         m_buffer = static_cast<T*>(Malloc::realloc(m_buffer, sizeToAllocate));
     }
 
@@ -951,12 +988,12 @@ private:
     template<FailureAction> bool reserveInitialCapacity(size_t initialCapacity);
     template<FailureAction> bool growCapacityBy(size_t increment);
 
-    template<FailureAction> bool expandCapacity(size_t newMinCapacity);
+    template<FailureAction> NEVER_INLINE bool expandCapacity(size_t newMinCapacity);
     template<FailureAction> T* expandCapacity(size_t newMinCapacity, T*);
     template<FailureAction, typename U> U* expandCapacity(size_t newMinCapacity, U*);
-    template<FailureAction, typename U> bool appendSlowCase(U&&);
+    template<FailureAction, typename U> NEVER_INLINE bool appendSlowCase(U&&);
     template<FailureAction, typename... Args> bool constructAndAppend(Args&&...);
-    template<FailureAction, typename... Args> bool constructAndAppendSlowCase(Args&&...);
+    template<FailureAction, typename... Args> NEVER_INLINE bool constructAndAppendSlowCase(Args&&...);
 
     template<FailureAction, typename U> bool append(U&&);
     template<FailureAction, typename U, size_t Extent> bool append(std::span<const U, Extent>);
@@ -1399,6 +1436,18 @@ bool Vector<T, inlineCapacity, OverflowHandler, minCapacity, Malloc>::reserveCap
     static_assert(action == FailureAction::Crash || action == FailureAction::Report);
     if (newCapacity <= capacity())
         return true;
+
+#if defined(WEBKIT_IOS6)
+    if constexpr (action == FailureAction::Crash) {
+        if (Base::shouldReallocateBuffer(newCapacity) && isValidCapacityForVector<T>(newCapacity)) {
+            asanSetBufferSizeToFullCapacity();
+            Base::reallocateBuffer(newCapacity);
+            asanSetInitialBufferSizeTo(size());
+            return true;
+        }
+    }
+#endif
+
     T* oldBuffer = begin();
     T* oldEnd = end();
 

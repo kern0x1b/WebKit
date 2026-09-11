@@ -162,13 +162,14 @@ inline StringBuilder::operator StringView() const LIFETIME_BOUND
 
 inline void StringBuilder::append(char16_t character)
 {
-    if (m_buffer && m_length < m_buffer->length() && m_string.isNull()) {
-        if (!m_buffer->is8Bit()) {
+    if (m_buffer && m_length < m_buffer->length() && m_string.isNull()) [[likely]] {
+        if (m_buffer->is8Bit()) [[likely]] {
+            if (isLatin1(character)) [[likely]] {
+                spanConstCast<Latin1Character>(m_buffer->span8())[m_length++] = static_cast<Latin1Character>(character);
+                return;
+            }
+        } else {
             spanConstCast<char16_t>(m_buffer->span16())[m_length++] = character;
-            return;
-        }
-        if (isLatin1(character)) {
-            spanConstCast<Latin1Character>(m_buffer->span8())[m_length++] = static_cast<Latin1Character>(character);
             return;
         }
     }
@@ -177,8 +178,8 @@ inline void StringBuilder::append(char16_t character)
 
 inline void StringBuilder::append(Latin1Character character)
 {
-    if (m_buffer && m_length < m_buffer->length() && m_string.isNull()) {
-        if (m_buffer->is8Bit())
+    if (m_buffer && m_length < m_buffer->length() && m_string.isNull()) [[likely]] {
+        if (m_buffer->is8Bit()) [[likely]]
             spanConstCast<Latin1Character>(m_buffer->span8())[m_length++] = character;
         else
             spanConstCast<char16_t>(m_buffer->span16())[m_length++] = character;

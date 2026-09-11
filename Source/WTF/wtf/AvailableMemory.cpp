@@ -185,7 +185,14 @@ size_t availableMemory()
 #if PLATFORM(IOS_FAMILY) || OS(LINUX) || OS(FREEBSD)
 MemoryStatus memoryStatus()
 {
-#if PLATFORM(IOS_FAMILY)
+#if defined(WEBKIT_IOS6)
+    mach_task_basic_info_data_t taskInfo;
+    mach_msg_type_number_t taskInfoCount = MACH_TASK_BASIC_INFO_COUNT;
+
+    size_t memoryFootprint = 0;
+    if (KERN_SUCCESS == task_info(mach_task_self(), MACH_TASK_BASIC_INFO, (task_info_t)(&taskInfo), &taskInfoCount))
+        memoryFootprint = static_cast<size_t>(taskInfo.resident_size);
+#elif PLATFORM(IOS_FAMILY)
     task_vm_info_data_t vmInfo;
     mach_msg_type_number_t vmSize = TASK_VM_INFO_COUNT;
 

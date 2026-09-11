@@ -224,7 +224,10 @@ void MemoryPressureHandler::setMemoryFootprintNotificationThresholds(Vector<uint
 void MemoryPressureHandler::measurementTimerFired()
 {
     size_t footprint = memoryFootprint();
-#if PLATFORM(COCOA)
+#if defined(WEBKIT_IOS6)
+    if (MemoryPressureHandler::singleton().m_shouldLogMemoryMemoryPressureEvents)
+        WTFLogAlways("[memory] footprint %zu MB", footprint / MB);
+#elif PLATFORM(COCOA)
     RELEASE_LOG(MemoryPressure, "Current memory footprint: %zu MB", footprint / MB);
 #endif
 
@@ -248,7 +251,11 @@ void MemoryPressureHandler::measurementTimerFired()
         releaseMemory(Critical::No, Synchronous::No);
         break;
     case MemoryUsagePolicy::Strict:
+#if defined(WEBKIT_IOS6)
+        releaseMemory(footprint >= m_configuration.baseThreshold ? Critical::Yes : Critical::No, Synchronous::No);
+#else
         releaseMemory(Critical::Yes, Synchronous::No);
+#endif
         break;
     }
 }

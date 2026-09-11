@@ -252,6 +252,68 @@ SUPPRESS_NODELETE ALWAYS_INLINE bool NODELETE equal(const char16_t* a, std::span
 #endif
     }
 }
+#elif defined(WEBKIT_IOS6) && !ASAN_ENABLED
+template<OneByteCharacterType CharacterType>
+SUPPRESS_NODELETE ALWAYS_INLINE bool NODELETE equal(const CharacterType* a, std::span<const CharacterType> b)
+{
+    ASSERT(b.size() <= std::numeric_limits<unsigned>::max());
+    unsigned length = b.size();
+
+    if (!length)
+        return true;
+    if (length == 1)
+        return *a == b.front();
+
+    switch (sizeof(unsigned) * CHAR_BIT - clz(length - 1)) {
+    case 0:
+        RELEASE_ASSERT_NOT_REACHED();
+    case 1:
+        return unalignedLoad<uint16_t>(a) == unalignedLoad<uint16_t>(b.data());
+    case 2:
+        return unalignedLoad<uint16_t>(a) == unalignedLoad<uint16_t>(b.data())
+            && unalignedLoad<uint16_t>(a + length - 2) == unalignedLoad<uint16_t>(b.data() + length - 2);
+    case 3:
+        return unalignedLoad<uint32_t>(a) == unalignedLoad<uint32_t>(b.data())
+            && unalignedLoad<uint32_t>(a + length - 4) == unalignedLoad<uint32_t>(b.data() + length - 4);
+    default:
+        if (unalignedLoad<uint32_t>(a) != unalignedLoad<uint32_t>(b.data()))
+            return false;
+        for (unsigned i = length % 4; i < length; i += 4) {
+            if (unalignedLoad<uint32_t>(a + i) != unalignedLoad<uint32_t>(b.data() + i))
+                return false;
+        }
+        return true;
+    }
+}
+
+SUPPRESS_NODELETE ALWAYS_INLINE bool NODELETE equal(const char16_t* a, std::span<const char16_t> b)
+{
+    ASSERT(b.size() <= std::numeric_limits<unsigned>::max());
+    unsigned length = b.size();
+
+    if (!length)
+        return true;
+    if (length == 1)
+        return *a == b.front();
+
+    switch (sizeof(unsigned) * CHAR_BIT - clz(length - 1)) {
+    case 0:
+        RELEASE_ASSERT_NOT_REACHED();
+    case 1:
+        return unalignedLoad<uint32_t>(a) == unalignedLoad<uint32_t>(b.data());
+    case 2:
+        return unalignedLoad<uint32_t>(a) == unalignedLoad<uint32_t>(b.data())
+            && unalignedLoad<uint32_t>(a + length - 2) == unalignedLoad<uint32_t>(b.data() + length - 2);
+    default:
+        if (unalignedLoad<uint32_t>(a) != unalignedLoad<uint32_t>(b.data()))
+            return false;
+        for (unsigned i = length % 2; i < length; i += 2) {
+            if (unalignedLoad<uint32_t>(a + i) != unalignedLoad<uint32_t>(b.data() + i))
+                return false;
+        }
+        return true;
+    }
+}
 #elif CPU(X86) && !ASAN_ENABLED
 template<OneByteCharacterType CharacterType>
 ALWAYS_INLINE bool NODELETE equal(const CharacterType* a, std::span<const CharacterType> b)
@@ -357,6 +419,27 @@ SUPPRESS_NODELETE ALWAYS_INLINE bool NODELETE equal(const Latin1Character* a, st
     if (length == 1)
         return *a == b.front();
     return true;
+#elif defined(WEBKIT_IOS6) && !ASAN_ENABLED
+    ASSERT(b.size() <= std::numeric_limits<unsigned>::max());
+    unsigned length = b.size();
+
+    auto expand2 = [](const Latin1Character* p) ALWAYS_INLINE_LAMBDA -> uint32_t {
+        uint32_t v32 = unalignedLoad<uint16_t>(p);
+        return (v32 | (v32 << 8)) & 0x00FF00FFU;
+    };
+
+    if (length >= 2) {
+        if (expand2(a) != unalignedLoad<uint32_t>(b.data()))
+            return false;
+        for (unsigned i = length % 2; i < length; i += 2) {
+            if (expand2(a + i) != unalignedLoad<uint32_t>(b.data() + i))
+                return false;
+        }
+        return true;
+    }
+    if (length == 1)
+        return *a == b.front();
+    return true;
 #else
     for (size_t i = 0; i < b.size(); ++i) {
         if (a[i] != b[i])
@@ -458,6 +541,28 @@ bool NODELETE equal(const StringClass& string, std::span<const char8_t> span)
     return Unicode::equal(string.span16(), span);
 }
 
+#if defined(WEBKIT_IOS6) && CPU(LITTLE_ENDIAN)
+namespace SWAR {
+
+ALWAYS_INLINE constexpr uint32_t asciiLowerBytes(uint32_t word)
+{
+    uint32_t low = word & 0x7F7F7F7FU;
+    uint32_t atLeastA = low + 0x3F3F3F3FU;
+    uint32_t aboveZ = low + 0x25252525U;
+    return word | ((atLeastA & ~aboveZ & ~word & 0x80808080U) >> 2);
+}
+
+ALWAYS_INLINE constexpr uint32_t asciiLowerHalves(uint32_t word)
+{
+    uint32_t low = word & 0x7FFF7FFFU;
+    uint32_t atLeastA = low + 0x7FBF7FBFU;
+    uint32_t aboveZ = low + 0x7FA57FA5U;
+    return word | ((atLeastA & ~aboveZ & ~word & 0x80008000U) >> 10);
+}
+
+} // namespace SWAR
+#endif
+
 template<typename CharacterTypeA, typename CharacterTypeB> SUPPRESS_NODELETE inline bool NODELETE equalIgnoringASCIICaseWithLength(std::span<const CharacterTypeA> a, std::span<const CharacterTypeB> b, size_t lengthToCheck)
 {
     ASSERT(a.size() >= lengthToCheck);
@@ -496,6 +601,29 @@ template<typename CharacterTypeA, typename CharacterTypeB> SUPPRESS_NODELETE inl
 
             return true;
         }
+    }
+#elif defined(WEBKIT_IOS6) && CPU(LITTLE_ENDIAN)
+    if constexpr (std::is_same_v<CharacterTypeA, CharacterTypeB> && (sizeof(CharacterTypeA) == 1 || sizeof(CharacterTypeA) == 2)) {
+        constexpr size_t stride = sizeof(uint32_t) / sizeof(CharacterTypeA);
+        size_t i = 0;
+        for (; i + stride <= lengthToCheck; i += stride) {
+            uint32_t aWord = unalignedLoad<uint32_t>(a.data() + i);
+            uint32_t bWord = unalignedLoad<uint32_t>(b.data() + i);
+            if (aWord == bWord)
+                continue;
+            if constexpr (sizeof(CharacterTypeA) == 1) {
+                if (SWAR::asciiLowerBytes(aWord) != SWAR::asciiLowerBytes(bWord))
+                    return false;
+            } else {
+                if (SWAR::asciiLowerHalves(aWord) != SWAR::asciiLowerHalves(bWord))
+                    return false;
+            }
+        }
+        for (; i < lengthToCheck; ++i) {
+            if (toASCIILower(a[i]) != toASCIILower(b[i]))
+                return false;
+        }
+        return true;
     }
 #endif
 
@@ -639,6 +767,23 @@ SUPPRESS_NODELETE ALWAYS_INLINE const uint8_t* NODELETE find8(const uint8_t* poi
 template<typename UnsignedType>
 SUPPRESS_NODELETE ALWAYS_INLINE const UnsignedType* NODELETE findImpl(const UnsignedType* pointer, UnsignedType character, size_t length)
 {
+#if defined(WEBKIT_IOS6) && CPU(LITTLE_ENDIAN)
+    size_t index = 0;
+    if constexpr (sizeof(UnsignedType) == 2) {
+        uint32_t splat = static_cast<uint32_t>(character) * 0x00010001U;
+        for (; index + 2 <= length; index += 2) {
+            uint32_t value = unalignedLoad<uint32_t>(pointer + index) ^ splat;
+            uint32_t mask = (value - 0x00010001U) & ~value & 0x80008000U;
+            if (mask)
+                return pointer + index + ((mask & 0x00008000U) ? 0 : 1);
+        }
+    }
+    for (; index < length; ++index) {
+        if (pointer[index] == character)
+            return pointer + index;
+    }
+    return nullptr;
+#else
     auto charactersVector = SIMD::splat<UnsignedType>(character);
     auto vectorMatch = [&](auto value) ALWAYS_INLINE_LAMBDA {
         auto mask = SIMD::equal(value, charactersVector);
@@ -655,6 +800,7 @@ SUPPRESS_NODELETE ALWAYS_INLINE const UnsignedType* NODELETE findImpl(const Unsi
     if (cursor == end)
         return nullptr;
     return cursor;
+#endif
 }
 
 ALWAYS_INLINE const uint16_t* NODELETE find16(const uint16_t* pointer, uint16_t character, size_t length)
@@ -669,6 +815,13 @@ ALWAYS_INLINE const uint32_t* NODELETE find32(const uint32_t* pointer, uint32_t 
 
 SUPPRESS_NODELETE ALWAYS_INLINE const uint64_t* NODELETE find64(const uint64_t* pointer, uint64_t character, size_t length)
 {
+#if defined(WEBKIT_IOS6)
+    for (size_t index = 0; index < length; ++index) {
+        if (pointer[index] == character)
+            return pointer + index;
+    }
+    return nullptr;
+#else
     constexpr size_t scalarThreshold = 4;
     size_t index = 0;
     size_t runway = std::min(scalarThreshold, length);
@@ -719,10 +872,18 @@ SUPPRESS_NODELETE ALWAYS_INLINE const uint64_t* NODELETE find64(const uint64_t* 
     }
 
     return nullptr;
+#endif
 }
 
 SUPPRESS_NODELETE ALWAYS_INLINE const uint8_t* NODELETE reverseFind8(const uint8_t* pointer, uint8_t character, size_t length)
 {
+#if defined(WEBKIT_IOS6)
+    for (size_t index = length; index--;) {
+        if (pointer[index] == character)
+            return pointer + index;
+    }
+    return nullptr;
+#else
     constexpr size_t thresholdLength = 16;
 
     size_t index = length;
@@ -752,11 +913,19 @@ SUPPRESS_NODELETE ALWAYS_INLINE const uint8_t* NODELETE reverseFind8(const uint8
         return nullptr;
     return cursor;
 #endif
+#endif
 }
 
 template<typename UnsignedType>
 SUPPRESS_NODELETE ALWAYS_INLINE const UnsignedType* NODELETE reverseFindImpl(const UnsignedType* pointer, UnsignedType character, size_t length)
 {
+#if defined(WEBKIT_IOS6)
+    for (size_t index = length; index--;) {
+        if (pointer[index] == character)
+            return pointer + index;
+    }
+    return nullptr;
+#else
     auto charactersVector = SIMD::splat<UnsignedType>(character);
     auto vectorMatch = [&](auto value) ALWAYS_INLINE_LAMBDA {
         auto mask = SIMD::equal(value, charactersVector);
@@ -773,6 +942,7 @@ SUPPRESS_NODELETE ALWAYS_INLINE const UnsignedType* NODELETE reverseFindImpl(con
     if (cursor == end)
         return nullptr;
     return cursor;
+#endif
 }
 
 ALWAYS_INLINE const uint16_t* NODELETE reverseFind16(const uint16_t* pointer, uint16_t character, size_t length)
@@ -787,6 +957,13 @@ ALWAYS_INLINE const uint32_t* NODELETE reverseFind32(const uint32_t* pointer, ui
 
 SUPPRESS_NODELETE ALWAYS_INLINE const uint64_t* NODELETE reverseFind64(const uint64_t* pointer, uint64_t character, size_t length)
 {
+#if defined(WEBKIT_IOS6)
+    for (size_t i = length; i--;) {
+        if (pointer[i] == character)
+            return pointer + i;
+    }
+    return nullptr;
+#else
     constexpr size_t scalarThreshold = 4;
     size_t index = length;
     size_t runway = length > scalarThreshold ? length - scalarThreshold : 0;
@@ -840,6 +1017,7 @@ SUPPRESS_NODELETE ALWAYS_INLINE const uint64_t* NODELETE reverseFind64(const uin
     }
 
     return nullptr;
+#endif
 }
 
 ALWAYS_INLINE const Float16* NODELETE reverseFindFloat16(const Float16* pointer, Float16 target, size_t length)
@@ -1154,6 +1332,50 @@ SUPPRESS_NODELETE ALWAYS_INLINE const char16_t* NODELETE find16NonASCII(std::spa
     ASSERT(index < length);
     return find16NonASCIIAlignedImpl({ pointer + index, length - index });
 }
+#elif defined(WEBKIT_IOS6) && CPU(LITTLE_ENDIAN)
+SUPPRESS_NODELETE ALWAYS_INLINE const Latin1Character* NODELETE find8NonASCII(std::span<const Latin1Character> data)
+{
+    auto* pointer = data.data();
+    size_t length = data.size();
+
+    size_t index = 0;
+    for (; index + 4 <= length; index += 4) {
+        uint32_t mask = unalignedLoad<uint32_t>(pointer + index) & 0x80808080U;
+        if (!mask)
+            continue;
+        if (mask & 0x00000080U)
+            return pointer + index;
+        if (mask & 0x00008000U)
+            return pointer + index + 1;
+        if (mask & 0x00800000U)
+            return pointer + index + 2;
+        return pointer + index + 3;
+    }
+    for (; index < length; ++index) {
+        if (!isASCII(pointer[index]))
+            return pointer + index;
+    }
+    return nullptr;
+}
+
+SUPPRESS_NODELETE ALWAYS_INLINE const char16_t* NODELETE find16NonASCII(std::span<const char16_t> data)
+{
+    auto* pointer = data.data();
+    size_t length = data.size();
+
+    size_t index = 0;
+    for (; index + 2 <= length; index += 2) {
+        uint32_t mask = unalignedLoad<uint32_t>(pointer + index) & 0xFF80FF80U;
+        if (!mask)
+            continue;
+        if (mask & 0x0000FF80U)
+            return pointer + index;
+        return pointer + index + 1;
+    }
+    if (index < length && !isASCII(pointer[index]))
+        return pointer + index;
+    return nullptr;
+}
 #endif
 
 template<std::integral CharacterType1, std::integral CharacterType2>
@@ -1301,6 +1523,21 @@ SUPPRESS_NODELETE inline bool NODELETE equalLettersIgnoringASCIICaseWithLength(s
 
             return true;
         }
+    }
+#elif defined(WEBKIT_IOS6)
+    if constexpr (sizeof(CharacterType) == 1) {
+        size_t i = 0;
+        for (; i + 4 <= length; i += 4) {
+            uint32_t charactersWord = unalignedLoad<uint32_t>(characters.data() + i);
+            uint32_t lowercaseWord = unalignedLoad<uint32_t>(lowercaseLetters.data() + i);
+            if ((charactersWord | 0x20202020U) != lowercaseWord)
+                return false;
+        }
+        for (; i < length; ++i) {
+            if (!isASCIIAlphaCaselessEqual(characters[i], lowercaseLetters[i]))
+                return false;
+        }
+        return true;
     }
 #endif
 
@@ -1535,6 +1772,20 @@ inline void copyElements(std::span<uint16_t> destinationSpan, std::span<const ui
     // Handle remaining elements.
     while (destination != end)
         *destination++ = *source++;
+#elif defined(WEBKIT_IOS6)
+    size_t i = 0;
+    if (length >= 4) {
+        size_t wordEnd = length & ~static_cast<size_t>(3);
+        for (; i < wordEnd; i += 4) {
+            uint32_t packed = unalignedLoad<uint32_t>(source + i);
+            uint32_t low = packed & 0xFFFFU;
+            uint32_t high = packed >> 16;
+            unalignedStore<uint32_t>(destination + i, (low | (low << 8)) & 0x00FF00FFU);
+            unalignedStore<uint32_t>(destination + i + 2, (high | (high << 8)) & 0x00FF00FFU);
+        }
+    }
+    for (; i < length; ++i)
+        destination[i] = source[i];
 #else
     for (unsigned i = 0; i < length; ++i)
         destination[i] = source[i];

@@ -30,7 +30,9 @@
 #import <mach/task_info.h>
 #import <malloc/malloc.h>
 #import <notify.h>
+#import <sys/sysctl.h>
 #import <wtf/Logging.h>
+#import <wtf/MemoryFootprint.h>
 #import <wtf/spi/darwin/DispatchSPI.h>
 
 #define ENABLE_FMW_FOOTPRINT_COMPARISON 0
@@ -41,11 +43,14 @@ namespace WTF {
 
 void MemoryPressureHandler::platformReleaseMemory(Critical critical)
 {
+#if defined(WEBKIT_IOS6)
+    if (critical == Critical::Yes)
+        cache_simulate_memory_warning_event(DISPATCH_MEMORYPRESSURE_CRITICAL);
+#else
     if (critical == Critical::Yes && (!isUnderMemoryPressure() || m_isSimulatingMemoryPressure)) {
-        // libcache listens to OS memory notifications, but for process suspension
-        // or memory pressure simulation, we need to prod it manually:
         cache_simulate_memory_warning_event(DISPATCH_MEMORYPRESSURE_CRITICAL);
     }
+#endif
 }
 
 static OSObjectPtr<dispatch_source_t>& NODELETE memoryPressureEventSource()
@@ -76,20 +81,91 @@ static const Seconds s_minimumHoldOffTime { 5_s };
 static constexpr unsigned s_holdOffMultiplier = 20;
 #endif
 
+#if defined(WEBKIT_IOS6)
+static const Seconds s_criticalPressureRepeatInterval { 60_s };
+
+static int systemMemoryFreeLevel()
+{
+    int level = 0;
+    size_t size = sizeof(level);
+    if (sysctlbyname("kern.memorystatus_level", &level, &size, nullptr, 0))
+        return 100;
+    return level;
+}
+
+static size_t processMemoryBudget()
+{
+    static size_t budget = 0;
+    if (!budget) {
+        budget = 320 * MB;
+        if (const char* override = getenv("WEBKIT_IOS6_MEMORY_BUDGET_MB")) {
+            long value = strtol(override, nullptr, 10);
+            if (value > 16 && value < 4096)
+                budget = static_cast<size_t>(value) * MB;
+        }
+    }
+    return budget;
+}
+
+static SystemMemoryPressureStatus gradeMemoryPressure(SystemMemoryPressureStatus previous)
+{
+    size_t footprint = memoryFootprint();
+    size_t budget = processMemoryBudget();
+    int level = systemMemoryFreeLevel();
+
+    if (footprint >= budget * 9 / 10 || level < 8)
+        return SystemMemoryPressureStatus::Critical;
+
+    if (footprint >= budget * 3 / 4 || level < 12)
+        return SystemMemoryPressureStatus::Warning;
+
+    if (previous != SystemMemoryPressureStatus::Normal && footprint >= budget * 5 / 8)
+        return SystemMemoryPressureStatus::Warning;
+
+    return SystemMemoryPressureStatus::Normal;
+}
+#endif
+
 void MemoryPressureHandler::install()
 {
     if (m_installed || timerEventSource())
         return;
 
     dispatch_async(m_dispatchQueue.get(), ^{
+#if defined(WEBKIT_IOS6)
+        SUPPRESS_RETAINPTR_CTOR_ADOPT memoryPressureEventSource() = adoptOSObject(dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, m_dispatchQueue.get()));
+        if (!memoryPressureEventSource())
+            return;
+
+        dispatch_source_set_timer(memoryPressureEventSource().get(), dispatch_time(DISPATCH_TIME_NOW, 0),
+            s_minimumHoldOffTime.seconds() * NSEC_PER_SEC, NSEC_PER_SEC);
+        dispatch_source_set_event_handler(memoryPressureEventSource().get(), ^{
+            SystemMemoryPressureStatus previous = m_memoryPressureStatus.load();
+            SystemMemoryPressureStatus status = gradeMemoryPressure(previous);
+            setMemoryPressureStatus(status);
+
+            if (status == SystemMemoryPressureStatus::Critical) {
+                static std::optional<MonotonicTime> lastCriticalResponse;
+                auto now = MonotonicTime::now();
+                if (!lastCriticalResponse || now - *lastCriticalResponse >= s_criticalPressureRepeatInterval) {
+                    lastCriticalResponse = now;
+                    respondToMemoryPressure(Critical::Yes);
+                }
+            } else if (status == SystemMemoryPressureStatus::Warning && previous != SystemMemoryPressureStatus::Warning)
+                respondToMemoryPressure(Critical::No);
+
+            if (m_shouldLogMemoryMemoryPressureEvents)
+                RELEASE_LOG(MemoryPressure, "Memory pressure: footprint %zu MB, budget %zu MB, system free %d%%, status %d", memoryFootprint() / MB, processMemoryBudget() / MB, systemMemoryFreeLevel(), static_cast<int>(status));
+        });
+        dispatch_resume(memoryPressureEventSource().get());
+#else
         auto memoryStatusFlags = DISPATCH_MEMORYPRESSURE_NORMAL | DISPATCH_MEMORYPRESSURE_WARN | DISPATCH_MEMORYPRESSURE_CRITICAL | DISPATCH_MEMORYPRESSURE_PROC_LIMIT_WARN | DISPATCH_MEMORYPRESSURE_PROC_LIMIT_CRITICAL;
-        // FIXME: This is a false positive. rdar://160931336
-        SUPPRESS_RETAINPTR_CTOR_ADOPT memoryPressureEventSource() = adoptOSObject(dispatch_source_create(DISPATCH_SOURCE_TYPE_MEMORYPRESSURE, 0, memoryStatusFlags, m_dispatchQueue.get()));
+        auto *memoryPressureSourceType = DISPATCH_SOURCE_TYPE_MEMORYPRESSURE;
+        SUPPRESS_RETAINPTR_CTOR_ADOPT memoryPressureEventSource() = adoptOSObject(dispatch_source_create(memoryPressureSourceType, 0, memoryStatusFlags, m_dispatchQueue.get()));
 
         dispatch_source_set_event_handler(memoryPressureEventSource().get(), ^{
             auto status = dispatch_source_get_data(memoryPressureEventSource().get());
             switch (status) {
-            // VM pressure events.
             case DISPATCH_MEMORYPRESSURE_NORMAL:
                 setMemoryPressureStatus(SystemMemoryPressureStatus::Normal);
                 break;
@@ -101,7 +177,6 @@ void MemoryPressureHandler::install()
                 setMemoryPressureStatus(SystemMemoryPressureStatus::Critical);
                 respondToMemoryPressure(Critical::Yes);
                 break;
-            // Process memory limit events.
             case DISPATCH_MEMORYPRESSURE_PROC_LIMIT_WARN:
                 didExceedProcessMemoryLimit(ProcessMemoryLimit::Warning);
                 respondToMemoryPressure(Critical::No);
@@ -115,6 +190,7 @@ void MemoryPressureHandler::install()
                 RELEASE_LOG(MemoryPressure, "Received memory pressure event: %lu, system vm pressure critical: %d", status, isUnderMemoryPressure());
         });
         dispatch_resume(memoryPressureEventSource().get());
+#endif
     });
 
     // Allow simulation of memory warning (80% of high watermark) with "notifyutil -p org.WebKit.memoryWarning
@@ -239,7 +315,11 @@ std::optional<MemoryPressureHandler::ReliefLogger::MemoryUsage> MemoryPressureHa
     if (err != KERN_SUCCESS)
         return std::nullopt;
 
+#if defined(WEBKIT_IOS6)
+    return MemoryUsage {static_cast<size_t>(vmInfo.internal), memoryFootprint()};
+#else
     return MemoryUsage {static_cast<size_t>(vmInfo.internal), static_cast<size_t>(vmInfo.phys_footprint)};
+#endif
 }
 
 } // namespace WTF

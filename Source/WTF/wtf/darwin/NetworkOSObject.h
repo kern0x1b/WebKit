@@ -29,11 +29,17 @@
 #include <wtf/OSObjectPtr.h>
 #include <wtf/darwin/TypeCastsOSObject.h>
 
+#if defined(WEBKIT_IOS6)
+#define WTF_OS_OBJECT_NETWORK_TYPES(M) \
+    M(nw_endpoint) \
+    M(nw_path)
+#else
 #define WTF_OS_OBJECT_NETWORK_TYPES(M) \
     M(nw_endpoint) \
     M(nw_path) \
     M(nw_resolution_report) \
     M(nw_resolver_config)
+#endif
 
 // Forward declarations for network base struct types.
 WTF_EXTERN_C_BEGIN

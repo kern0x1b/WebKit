@@ -77,7 +77,21 @@ char32_t String::codePointAt(unsigned i) const
 
 String makeStringByJoining(std::span<const String> strings, const String& separator)
 {
+    if (strings.empty())
+        return emptyString();
+    if (strings.size() == 1)
+        return strings.front();
+
+    Checked<unsigned> totalLength = 0;
+    for (const auto& string : strings)
+        totalLength += string.length();
+    totalLength += Checked<unsigned>(strings.size() - 1) * separator.length();
+
+    if (totalLength.hasOverflowed())
+        return String();
+
     StringBuilder builder;
+    builder.reserveCapacity(totalLength.value());
     for (const auto& string : strings) {
         if (builder.isEmpty())
             builder.append(string);

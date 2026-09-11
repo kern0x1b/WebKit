@@ -24,6 +24,7 @@
  */
 
 #include "config.h"
+#include <mutex>
 #include <wtf/RunLoop.h>
 
 #include <wtf/AutodrainedPool.h>
@@ -148,12 +149,18 @@ void RunLoop::TimerBase::stop()
     if (!m_timer)
         return;
 
-    // An active timer must be stopped (and destroyed) on its run loop's thread: the CFRunLoopTimer
-    // holds a raw pointer to this TimerBase as its callback context, and CFRunLoopTimerInvalidate()
-    // does not synchronize with a callback already dispatching on the run loop's thread, so invalidating
-    // from another thread races with the in-flight callback and can leave it reading freed memory.
-    // (Starting a timer cross-thread is safe and supported -- that is how dispatch()/dispatchAfter()
-    // schedule work onto another run loop.)
+#if defined(WEBKIT_IOS6)
+    if (!m_runLoop->isCurrent()) {
+        static std::once_flag reported;
+        std::call_once(reported, [] {
+            WTFLogAlways("[runloop] a timer was stopped from another thread; invalidating it there");
+        });
+        CFRunLoopTimerInvalidate(m_timer.get());
+        m_timer = nullptr;
+        return;
+    }
+#endif
+
     releaseAssertIsCurrent(m_runLoop);
     CFRunLoopTimerInvalidate(m_timer.get());
     m_timer = nullptr;

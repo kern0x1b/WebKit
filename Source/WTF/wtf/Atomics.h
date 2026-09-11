@@ -78,6 +78,10 @@ struct Atomic {
     ALWAYS_INLINE bool compareExchangeWeak(T expected, T desired, std::memory_order order = std::memory_order_seq_cst)
     {
         T expectedOrActual = expected;
+#if defined(WEBKIT_IOS6)
+        if (order == std::memory_order_acquire || order == std::memory_order_acq_rel)
+            return value.compare_exchange_weak(expectedOrActual, desired, order, std::memory_order_relaxed);
+#endif
         return value.compare_exchange_weak(expectedOrActual, desired, order);
     }
 

@@ -27,18 +27,50 @@
 #include <wtf/MemoryFootprint.h>
 
 #include <mach/mach.h>
+#include <cstring>
+#include <wtf/Assertions.h>
+#include <cstdlib>
 #include <mach/task_info.h>
 
 namespace WTF {
 
 size_t memoryFootprint()
 {
+#if defined(WEBKIT_IOS6)
+    static const int useInternal = [] -> int {
+        const char* mode = getenv("WEBKIT_IOS6_FOOTPRINT");
+        return mode && !strcmp(mode, "own");
+    }();
+
+    if (useInternal) {
+        task_vm_info_data_t vmInfo;
+        mach_msg_type_number_t vmCount = TASK_VM_INFO_REV0_COUNT;
+        kern_return_t vmResult = task_info(mach_task_self(), TASK_VM_INFO, (task_info_t)&vmInfo, &vmCount);
+        static bool reported = false;
+        if (!reported) {
+            reported = true;
+            WTFLogAlways("[footprint] TASK_VM_INFO kr=%d internal=%llu external=%llu compressed=%llu",
+                (int)vmResult, (unsigned long long)vmInfo.internal,
+                (unsigned long long)vmInfo.external, (unsigned long long)vmInfo.compressed);
+        }
+        if (vmResult == KERN_SUCCESS)
+            return static_cast<size_t>(vmInfo.internal + vmInfo.compressed);
+    }
+
+    mach_task_basic_info_data_t taskInfo;
+    mach_msg_type_number_t count = MACH_TASK_BASIC_INFO_COUNT;
+    kern_return_t result = task_info(mach_task_self(), MACH_TASK_BASIC_INFO, (task_info_t) &taskInfo, &count);
+    if (result != KERN_SUCCESS)
+        return 0;
+    return static_cast<size_t>(taskInfo.resident_size);
+#else
     task_vm_info_data_t vmInfo;
     mach_msg_type_number_t count = TASK_VM_INFO_COUNT;
     kern_return_t result = task_info(mach_task_self(), TASK_VM_INFO, (task_info_t) &vmInfo, &count);
     if (result != KERN_SUCCESS)
         return 0;
     return static_cast<size_t>(vmInfo.phys_footprint);
+#endif
 }
 
 }

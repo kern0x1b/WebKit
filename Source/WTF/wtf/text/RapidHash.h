@@ -68,11 +68,141 @@ public:
     template<typename T, typename Converter = DefaultConverter>
     ALWAYS_INLINE static constexpr unsigned computeHashAndMaskTop8Bits(std::span<const T> data)
     {
+#if defined(WEBKIT_IOS6)
+        return StringHasher::avoidZero(narrowHash<T, Converter>(data) & StringHasher::maskHash);
+#else
         return StringHasher::avoidZero(static_cast<unsigned>(rapidhash<T, Converter>(data)) & StringHasher::maskHash);
+#endif
     }
 
 private:
     friend class StringHasher;
+
+#if defined(WEBKIT_IOS6)
+    static constexpr uint32_t narrowSecretA = 0x53c5ca59U;
+    static constexpr uint32_t narrowSecretB = 0x74743c1bU;
+
+    ALWAYS_INLINE static constexpr void narrowMix(uint32_t& a, uint32_t& b)
+    {
+        uint64_t product = static_cast<uint64_t>(a ^ narrowSecretA) * static_cast<uint64_t>(b ^ narrowSecretB);
+        a = static_cast<uint32_t>(product);
+        b = static_cast<uint32_t>(product >> 32);
+    }
+
+    ALWAYS_INLINE static constexpr uint32_t narrowHashImpl(uint32_t length, NOESCAPE const Invocable<uint32_t(uint32_t)> auto& read32, NOESCAPE const Invocable<uint32_t(uint32_t, uint32_t)> auto& readSmall)
+    {
+        uint32_t seed = 0;
+        uint32_t see1 = length;
+        narrowMix(seed, see1);
+
+        uint32_t remaining = length;
+        uint32_t offset = 0;
+        while (remaining > 8) {
+            seed ^= read32(offset);
+            see1 ^= read32(offset + 4);
+            narrowMix(seed, see1);
+            offset += 8;
+            remaining -= 8;
+        }
+
+        if (remaining >= 4) [[likely]] {
+            seed ^= read32(offset);
+            see1 ^= read32(offset + remaining - 4);
+        } else if (remaining)
+            seed ^= readSmall(offset, remaining);
+
+        narrowMix(seed, see1);
+        seed ^= see1;
+        narrowMix(seed, see1);
+        return seed ^ see1;
+    }
+
+    template<typename T, typename Converter>
+    ALWAYS_INLINE static constexpr uint32_t narrowHashOneBytePerChar(std::span<const T> data, [[maybe_unused]] uint32_t& seenBits)
+    {
+        const T* p = data.data();
+
+        auto foldByte = [&](uint32_t index) ALWAYS_INLINE_LAMBDA -> uint32_t {
+            if constexpr (std::is_same_v<Converter, DefaultConverter>) {
+                if constexpr (sizeof(T) == 2) {
+                    uint32_t character = static_cast<uint32_t>(static_cast<uint16_t>(data[index]));
+                    seenBits |= character;
+                    return character & 0xFF;
+                } else
+                    return static_cast<uint32_t>(static_cast<uint8_t>(data[index]));
+            } else {
+                uint32_t converted = static_cast<uint32_t>(static_cast<uint16_t>(Converter::convert(data[index])));
+                return (converted & 0xFF) | (converted >> 8);
+            }
+        };
+
+        auto read32 = [&](uint32_t offset) ALWAYS_INLINE_LAMBDA -> uint32_t {
+#if CPU(LITTLE_ENDIAN)
+            if (!std::is_constant_evaluated()) {
+                if constexpr (std::is_same_v<Converter, DefaultConverter>) {
+                    if constexpr (sizeof(T) == 1)
+                        return unalignedLoad<uint32_t>(p + offset);
+                    else if constexpr (sizeof(T) == 2) {
+                        uint32_t low = unalignedLoad<uint32_t>(p + offset);
+                        uint32_t high = unalignedLoad<uint32_t>(p + offset + 2);
+                        seenBits |= low | high;
+                        return ((low | (low >> 8)) & 0xFFFF) | (((high | (high >> 8)) & 0xFFFF) << 16);
+                    }
+                }
+            }
+#endif
+            uint32_t result = 0;
+            for (uint32_t i = 0; i < 4; ++i)
+                result |= foldByte(offset + i) << (i * 8);
+            return result;
+        };
+
+        auto readSmall = [&](uint32_t offset, uint32_t count) ALWAYS_INLINE_LAMBDA -> uint32_t {
+            return (foldByte(offset) << 16) | (foldByte(offset + (count >> 1)) << 8) | foldByte(offset + count - 1);
+        };
+
+        return narrowHashImpl(static_cast<uint32_t>(data.size()), read32, readSmall);
+    }
+
+    ALWAYS_INLINE static constexpr uint32_t narrowHashRawBytes(std::span<const char16_t> data)
+    {
+        const char16_t* p = data.data();
+
+        auto readByte = [&](uint32_t byteIndex) ALWAYS_INLINE_LAMBDA -> uint32_t {
+            uint32_t character = static_cast<uint32_t>(static_cast<uint16_t>(data[byteIndex >> 1]));
+            return (byteIndex & 1) ? (character >> 8) : (character & 0xFF);
+        };
+
+        auto read32 = [&](uint32_t byteOffset) ALWAYS_INLINE_LAMBDA -> uint32_t {
+#if CPU(LITTLE_ENDIAN)
+            if (!std::is_constant_evaluated())
+                return unalignedLoad<uint32_t>(reinterpret_cast<const uint8_t*>(p) + byteOffset);
+#endif
+            uint32_t result = 0;
+            for (uint32_t i = 0; i < 4; ++i)
+                result |= readByte(byteOffset + i) << (i * 8);
+            return result;
+        };
+
+        auto readSmall = [&](uint32_t byteOffset, uint32_t count) ALWAYS_INLINE_LAMBDA -> uint32_t {
+            return (readByte(byteOffset) << 16) | (readByte(byteOffset + (count >> 1)) << 8) | readByte(byteOffset + count - 1);
+        };
+
+        return narrowHashImpl(static_cast<uint32_t>(2 * data.size()), read32, readSmall);
+    }
+
+    template<typename T, typename Converter>
+    ALWAYS_INLINE static constexpr uint32_t narrowHash(std::span<const T> data)
+    {
+        uint32_t seenBits = 0;
+        uint32_t result = narrowHashOneBytePerChar<T, Converter>(data, seenBits);
+        if constexpr (sizeof(T) == 2 && std::is_same_v<Converter, DefaultConverter>) {
+            if (seenBits & 0xFF00FF00U) [[unlikely]]
+                return narrowHashRawBytes(data);
+        }
+        return result;
+    }
+#endif
 
     ALWAYS_INLINE static constexpr std::pair<uint64_t, uint64_t> rapidMul128(uint64_t A, uint64_t B)
     {

@@ -666,33 +666,32 @@ Ref<StringImpl> StringImpl::convertToUppercaseWithLocale(const AtomString& local
 Ref<StringImpl> StringImpl::foldCase()
 {
     if (is8Bit()) {
-        unsigned failingIndex;
-        auto span = span8();
-        for (unsigned i = 0; i < span.size(); ++i) {
-            auto character = span[i];
-            if (!isASCII(character) || isASCIIUpper(character)) [[unlikely]] {
-                failingIndex = i;
-                goto SlowPath;
-            }
-        }
-        // String was all ASCII and no uppercase, so just return as-is.
-        return *this;
-
-SlowPath:
+        bool needsFolding = false;
         bool need16BitCharacters = false;
-        for (unsigned i = failingIndex; i < span.size(); ++i) {
-            auto character = span[i];
-            if (character == 0xB5 || character == 0xDF) {
+        unsigned ored = 0;
+        auto span = span8();
+        for (auto character : span) {
+            ored |= character;
+            if (isASCIIUpper(character))
+                needsFolding = true;
+            if (character == 0xB5 || character == 0xDF)
                 need16BitCharacters = true;
-                break;
-            }
+        }
+
+        if (!(ored & ~0x7F)) {
+            if (!needsFolding)
+                return *this;
+            std::span<Latin1Character> data8;
+            auto folded = createUninitializedInternalNonEmpty(m_length, data8);
+            for (unsigned i = 0; i < span.size(); ++i)
+                data8[i] = toASCIILower(span[i]);
+            return folded;
         }
 
         if (!need16BitCharacters) {
             std::span<Latin1Character> data8;
             auto folded = createUninitializedInternalNonEmpty(m_length, data8);
-            copyCharacters(data8, span.first(failingIndex));
-            for (unsigned i = failingIndex; i < span.size(); ++i) {
+            for (unsigned i = 0; i < span.size(); ++i) {
                 auto character = span[i];
                 if (isASCII(character))
                     data8[i] = toASCIILower(character);
@@ -704,7 +703,6 @@ SlowPath:
             return folded;
         }
     } else {
-        // FIXME: Unclear why we use goto in the 8-bit case, and a different approach in the 16-bit case.
         bool noUpper = true;
         unsigned ored = 0;
         auto span = span16();
@@ -752,7 +750,26 @@ template<StringImpl::CaseConvertType type, typename CharacterType>
 ALWAYS_INLINE Ref<StringImpl> StringImpl::convertASCIICase(StringImpl& impl, std::span<const CharacterType> data)
 {
     size_t failingIndex;
-    for (size_t i = 0; i < data.size(); ++i) {
+    size_t scanStart = 0;
+
+#if defined(WEBKIT_IOS6)
+    if constexpr (sizeof(CharacterType) == 1) {
+        constexpr uint32_t lowBias = type == CaseConvertType::Lower ? 0x3f3f3f3fU : 0x1f1f1f1fU;
+        constexpr uint32_t highBias = type == CaseConvertType::Lower ? 0xdadadadaU : 0xfafafafaU;
+        size_t count = data.size();
+        size_t index = 0;
+        for (; index + 4 <= count; index += 4) {
+            uint32_t word = unalignedLoad<uint32_t>(&data[index]);
+            if (word & 0x80808080U)
+                break;
+            if ((word + lowBias) & (highBias - word) & 0x80808080U)
+                break;
+        }
+        scanStart = index;
+    }
+#endif
+
+    for (size_t i = scanStart; i < data.size(); ++i) {
         CharacterType character = data[i];
         if constexpr (type == CaseConvertType::Lower) {
             if (isASCIIUpper(character)) [[unlikely]] {
@@ -1629,11 +1646,17 @@ CString StringImpl::utf8(ConversionMode mode) const
 
 NEVER_INLINE unsigned StringImpl::hashSlowCase() const
 {
+#if defined(WEBKIT_IOS6)
+    unsigned hash = is8Bit() ? StringHasher::computeHashAndMaskTop8Bits(span8()) : StringHasher::computeHashAndMaskTop8Bits(span16());
+    setHash(hash);
+    return hash;
+#else
     if (is8Bit())
         setHash(StringHasher::computeHashAndMaskTop8Bits(span8()));
     else
         setHash(StringHasher::computeHashAndMaskTop8Bits(span16()));
     return existingHash();
+#endif
 }
 
 unsigned StringImpl::concurrentHash() const

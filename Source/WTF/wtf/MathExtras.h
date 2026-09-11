@@ -645,6 +645,12 @@ inline uint32_t reverseBits32(uint32_t value)
         : "=r"(result)
         : "r"(value));
     return result;
+#elif CPU(ARM_THUMB2) || CPU(ARM_TRADITIONAL)
+    uint32_t result;
+    __asm__("rbit %0, %1"
+        : "=r"(result)
+        : "r"(value));
+    return result;
 #else
     value = ((value & 0xaaaaaaaa) >> 1) | ((value & 0x55555555) << 1);
     value = ((value & 0xcccccccc) >> 2) | ((value & 0x33333333) << 2);
@@ -1042,13 +1048,15 @@ SUPPRESS_NODELETE ALWAYS_INLINE std::optional<int32_t> NODELETE tryConvertToStri
         return result;
     return std::nullopt;
 #else
-    if (std::isinf(value) || std::isnan(value))
+    if (value < static_cast<double>(INT32_MIN) || value > static_cast<double>(INT32_MAX)) [[unlikely]]
         return std::nullopt;
 
-    // Note that -0.0 is not StrictInt32.
-    const int32_t asInt32 = truncateDoubleToInt32(value);
-    if (!(asInt32 != value || (!asInt32 && std::signbit(value))))
+    const int32_t asInt32 = static_cast<int32_t>(value);
+    if (asInt32 == value) [[likely]] {
+        if (!asInt32 && std::signbit(value)) [[unlikely]]
+            return std::nullopt;
         return asInt32;
+    }
 
     return std::nullopt;
 #endif

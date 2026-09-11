@@ -429,7 +429,25 @@ public:
     {
         static_assert(sizeof(char16_t) == sizeof(uint16_t));
         static_assert(sizeof(Latin1Character) == sizeof(uint8_t));
+#if defined(WEBKIT_IOS6)
+        RELEASE_ASSERT(destination.size() >= source.size());
+        size_t count = source.size();
+        if (count >= 32)
+            return copyElements(spanReinterpretCast<uint16_t>(destination), source);
+        size_t index = 0;
+        for (; index + 4 <= count; index += 4) {
+            uint32_t bytes = unalignedLoad<uint32_t>(&source[index]);
+            uint32_t low = (bytes & 0x000000ffU) | ((bytes & 0x0000ff00U) << 8);
+            uint32_t high = ((bytes >> 16) & 0x000000ffU) | ((bytes & 0xff000000U) >> 8);
+            unalignedStore<uint32_t>(&destination[index], low);
+            unalignedStore<uint32_t>(&destination[index + 2], high);
+        }
+        for (; index < count; ++index)
+            destination[index] = source[index];
+        return;
+#else
         return copyElements(spanReinterpretCast<uint16_t>(destination), source);
+#endif
     }
 
     ALWAYS_INLINE static void copyCharacters(std::span<Latin1Character> destination, std::span<const char16_t> source)
@@ -440,7 +458,25 @@ public:
         for (auto character : source)
             ASSERT(isLatin1(character));
 #endif
+#if defined(WEBKIT_IOS6)
+        RELEASE_ASSERT(destination.size() >= source.size());
+        size_t count = source.size();
+        if (count >= 32)
+            return copyElements(destination, spanReinterpretCast<const uint16_t>(source));
+        size_t index = 0;
+        for (; index + 4 <= count; index += 4) {
+            uint32_t first = unalignedLoad<uint32_t>(&source[index]);
+            uint32_t second = unalignedLoad<uint32_t>(&source[index + 2]);
+            uint32_t packed = (first & 0x000000ffU) | ((first >> 8) & 0x0000ff00U)
+                | ((second & 0x000000ffU) << 16) | ((second >> 16) << 24);
+            unalignedStore<uint32_t>(&destination[index], packed);
+        }
+        for (; index < count; ++index)
+            destination[index] = static_cast<Latin1Character>(source[index]);
+        return;
+#else
         return copyElements(destination, spanReinterpretCast<const uint16_t>(source));
+#endif
     }
 
     // Some string features, like reference counting and the atomicity flag, are not
@@ -801,15 +837,33 @@ inline std::strong_ordering codePointCompare(std::span<const CharacterType1> cha
     auto* characters2Ptr = characters2.data();
     size_t position = 0;
 
-#if CPU(REGISTER64) && !CPU(NEEDS_ALIGNED_ACCESS) && CPU(LITTLE_ENDIAN)
+#if defined(WEBKIT_IOS6) && CPU(LITTLE_ENDIAN)
+    if constexpr (sizeof(CharacterType1) == sizeof(CharacterType2) && (sizeof(CharacterType1) == 1 || sizeof(CharacterType1) == 2)) {
+        constexpr size_t stride = sizeof(uint32_t) / sizeof(CharacterType1);
+        for (; position + (stride - 1) < commonLength;) {
+            auto lhs = unalignedLoad<uint32_t>(characters1Ptr);
+            auto rhs = unalignedLoad<uint32_t>(characters2Ptr);
+            if (lhs != rhs) {
+                if constexpr (sizeof(CharacterType1) == 1)
+                    return (flipBytes(lhs) > flipBytes(rhs)) ? std::strong_ordering::greater : std::strong_ordering::less;
+                else {
+                    auto rotate16 = [](uint32_t value) ALWAYS_INLINE_LAMBDA {
+                        return (value << 16) | (value >> 16);
+                    };
+                    return (rotate16(lhs) > rotate16(rhs)) ? std::strong_ordering::greater : std::strong_ordering::less;
+                }
+            }
+
+            characters1Ptr += stride;
+            characters2Ptr += stride;
+            position += stride;
+        }
+    }
+#elif CPU(REGISTER64) && !CPU(NEEDS_ALIGNED_ACCESS) && CPU(LITTLE_ENDIAN)
     if constexpr (sizeof(CharacterType1) == sizeof(CharacterType2) && (sizeof(CharacterType1) == 1 || sizeof(CharacterType1) == 2)) {
         using ChunkType = std::conditional_t<sizeof(CharacterType1) == 1, uint32_t, uint64_t>;
         constexpr size_t stride = sizeof(ChunkType) / sizeof(CharacterType1);
         for (; position + (stride - 1) < commonLength;) {
-            // Even though CPU does not need aligned access, we cannot
-            // simply dereference ChunkType* or the compiler may perform
-            // optimizations based on the assumption that all ChunkType
-            // objects are naturally aligned.
             auto lhs = unalignedLoad<ChunkType>(characters1Ptr);
             auto rhs = unalignedLoad<ChunkType>(characters2Ptr);
             if (lhs != rhs) {
@@ -1231,7 +1285,11 @@ inline StringImpl::StringImpl(CreateSymbolTag)
 
 template<typename T> inline size_t StringImpl::allocationSize(Checked<size_t> tailElementCount)
 {
+#if defined(WEBKIT_IOS6)
+    return tailOffset<T>() + tailElementCount.value() * sizeof(T);
+#else
     return tailOffset<T>() + tailElementCount * sizeof(T);
+#endif
 }
 
 template<typename CharacterType>
@@ -1468,7 +1526,7 @@ inline Expected<std::invoke_result_t<Func, std::span<const char8_t>>, UTF8Conver
     if (productOverflows<size_t>(characters.size(), 2) || !isValidCapacityForVector<char8_t>(characters.size() * 2)) [[unlikely]]
         return makeUnexpected(UTF8ConversionError::OutOfMemory);
 
-#if CPU(ARM64)
+#if CPU(ARM64) || (defined(WEBKIT_IOS6) && CPU(LITTLE_ENDIAN))
     if (auto* firstNonASCII = find8NonASCII(characters)) {
         size_t prefixLength = firstNonASCII - characters.data();
         size_t remainingLength = characters.size() - prefixLength;

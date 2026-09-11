@@ -34,7 +34,9 @@ DECLARE_SYSTEM_HEADER
 
 #include <wtf/Platform.h>
 
-#if PLATFORM(MAC) || PLATFORM(IOS) || USE(APPLE_INTERNAL_SDK)
+// The iOS SDK carries no public IOKit headers, so this port declares the two
+// values it needs the way every platform without them does.
+#if (PLATFORM(MAC) || PLATFORM(IOS) || USE(APPLE_INTERNAL_SDK)) && !defined(WEBKIT_IOS6)
 
 #include <IOKit/IOTypes.h>
 

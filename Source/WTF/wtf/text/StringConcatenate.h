@@ -199,6 +199,10 @@ public:
         WTF_STRINGTYPEADAPTER_COPIED_WTF_STRING();
     }
 
+#if defined(WEBKIT_IOS6)
+    StringImpl* existingStringImpl() const { return (m_string && !m_string->isSymbol()) ? m_string : nullptr; }
+#endif
+
 private:
     SUPPRESS_UNCOUNTED_MEMBER StringImpl* const m_string;
 };
@@ -241,6 +245,10 @@ public:
         StringView { m_string }.getCharacters(destination);
         WTF_STRINGTYPEADAPTER_COPIED_WTF_STRING();
     }
+
+#if defined(WEBKIT_IOS6)
+    StringImpl* existingStringImpl() const { return m_string.isSymbol() ? nullptr : &m_string; }
+#endif
 
 private:
     SUPPRESS_UNCOUNTED_MEMBER StringImpl& m_string;
