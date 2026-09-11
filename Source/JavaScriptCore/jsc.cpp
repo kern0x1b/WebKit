@@ -1227,9 +1227,9 @@ static RefPtr<Uint8Array> fillBufferWithContentsOfFile(FILE* file)
 
 static RefPtr<Uint8Array> fillBufferWithContentsOfFile(const String& fileName)
 {
-    FILE* f = fopen(fileName.utf8().data(), "rb");
+    FILE* f = fopen(fileName.utf8().legacyCStringPointer(), "rb");
     if (!f) {
-        fprintf(stderr, "Could not open file: %s\n", fileName.utf8().data());
+        fprintf(stderr, "Could not open file: %s\n", fileName.utf8().legacyCStringPointer());
         return nullptr;
     }
 
@@ -1461,7 +1461,7 @@ static bool fetchModuleFromLocalFileSystem(const URL& fileURL, Vector& buffer)
     FILE* f = fopen(pathName.data(), "r");
 #endif
     if (!f) {
-        fprintf(stderr, "Could not open file: %s\n", fileName.utf8().data());
+        fprintf(stderr, "Could not open file: %s\n", fileName.utf8().legacyCStringPointer());
         return false;
     }
 
@@ -1779,7 +1779,7 @@ JSC_DEFINE_HOST_FUNCTION(functionJSCStack, (JSGlobalObject* globalObject, CallFr
 
     FunctionJSCStackFunctor functor(trace);
     StackVisitor::visit(callFrame, vm, functor);
-    fprintf(stderr, "%s", trace.toString().utf8().data());
+    fprintf(stderr, "%s", trace.toString().utf8().legacyCStringPointer());
     return JSValue::encode(jsUndefined());
 }
 
@@ -3764,7 +3764,7 @@ static void dumpException(GlobalObject* globalObject, JSValue exception)
         CHECK_EXCEPTION();
         auto lineNumberString = lineNumberValue.toWTFString(globalObject);
         CHECK_EXCEPTION();
-        printf("at %s:%s\n", fileNameString.utf8().data(), lineNumberString.utf8().data());
+        printf("at %s:%s\n", fileNameString.utf8().legacyCStringPointer(), lineNumberString.utf8().legacyCStringPointer());
     }
     
     if (!stackValue.isUndefinedOrNull()) {
@@ -3787,19 +3787,19 @@ static bool checkUncaughtException(VM& vm, GlobalObject* globalObject, JSValue e
     auto scope = DECLARE_TOP_EXCEPTION_SCOPE(vm);
     scope.clearException();
     if (!exception) {
-        printf("Expected uncaught exception with name '%s' but none was thrown\n", expectedExceptionName.utf8().data());
+        printf("Expected uncaught exception with name '%s' but none was thrown\n", expectedExceptionName.utf8().legacyCStringPointer());
         return false;
     }
 
     JSValue exceptionClass = globalObject->get(globalObject, Identifier::fromString(vm, expectedExceptionName));
     if (!exceptionClass.isObject() || scope.exception()) {
-        printf("Expected uncaught exception with name '%s' but given exception class is not defined\n", expectedExceptionName.utf8().data());
+        printf("Expected uncaught exception with name '%s' but given exception class is not defined\n", expectedExceptionName.utf8().legacyCStringPointer());
         return false;
     }
 
     bool isInstanceOfExpectedException = uncheckedDowncast<JSObject>(exceptionClass)->hasInstance(globalObject, exception);
     if (scope.exception()) {
-        printf("Expected uncaught exception with name '%s' but given exception class fails performing hasInstance\n", expectedExceptionName.utf8().data());
+        printf("Expected uncaught exception with name '%s' but given exception class fails performing hasInstance\n", expectedExceptionName.utf8().legacyCStringPointer());
         return false;
     }
     if (isInstanceOfExpectedException) {
@@ -3808,7 +3808,7 @@ static bool checkUncaughtException(VM& vm, GlobalObject* globalObject, JSValue e
         return true;
     }
 
-    printf("Expected uncaught exception with name '%s' but exception value is not instance of this exception class\n", expectedExceptionName.utf8().data());
+    printf("Expected uncaught exception with name '%s' but exception value is not instance of this exception class\n", expectedExceptionName.utf8().legacyCStringPointer());
     dumpException(globalObject, exception);
     return false;
 }
@@ -3985,7 +3985,7 @@ static void runInteractive(GlobalObject* globalObject)
         } while (error.syntaxErrorType() == ParserError::SyntaxErrorRecoverable);
         
         if (error.isValid()) {
-            printf("%s:%d\n", error.message().utf8().data(), error.line());
+            printf("%s:%d\n", error.message().utf8().legacyCStringPointer(), error.line());
             continue;
         }
         
@@ -4490,7 +4490,7 @@ int runJSC(const CommandLine& options, bool isWorker, const Func& func)
 
         if (Options::useProfiler()) {
             JSLockHolder locker(vm);
-            if (!vm.m_perBytecodeProfiler->save(options.m_profilerOutput.utf8().data()))
+            if (!vm.m_perBytecodeProfiler->save(options.m_profilerOutput.utf8().legacyCStringPointer()))
                 fprintf(stderr, "could not save profiler output.\n");
         }
 

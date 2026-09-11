@@ -195,7 +195,7 @@ static inline String gap(JSGlobalObject* globalObject, JSValue space)
         char spaces[maxGapLength];
         for (unsigned i = 0; i < count; ++i)
             spaces[i] = ' ';
-        return String(std::span { spaces }.first(count));
+        return String::fromLatin1(std::span { spaces }.first(count));
     }
 
     // If the space value is a string, use it as the gap string, otherwise use no gap string.

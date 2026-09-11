@@ -55,7 +55,6 @@ template<typename FunctionType> class ScopedLambda;
 template<typename ResultType, typename... ArgumentTypes>
 class ScopedLambda<ResultType(ArgumentTypes...)> {
     WTF_FORBID_HEAP_ALLOCATION;
-    WTF_MAKE_NONMOVABLE(ScopedLambda);
 public:
     ScopedLambda(ResultType (*impl)(void* arg, ArgumentTypes...) = nullptr, void* arg = nullptr)
         : m_impl(impl)
