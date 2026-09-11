@@ -72,6 +72,12 @@ bool SurfaceGL::hasEmulatedAlphaChannel() const
     return false;
 }
 
+angle::Result SurfaceGL::getBindTexImageTextureID(const gl::Context *context, GLuint *textureIDOut)
+{
+    *textureIDOut = 0;
+    return angle::Result::Continue;
+}
+
 egl::Error SurfaceGL::attachToFramebuffer(const gl::Context *context, gl::Framebuffer *framebuffer)
 {
     return egl::NoError();

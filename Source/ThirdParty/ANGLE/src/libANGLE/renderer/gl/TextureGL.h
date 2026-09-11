@@ -303,6 +303,7 @@ class TextureGL : public TextureImpl
     GLenum mAppliedDepthStencilTextureMode;
 
     GLuint mTextureID;
+    bool mOwnsTextureID = true;
 };
 }  // namespace rx
 

@@ -175,8 +175,12 @@ void TextureGL::onDestroy(const gl::Context *context)
 {
     GetImplAs<ContextGL>(context)->flushIfNecessaryBeforeDeleteTextures();
     StateManagerGL *stateManager = GetStateManagerGL(context);
-    stateManager->deleteTexture(mTextureID);
-    mTextureID = 0;
+    if (mOwnsTextureID)
+    {
+        stateManager->deleteTexture(mTextureID);
+    }
+    mOwnsTextureID = true;
+    mTextureID     = 0;
 }
 
 angle::Result TextureGL::setImage(const gl::Context *context,
@@ -1714,10 +1718,31 @@ angle::Result TextureGL::bindTexImage(const gl::Context *context, egl::Surface *
 
     StateManagerGL *stateManager = GetStateManagerGL(context);
 
+    SurfaceGL *surfaceGL = GetImplAs<SurfaceGL>(surface);
+
+    GLuint surfaceTextureID = 0;
+    ANGLE_TRY(surfaceGL->getBindTexImageTextureID(context, &surfaceTextureID));
+    if (surfaceTextureID != 0 && surfaceTextureID != mTextureID)
+    {
+        if (mOwnsTextureID)
+        {
+            stateManager->deleteTexture(mTextureID);
+        }
+        mTextureID     = surfaceTextureID;
+        mOwnsTextureID = false;
+
+        mLevelInfo.clear();
+        mLevelInfo.resize(GetMaxLevelInfoCountForTextureType(getType()));
+
+        mAppliedSwizzle   = gl::SwizzleState();
+        mAppliedSampler   = gl::SamplerState::CreateDefaultForTarget(getType());
+        mAppliedBaseLevel = 0;
+        mAppliedMaxLevel  = gl::kInitialMaxLevel;
+        mLocalDirtyBits   = mAllModifiedDirtyBits;
+    }
+
     // Make sure this texture is bound
     stateManager->bindTexture(getType(), mTextureID);
-
-    SurfaceGL *surfaceGL = GetImplAs<SurfaceGL>(surface);
 
     const gl::Format &surfaceFormat = surface->getBindTexImageFormat();
     setLevelInfo(context, getType(), 0, 1,
@@ -2195,7 +2220,11 @@ angle::Result TextureGL::recreateTexture(const gl::Context *context)
     StateManagerGL *stateManager = GetStateManagerGL(context);
 
     stateManager->bindTexture(getType(), mTextureID);
-    stateManager->deleteTexture(mTextureID);
+    if (mOwnsTextureID)
+    {
+        stateManager->deleteTexture(mTextureID);
+    }
+    mOwnsTextureID = true;
 
     functions->genTextures(1, &mTextureID);
     stateManager->bindTexture(getType(), mTextureID);

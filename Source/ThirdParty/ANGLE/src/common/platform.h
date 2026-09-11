@@ -135,7 +135,7 @@
 #        if TARGET_OS_VISION  // Must be checked before iOS
 #            define ANGLE_PLATFORM_VISIONOS 1
 #        elif TARGET_OS_IOS
-#            if __IPHONE_OS_VERSION_MAX_ALLOWED < 170000
+#            if __IPHONE_OS_VERSION_MAX_ALLOWED < 170000 && !defined(WEBKIT_IOS6)
 #                error iOS 17 SDK or newer is required.
 #            endif
 #            define ANGLE_PLATFORM_IOS 1

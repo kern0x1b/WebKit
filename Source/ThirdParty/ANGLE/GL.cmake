@@ -99,6 +99,19 @@ if(is_win)
     )
 endif()
 
+if(is_ios OR WEBKIT_IOS6)
+    list(APPEND gl_backend_sources
+        "src/libANGLE/renderer/gl/eagl/DeviceEAGL.cpp"
+        "src/libANGLE/renderer/gl/eagl/DeviceEAGL.h"
+        "src/libANGLE/renderer/gl/eagl/DisplayEAGL.h"
+        "src/libANGLE/renderer/gl/eagl/DisplayEAGL.mm"
+        "src/libANGLE/renderer/gl/eagl/IOSurfaceSurfaceEAGL.h"
+        "src/libANGLE/renderer/gl/eagl/IOSurfaceSurfaceEAGL.mm"
+        "src/libANGLE/renderer/gl/eagl/PbufferSurfaceEAGL.cpp"
+        "src/libANGLE/renderer/gl/eagl/PbufferSurfaceEAGL.h"
+    )
+endif()
+
 if(angle_use_x11)
     list(APPEND gl_backend_sources
         "src/libANGLE/renderer/gl/glx/ContextGLX.cpp"
