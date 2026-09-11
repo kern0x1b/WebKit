@@ -505,7 +505,6 @@ size_t fastMallocGoodSize(size_t size)
 
 #endif
 
-void* fastAlignedMalloc(size_t alignment, size_t size)
 PRESERVE_MOST void* fastAlignedMalloc(size_t alignment, size_t size)
 {
     ASSERT_IS_WITHIN_LIMIT(size);
@@ -620,7 +619,6 @@ TryMallocReturnValue tryFastCompactRealloc(void* object, size_t newSize)
 
 #else
 
-TryMallocReturnValue tryFastMalloc(size_t size)
 PRESERVE_MOST TryMallocReturnValue tryFastMalloc(size_t size)
 {
     FAIL_IF_EXCEEDS_LIMIT(size);

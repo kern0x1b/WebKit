@@ -127,6 +127,12 @@
 #define USE_ACCELERATE 1
 #endif
 
+#if CPU(REGISTER64)
+#define USE_JSVALUE64 1
+#else
+#define USE_JSVALUE32_64 1
+#endif
+
 // FIXME: this should instead be based on SIZE_MAX == UINT64_MAX
 // But this requires including <cstdint> and Platform.h is included in all kind of weird places, including non-cpp files
 // And in practice CPU(ADDRESS64) is equivalent on all platforms we support (verified by static_asserts in ArrayBuffer.h)
