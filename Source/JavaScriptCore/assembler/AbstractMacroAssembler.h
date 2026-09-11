@@ -143,7 +143,7 @@ public:
         TimesFour,
         TimesEight,
         ScalePtr = isAddress64Bit() ? TimesEight : TimesFour,
-        ScaleRegWord = TimesEight,
+        ScaleRegWord = isRegister64Bit() ? TimesEight : TimesFour,
     };
 
     enum class Extend : uint8_t {
@@ -643,7 +643,15 @@ public:
     public:
         Jump() = default;
 
-#if CPU(ARM64)
+#if CPU(ARM_THUMB2)
+        // Fixme: this information should be stored in the instruction stream, not in the Jump object.
+        Jump(AssemblerLabel jmp, ARMv7Assembler::JumpType type = ARMv7Assembler::JumpNoCondition, ARMv7Assembler::Condition condition = ARMv7Assembler::ConditionInvalid)
+            : m_label(jmp)
+            , m_type(type)
+            , m_condition(condition)
+        {
+        }
+#elif CPU(ARM64)
         Jump(AssemblerLabel jmp, ARM64Assembler::JumpType type = ARM64Assembler::JumpNoCondition, ARM64Assembler::Condition condition = ARM64Assembler::ConditionInvalid)
             : m_label(jmp)
             , m_type(type)
@@ -693,7 +701,9 @@ public:
             masm->checkRegisterAllocationAgainstBranchRange(m_label.offset(), masm->debugOffset());
 #endif
 
-#if CPU(ARM64)
+#if CPU(ARM_THUMB2)
+            masm->m_assembler.linkJump(m_label, masm->m_assembler.label(), m_type, m_condition);
+#elif CPU(ARM64)
             if ((m_type == ARM64Assembler::JumpCompareAndBranch) || (m_type == ARM64Assembler::JumpCompareAndBranchFixedSize))
                 masm->m_assembler.linkJump(m_label, masm->m_assembler.label(), m_type, m_condition, m_is64Bit, m_compareRegister);
             else if ((m_type == ARM64Assembler::JumpTestBit) || (m_type == ARM64Assembler::JumpTestBitFixedSize))
@@ -712,7 +722,9 @@ public:
             masm->checkRegisterAllocationAgainstBranchRange(label.m_label.offset(), m_label.offset());
 #endif
 
-#if CPU(ARM64)
+#if CPU(ARM_THUMB2)
+            masm->m_assembler.linkJump(m_label, label.m_label, m_type, m_condition);
+#elif CPU(ARM64)
             if ((m_type == ARM64Assembler::JumpCompareAndBranch) || (m_type == ARM64Assembler::JumpCompareAndBranchFixedSize))
                 masm->m_assembler.linkJump(m_label, label.m_label, m_type, m_condition, m_is64Bit, m_compareRegister);
             else if ((m_type == ARM64Assembler::JumpTestBit) || (m_type == ARM64Assembler::JumpTestBitFixedSize))
@@ -746,7 +758,10 @@ public:
 
     private:
         AssemblerLabel m_label;
-#if CPU(ARM64)
+#if CPU(ARM_THUMB2)
+        ARMv7Assembler::JumpType m_type { ARMv7Assembler::JumpNoCondition };
+        ARMv7Assembler::Condition m_condition { ARMv7Assembler::ConditionInvalid };
+#elif CPU(ARM64)
         unsigned m_bitNumber { 0 };
         ARM64Assembler::JumpType m_type { ARM64Assembler::JumpNoCondition };
         ARM64Assembler::Condition m_condition { ARM64Assembler::ConditionInvalid };
@@ -1006,29 +1021,15 @@ public:
         AssemblerType::relinkJump(jump.dataLocation(), destination.dataLocation());
     }
     
-    template<RepatchingInfo repatch = jitMemcpyRepatchFlush, PtrTag callTag, PtrTag destTag>
+    template<PtrTag callTag, PtrTag destTag>
     static void repatchNearCall(CodeLocationNearCall<callTag> nearCall, CodeLocationLabel<destTag> destination)
     {
         switch (nearCall.callMode()) {
         case NearCallMode::Tail:
-            AssemblerType::template relinkTailCall<repatch>(nearCall.dataLocation(), destination.dataLocation());
+            AssemblerType::relinkTailCall(nearCall.dataLocation(), destination.dataLocation());
             return;
         case NearCallMode::Regular:
-            AssemblerType::template relinkCall<repatch>(nearCall.dataLocation(), destination.untaggedPtr());
-            return;
-        }
-        RELEASE_ASSERT_NOT_REACHED();
-    }
-
-    template<PtrTag callTag>
-    static void flushNearCall(CodeLocationNearCall<callTag> nearCall)
-    {
-        switch (nearCall.callMode()) {
-        case NearCallMode::Tail:
-            AssemblerType::flushTailCall(nearCall.dataLocation());
-            return;
-        case NearCallMode::Regular:
-            AssemblerType::flushCall(nearCall.dataLocation());
+            AssemblerType::relinkCall(nearCall.dataLocation(), destination.untaggedPtr());
             return;
         }
         RELEASE_ASSERT_NOT_REACHED();
@@ -1085,8 +1086,8 @@ public:
 
     void emitNops(size_t memoryToFillWithNopsInBytes)
     {
-#if CPU(ARM64)
-        constexpr size_t nopSize = 4;
+#if CPU(ARM64) || CPU(ARM)
+        constexpr size_t nopSize = is32Bit() ? 2 : 4;
         RELEASE_ASSERT(memoryToFillWithNopsInBytes % nopSize == 0);
         for (unsigned i = 0; i < memoryToFillWithNopsInBytes / nopSize; ++i)
             m_assembler.nop();

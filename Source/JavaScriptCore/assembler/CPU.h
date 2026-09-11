@@ -33,6 +33,29 @@ namespace JSC {
 
 using UCPUStrictInt32 = UCPURegister;
 
+constexpr bool isARMv7IDIVSupported()
+{
+#if HAVE(ARM_IDIV_INSTRUCTIONS)
+    return true;
+#else
+    return false;
+#endif
+}
+
+constexpr bool isARM_THUMB2()
+{
+#if CPU(ARM_THUMB2)
+    return true;
+#else
+    return false;
+#endif
+}
+
+constexpr bool hasUnalignedFPMemoryAccess()
+{
+    return !isARM_THUMB2();
+}
+
 constexpr bool isARM64()
 {
 #if CPU(ARM64)
@@ -114,9 +137,28 @@ constexpr bool isRISCV64()
 #endif
 }
 
+constexpr bool is64Bit()
+{
+#if USE(JSVALUE64)
+    return true;
+#else
+    return false;
+#endif
+}
+
+constexpr bool is32Bit()
+{
+    return !is64Bit();
+}
+
 constexpr bool isAddress64Bit()
 {
     return sizeof(void*) == 8;
+}
+
+constexpr bool isAddress32Bit()
+{
+    return !isAddress64Bit();
 }
 
 constexpr size_t registerSize()
@@ -135,6 +177,12 @@ constexpr bool isRegister64Bit()
     return registerSize() == 8;
 }
 
+constexpr bool isRegister32Bit()
+{
+    return registerSize() == 4;
+}
+
+inline bool optimizeForARMv7IDIVSupported();
 inline bool optimizeForARM64();
 inline bool optimizeForX86();
 inline bool optimizeForX86_64();
@@ -159,17 +207,9 @@ ALWAYS_INLINE int32_t hwPhysicalCPUMax() { return kernTCSMAwareNumberOfProcessor
 #endif
 
 #if CPU(ARM64) && OS(DARWIN)
-// Cores are reported as performance levels ordered fastest first, but a level's index does not
-// identify the kind of core it holds: a chip with Super and Performance cores and a chip with
-// Performance and Efficiency cores both report two levels. A category a chip lacks reports zero.
-enum class CoreCategory : uint8_t {
-    Super,
-    Performance,
-    Efficiency,
-};
-static constexpr unsigned numberOfCoreCategories = 3;
-
-int32_t hwNumberOfCores(CoreCategory);
+int32_t hwNumberOfP0Cores();
+int32_t hwNumberOfP1Cores();
+int32_t hwNumberOfP2Cores();
 #endif
 
 constexpr size_t prologueStackPointerDelta()
@@ -180,7 +220,7 @@ constexpr size_t prologueStackPointerDelta()
 #elif CPU(X86_64)
     // Prologue only saves the framePointerRegister
     return sizeof(CPURegister);
-#elif CPU(ARM64) || CPU(RISCV64)
+#elif CPU(ARM_THUMB2) || CPU(ARM64) || CPU(RISCV64)
     // Prologue saves the framePointerRegister and linkRegister
     return 2 * sizeof(CPURegister);
 #else

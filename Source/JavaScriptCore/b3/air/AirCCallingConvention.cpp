@@ -45,6 +45,8 @@ template<typename BankInfo>
 void marshallCCallArgumentImpl(Vector<Arg>& result, unsigned& argumentCount, Value::OffsetType& stackOffset, Type childType)
 {
     const auto registerCount = cCallArgumentRegisterCount(childType);
+    if constexpr (is32Bit())
+        ASSERT(childType != Int64);
 
     if (argumentCount < BankInfo::numberOfArgumentRegisters) {
         for (unsigned i = 0; i < registerCount; i++)
@@ -53,8 +55,12 @@ void marshallCCallArgumentImpl(Vector<Arg>& result, unsigned& argumentCount, Val
     }
 
     unsigned slotSize, slotAlignment;
-    if (isARM64() && isDarwin()) {
+    if ((isARM64() && isDarwin()) || isARM_THUMB2()) {
         // Arguments are packed to their natural alignment.
+        //
+        // In the rare case when the Arg width does not match the argument width
+        // (32-bit arm passing a 64-bit argument), we respect the width needed
+        // for each stack access:
         slotSize = bytesForWidth(cCallArgumentRegisterWidth(childType));
 
         // but the logical stack slot uses the natural alignment of the argument
@@ -108,11 +114,18 @@ size_t cCallResultCount(Code& code, CCallValue* value)
     switch (value->type().kind()) {
     case Void:
         return 0;
+    case Int64:
+        if constexpr (is32Bit())
+            return 2;
+        return 1;
     case Tuple:
         // We only support functions that return each parameter in its own register for now.
         UNUSED_PARAM(code);
         ASSERT(code.proc().resultCount(value->type()) == 2);
-        ASSERT(code.proc().typeAtOffset(value->type(), 0).isInt());
+        if (is32Bit())
+            ASSERT(code.proc().typeAtOffset(value->type(), 0) == pointerType());
+        else
+            ASSERT(code.proc().typeAtOffset(value->type(), 0).isInt());
         ASSERT(code.proc().typeAtOffset(value->type(), 1) == pointerType());
         return 2;
     default:
@@ -120,12 +133,26 @@ size_t cCallResultCount(Code& code, CCallValue* value)
 
     }
 }
+// Do register arguments of this type need to be even-aligned? (e.g. r0/r1 would
+// be even aligned, r1/r2 wouldn't).
+bool cCallArgumentEvenRegisterAlignment(Type type)
+{
+    if (!is32Bit())
+        return false;
+    if (type == Int64)
+        return true;
+    return false;
+}
 
 size_t cCallArgumentRegisterCount(Type type)
 {
     switch (type.kind()) {
     case Void:
         return 0;
+    case Int64:
+        if constexpr (is32Bit())
+            return 2;
+        return 1;
     case Tuple:
         RELEASE_ASSERT_NOT_REACHED();
     default:
@@ -135,6 +162,11 @@ size_t cCallArgumentRegisterCount(Type type)
 
 Width cCallArgumentRegisterWidth(Type type)
 {
+    if constexpr (is32Bit()) {
+        if (type == Int64)
+            return Width32;
+    }
+
     return widthForType(type);
 }
 
@@ -147,6 +179,8 @@ Tmp cCallResult(Code& code, CCallValue* value, unsigned index)
     case Int32:
         return Tmp(GPRInfo::returnValueGPR);
     case Int64:
+        if (is32Bit() && index == 1)
+            return Tmp(GPRInfo::returnValueGPR2);
         return Tmp(GPRInfo::returnValueGPR);
     case Float:
     case Double:
@@ -155,7 +189,10 @@ Tmp cCallResult(Code& code, CCallValue* value, unsigned index)
     case Tuple:
         ASSERT_UNUSED(code, code.proc().resultCount(value->type()) == 2);
         // We only support functions that return each parameter in its own register for now.
-        ASSERT(code.proc().typeAtOffset(value->type(), 0).isInt());
+        if (is32Bit())
+            ASSERT(code.proc().typeAtOffset(value->type(), 0) == registerType());
+        else
+            ASSERT(code.proc().typeAtOffset(value->type(), 0).isInt());
         ASSERT(code.proc().typeAtOffset(value->type(), 1) == registerType());
         return index ? Tmp(GPRInfo::returnValueGPR2) : Tmp(GPRInfo::returnValueGPR);
     case V128:
@@ -182,17 +219,40 @@ Inst buildCCall(Code& code, Value* origin, const Vector<Arg>& arguments)
     return Inst(Patch, origin, WTF::move(args));
 }
 
+#if CPU(ARM_THUMB2)
+Value* ArgumentValueList::makeStitch(B3::BasicBlock*, Value* low, Value* hi) const
+{
+    return block->appendNew<Value>(procedure, Stitch, Origin(), low, hi);
+}
+#endif
+
 Value* ArgumentValueList::makeCCallValue(B3::BasicBlock* block, Type type, Air::Arg arg) const
 {
-    RELEASE_ASSERT(arg.isTmp() && arg.tmp().isReg());
-    Value* val = block->appendNew<ArgumentRegValue>(procedure, Origin(), arg.reg());
-    if (type == Int32)
-        val = block->appendNew<Value>(procedure, Trunc, Origin(), val);
+    if (arg.isTmp() && arg.tmp().isReg()) {
+        Value* val = block->appendNew<ArgumentRegValue>(procedure, Origin(), arg.reg());
+        if constexpr (!is32Bit()) {
+            if (type == Int32)
+                val = block->appendNew<Value>(procedure, Trunc, Origin(), val);
+        }
 
-    if (type == Float)
-        val = block->appendNew<Value>(procedure, Trunc, Origin(), val);
+        if (type == Float)
+            val = block->appendNew<Value>(procedure, Trunc, Origin(), val);
 
-    return val;
+        return val;
+    }
+
+    // we really shouldn't be using this except on arm32, so, assert just in
+    // case, since the details are likely wrong for other architectures, and
+    // it's not expected to end up here on 64-bit
+    RELEASE_ASSERT(isARM_THUMB2() && arg.isCallArg());
+
+    return block->appendNew<MemoryValue>(procedure,
+        Load,
+        type,
+        Origin(),
+        block->appendNew<Value>(procedure, FramePointer, Origin()),
+        arg.offset() + static_cast<int32_t>(2 * sizeof(void*))
+    );
 }
 
 Value* ArgumentValueList::makeCCallValue(B3::BasicBlock* block, size_t idx) const
@@ -215,7 +275,11 @@ Value* ArgumentValueList::makeCCallValue(B3::BasicBlock* block, size_t idx) cons
 
     case Int64:
         RELEASE_ASSERT(argCount == sizeof(uint64_t) / sizeof(uintptr_t));
+#if CPU(ARM_THUMB2)
+            return makeStitch(block, makeCCallValue(block, Int32, underlyingArgs[firstUnderlyingArg]), makeCCallValue(block, Int32, underlyingArgs[firstUnderlyingArg + 1]));
+#else
         return makeCCallValue(block, types[idx], underlyingArgs[firstUnderlyingArg]);
+#endif
 
     default:
         RELEASE_ASSERT_NOT_REACHED();
@@ -233,6 +297,16 @@ ArgumentValueList computeCCallArguments(Procedure& procedure, B3::BasicBlock* bl
 
     for (auto type : types) {
         argUnderlyingCounts.append(underlyingArgs.size());
+#if CPU(ARM_THUMB2)
+        if (type == Int64) {
+            // Int64 arguments are passed in even-based register pairs on ARMv7.
+            if ((gpArgumentCount < 4) && (gpArgumentCount % 2))
+                ++gpArgumentCount;
+            marshallCCallArgument(underlyingArgs, gpArgumentCount, fpArgumentCount, stackOffset, Int32);
+            marshallCCallArgument(underlyingArgs, gpArgumentCount, fpArgumentCount, stackOffset, Int32);
+            continue;
+        }
+#endif
         marshallCCallArgument(underlyingArgs, gpArgumentCount, fpArgumentCount, stackOffset, type);
     }
 
@@ -242,3 +316,4 @@ ArgumentValueList computeCCallArguments(Procedure& procedure, B3::BasicBlock* bl
 } } } // namespace JSC::B3::Air
 
 #endif // ENABLE(B3_JIT)
+

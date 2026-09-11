@@ -851,6 +851,26 @@ macro restoreCallerPCAndCFR()
     end
 end
 
+macro pushCalleeSaves()
+    # Note: Only registers that are in RegisterSet::calleeSaveRegisters(),
+    # but are not in RegisterSet::vmCalleeSaveRegisters() need to be saved here,
+    # i.e.: only those registers that are callee save in the C ABI, but are not
+    # callee save in the JIT ABI.
+    if C_LOOP or ARM64 or ARM64E or X86_64 or RISCV64
+    elsif ARMv7
+        emit "vpush.64 {d14, d15}"
+        emit "push {r4-r6, r8-r9}"
+    end
+end
+
+macro popCalleeSaves()
+    if C_LOOP or ARM64 or ARM64E or X86_64 or RISCV64
+    elsif ARMv7
+        emit "pop {r4-r6, r8-r9}"
+        emit "vpop.64 {d14, d15}"
+    end
+end
+
 macro preserveCalleeSavesUsedByLLInt()
     subp CalleeSaveSpaceStackAligned, sp
     if C_LOOP
