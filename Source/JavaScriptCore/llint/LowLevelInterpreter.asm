@@ -152,6 +152,7 @@ const SeenMultipleCalleeObjects = 1
 # The header slot count depends on pointer width (CallerFrameAndPC is one slot on
 # 32-bit, two on 64-bit), so derive it from C++ rather than the value representation.
 const CallFrameHeaderSlots = constexpr (CallFrame::headerSizeInRegisters)
+const CallFrameAlignSlots = 1
 
 const JSLexicalEnvironment_variables = (sizeof JSLexicalEnvironment + SlotSize - 1) & ~(SlotSize - 1)
 const DirectArguments_storage = (sizeof DirectArguments + SlotSize - 1) & ~(SlotSize - 1)
