@@ -851,6 +851,16 @@ void GraphicsContextGLANGLE::prepareTexture()
         // Blit m_preserveDrawingBufferTexture into m_texture.
         ScopedGLCapability scopedScissor(GL_SCISSOR_TEST, GL_FALSE);
         ScopedGLCapability scopedDither(GL_DITHER, GL_FALSE);
+        if (!m_isForWebGL2 && !isExtensionEnabledImpl("GL_NV_framebuffer_blit"_s) && !isExtensionEnabledImpl("GL_ANGLE_framebuffer_blit"_s)) {
+            ScopedFramebuffer readFBO;
+            GL_BindFramebuffer(GL_FRAMEBUFFER, readFBO);
+            GL_FramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_preserveDrawingBufferTexture, 0);
+            ScopedRestoreTextureBinding restoreBinding(TEXTURE_BINDING_2D, TEXTURE_2D);
+            GL_BindTexture(GL_TEXTURE_2D, m_texture);
+            GL_CopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, m_currentWidth, m_currentHeight);
+            GL_BindFramebuffer(GL_FRAMEBUFFER, m_state.boundDrawFBO);
+            return;
+        }
         GL_BindFramebuffer(GL_DRAW_FRAMEBUFFER_ANGLE, m_preserveDrawingBufferFBO);
         // Read m_preserveDrawingBufferTexture through an own framebuffer instead of m_fbo, because
         // the read buffer of m_fbo, the emulated default framebuffer, is set by the WebGL 2 context
