@@ -70,7 +70,10 @@ const ColorSpace& ColorSpace::SRGB()
 
 const ColorSpace& ColorSpace::LinearSRGB()
 {
-#if USE(CG) || USE(SKIA)
+#if defined(WEBKIT_IOS6)
+    static NeverDestroyed<ColorSpace> colorSpace { linearSRGBColorSpaceSingleton(), true };
+    return colorSpace.get();
+#elif USE(CG) || USE(SKIA)
     return knownColorSpace<linearSRGBColorSpaceSingleton>();
 #else
     return knownColorSpace<PlatformColorSpace::Name::LinearSRGB>();
@@ -148,6 +151,10 @@ const ColorSpace& ColorSpace::ExtendedRec2020()
 
 bool operator==(const ColorSpace& a, const ColorSpace& b)
 {
+#if defined(WEBKIT_IOS6)
+    if (a.isLinearSRGB() != b.isLinearSRGB())
+        return false;
+#endif
 #if USE(CG)
     // Do not protect the platformColorSpace here as it is not strictly required for safety and
     // this code is performance sensitive.
