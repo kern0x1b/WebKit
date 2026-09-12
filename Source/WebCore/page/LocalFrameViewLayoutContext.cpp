@@ -311,7 +311,9 @@ void LocalFrameViewLayoutContext::performLayout(bool canDeferUpdateLayerPosition
         m_firstLayout = false;
     }
 
+#if !defined(WEBKIT_IOS6)
     Vector<FloatQuad> layoutAreas;
+#endif
     {
         TraceScope tracingScope(RenderTreeLayoutStart, RenderTreeLayoutEnd);
         SetForScope layoutPhase(m_layoutPhase, LayoutPhase::InRenderTreeLayout);
@@ -321,7 +323,64 @@ void LocalFrameViewLayoutContext::performLayout(bool canDeferUpdateLayerPosition
 #ifndef NDEBUG
         RenderTreeNeedsLayoutChecker checker(*renderView());
 #endif
+#if defined(WEBKIT_IOS6)
+        static int logLayouts = -1;
+        if (logLayouts < 0)
+            logLayouts = !access("/tmp/native-layout-log", F_OK);
+        MonotonicTime layoutStart = logLayouts ? MonotonicTime::now() : MonotonicTime();
+        if (logLayouts) {
+            g_webkitIOS6LayoutCounters = true;
+            g_webkitIOS6BlocksLaidOut = 0;
+            g_webkitIOS6BlocksForced = 0;
+            g_webkitIOS6BlocksDirty = 0;
+            g_webkitIOS6BlocksViaChild = 0;
+            for (unsigned i = 0; i < needsLayoutSlots; i++) {
+                needsLayoutCallers[i] = nullptr;
+                needsLayoutCounts[i] = 0;
+            }
+            g_webkitIOS6NeedsLayoutRecording = true;
+            g_webkitIOS6GridStretchHeight = 0;
+            g_webkitIOS6GridStretchRequirement = 0;
+            g_webkitIOS6GridStretchPercent = 0;
+            g_webkitIOS6InlineLayoutNs = 0;
+            g_webkitIOS6InlineLayoutCount = 0;
+            g_webkitIOS6BoxGeometryNs = 0;
+            g_webkitIOS6BoxGeometryCount = 0;
+            g_webkitIOS6StylesSet = 0;
+            g_webkitIOS6StyleResolves = 0;
+            g_webkitIOS6DirtyOnEntry = 0;
+            if (CheckedPtr root = renderView()) {
+                for (CheckedPtr walk = static_cast<RenderObject*>(root.get()); walk; walk = walk->nextInPreOrder()) {
+                    if (walk->selfNeedsLayout())
+                        ++g_webkitIOS6DirtyOnEntry;
+                }
+            }
+        }
+#endif
         layoutRoot->layout();
+#if defined(WEBKIT_IOS6)
+        if (logLayouts) {
+            auto elapsed = (MonotonicTime::now() - layoutStart).milliseconds();
+            g_webkitIOS6LayoutMsTotal += elapsed;
+            ++g_webkitIOS6LayoutCount;
+            bool wholeDocument = is<RenderView>(*layoutRoot);
+            WTFLogAlways("[layout] %s %.1f ms, %u blocks (%u forced, %u self, %u via child), %u on entry, document %d px",
+                wholeDocument ? "whole document" : "subtree", elapsed, g_webkitIOS6BlocksLaidOut,
+                g_webkitIOS6BlocksForced, g_webkitIOS6BlocksDirty, g_webkitIOS6BlocksViaChild, g_webkitIOS6DirtyOnEntry,
+                renderView() ? renderView()->documentRect().height() : -1);
+            g_webkitIOS6NeedsLayoutRecording = false;
+            WTFLogAlways("[phase] inline %llu ms in %u calls, box geometry %llu ms in %u calls",
+                g_webkitIOS6InlineLayoutNs / 1000000, g_webkitIOS6InlineLayoutCount,
+                g_webkitIOS6BoxGeometryNs / 1000000, g_webkitIOS6BoxGeometryCount);
+            if (g_webkitIOS6GridStretchHeight || g_webkitIOS6GridStretchRequirement || g_webkitIOS6GridStretchPercent)
+                WTFLogAlways("[grid] stretch relayouts: %u height differs, %u requirement, %u percent descendants",
+                    g_webkitIOS6GridStretchHeight, g_webkitIOS6GridStretchRequirement, g_webkitIOS6GridStretchPercent);
+            for (unsigned i = 0; i < needsLayoutSlots && needsLayoutCallers[i]; i++) {
+                if (needsLayoutCounts[i] > 50)
+                    WTFLogAlways("[dirtied] %u from %p", needsLayoutCounts[i], needsLayoutCallers[i]);
+            }
+        }
+#endif
         {
             CheckedPtr renderView = this->renderView();
             auto state = renderView ? renderView->textAutosizingState() : RenderView::TextAutosizingState::Normal;
@@ -346,7 +405,9 @@ void LocalFrameViewLayoutContext::performLayout(bool canDeferUpdateLayerPosition
                 break;
             }
         }
+#if !defined(WEBKIT_IOS6)
         layoutRoot->absoluteQuads(layoutAreas);
+#endif
 
         clearSubtreeLayoutRoot();
         ASSERT(m_percentHeightIgnoreList.isEmptyIgnoringNullReferences());
@@ -380,7 +441,9 @@ void LocalFrameViewLayoutContext::performLayout(bool canDeferUpdateLayerPosition
         protect(view())->didLayout(layoutRoot, canDeferUpdateLayerPositions);
         runOrScheduleAsynchronousTasks(canDeferUpdateLayerPositions);
     }
+#if !defined(WEBKIT_IOS6)
     InspectorInstrumentation::didLayout(frame, *layoutRoot, layoutAreas);
+#endif
     DebugPageOverlays::didLayout(frame);
 }
 
