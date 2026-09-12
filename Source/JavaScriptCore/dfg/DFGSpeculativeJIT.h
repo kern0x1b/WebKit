@@ -2183,6 +2183,10 @@ public:
 #endif
     {
         ASSERT(m_jit);
+#if USE(JSVALUE32_64)
+        m_register.pair.tagGPR = InvalidGPRReg;
+        m_register.pair.payloadGPR = InvalidGPRReg;
+#endif
         if (!edge)
             return;
         ASSERT_UNUSED(mode, mode == ManualOperandSpeculation || edge.useKind() == UntypedUse);
@@ -2190,8 +2194,6 @@ public:
         if (jit->isFilled(node()))
             gpr();
 #elif USE(JSVALUE32_64)
-        m_register.pair.tagGPR = InvalidGPRReg;
-        m_register.pair.payloadGPR = InvalidGPRReg;
         if (jit->isFilled(node()))
             fill();
 #endif
