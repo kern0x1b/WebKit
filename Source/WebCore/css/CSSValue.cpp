@@ -337,27 +337,15 @@ void CSSValue::collectComputedStyleDependencies(ComputedStyleDependencies& depen
 {
     // FIXME: Unclear why it's OK that we do not cover CSSValuePair, CSSBorderImageSliceValue, CSSBorderImageWidthValue, and others here. Probably should use visitDerived unless they don't allow the primitive values that can have dependencies. May want to base this on a traverseValues or forEachValue function instead.
     // FIXME: Consider a non-recursive algorithm for walking this tree of dependencies.
-    switch (classType()) {
-    case ClassType::ValueList:
-    case ClassType::GridTemplateList:
-    case ClassType::TransformList:
-        for (auto& listValue : uncheckedDowncast<CSSValueContainingVector>(*this))
+    if (auto* asList = dynamicDowncast<CSSValueContainingVector>(*this)) {
+        for (auto& listValue : *asList)
             listValue.collectComputedStyleDependencies(dependencies);
-        break;
-    case ClassType::CustomIdent:
-        CSS::collectComputedStyleDependencies(dependencies, uncheckedDowncast<CSSCustomIdentValue>(*this).customIdent());
-        break;
-    case ClassType::Primitive:
-        uncheckedDowncast<CSSPrimitiveValue>(*this).collectComputedStyleDependencies(dependencies);
-        break;
-    default:
-        break;
+        return;
     }
-}
-
-bool CSSValue::canResolveDependenciesWithConversionData(const CSSToLengthConversionData& conversionData) const
-{
-    return computedStyleDependencies().canResolveDependenciesWithConversionData(conversionData);
+    if (auto* asPrimitiveValue = dynamicDowncast<CSSPrimitiveValue>(*this))
+        asPrimitiveValue->collectComputedStyleDependencies(dependencies);
+    if (auto* asCalcSizeValue = dynamicDowncast<CSSCalcSizeValue>(*this))
+        asCalcSizeValue->collectComputedStyleDependencies(dependencies);
 }
 
 bool CSSValue::equals(const CSSValue& other) const
@@ -422,27 +410,6 @@ ASCIILiteral CSSValue::separatorCSSText(ValueSeparator separator)
 
 void CSSValue::operator delete(CSSValue* value, std::destroying_delete_t)
 {
-    // Primitives and keywords are the overwhelming majority of CSS values, and every temporary a
-    // failed parse attempt discards is destroyed here. Naming them directly keeps that path off
-    // visitDerived()'s eighty-entry jump table. Both classes are final, so the class type tag
-    // identifies them exactly.
-    switch (value->classType()) {
-    case ClassType::Primitive: {
-        auto& primitiveValue = uncheckedDowncast<CSSPrimitiveValue>(*value);
-        std::destroy_at(&primitiveValue);
-        CSSPrimitiveValue::freeAfterDestruction(&primitiveValue);
-        return;
-    }
-    case ClassType::Keyword: {
-        auto& keywordValue = uncheckedDowncast<CSSKeywordValue>(*value);
-        std::destroy_at(&keywordValue);
-        CSSKeywordValue::freeAfterDestruction(&keywordValue);
-        return;
-    }
-    default:
-        break;
-    }
-
     value->visitDerived([]<typename ValueType>(ValueType& value) {
         std::destroy_at(&value);
         ValueType::freeAfterDestruction(&value);

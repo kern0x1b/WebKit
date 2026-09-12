@@ -702,7 +702,8 @@ void ImageLoader::dispatchPendingLoadEvent()
         return;
     m_hasPendingLoadEvent = false;
     Ref protectedElement = element();
-    if (protectedElement->document().hasLivingRenderTree())
+    Ref document = protectedElement->document();
+    if (document->canEverRender())
         dispatchLoadEvent();
 
     // Only consider updating the protection ref-count of the Element immediately before returning
@@ -717,7 +718,8 @@ void ImageLoader::dispatchPendingErrorEvent()
     m_hasPendingErrorEvent = false;
     loadEventSender().cancelEvent(*this, eventNames().errorEvent);
     Ref protectedElement = element();
-    if (protectedElement->document().hasLivingRenderTree())
+    Ref document = protectedElement->document();
+    if (document->canEverRender())
         protectedElement->dispatchEvent(Event::create(eventNames().errorEvent, Event::CanBubble::No, Event::IsCancelable::No));
 
     // Only consider updating the protection ref-count of the Element immediately before returning

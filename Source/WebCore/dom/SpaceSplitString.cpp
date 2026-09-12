@@ -68,15 +68,8 @@ bool SpaceSplitStringData::containsAll(const SpaceSplitStringData& other) const
     if (this == &other)
         return true;
 
-    unsigned otherSize = other.m_size;
-    if (m_size < otherSize) [[unlikely]]
-        return false;
-
-    if (otherSize == 1) [[likely]]
-        return contains(other[0]);
-
-    for (unsigned i = 0; i < otherSize; ++i) {
-        if (!contains(other[i]))
+    for (auto& token : other) {
+        if (!contains(token))
             return false;
     }
     return true;

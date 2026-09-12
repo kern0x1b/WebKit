@@ -164,9 +164,6 @@ public:
 
     void updateIntrinsicLogicalHeightsForRowSizingFirstPassCacheAvailability();
     std::optional<GridItemSizeCache>& NODELETE intrinsicLogicalHeightsForRowSizingFirstPass() const LIFETIME_BOUND;
-#if defined(WEBKIT_IOS6)
-    bool canCacheIntrinsicLogicalHeightForRowSizingFirstPass(const RenderBox&) const;
-#endif
 
     bool shouldCheckExplicitIntrinsicInnerLogicalSize(Style::GridTrackSizingDirection) const;
 
@@ -346,7 +343,7 @@ private:
 
     bool layoutUsingGridFormattingContext();
 
-    mutable std::optional<bool> m_hasGridFormattingContextLayout;
+    std::optional<bool> m_hasGridFormattingContextLayout;
 
     mutable bool m_isComputingTrackSizes { false };
 };

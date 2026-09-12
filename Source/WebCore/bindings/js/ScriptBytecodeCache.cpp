@@ -142,21 +142,21 @@ static String appendPathComponent(const String& directory, const String& compone
 static bool removePath(const String& path)
 {
     auto utf8 = path.utf8();
-    return !unlink(utf8.data());
+    return !unlink(utf8.legacyCStringPointer());
 }
 
 static bool renamePath(const String& from, const String& to)
 {
     auto fromUTF8 = from.utf8();
     auto toUTF8 = to.utf8();
-    return !rename(fromUTF8.data(), toUTF8.data());
+    return !rename(fromUTF8.legacyCStringPointer(), toUTF8.legacyCStringPointer());
 }
 
 static std::optional<uint64_t> sizeOfPath(const String& path)
 {
     auto utf8 = path.utf8();
     struct stat statBuffer { };
-    if (stat(utf8.data(), &statBuffer))
+    if (stat(utf8.legacyCStringPointer(), &statBuffer))
         return std::nullopt;
     return static_cast<uint64_t>(statBuffer.st_size);
 }
@@ -165,7 +165,7 @@ static bool createDirectories(const String& path)
 {
     auto utf8 = path.utf8();
     struct stat statBuffer { };
-    if (!stat(utf8.data(), &statBuffer))
+    if (!stat(utf8.legacyCStringPointer(), &statBuffer))
         return S_ISDIR(statBuffer.st_mode);
 
     Vector<char> working(utf8.length() + 1);
@@ -184,14 +184,14 @@ static bool createDirectories(const String& path)
     if (mkdir(working.span().data(), 0700) && errno != EEXIST)
         return false;
 
-    return !stat(utf8.data(), &statBuffer) && S_ISDIR(statBuffer.st_mode);
+    return !stat(utf8.legacyCStringPointer(), &statBuffer) && S_ISDIR(statBuffer.st_mode);
 }
 
 static Vector<String> namesInDirectory(const String& path)
 {
     Vector<String> names;
     auto utf8 = path.utf8();
-    DIR* directory = opendir(utf8.data());
+    DIR* directory = opendir(utf8.legacyCStringPointer());
     if (!directory)
         return names;
 
@@ -208,7 +208,7 @@ static Vector<String> namesInDirectory(const String& path)
 static void touchLastUsed(const String& metaPath, uint64_t timestamp)
 {
     auto utf8 = metaPath.utf8();
-    int descriptor = open(utf8.data(), O_WRONLY | O_CLOEXEC);
+    int descriptor = open(utf8.legacyCStringPointer(), O_WRONLY | O_CLOEXEC);
     if (descriptor < 0)
         return;
 
@@ -271,7 +271,7 @@ static BytecodeCacheMeta decodeMeta(std::span<const uint8_t> buffer)
 static std::optional<BytecodeCacheMeta> readMeta(const String& path)
 {
     auto utf8 = path.utf8();
-    int descriptor = open(utf8.data(), O_RDONLY | O_CLOEXEC);
+    int descriptor = open(utf8.legacyCStringPointer(), O_RDONLY | O_CLOEXEC);
     if (descriptor < 0)
         return std::nullopt;
 
@@ -301,7 +301,7 @@ static bool writeFileAtomically(const String& path, std::span<const uint8_t> byt
     auto temporaryUTF8 = temporaryPath.utf8();
     removePath(temporaryPath);
 
-    int descriptor = open(temporaryUTF8.data(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, S_IRUSR | S_IWUSR);
+    int descriptor = open(temporaryUTF8.legacyCStringPointer(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, S_IRUSR | S_IWUSR);
     if (descriptor < 0)
         return false;
 
@@ -357,7 +357,7 @@ void ScriptBytecodeCache::setDirectory(const String& directory, uint64_t maximum
 
     if (!createDirectories(directory)) {
         m_directory = String();
-        WTFLogAlways("BYTECODE unusable directory %s", directory.utf8().data());
+        WTFLogAlways("BYTECODE unusable directory %s", directory.utf8().legacyCStringPointer());
         return;
     }
 
@@ -368,13 +368,13 @@ void ScriptBytecodeCache::setDirectory(const String& directory, uint64_t maximum
     scanDirectory();
 
     WTFLogAlways("BYTECODE dir %s cap %llu MB used %llu KB purged %u jscVersion %u jscBuild %016llx boot '%s'",
-        directory.utf8().data(),
+        directory.utf8().legacyCStringPointer(),
         static_cast<unsigned long long>(maximumSize / (1024 * 1024)),
         static_cast<unsigned long long>(m_currentSize / 1024),
         m_purgedOnScan,
         JSC::computeJSCBytecodeCacheVersion(),
         static_cast<unsigned long long>(JSC::computeJSCBinaryIdentity()),
-        bootSessionUUIDString().utf8().data());
+        bootSessionUUIDString().utf8().legacyCStringPointer());
 }
 
 void ScriptBytecodeCache::scanDirectory()
@@ -628,14 +628,14 @@ RefPtr<JSC::CachedBytecode> ScriptBytecodeCacheEntry::load()
         removePath(metaPath);
         removePath(payloadPath);
         if (scriptBytecodeCacheChatterEnabled())
-            WTFLogAlways("BYTECODE miss %s reason %s", shortenedURL(m_provider.sourceURL()).utf8().data(), reason);
+            WTFLogAlways("BYTECODE miss %s reason %s", shortenedURL(m_provider.sourceURL()).utf8().legacyCStringPointer(), reason);
         return nullptr;
     };
 
     auto meta = readMeta(metaPath);
     if (!meta) {
         if (scriptBytecodeCacheChatterEnabled())
-            WTFLogAlways("BYTECODE miss %s reason absent source %llu B", shortenedURL(m_provider.sourceURL()).utf8().data(), static_cast<unsigned long long>(m_sourceLength));
+            WTFLogAlways("BYTECODE miss %s reason absent source %llu B", shortenedURL(m_provider.sourceURL()).utf8().legacyCStringPointer(), static_cast<unsigned long long>(m_sourceLength));
         return nullptr;
     }
 
@@ -677,7 +677,7 @@ RefPtr<JSC::CachedBytecode> ScriptBytecodeCacheEntry::load()
     touchLastUsed(metaPath, nowInSeconds());
     if (scriptBytecodeCacheChatterEnabled()) {
         WTFLogAlways("BYTECODE hit %s blob %llu B source %llu B load %.1f ms",
-            shortenedURL(m_provider.sourceURL()).utf8().data(),
+            shortenedURL(m_provider.sourceURL()).utf8().legacyCStringPointer(),
             static_cast<unsigned long long>(meta->payloadSize),
             static_cast<unsigned long long>(m_sourceLength),
             elapsed.milliseconds());
@@ -698,7 +698,7 @@ void ScriptBytecodeCacheEntry::store(const JSC::BytecodeCacheGenerator& generato
         removePath(makeString(rejectedBase, ".meta"_s));
         removePath(makeString(rejectedBase, ".bc"_s));
         if (scriptBytecodeCacheChatterEnabled())
-            WTFLogAlways("BYTECODE reject %s: decode refused a loaded blob, regenerating", shortenedURL(m_provider.sourceURL()).utf8().data());
+            WTFLogAlways("BYTECODE reject %s: decode refused a loaded blob, regenerating", shortenedURL(m_provider.sourceURL()).utf8().legacyCStringPointer());
     }
 
     if (m_cachedBytecode && m_cachedBytecode->hasUpdates())
@@ -721,7 +721,7 @@ void ScriptBytecodeCacheEntry::store(const JSC::BytecodeCacheGenerator& generato
     cache.didEncode(bytes, encodeElapsed);
     if (scriptBytecodeCacheChatterEnabled()) {
         WTFLogAlways("BYTECODE encode %s blob %llu B source %llu B compile %.1f ms encode %.1f ms",
-            shortenedURL(m_provider.sourceURL()).utf8().data(),
+            shortenedURL(m_provider.sourceURL()).utf8().legacyCStringPointer(),
             static_cast<unsigned long long>(bytes),
             static_cast<unsigned long long>(m_sourceLength),
             compileTime.milliseconds(), encodeElapsed.milliseconds());
@@ -789,7 +789,7 @@ void ScriptBytecodeCacheEntry::commit()
     });
 
     if (overflowed) {
-        WTFLogAlways("BYTECODE commit %s rejected: update out of range", shortenedURL(m_provider.sourceURL()).utf8().data());
+        WTFLogAlways("BYTECODE commit %s rejected: update out of range", shortenedURL(m_provider.sourceURL()).utf8().legacyCStringPointer());
         return;
     }
 
@@ -811,12 +811,12 @@ void ScriptBytecodeCacheEntry::commit()
 
     removePath(metaPath);
     if (!writeFileAtomically(payloadPath, buffer.span())) {
-        WTFLogAlways("BYTECODE commit %s failed writing payload", shortenedURL(m_provider.sourceURL()).utf8().data());
+        WTFLogAlways("BYTECODE commit %s failed writing payload", shortenedURL(m_provider.sourceURL()).utf8().legacyCStringPointer());
         return;
     }
     if (!writeFileAtomically(metaPath, encodeMeta(meta).span())) {
         removePath(payloadPath);
-        WTFLogAlways("BYTECODE commit %s failed writing meta", shortenedURL(m_provider.sourceURL()).utf8().data());
+        WTFLogAlways("BYTECODE commit %s failed writing meta", shortenedURL(m_provider.sourceURL()).utf8().legacyCStringPointer());
         return;
     }
 
@@ -825,7 +825,7 @@ void ScriptBytecodeCacheEntry::commit()
     cache.didCommit(totalSize, elapsed);
     if (scriptBytecodeCacheChatterEnabled()) {
         WTFLogAlways("BYTECODE commit %s blob %llu B in %.1f ms",
-            shortenedURL(m_provider.sourceURL()).utf8().data(),
+            shortenedURL(m_provider.sourceURL()).utf8().legacyCStringPointer(),
             static_cast<unsigned long long>(totalSize), elapsed.milliseconds());
     }
     cache.evictIfNeeded();

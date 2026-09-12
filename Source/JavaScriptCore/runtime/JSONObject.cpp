@@ -1200,12 +1200,6 @@ static ALWAYS_INLINE uint64_t copyEightBytesAndLoad(const CharType* source, Char
 
 static ALWAYS_INLINE uint32_t copyFourBytesAndLoad(const Latin1Character* source, Latin1Character* destination)
 {
-#if defined(WEBKIT_IOS6)
-    if constexpr (sizeof(CharType) == 1) {
-        memcpySpan(std::span<CharType> { cursor, span.size() }, span);
-        return latin1SpanNeedsJSONEscaping(span);
-    }
-#endif
     uint32_t word = WTF::unalignedLoad<uint32_t>(source);
     WTF::unalignedStore<uint32_t>(destination, word);
     return word;

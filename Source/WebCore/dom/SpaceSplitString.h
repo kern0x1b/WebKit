@@ -39,17 +39,10 @@ public:
     auto begin() LIFETIME_BOUND { return std::to_address(tokenArray().begin()); }
     auto end() LIFETIME_BOUND { return std::to_address(tokenArray().end()); }
 
-    ALWAYS_INLINE bool contains(const AtomString& string)
+    bool contains(const AtomString& string) const
     {
         auto tokens = tokenArray();
-        unsigned size = m_size;
-        if (size == 1) [[likely]]
-            return tokens[0] == string;
-        for (unsigned i = 0; i < size; ++i) {
-            if (tokens[i] == string)
-                return true;
-        }
-        return false;
+        return std::ranges::find(tokens, string) != tokens.end();
     }
 
     bool NODELETE containsAll(const SpaceSplitStringData&) const;
