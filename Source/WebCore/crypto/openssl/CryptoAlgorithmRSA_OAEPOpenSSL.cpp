@@ -82,6 +82,9 @@ ExceptionOr<Vector<uint8_t>> CryptoAlgorithmRSA_OAEP::platformEncrypt(const Cryp
     cipherText.shrink(cipherTextLen);
 
     return cipherText;
+#else
+    return Exception { ExceptionCode::NotSupportedError };
+#endif
 }
 
 ExceptionOr<Vector<uint8_t>> CryptoAlgorithmRSA_OAEP::platformDecrypt(const CryptoAlgorithmRsaOaepParams& parameters, const CryptoKeyRSA& key, const Vector<uint8_t>& cipherText)
@@ -132,6 +135,9 @@ ExceptionOr<Vector<uint8_t>> CryptoAlgorithmRSA_OAEP::platformDecrypt(const Cryp
     plainText.shrink(plainTextLen);
 
     return plainText;
+#else
+    return Exception { ExceptionCode::NotSupportedError };
+#endif
 }
 
 } // namespace WebCore

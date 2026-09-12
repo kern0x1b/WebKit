@@ -39,6 +39,7 @@ namespace WebCore { namespace DOMJIT {
 
 using JSC::CCallHelpers;
 using JSC::GPRReg;
+using JSC::JSValueRegs;
 using JSC::MacroAssembler;
 
 static_assert(std::is_same<GPRReg, MacroAssembler::RegisterID>::value, "GPRReg is the alias to the MacroAssembler::RegisterID");
@@ -65,14 +66,15 @@ void tryLookUpWrapperCache(CCallHelpers& jit, CCallHelpers::JumpList& failureCas
     jit.loadPtr(CCallHelpers::Address(wrapped, ScriptWrappable::offsetOfWrapper<WrappedType>()), resultGPR);
     failureCases.append(jit.branchTestPtr(CCallHelpers::Zero, resultGPR));
     failureCases.append(branchIfNotWeakIsLive(jit, resultGPR));
-    jit.loadPtr(CCallHelpers::Address(resultGPR, JSC::WeakImpl::offsetOfJSValue()), resultGPR);
+    jit.loadPtr(CCallHelpers::Address(resultGPR, JSC::WeakImpl::offsetOfJSValue() + JSC::JSValue::offsetOfPayload()), resultGPR);
 }
 
 template<typename WrappedType, typename ToJSFunction>
-void toWrapper(CCallHelpers& jit, JSC::SnippetParams& params, GPRReg wrapped, GPRReg globalObject, GPRReg result, ToJSFunction function, JSC::JSValue globalObjectConstant)
+void toWrapper(CCallHelpers& jit, JSC::SnippetParams& params, GPRReg wrapped, GPRReg globalObject, JSValueRegs result, ToJSFunction function, JSC::JSValue globalObjectConstant)
 {
-    ASSERT(wrapped != result);
-    ASSERT(globalObject != result);
+    ASSERT(wrapped != result.payloadGPR());
+    ASSERT(globalObject != result.payloadGPR());
+    GPRReg payloadGPR = result.payloadGPR();
     CCallHelpers::JumpList slowCases;
 
     if (globalObjectConstant) {
@@ -84,7 +86,8 @@ void toWrapper(CCallHelpers& jit, JSC::SnippetParams& params, GPRReg wrapped, GP
     } else
         slowCases.append(branchIfNotWorldIsNormal(jit, globalObject));
 
-    tryLookUpWrapperCache<WrappedType>(jit, slowCases, wrapped, result);
+    tryLookUpWrapperCache<WrappedType>(jit, slowCases, wrapped, payloadGPR);
+    jit.boxCell(payloadGPR, result);
     params.addSlowPathCall(slowCases, jit, function, result, globalObject, wrapped);
 }
 

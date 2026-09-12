@@ -337,7 +337,11 @@ String PlatformPasteboard::stringForType(const String& type) const
 Color PlatformPasteboard::color()
 {
     NSData *data = [m_pasteboard dataForPasteboardType:UIColorPboardType];
+#if defined(WEBKIT_IOS6)
+    UIColor *uiColor = dynamic_objc_cast<UIColor>([NSKeyedUnarchiver unarchiveObjectWithData:data]);
+#else
     UIColor *uiColor = [NSKeyedUnarchiver unarchivedObjectOfClass:PAL::getUIColorClassSingleton() fromData:data error:nil];
+#endif
     return roundAndClampToSRGBALossy(uiColor.CGColor);
 }
 

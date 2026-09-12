@@ -65,9 +65,8 @@ static bool isContentfulOrHasDecoration(const InlineItem& inlineItem, const Inli
 {
     if (inlineItem.isFloat() || inlineItem.isOutOfFlow())
         return false;
-    if (inlineItem.isText()) {
-        auto& inlineTextItem = downcast<InlineTextItem>(inlineItem);
-        auto wouldProduceEmptyRun = inlineTextItem.isFullyTrimmable() || inlineTextItem.isEmpty() || inlineTextItem.isWordSeparator() || inlineTextItem.isZeroWidthSpaceSeparator() || inlineTextItem.isQuirkNonBreakingSpace();
+    if (auto* inlineTextItem = dynamicDowncast<InlineTextItem>(inlineItem)) {
+        auto wouldProduceEmptyRun = inlineTextItem->isFullyTrimmable() || inlineTextItem->isEmpty() || inlineTextItem->isWordSeparator() || inlineTextItem->isZeroWidthSpaceSeparator() || inlineTextItem->isQuirkNonBreakingSpace();
         return !wouldProduceEmptyRun;
     }
 
@@ -81,14 +80,7 @@ static bool isContentfulOrHasDecoration(const InlineItem& inlineItem, const Inli
 static inline StringBuilder toString(const Line::RunList& runs)
 {
     // FIXME: We could try to reuse the content builder in InlineItemsBuilder if this turns out to be a perf bottleneck.
-    unsigned totalLength = 0;
-    for (auto& run : runs) {
-        if (!run.isText())
-            continue;
-        totalLength += run.textContent().length;
-    }
     StringBuilder lineContentBuilder;
-    lineContentBuilder.reserveCapacity(totalLength);
     for (auto& run : runs) {
         if (!run.isText())
             continue;
@@ -320,11 +312,8 @@ LineBuilder::LineBuilder(InlineFormattingContext& inlineFormattingContext, Horiz
     : AbstractLineBuilder(inlineFormattingContext, inlineFormattingContext.root(), rootHorizontalConstraints, inlineItemList)
     , m_floatingContext(inlineFormattingContext.floatingContext())
     , m_textSpacingContext(WTF::move(textSpacingContext))
-    , m_lineCandidate(makeUniqueRef<LineCandidate>())
 {
 }
-
-LineBuilder::~LineBuilder() = default;
 
 LineLayoutResult LineBuilder::layoutInlineContent(const LineInput& lineInput, const std::optional<PreviousLine>& previousLine, bool isFirstFormattedLineCandidate)
 {
@@ -548,7 +537,7 @@ UniqueRef<LineContent> LineBuilder::placeInlineAndFloatContent(const InlineItemR
     size_t placedInlineItemCount = 0;
 
     auto layoutInlineAndFloatContent = [&] {
-        auto& lineCandidate = m_lineCandidate;
+        auto lineCandidate = makeUniqueRef<LineCandidate>();
 
         auto currentItemIndex = needsLayoutRange.startIndex();
         while (currentItemIndex < needsLayoutRange.endIndex()) {
@@ -877,7 +866,7 @@ Vector<std::pair<size_t, size_t>> LineBuilder::collectShapeRanges(const LineCand
     ASSERT(contentList.first().type == ShapingType::Content && contentList.last().type == ShapingType::Content);
     Vector<std::pair<size_t, size_t>> ranges;
 
-    auto* lastFontCascade = &rootStyle().fontCascade();
+    CheckedPtr lastFontCascade = &rootStyle().fontCascade();
     auto leadingContentRunIndex = std::optional<size_t> { };
     auto trailingContentRunIndex = std::optional<size_t> { };
     auto hasBoundaryBetween = false;
@@ -918,7 +907,7 @@ Vector<std::pair<size_t, size_t>> LineBuilder::collectShapeRanges(const LineCand
                     leadingContentRunIndex = entry.index;
                 lastFontCascade = &styleToUse.fontCascade();
             } else if (hasBoundaryBetween) {
-                auto hasMatchingFontCascade = *lastFontCascade == styleToUse.fontCascade();
+                auto hasMatchingFontCascade = *lastFontCascade.get() == styleToUse.fontCascade();
                 if (isEligibleText && hasMatchingFontCascade)
                     trailingContentRunIndex = entry.index;
                 else {
@@ -1245,17 +1234,13 @@ LineBuilder::RectAndFloatConstraints LineBuilder::adjustedLineRectWithCandidateI
         return { m_lineLogicalRect };
     // FIXME: Use InlineFormattingUtils::inlineLevelBoxAffectsLineBox instead.
     auto candidateContentHeight = InlineLayoutUnit { };
-    auto isFirstFormattedLineCandidate = this->isFirstFormattedLineCandidate();
+    auto lineBoxContain = rootStyle().lineBoxContain();
     for (auto& run : inlineContent.continuousContent().runs()) {
         auto& inlineItem = run.inlineItem;
         if (inlineItem.isText()) {
-            auto& styleToUse = isFirstFormattedLineCandidate ? inlineItem.firstLineStyle() : inlineItem.style();
-            if (&styleToUse != m_computedLineHeightCache.style) {
-                m_computedLineHeightCache.style = &styleToUse;
-                m_computedLineHeightCache.computedLineHeight = styleToUse.computedLineHeight();
-            }
-            candidateContentHeight = std::max<InlineLayoutUnit>(candidateContentHeight, m_computedLineHeightCache.computedLineHeight);
-        } else if (inlineItem.isAtomicInlineBox() && rootStyle().lineBoxContain().contains(Style::WebkitLineBoxContainValue::Replaced))
+            auto& styleToUse = isFirstFormattedLineCandidate() ? inlineItem.firstLineStyle() : inlineItem.style();
+            candidateContentHeight = std::max<InlineLayoutUnit>(candidateContentHeight, styleToUse.usedLineHeight());
+        } else if (inlineItem.isAtomicInlineBox() && lineBoxContain.contains(Style::WebkitLineBoxContainValue::Replaced))
             candidateContentHeight = std::max(candidateContentHeight, InlineLayoutUnit { formattingContext().geometryForBox(inlineItem.layoutBox()).marginBoxHeight() });
     }
     if (candidateContentHeight <= m_lineLogicalRect.height())

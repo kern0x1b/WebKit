@@ -126,61 +126,52 @@ static std::optional<ClassifyBlockResult> classifyBlock(CSSParserTokenRange rang
             if (current.isTopLevelBlock && tokenType == LeftBraceToken && block.atEnd())
                 result.hasEmptyTopLevelBraceBlock = true;
 
-            // functionId() resolves the ident through a keyword lookup; ask for it once instead
-            // of once per candidate function name.
-            if (tokenType == FunctionToken) {
-                switch (token.functionId()) {
-                case CSSValueVar:
-                    if (!isValidVariableReference(block, parserContext))
-                        return { };
-                    result.hasSubstitutionFunctions = true;
-                    continue;
-                case CSSValueEnv:
-                    if (!isValidConstantReference(block, parserContext))
-                        return { };
-                    result.hasSubstitutionFunctions = true;
-                    continue;
-                case CSSValueAttr:
-                    if (parserContext.cssAttrSubstitutionFunctionEnabled) {
-                        if (!isValidAttrReference(block, parserContext))
-                            return { };
-                        result.hasSubstitutionFunctions = true;
-                        continue;
-                    }
-                    break;
-                case CSSValueRandomItem:
-                    if (parserContext.cssRandomItemFunctionEnabled) {
-                        if (!isValidRandomItemReference(block, parserContext))
-                            return { };
-                        result.hasSubstitutionFunctions = true;
-                        continue;
-                    }
-                    break;
-                case CSSValueIf:
-                    if (parserContext.cssIfFunctionEnabled) {
-                        if (!isValidIfReference(block, parserContext))
-                            return { };
-                        result.hasSubstitutionFunctions = true;
-                        continue;
-                    }
-                    break;
-                case CSSValueInternalAutoBase:
-                    if (parserContext.cssInternalAutoBaseParsingEnabled) {
-                        result.hasSubstitutionFunctions = true;
-                        continue;
-                    }
-                    break;
-                default:
-                    break;
-                }
-
-                if (parserContext.propertySettings.cssFunctionAtRuleEnabled && isCustomPropertyName(token.value())) {
-                    // https://drafts.csswg.org/css-mixins/#typedef-dashed-function
-                    if (!isValidDashedFunction(block, parserContext))
-                        return { };
-                    result.hasSubstitutionFunctions = true;
-                    continue;
-                }
+            if (token.functionId() == CSSValueVar) {
+                if (!isValidVariableReference(block, parserContext))
+                    return { };
+                result.hasSubstitutionFunctions = true;
+                continue;
+            }
+            if (token.functionId() == CSSValueEnv) {
+                if (!isValidEnvReference(block, parserContext))
+                    return { };
+                result.hasSubstitutionFunctions = true;
+                continue;
+            }
+            if (token.functionId() == CSSValueInherit && parserContext.cssInheritFunctionEnabled) {
+                // <inherit-args> is the same argument grammar as var()'s.
+                if (!isValidVariableReference(block, parserContext))
+                    return { };
+                result.hasSubstitutionFunctions = true;
+                continue;
+            }
+            if (token.functionId() == CSSValueAttr && parserContext.cssAttrSubstitutionFunctionEnabled) {
+                if (!isValidAttrReference(block, parserContext))
+                    return { };
+                result.hasSubstitutionFunctions = true;
+                continue;
+            }
+            if (token.functionId() == CSSValueRandomItem && parserContext.cssRandomItemFunctionEnabled) {
+                if (!isValidRandomItemReference(block, parserContext))
+                    return { };
+                result.hasSubstitutionFunctions = true;
+                continue;
+            }
+            if (token.functionId() == CSSValueIf && parserContext.cssIfFunctionEnabled) {
+                if (!isValidIfReference(block, parserContext))
+                    return { };
+                result.hasSubstitutionFunctions = true;
+                continue;
+            }
+            if (token.functionId() == CSSValueIdent && parserContext.cssIdentFunctionEnabled) {
+                if (!isValidIdentReference(block, parserContext))
+                    return { };
+                result.hasSubstitutionFunctions = true;
+                continue;
+            }
+            if (token.functionId() == CSSValueInternalAutoBase && parserContext.cssInternalAutoBaseParsingEnabled) {
+                result.hasSubstitutionFunctions = true;
+                continue;
             }
             stack.append(ClassifyBlockState {
                 .range = block,

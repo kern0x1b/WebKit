@@ -42,7 +42,11 @@ ResourceResponse LegacyWebArchive::createResourceResponseFromMacArchivedData(CFD
         return ResourceResponse();
     
     RetainPtr<NSURLResponse> response;
+#if defined(WEBKIT_IOS6)
+    auto unarchiver = adoptNS([[NSKeyedUnarchiver alloc] initForReadingWithData:(__bridge NSData *)responseData]);
+#else
     auto unarchiver = adoptNS([[NSKeyedUnarchiver alloc] initForReadingFromData:(__bridge NSData *)responseData error:nullptr]);
+#endif
     unarchiver.get().decodingFailurePolicy = NSDecodingFailurePolicyRaiseException;
     @try {
         response = [unarchiver decodeObjectOfClass:NSURLResponse.class forKey:LegacyWebArchiveResourceResponseKey];

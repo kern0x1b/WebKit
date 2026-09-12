@@ -453,7 +453,7 @@ void ServiceWorkerThread::queueTaskToFireBackgroundFetchEvent(BackgroundFetchInf
     queueTaskToFireEvent([weakThis = ThreadSafeWeakPtr { *this }, info = crossThreadCopy(WTF::move(info)), callback = WTF::move(callback)](auto& serviceWorkerGlobalScope) mutable {
         RELEASE_LOG(ServiceWorker, "ServiceWorkerThread::queueTaskToFireBackgroundFetchEvent firing event for worker %" PRIu64, serviceWorkerGlobalScope.thread()->identifier().toUInt64());
 
-        Ref manager = ServiceWorkerRegistrationBackgroundFetchAPI::backgroundFetch(serviceWorkerGlobalScope->registration());
+        Ref manager = ServiceWorkerRegistrationBackgroundFetchAPI::backgroundFetch(protect(serviceWorkerGlobalScope.registration()));
         auto failureReason = info.failureReason;
         BackgroundFetchEventInit eventInit { { }, manager->backgroundFetchRegistrationInstance(serviceWorkerGlobalScope, WTF::move(info)) };
         RefPtr<ExtendableEvent> event;

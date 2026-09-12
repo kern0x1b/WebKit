@@ -25,6 +25,8 @@
 
 #pragma once
 
+#include "DestinationColorSpace.h"
+
 #if USE(CG)
 
 #include <WebCore/ImageBuffer.h>
@@ -53,9 +55,6 @@ private:
     RefPtr<NativeImage> copyNativeImage() final;
     RefPtr<NativeImage> createNativeImageReference() final;
 
-#if defined(WEBKIT_IOS6)
-    void transformToColorSpace(const DestinationColorSpace&) final;
-#endif
     void getPixelBuffer(const IntRect&, PixelBuffer&) final;
     void putPixelBuffer(const PixelBufferSourceView&, const IntRect& srcRect, const IntPoint& destPoint, AlphaPremultiplication destFormat) final;
 

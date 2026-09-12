@@ -40,7 +40,7 @@
 namespace JSC {
 
 #if defined(WEBKIT_IOS6)
-static double envDouble(const char* name, double defaultValue)
+static double sweeperEnvDouble(const char* name, double defaultValue)
 {
     const char* text = getenv(name);
     if (!text || !text[0])
@@ -54,13 +54,13 @@ static double envDouble(const char* name, double defaultValue)
 
 static Seconds sweepTimeSlice()
 {
-    static const Seconds slice = Seconds::fromMilliseconds(envDouble("JSC_IOS6_SWEEP_SLICE_MS", 2.0));
+    static const Seconds slice = Seconds::fromMilliseconds(sweeperEnvDouble("JSC_IOS6_SWEEP_SLICE_MS", 2.0));
     return slice;
 }
 
 static double sweepTimeMultiplier()
 {
-    static const double multiplier = 1.0 / std::min(1.0, envDouble("JSC_IOS6_SWEEP_DUTY", 0.10));
+    static const double multiplier = 1.0 / std::min(1.0, sweeperEnvDouble("JSC_IOS6_SWEEP_DUTY", 0.10));
     return multiplier;
 }
 #else

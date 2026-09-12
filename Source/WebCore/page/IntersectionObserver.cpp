@@ -256,9 +256,6 @@ void IntersectionObserver::observe(Element& target)
     target.ensureIntersectionObserverData().registrations.append({ *this, std::nullopt });
     bool hadObservationTargets = hasObservationTargets();
     m_observationTargets.add(target);
-#if defined(WEBKIT_IOS6)
-    m_observationTargetsSnapshotIsStale = true;
-#endif
 
     // Per the specification, we should dispatch at least one observation for the target. For this reason, we make sure to keep the
     // target alive until this first observation. This, in turn, will keep the IntersectionObserver's JS wrapper alive via
@@ -278,9 +275,6 @@ void IntersectionObserver::unobserve(Element& target)
 
     bool removed = m_observationTargets.remove(&target);
     ASSERT_UNUSED(removed, removed);
-#if defined(WEBKIT_IOS6)
-    m_observationTargetsSnapshotIsStale = true;
-#endif
     m_targetsWaitingForFirstObservation.removeFirstMatching([&](auto& pendingTarget) { return pendingTarget.ptr() == &target; });
 
     if (!hasObservationTargets()) {
@@ -309,9 +303,6 @@ auto IntersectionObserver::takeRecords() -> TakenRecords
 void IntersectionObserver::targetDestroyed(Element& target)
 {
     m_observationTargets.remove(target);
-#if defined(WEBKIT_IOS6)
-    m_observationTargetsSnapshotIsStale = true;
-#endif
     m_targetsWaitingForFirstObservation.removeFirstMatching([&](auto& pendingTarget) { return pendingTarget.ptr() == &target; });
     if (!hasObservationTargets()) {
         if (RefPtr document = trackingDocument())
@@ -338,10 +329,6 @@ void IntersectionObserver::removeAllTargets()
         ASSERT_UNUSED(removed, removed);
     }
     m_observationTargets.clear();
-#if defined(WEBKIT_IOS6)
-    m_observationTargetsSnapshot.clear();
-    m_observationTargetsSnapshotIsStale = true;
-#endif
     m_targetsWaitingForFirstObservation.clear();
 }
 
@@ -485,56 +472,17 @@ static std::optional<LayoutRect> computeClippedRectInRootContentsSpace(const Lay
     return computeClippedRectInRootContentsSpace(*absoluteClippedRect, targetSecurityOrigin, enclosingFrame.get(), WTF::move(scrollMargin));
 }
 
-// Equivalent to FrameView::convertFromContainingView.
-static FloatRect convertFromContainingView(const FrameView& frameView, const FrameView& parentView, FloatRect rect)
+auto IntersectionObserver::computeIntersectionState(const IntersectionObserverRegistration& registration, FrameView& hostFrameView, Element& target, ApplyRootMargin applyRootMargin) const -> IntersectionObservationState
 {
-    if (is<LocalFrameView>(parentView)) {
-        // If we can compute it the old way, do so.
-        return frameView.convertFromContainingView(rect);
-    }
+    bool isFirstObservation = !registration.previousThresholdIndex;
 
-    rect = parentView.viewToContents(rect);
+    // This is not set if the root is implicit (meaning the root is the main frame),
+    // it's cross-origin with the target, and Site Isolation is enabled. In that case,
+    // the renderer is in another process and can't be accessed.
+    CheckedPtr<RenderBox> rootRenderer;
 
-    auto transform = parentView.absoluteToChildFrameOwnerLocalTransform(frameView.frame());
-    FloatRect transformed = transform.projectQuad(rect).boundingBox();
-    transformed.moveBy(-parentView.childFrameOwnerContentBoxLocation(frameView.frame()));
-
-    return transformed;
-}
-
-// Equivalent to Widget::convertFromRootView.
-static FloatRect convertFromRootView(const FrameView& frameView, FloatRect rect)
-{
-    auto parentView = [&frameView] () -> RefPtr<const FrameView> {
-        if (RefPtr parent = dynamicDowncast<FrameView>(frameView.parent()))
-            return parent;
-
-        // When Site Isolation is enabled, Widget::m_parent is not populated if
-        // frameView is RemoteFrameView. Workaround this by using the frame tree parent.
-        // FIXME: fix the underlying issue instead.
-        if (RefPtr parent = frameView.frame().tree().parent())
-            return parent->virtualView();
-
-        return nullptr;
-    }();
-
-    if (parentView) {
-        FloatRect parentRect = convertFromRootView(*parentView, rect);
-        return convertFromContainingView(frameView, *parentView, parentRect);
-    }
-
-    return rect;
-}
-
-// Equivalent to rootViewToContents.
-static FloatRect mainFrameViewToContents(const FrameView& targetFrameView, FloatRect rect)
-{
-    return targetFrameView.viewToContents(convertFromRootView(targetFrameView, rect));
-}
-
-auto IntersectionObserver::computeIntersectionRootState(FrameView& hostFrameView) const -> IntersectionRootState
-{
-    IntersectionRootState rootState;
+    CheckedPtr<RenderElement> targetRenderer;
+    IntersectionObservationState intersectionState;
 
     auto layoutViewportRectForIntersection = [&] {
         if (m_includeObscuredInsets == IncludeObscuredInsets::Yes) {
@@ -548,93 +496,71 @@ auto IntersectionObserver::computeIntersectionRootState(FrameView& hostFrameView
         return hostFrameView.layoutViewportRect();
     };
 
-    if (RefPtr root = this->root()) {
-        if (!root->renderer())
-            return rootState;
-
-        // Use RenderBox here rather than RenderBlock so explicit SVG roots
-        // (LegacyRenderSVGRoot and RenderSVGRoot are RenderReplaced) are accepted.
-        rootState.renderer = dynamicDowncast<RenderBox>(root->renderer());
-        if (!rootState.renderer)
-            return rootState;
-
-        rootState.canComputeIntersection = true;
-        // The per-target test below only lets a target through when the root is its containing
-        // block ancestor, which for a Document root means the target lives in that document.
-        // So "root() == &target.document()" is the same question as "is the root a Document",
-        // and that does not depend on the target.
-        if (is<Document>(*root))
-            rootState.bounds = layoutViewportRectForIntersection();
-        else if (rootState.renderer->hasNonVisibleOverflow())
-            rootState.bounds = rootState.renderer->paddingBoxRect();
-        else
-            rootState.bounds = { FloatPoint(), rootState.renderer->borderBoxSize() };
-    } else {
-        // This is not set if the root is implicit (meaning the root is the main frame),
-        // it's cross-origin with the target, and Site Isolation is enabled. In that case,
-        // the renderer is in another process and can't be accessed.
-        if (RefPtr hostLocalFrameView = dynamicDowncast<LocalFrameView>(hostFrameView))
-            rootState.renderer = hostLocalFrameView->renderView();
-
-        rootState.canComputeIntersection = true;
-        rootState.bounds = layoutViewportRectForIntersection();
-    }
-
-    rootState.boundsWithRootMargin = rootState.bounds;
-    // If applyRootMargin is Yes, the root and target frames are same-origin.
-    // Therefore the root renderer should be available, as the root is in the
-    // same process as the target (with or without Site Isolation)
-    auto rootUsedZoom = rootState.renderer ? Style::ZoomFactor { rootState.renderer->style().usedZoom() } : Style::ZoomFactor::none();
-    expandRootBoundsWithRootMargin(rootState.boundsWithRootMargin, scrollMarginBox(), rootUsedZoom);
-    expandRootBoundsWithRootMargin(rootState.boundsWithRootMargin, rootMarginBox(), rootUsedZoom);
-
-    return rootState;
-}
-
-auto IntersectionObserver::computeIntersectionState(const IntersectionObserverRegistration& registration, FrameView& hostFrameView, Element& target, ApplyRootMargin applyRootMargin, IntersectionRootState& rootState) const -> IntersectionObservationState
-{
-    bool isFirstObservation = !registration.previousThresholdIndex;
-
-    // rootState owns the checked reference for the whole pass, so this does not need its own.
-    RenderBox* rootRenderer = rootState.renderer.get();
-    CheckedPtr<RenderElement> targetRenderer;
-    IntersectionObservationState intersectionState;
-
-    if (rootState.canComputeIntersection) {
+    auto computeRootBounds = [&]() {
         targetRenderer = target.renderer();
-        if (targetRenderer) {
-            if (root()) {
-                auto isRootAncestorOfTarget = [&] {
-                    // containingBlock() skips the SVG boundary (the SVG root is a
-                    // RenderReplaced), so resolve an explicit SVG root via the target's SVG tree root.
-                    if (CheckedPtr legacySVGRoot = dynamicDowncast<LegacyRenderSVGRoot>(rootRenderer))
-                        return SVGRenderSupport::findTreeRootObject(*targetRenderer) == legacySVGRoot;
-                    if (CheckedPtr svgRoot = dynamicDowncast<RenderSVGRoot>(rootRenderer))
-                        return lineageOfType<RenderSVGRoot>(*targetRenderer).first() == svgRoot;
+        if (!targetRenderer)
+            return;
 
-                    // isContainingBlockAncestorFor is only available on RenderBlock.
-                    CheckedPtr rootBlock = dynamicDowncast<RenderBlock>(rootRenderer);
-                    return rootBlock && rootBlock->isContainingBlockAncestorFor(*targetRenderer);
-                };
+        if (root()) {
+            if (!root()->renderer())
+                return;
 
-                intersectionState.canComputeIntersection = isRootAncestorOfTarget();
-            } else
-                intersectionState.canComputeIntersection = true;
+            // Use RenderBox here rather than RenderBlock so explicit SVG roots
+            // (LegacyRenderSVGRoot and RenderSVGRoot are RenderReplaced) are accepted.
+            rootRenderer = dynamicDowncast<RenderBox>(root()->renderer());
+            if (!rootRenderer)
+                return;
+
+            auto isRootAncestorOfTarget = [&] {
+                // containingBlock() skips the SVG boundary (the SVG root is a
+                // RenderReplaced), so resolve an explicit SVG root via the target's SVG tree root.
+                if (CheckedPtr legacySVGRoot = dynamicDowncast<LegacyRenderSVGRoot>(rootRenderer))
+                    return SVGRenderSupport::findTreeRootObject(*targetRenderer) == legacySVGRoot;
+                if (CheckedPtr svgRoot = dynamicDowncast<RenderSVGRoot>(rootRenderer))
+                    return lineageOfType<RenderSVGRoot>(*targetRenderer).first() == svgRoot;
+
+                // isContainingBlockAncestorFor is only available on RenderBlock.
+                CheckedPtr rootBlock = dynamicDowncast<RenderBlock>(rootRenderer);
+                return rootBlock && rootBlock->isContainingBlockAncestorFor(*targetRenderer);
+            };
+
+            if (!isRootAncestorOfTarget())
+                return;
+
+            intersectionState.canComputeIntersection = true;
+            if (root() == &target.document())
+                intersectionState.rootBounds = layoutViewportRectForIntersection();
+            else if (rootRenderer->hasNonVisibleOverflow())
+                intersectionState.rootBounds = rootRenderer->paddingBoxRect();
+            else
+                intersectionState.rootBounds = { FloatPoint(), rootRenderer->borderBoxSize() };
+
+            return;
         }
-    }
 
+        if (RefPtr hostLocalFrameView = dynamicDowncast<LocalFrameView>(hostFrameView))
+            rootRenderer = hostLocalFrameView->renderView();
+
+        intersectionState.canComputeIntersection = true;
+        intersectionState.rootBounds = layoutViewportRectForIntersection();
+    };
+
+    computeRootBounds();
     if (!intersectionState.canComputeIntersection) {
         intersectionState.observationChanged = isFirstObservation || *registration.previousThresholdIndex != 0;
         return intersectionState;
     }
 
-    ASSERT_IMPLIES(applyRootMargin == ApplyRootMargin::Yes, rootRenderer);
-    intersectionState.rootBounds = applyRootMargin == ApplyRootMargin::Yes ? rootState.boundsWithRootMargin : rootState.bounds;
+    if (applyRootMargin == ApplyRootMargin::Yes) {
+        // If applyRootMargin is Yes, the root and target frames are same-origin.
+        // Therefore the root renderer should be available, as the root is in the
+        // same process as the target (with or without Site Isolation)
+        ASSERT(rootRenderer);
+        auto rootUsedZoom = rootRenderer ? Style::ZoomFactor { rootRenderer->style().usedZoom() } : Style::ZoomFactor::none();
 
-#if defined(WEBKIT_IOS6)
-    if (targetRenderer->isSkippedContent() && !isFirstObservation && !*registration.previousThresholdIndex)
-        return intersectionState;
-#endif
+        expandRootBoundsWithRootMargin(intersectionState.rootBounds, scrollMarginBox(), rootUsedZoom);
+        expandRootBoundsWithRootMargin(intersectionState.rootBounds, rootMarginBox(), rootUsedZoom);
+    }
 
     auto localTargetBounds = [&]() -> LayoutRect {
         if (CheckedPtr renderBox = dynamicDowncast<RenderBox>(*targetRenderer))
@@ -744,10 +670,7 @@ auto IntersectionObserver::computeIntersectionState(const IntersectionObserverRe
 
     intersectionState.observationChanged = isFirstObservation || intersectionState.thresholdIndex != registration.previousThresholdIndex;
     if (intersectionState.observationChanged) {
-        auto& cachedAbsoluteRootBounds = applyRootMargin == ApplyRootMargin::Yes ? rootState.absoluteBoundsWithRootMargin : rootState.absoluteBounds;
-        if (!cachedAbsoluteRootBounds)
-            cachedAbsoluteRootBounds = rootLocalToAbsoluteRect(intersectionState.rootBounds);
-        intersectionState.absoluteRootBounds = *cachedAbsoluteRootBounds;
+        intersectionState.absoluteRootBounds = rootLocalToAbsoluteRect(intersectionState.rootBounds);
 
         if (!intersectionState.absoluteTargetRect)
             intersectionState.absoluteTargetRect = targetRenderer->localToAbsoluteQuad(FloatRect(localTargetBounds)).boundingBox();
@@ -758,9 +681,6 @@ auto IntersectionObserver::computeIntersectionState(const IntersectionObserverRe
 
 auto IntersectionObserver::updateObservations(const Frame& hostFrame) -> NeedNotify
 {
-    if (m_observationTargets.isEmptyIgnoringNullReferences())
-        return NeedNotify::No;
-
     RefPtr hostFrameView = hostFrame.virtualView();
     if (!hostFrameView)
         return NeedNotify::No;
@@ -771,39 +691,19 @@ auto IntersectionObserver::updateObservations(const Frame& hostFrame) -> NeedNot
 
     auto needNotify = NeedNotify::No;
 
-#if defined(WEBKIT_IOS6)
-    if (m_observationTargetsSnapshotIsStale) {
-        m_observationTargetsSnapshot.shrink(0);
-        m_observationTargetsSnapshot.reserveCapacity(m_observationTargets.computeSize());
-        for (auto& target : m_observationTargets)
-            m_observationTargetsSnapshot.append(target);
-        m_observationTargetsSnapshotIsStale = false;
-    }
-    auto& observationTargets = m_observationTargetsSnapshot;
-#else
-    Vector<WeakPtr<Element, WeakPtrImplWithEventTargetData>, 16> observationTargets;
-    for (auto& target : m_observationTargets)
-        observationTargets.append(target);
-#endif
+    // Cache Document::isFullyActive() because it's expensive, and it's likely that observation
+    // targets all belong to a handful of documents.
+    auto isDocumentFullyActive = [cache = WeakHashMap<Document, bool, WeakPtrImplWithEventTargetData> { }] (const Document &document) mutable {
+        auto isFullyActive = cache.ensure(document, [&] () {
+            return document.isFullyActive();
+        }).iterator->value;
 
-    auto rootState = computeIntersectionRootState(*hostFrameView);
+        // Invariant: the fully active status of a document can't change when updating observations.
+        ASSERT(isFullyActive == document.isFullyActive());
+        return isFullyActive;
+    };
 
-    RefPtr hostFrameSecurityOrigin = hostFrame.frameDocumentSecurityOrigin();
-    // Targets of one observer nearly always share a document, and the origin comparison is a
-    // string compare, so remember the answer for the document we last asked about.
-    const Document* lastSameOriginDocument = nullptr;
-    bool lastSameOriginResult = false;
-
-    for (auto& weakTarget : observationTargets) {
-        RefPtr protectedTarget = weakTarget.get();
-        if (!protectedTarget) {
-#if defined(WEBKIT_IOS6)
-            m_observationTargetsSnapshotIsStale = true;
-#endif
-            continue;
-        }
-        Ref target = protectedTarget.releaseNonNull();
-
+    for (const auto& target : copyToVectorOf<Ref<Element>>(m_observationTargets)) {
         // Per HTML spec, "update the rendering" step (which includes "run the update intersection
         // observations") only occurs for fully active documents. Hence skip updating the target if
         // its document is not fully active.
@@ -818,19 +718,13 @@ auto IntersectionObserver::updateObservations(const Frame& hostFrame) -> NeedNot
         auto& registration = targetRegistrations[index];
 
         bool isSameOriginObservation = [&] () {
-            if (!hostFrameSecurityOrigin)
-                return false;
+            if (RefPtr hostFrameSecurityOrigin = hostFrame.frameDocumentSecurityOrigin())
+                return protect(target->document().securityOrigin())->isSameOriginDomain(*hostFrameSecurityOrigin);
 
-            auto& targetDocument = target->document();
-            if (lastSameOriginDocument == &targetDocument)
-                return lastSameOriginResult;
-
-            lastSameOriginDocument = &targetDocument;
-            lastSameOriginResult = protect(targetDocument.securityOrigin())->isSameOriginDomain(*hostFrameSecurityOrigin);
-            return lastSameOriginResult;
+            return false;
         }();
         auto applyRootMargin = isSameOriginObservation ? ApplyRootMargin::Yes : ApplyRootMargin::No;
-        auto intersectionState = computeIntersectionState(registration, *hostFrameView, target, applyRootMargin, rootState);
+        auto intersectionState = computeIntersectionState(registration, *hostFrameView, target, applyRootMargin);
 
         if (intersectionState.observationChanged) {
             if (intersectionState.isIntersecting) {

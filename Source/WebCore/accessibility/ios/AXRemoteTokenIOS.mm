@@ -36,7 +36,11 @@ RetainPtr<NSData> newAccessibilityRemoteToken(NSString *uuidString)
 {
     if (!uuidString)
         return nil;
+#if defined(WEBKIT_IOS6)
+    return [NSKeyedArchiver archivedDataWithRootObject:@{ @"ax-pid" : @(getpid()), @"ax-uuid" : uuidString, @"ax-register" : @YES }];
+#else
     return [NSKeyedArchiver archivedDataWithRootObject:@{ @"ax-pid" : @(getpid()), @"ax-uuid" : uuidString, @"ax-register" : @YES } requiringSecureCoding:YES error:nullptr];
+#endif
 }
 
 #endif
