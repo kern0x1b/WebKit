@@ -276,6 +276,13 @@ void LocalFrameViewLayoutContext::performLayout(bool canDeferUpdateLayerPosition
 #if PLATFORM(IOS_FAMILY)
     if (protect(view())->updateFixedPositionLayoutRect() && subtreeLayoutRoot())
         convertSubtreeLayoutToFullLayout();
+#if defined(WEBKIT_IOS6)
+    if (protect(view())->useCustomFixedPositionLayoutRect())
+        protect(view())->setLayoutViewportOverrideRect(LayoutRect(protect(view())->customFixedPositionLayoutRect()),
+            LocalFrameView::TriggerLayoutOrNot::No);
+
+    protect(view())->setFixedPositionRectAtLastLayout(protect(view())->rectForFixedPositionLayout());
+#endif
 #endif
     {
         SetForScope layoutPhase(m_layoutPhase, LayoutPhase::InPreLayout);

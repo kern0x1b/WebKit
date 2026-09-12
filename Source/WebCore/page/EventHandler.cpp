@@ -3098,8 +3098,10 @@ void EventHandler::updateMouseEventTargetNode(const AtomString& eventType, Node*
         m_textRecognitionHoverTimer.restart();
 #endif // ENABLE(IMAGE_ANALYSIS)
 
+#if !defined(WEBKIT_IOS6)
     if (RefPtr page = frame->page())
         protect(page->imageOverlayController())->elementUnderMouseDidChange(frame, m_elementUnderMouse);
+#endif
 
     ASSERT_IMPLIES(m_elementUnderMouse, &m_elementUnderMouse->document() == frame->document());
     ASSERT_IMPLIES(m_lastElementUnderMouse, &m_lastElementUnderMouse->document() == frame->document());
@@ -5464,9 +5466,28 @@ static HitTestResult hitTestResultInFrame(LocalFrame* frame, const LayoutPoint& 
     return result;
 }
 
+#if defined(WEBKIT_IOS6)
+static FILE* touchLatencyLog()
+{
+    static FILE* file = [] () -> FILE* {
+        const char* path = getenv("WEBKIT_IOS6_TOUCH_LATENCY_LOG");
+        if (!path || !path[0])
+            return nullptr;
+        FILE* opened = fopen(path, "a");
+        if (opened)
+            setvbuf(opened, nullptr, _IOLBF, 0);
+        return opened;
+    }();
+    return file;
+}
+#endif
+
 std::expected<bool, RemoteFrameGeometryTransformer> EventHandler::handleTouchEvent(const PlatformTouchEvent& event)
 {
     Ref frame = m_frame.get();
+#if defined(WEBKIT_IOS6)
+    MonotonicTime touchHandleEntry = MonotonicTime::now();
+#endif
 
     // First build up the lists to use for the 'touches', 'targetTouches' and 'changedTouches' attributes
     // in the JS event. See https://www.sitepen.com/blog/touching-and-gesturing-on-the-iphone/
@@ -5595,7 +5616,7 @@ std::expected<bool, RemoteFrameGeometryTransformer> EventHandler::handleTouchEve
         if (!targetFrame)
             continue;
 
-#if PLATFORM(WPE) || PLATFORM(GTK)
+#if PLATFORM(WPE) || PLATFORM(GTK) || defined(WEBKIT_IOS6)
         RefPtr<EventTarget> pointerTarget = touchTarget;
 
         if (pointState != PlatformTouchPoint::TouchPressed) {
@@ -5685,6 +5706,18 @@ std::expected<bool, RemoteFrameGeometryTransformer> EventHandler::handleTouchEve
             Ref<TouchEvent> touchEvent = TouchEvent::create(effectiveTouches.get(), targetTouches.get(), changedTouches[state].m_touches.get(),
                 stateName, downcast<Node>(*target).document().windowProxy(), { }, event.modifiers());
             target->dispatchEvent(touchEvent);
+#if defined(WEBKIT_IOS6)
+            if (state == PlatformTouchPoint::TouchPressed) {
+                if (FILE* log = touchLatencyLog()) {
+                    MonotonicTime dispatchDone = MonotonicTime::now();
+                    fprintf(log, "%.3f touchstart capture->entry=%.1fms entry->dispatched=%.1fms capture->dispatched=%.1fms\n",
+                        dispatchDone.secondsSinceEpoch().value(),
+                        (touchHandleEntry - event.timestamp()).milliseconds(),
+                        (dispatchDone - touchHandleEntry).milliseconds(),
+                        (dispatchDone - event.timestamp()).milliseconds());
+                }
+            }
+#endif
             swallowedEvent = swallowedEvent || touchEvent->defaultPrevented() || touchEvent->defaultHandled();
         }
     }

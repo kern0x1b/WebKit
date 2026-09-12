@@ -2810,6 +2810,12 @@ void Document::updateRenderTree(std::unique_ptr<Style::Update> styleUpdate)
 
 void Document::resolveStyle(ResolveStyleType type)
 {
+#if defined(WEBKIT_IOS6)
+    if (g_webkitIOS6LayoutCounters) [[unlikely]] {
+        extern unsigned g_webkitIOS6StyleResolves;
+        ++g_webkitIOS6StyleResolves;
+    }
+#endif
     ScriptDisallowedScope::InMainThread scriptDisallowedScope;
 
     ASSERT(!view() || !view()->isPainting());
