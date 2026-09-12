@@ -33,6 +33,9 @@ namespace Style {
 
 float snapLengthAsBorderWidth(float length, float deviceScaleFactor)
 {
+    if (!length)
+        return 0;
+
     // https://drafts.csswg.org/css-values-4/#snap-a-length-as-a-border-width
 
     // 1. Assert: `length` is non-negative.

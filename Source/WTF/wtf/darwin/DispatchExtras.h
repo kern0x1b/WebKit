@@ -41,12 +41,20 @@ inline dispatch_queue_main_t mainDispatchQueueSingleton()
 
 inline dispatch_queue_attr_t serialQueueWithAutoreleasePoolAttrSingleton()
 {
+#if defined(WEBKIT_IOS6)
+    return DISPATCH_QUEUE_SERIAL;
+#else
     return DISPATCH_QUEUE_SERIAL_WITH_AUTORELEASE_POOL; // NOLINT
+#endif
 }
 
 inline dispatch_queue_attr_t concurrentQueueWithAutoreleasePoolAttrSingleton()
 {
+#if defined(WEBKIT_IOS6)
+    return DISPATCH_QUEUE_CONCURRENT;
+#else
     return DISPATCH_QUEUE_CONCURRENT_WITH_AUTORELEASE_POOL; // NOLINT
+#endif
 }
 
 } // namespace WTF

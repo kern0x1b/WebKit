@@ -377,6 +377,18 @@ auto TreeResolver::resolveElement(Element& element, const Style::ComputedStyle* 
     }
 
     auto resolveAndAddPseudoElementStyle = [&](const PseudoElementIdentifier& pseudoElementIdentifier) {
+#if defined(WEBKIT_IOS6)
+        switch (pseudoElementIdentifier.type) {
+        case PseudoElementType::FirstLine:
+        case PseudoElementType::FirstLetter:
+            break;
+        default:
+            if (!update.style->hasPseudoStyle(pseudoElementIdentifier.type)
+                && (!existingStyle || !existingStyle->hasPseudoElementStyles()))
+                return OptionSet<Change> { };
+            break;
+        }
+#endif
         const Style::ComputedStyle* existingPseudoStyle = existingStyle ? existingStyle->pseudoElementStyle(pseudoElementIdentifier) : nullptr;
         auto pseudoElementUpdate = resolvePseudoElement(element, pseudoElementIdentifier, update, parent().isInDisplayNoneTree, existingPseudoStyle);
 
@@ -1522,7 +1534,7 @@ std::unique_ptr<Update> TreeResolver::resolve()
     if (!documentElement->childNeedsStyleRecalc() && !documentElement->needsStyleRecalc())
         return WTF::move(m_update);
 
-    m_didSeePendingStylesheet = m_document->styleScope().hasPendingSheetsBeforeBody();
+    m_didSeePendingStylesheet = m_document->styleScope().blocksRenderingBeforeBody();
 
     if (!m_update)
         m_update = makeUnique<Update>(m_document);

@@ -34,6 +34,7 @@
 #include "ImageFrameAnimator.h"
 #include "ImageObserver.h"
 #include "Logging.h"
+#include <stdlib.h>
 
 namespace WebCore {
 
@@ -98,8 +99,12 @@ void BitmapImageSource::encodedDataStatusChanged(EncodedDataStatus status)
     if (status >= EncodedDataStatus::SizeAvailable)
         m_frames.resizeToFit(protect(m_decoder)->frameCount());
 
+    RefPtr bitmapImage = m_bitmapImage.get();
+    if (!bitmapImage)
+        return;
+
     if (auto imageObserver = this->imageObserver())
-        imageObserver->encodedDataStatusChanged(protect(*m_bitmapImage), status);
+        imageObserver->encodedDataStatusChanged(*bitmapImage, status);
 }
 
 EncodedDataStatus BitmapImageSource::dataChanged(FragmentedSharedBuffer* data, bool allDataReceived)
@@ -154,8 +159,12 @@ void BitmapImageSource::decodedSizeChanged(long long decodedSize)
     if (!decodedSize)
         return;
 
+    RefPtr bitmapImage = m_bitmapImage.get();
+    if (!bitmapImage)
+        return;
+
     if (auto imageObserver = this->imageObserver())
-        imageObserver->decodedSizeChanged(protect(*m_bitmapImage), decodedSize);
+        imageObserver->decodedSizeChanged(*bitmapImage, decodedSize);
 }
 
 void BitmapImageSource::decodedSizeIncreased(unsigned decodedSize)
@@ -212,8 +221,12 @@ bool BitmapImageSource::canDestroyDecodedData() const
     if (!isLargeForDecoding())
         return true;
 
+    RefPtr bitmapImage = m_bitmapImage.get();
+    if (!bitmapImage)
+        return true;
+
     if (auto imageObserver = this->imageObserver())
-        return imageObserver->canDestroyDecodedData(protect(*m_bitmapImage));
+        return imageObserver->canDestroyDecodedData(*bitmapImage);
 
     return true;
 }
@@ -317,8 +330,12 @@ bool BitmapImageSource::isAnimationAllowed() const
         return false;
 
     // ImageObserver may disallow animation.
+    RefPtr bitmapImage = m_bitmapImage.get();
+    if (!bitmapImage)
+        return true;
+
     if (auto imageObserver = this->imageObserver())
-        return imageObserver->allowsAnimation(protect(*m_bitmapImage));
+        return imageObserver->allowsAnimation(*bitmapImage);
 
     return true;
 }
@@ -342,7 +359,19 @@ DecodingDestination BitmapImageSource::preferredDecodingDestination(GraphicsCont
 bool BitmapImageSource::isLargeForDecoding() const
 {
     auto sizeInBytes = size(ImageOrientation::Orientation::None).unclampedArea() * sizeof(uint32_t);
+#if defined(WEBKIT_IOS6)
+    static const size_t asynchronousDecodingThreshold = [] -> size_t {
+        if (const char* override = getenv("WEBKIT_IOS6_ASYNC_DECODE_MIN_KB")) {
+            int value = atoi(override);
+            if (value > 0 && value <= 64 * 1024)
+                return static_cast<size_t>(value) * KB;
+        }
+        return 64 * KB;
+    }();
+    return sizeInBytes > (isAnimated() ? 100 * KB : asynchronousDecodingThreshold);
+#else
     return sizeInBytes > (isAnimated() ? 100 * KB : 500 * KB);
+#endif
 }
 
 bool BitmapImageSource::isDecoderWorkQueueIdle() const
@@ -427,8 +456,12 @@ void BitmapImageSource::imageFrameAtIndexAvailable(unsigned index, ImageAnimatin
     if (decodingStatus == DecodingStatus::Invalid)
         return;
 
+    RefPtr bitmapImage = m_bitmapImage.get();
+    if (!bitmapImage)
+        return;
+
     if (auto imageObserver = this->imageObserver())
-        imageObserver->imageFrameAvailable(protect(*m_bitmapImage), animatingState, nullptr, decodingStatus);
+        imageObserver->imageFrameAvailable(*bitmapImage, animatingState, nullptr, decodingStatus);
 }
 
 void BitmapImageSource::imageFrameDecodeAtIndexHasFinished(unsigned index, ImageAnimatingState animatingState, DecodingStatus decodingStatus)
@@ -549,8 +582,13 @@ const ImageFrame& BitmapImageSource::frameAtIndexCacheIfNeeded(unsigned index, c
     auto& frame = m_frames[index];
     auto subsamplingLevelValue = subsamplingLevel.value_or(frame.subsamplingLevel());
 
+#if defined(WEBKIT_IOS6)
+    if (frame.isComplete())
+        return frame;
+#else
     if (frame.isComplete() && subsamplingLevelValue == frame.subsamplingLevel())
         return frame;
+#endif
 
     destroyNativeImageAtIndex(index);
 
@@ -617,6 +655,26 @@ std::expected<Ref<NativeImage>, DecodingStatus> BitmapImageSource::nativeImageAt
     if (auto compatibleDecodingDestination = compatibleDecodingDestinationWithOptionsAtIndex(index, subsamplingLevel, options))
         decodingDestination = *compatibleDecodingDestination;
     else {
+#if defined(WEBKIT_IOS6)
+        std::optional<IntSize> sizeForDrawing;
+        if (!isAnimated())
+            sizeForDrawing = options.sizeForDrawing();
+
+        auto decodingOptions = DecodingOptions { DecodingMode::Synchronous, decodingDestination, sizeForDrawing };
+
+        auto result = protect(m_decoder)->createNativeImageAtIndex(index, subsamplingLevel, decodingOptions);
+        if (!result)
+            return makeUnexpected(DecodingStatus::Invalid);
+
+        Ref nativeImage = WTF::move(std::get<Ref<NativeImage>>(*result));
+        decodingDestination = std::get<DecodingDestination>(*result);
+
+        if (sizeForDrawing && nativeImage->size() == protect(m_decoder)->size())
+            sizeForDrawing = std::nullopt;
+
+        decodingOptions = { DecodingMode::Synchronous, decodingDestination, sizeForDrawing };
+        cacheNativeImageAtIndex(index, subsamplingLevel, decodingOptions, WTF::move(nativeImage));
+#else
         auto decodingOptions = DecodingOptions { DecodingMode::Synchronous, decodingDestination };
 
         auto result = protect(m_decoder)->createNativeImageAtIndex(index, subsamplingLevel, decodingOptions);
@@ -628,6 +686,7 @@ std::expected<Ref<NativeImage>, DecodingStatus> BitmapImageSource::nativeImageAt
 
         decodingOptions = { DecodingMode::Synchronous, decodingDestination };
         cacheNativeImageAtIndex(index, subsamplingLevel, decodingOptions, WTF::move(nativeImage));
+#endif
     }
 
     if (RefPtr nativeImage = frameAtIndex(index).nativeImage(decodingDestination))
@@ -733,8 +792,12 @@ void BitmapImageSource::setHasHDRContentForTesting()
 
     m_hasHDRContentForTesting = true;
 
+    RefPtr bitmapImage = m_bitmapImage.get();
+    if (!bitmapImage)
+        return;
+
     if (auto imageObserver = this->imageObserver())
-        imageObserver->imageContentChanged(protect(*m_bitmapImage));
+        imageObserver->imageContentChanged(*bitmapImage);
 }
 
 DecodingStatus BitmapImageSource::frameDecodingStatusAtIndex(unsigned index) const

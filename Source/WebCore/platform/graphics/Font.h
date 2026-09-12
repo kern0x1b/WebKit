@@ -120,6 +120,10 @@ public:
 
     const GlyphPage* glyphPage(unsigned pageNumber) const;
 
+#if USE(CORE_TEXT) && defined(WEBKIT_IOS6) && !ENABLE(OPENTYPE_VERTICAL)
+    void prewarmGlyphAdvances(const GlyphPage&) const;
+#endif
+
     void determinePitch();
     PitchType pitch() const { return m_treatAsFixedPitch ? PitchType::Fixed : PitchType::Variable; }
     bool canTakeFixedPitchFastContentMeasuring() const { return m_canTakeFixedPitchFastContentMeasuring; }
@@ -135,6 +139,11 @@ public:
     WEBCORE_EXPORT static std::optional<Ref<Font>> fromIPCData(IPCFontData&&);
     WEBCORE_EXPORT IPCFontData toSerializableFont() const;
     WEBCORE_EXPORT std::optional<InstalledFont> toSerializableInstalledFont() const;
+
+    // The Core Text string attributes for shaping with this font. They depend only on the
+    // font, the kerning switch and the locale, so the dictionary is built once per font
+    // rather than once per complex text run.
+    RetainPtr<CFDictionaryRef> cfStringAttributes(bool enableKerning, const AtomString& locale) const;
 #endif
 #if PLATFORM(WIN)
     SCRIPT_CACHE* scriptCache() const LIFETIME_BOUND { return &m_scriptCache; }
@@ -174,6 +183,9 @@ private:
     float platformWidthForGlyph(Glyph) const;
     Path platformPathForGlyph(Glyph) const;
 
+    static constexpr unsigned directMappedGlyphPageCount = 16;
+    mutable std::array<const GlyphPage*, directMappedGlyphPageCount> m_directMappedGlyphPages { };
+    mutable uint16_t m_directMappedGlyphPagesFilled { 0 };
     mutable HashMap<unsigned, RefPtr<GlyphPage>, IntHash<unsigned>, WTF::UnsignedWithZeroKeyHashTraits<unsigned>> m_glyphPages;
     mutable GlyphMetricsMap<float> m_glyphToWidthMap;
     mutable std::unique_ptr<GlyphMetricsMap<FloatRect>> m_glyphToBoundsMap;

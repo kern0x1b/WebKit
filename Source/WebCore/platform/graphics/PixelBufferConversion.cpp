@@ -25,6 +25,7 @@
 
 #include "config.h"
 #include "PixelBufferConversion.h"
+#include "ColorTransferFunctions.h"
 
 #include "AlphaPremultiplication.h"
 #include "ColorSpace.h"
@@ -255,8 +256,13 @@ static bool convertImagePixelsAcceleratedMatchingSize(const ConstPixelBufferConv
         constexpr std::array<uint8_t, 4> identityMap { 0, 1, 2, 3 };
         constexpr std::array<uint8_t, 4> swappedMap { 2, 1, 0, 3 };
         constexpr uint8_t lastChannelMask = 0x1; // 0x8 is the first of the four channels, 0x1 the last.
+#if defined(WEBKIT_IOS6)
+        vImagePermuteChannels_ARGB8888(&sourceVImageBuffer, &destinationVImageBuffer, swapComponentOrder ? swappedMap.data() : identityMap.data(), kvImageNoFlags);
+        vImageOverwriteChannelsWithScalar_ARGB8888(255, &destinationVImageBuffer, &destinationVImageBuffer, lastChannelMask, kvImageNoFlags);
+#else
         constexpr std::array<uint8_t, 4> opaqueAlpha { 0, 0, 0, 255 };
         vImagePermuteChannelsWithMaskedInsert_ARGB8888(&sourceVImageBuffer, &destinationVImageBuffer, swapComponentOrder ? swappedMap.data() : identityMap.data(), lastChannelMask, opaqueAlpha.data(), kvImageNoFlags);
+#endif
         return true;
     }
 
@@ -579,8 +585,94 @@ static bool canCopyPixels(const PixelBufferFormat& sourceFormat, const PixelBuff
         && (sourceAlphaFormat == destinationAlphaFormat || (sourceAlphaFormat == AlphaFormat::Premultiplied && destinationAlphaFormat == AlphaFormat::Opaque));
 }
 
+#if defined(WEBKIT_IOS6)
+static const std::array<uint8_t, 256>& transferTable(bool toLinear)
+{
+    using Transfer = SRGBTransferFunction<float, TransferFunctionMode::Clamped>;
+
+    static NeverDestroyed<std::array<uint8_t, 256>> toLinearTable = [] {
+        std::array<uint8_t, 256> table;
+        for (unsigned i = 0; i < 256; ++i) {
+            float linear = Transfer::toLinear(i / 255.0f);
+            table[i] = static_cast<uint8_t>(linear * 255.0f + 0.5f);
+        }
+        return table;
+    }();
+
+    static NeverDestroyed<std::array<uint8_t, 256>> toGammaTable = [] {
+        std::array<uint8_t, 256> table;
+        for (unsigned i = 0; i < 256; ++i) {
+            float encoded = Transfer::toGammaEncoded(i / 255.0f);
+            table[i] = static_cast<uint8_t>(encoded * 255.0f + 0.5f);
+        }
+        return table;
+    }();
+
+    return toLinear ? toLinearTable.get() : toGammaTable.get();
+}
+
+static bool isEightBitFormat(PixelFormat format)
+{
+    return format == PixelFormat::RGBA8 || format == PixelFormat::BGRA8 || format == PixelFormat::BGRX8;
+}
+
+static bool convertImagePixelsAcrossSRGBAndLinearSRGB(const ConstPixelBufferConversionView& source, const PixelBufferConversionView& destination, const IntSize& destinationSize)
+{
+    bool toLinear = source.format.colorSpace == ColorSpace::SRGB() && destination.format.colorSpace == ColorSpace::LinearSRGB();
+    bool toGammaEncoded = source.format.colorSpace == ColorSpace::LinearSRGB() && destination.format.colorSpace == ColorSpace::SRGB();
+    if (!toLinear && !toGammaEncoded)
+        return false;
+    if (!isEightBitFormat(source.format.pixelFormat) || !isEightBitFormat(destination.format.pixelFormat))
+        return false;
+
+    auto sameColorSpaceSource = source;
+    sameColorSpaceSource.format.colorSpace = destination.format.colorSpace;
+    convertImagePixels(sameColorSpaceSource, destination, destinationSize);
+
+    auto& table = transferTable(toLinear);
+    bool premultiplied = destination.format.alphaFormat == AlphaPremultiplication::Premultiplied;
+    bool hasAlpha = destination.format.pixelFormat != PixelFormat::BGRX8;
+
+    size_t rowOffset = 0;
+    for (int y = 0; y < destinationSize.height(); ++y) {
+        for (int x = 0; x < destinationSize.width(); ++x) {
+            size_t pixel = rowOffset + static_cast<size_t>(x) * 4;
+            uint8_t alpha = hasAlpha ? destination.rows[pixel + 3] : 255;
+
+            for (size_t channel = 0; channel < 3; ++channel) {
+                unsigned value = destination.rows[pixel + channel];
+                if (premultiplied && hasAlpha) {
+                    if (!alpha) {
+                        destination.rows[pixel + channel] = 0;
+                        continue;
+                    }
+                    value = std::min<unsigned>(255, (value * 255 + alpha / 2) / alpha);
+                }
+
+                value = table[value];
+
+                if (premultiplied && hasAlpha)
+                    value = (value * alpha + 127) / 255;
+
+                destination.rows[pixel + channel] = static_cast<uint8_t>(value);
+            }
+        }
+        rowOffset += destination.bytesPerRow;
+    }
+
+    return true;
+}
+#endif
+
 void convertImagePixels(const ConstPixelBufferConversionView& source, const PixelBufferConversionView& destination, const IntSize& destinationSize)
 {
+#if defined(WEBKIT_IOS6)
+    if (source.format.colorSpace != destination.format.colorSpace) {
+        if (convertImagePixelsAcrossSRGBAndLinearSRGB(source, destination, destinationSize))
+            return;
+    }
+#endif
+
     // We currently only support converting between RGBA8, BGRA8, RGBX8, BGRX8, and (where enabled) RGBA16F.
     ASSERT(isSupportedConversionFormat(source.format.pixelFormat));
     ASSERT(isSupportedConversionFormat(destination.format.pixelFormat));

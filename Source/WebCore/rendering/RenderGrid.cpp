@@ -859,7 +859,17 @@ LayoutUnit RenderGrid::guttersSize(Style::GridTrackSizingDirection direction, un
 
 std::pair<LayoutUnit, LayoutUnit> RenderGrid::computeIntrinsicLogicalWidths() const
 {
+#if defined(WEBKIT_IOS6)
+    auto mayUseGridFormattingContext = [&] {
+        if (m_hasGridFormattingContextLayout && !*m_hasGridFormattingContextLayout)
+            return false;
+        m_hasGridFormattingContextLayout = LayoutIntegration::canUseForGridLayout(*this);
+        return *m_hasGridFormattingContextLayout;
+    };
+    if (mayUseGridFormattingContext()) {
+#else
     if (LayoutIntegration::canUseForGridLayout(*this)) {
+#endif
         // const_cast is safe here: computeIntrinsicWidths() only reads grid properties
         // and does not mutate RenderGrid state, matching the legacy path pattern below.
         auto gridLayout = LayoutIntegration::GridLayout { const_cast<RenderGrid&>(*this) };
@@ -1878,13 +1888,33 @@ void RenderGrid::stretchBlockSizeForGridItem(RenderBox& gridItem, LayoutUnit ali
     gridItem.setOverridingBorderBoxLogicalHeight(desiredLogicalHeight);
 
     auto itemNeedsRelayoutForStretchAlignment = [&]() {
-        if (desiredLogicalHeight != gridItem.logicalHeight())
+#if defined(WEBKIT_IOS6)
+        extern unsigned g_webkitIOS6GridStretchHeight;
+        extern unsigned g_webkitIOS6GridStretchRequirement;
+        extern unsigned g_webkitIOS6GridStretchPercent;
+#endif
+        if (desiredLogicalHeight != gridItem.logicalHeight()) {
+#if defined(WEBKIT_IOS6)
+            if (g_webkitIOS6LayoutCounters) [[unlikely]]
+                ++g_webkitIOS6GridStretchHeight;
+#endif
             return true;
+        }
 
-        if (canSetColumnAxisStretchRequirementForItem(gridItem))
+        if (canSetColumnAxisStretchRequirementForItem(gridItem)) {
+#if defined(WEBKIT_IOS6)
+            return false;
+#else
             return gridLayoutState.containsLayoutRequirementForGridItem(gridItem, ItemLayoutRequirement::NeedsColumnAxisStretchAlignment);
+#endif
+        }
 
-        return is<RenderBlock>(gridItem) && downcast<RenderBlock>(gridItem).hasPercentHeightDescendants();
+        bool hasPercentHeightDescendants = is<RenderBlock>(gridItem) && downcast<RenderBlock>(gridItem).hasPercentHeightDescendants();
+#if defined(WEBKIT_IOS6)
+        if (hasPercentHeightDescendants && g_webkitIOS6LayoutCounters) [[unlikely]]
+            ++g_webkitIOS6GridStretchPercent;
+#endif
+        return hasPercentHeightDescendants;
     }();
     // Checking the logical-height of a grid item isn't enough. Setting an override logical-height
     // changes the definiteness, resulting in percentages to resolve differently.
@@ -1963,6 +1993,13 @@ bool RenderGrid::isBaselineAlignmentForGridItem(const RenderBox& gridItem, Style
 {
     if (gridItem.isOutOfFlowPositioned())
         return false;
+#if defined(WEBKIT_IOS6)
+    auto containingAxis = logicalAxis(alignmentContextType);
+    auto specifiedAlignment = containingAxis == LogicalBoxAxis::Inline
+        ? gridItem.style().justifySelf().resolve(&style()) : gridItem.style().alignSelf().resolve(&style());
+    if (!isBaselinePosition(specifiedAlignment.position()))
+        return false;
+#endif
     auto align = selfAlignmentForGridItem(gridItem, logicalAxis(alignmentContextType)).position();
     if (!isBaselinePosition(align))
         return false;
@@ -2250,10 +2287,18 @@ bool RenderGrid::isSubgrid() const
 
 bool RenderGrid::isSubgrid(Style::GridTrackSizingDirection direction) const
 {
-    // If the grid container is forced to establish an independent formatting
-    // context (like contain layout, or position:absolute), then the used value
-    // of grid-template-rows/columns is 'none' and the container is not a subgrid.
-    // https://drafts.csswg.org/css-grid-2/#subgrid-listing
+#if defined(WEBKIT_IOS6)
+    auto* renderGrid = dynamicDowncast<RenderGrid>(parent());
+    if (!renderGrid)
+        return false;
+    if (!style().gridTemplateList(direction).subgrid)
+        return false;
+    if (establishesIndependentFormattingContextIgnoringDisplayType(style()))
+        return false;
+    if (isExcludedFromNormalLayout())
+        return false;
+    return !renderGrid->isStackingAxis(direction);
+#else
     if (establishesIndependentFormattingContextIgnoringDisplayType(style()))
         return false;
     if (isExcludedFromNormalLayout())
@@ -2264,6 +2309,7 @@ bool RenderGrid::isSubgrid(Style::GridTrackSizingDirection direction) const
     if (!renderGrid)
         return false;
     return !renderGrid->isStackingAxis(direction);
+#endif
 }
 
 bool RenderGrid::isSubgridInParentDirection(Style::GridTrackSizingDirection parentDirection) const
@@ -2730,6 +2776,9 @@ bool RenderGrid::canCreateIntrinsicLogicalHeightsForRowSizingFirstPassCache() co
     if (enclosingFragmentedFlow())
         return false;
 
+#if defined(WEBKIT_IOS6)
+    return true;
+#else
     for (auto& gridItem : childrenOfType<RenderBox>(*this)) {
         if (auto* renderGrid = dynamicDowncast<RenderGrid>(gridItem)) {
             if (renderGrid->isSubgridRows())
@@ -2743,7 +2792,23 @@ bool RenderGrid::canCreateIntrinsicLogicalHeightsForRowSizingFirstPassCache() co
             return false;
     }
     return true;
+#endif
 }
+
+#if defined(WEBKIT_IOS6)
+bool RenderGrid::canCacheIntrinsicLogicalHeightForRowSizingFirstPass(const RenderBox& gridItem) const
+{
+    if (auto* renderGrid = dynamicDowncast<RenderGrid>(gridItem)) {
+        if (renderGrid->isSubgridRows())
+            return false;
+
+        if (renderGrid->isSubgridColumns() && GridLayoutFunctions::isOrthogonalGridItem(*this, *renderGrid))
+            return false;
+    }
+
+    return !isBaselineAlignmentForGridItem(gridItem);
+}
+#endif
 
 void GridItemSizeCache::setSizeForGridItem(const RenderBox& gridItem, LayoutUnit size)
 {

@@ -442,7 +442,9 @@ std::optional<ExceptionOr<void>> XMLHttpRequest::prepareToSend()
 
 ExceptionOr<void> XMLHttpRequest::send(std::optional<SendTypes>&& sendType)
 {
+#if !defined(WEBKIT_IOS6)
     InspectorInstrumentation::willSendXMLHttpRequest(protect(scriptExecutionContext()).get(), url().string());
+#endif
     m_userGestureToken = UserGestureIndicator::currentUserGesture();
 
     if (!sendType)
@@ -1087,6 +1089,17 @@ void XMLHttpRequest::didReceiveData(const SharedBuffer& buffer)
 
     if (useDecoder && !m_decoder)
         m_decoder = createDecoder();
+
+#if defined(WEBKIT_IOS6)
+    if (useDecoder && m_responseBuilder.length() && m_responseBuilder.capacity() == m_responseBuilder.length()) {
+        long long announcedLength = m_response.expectedContentLength();
+        if (announcedLength > 16 * 1024) {
+            unsigned reservation = static_cast<unsigned>(std::min<long long>(announcedLength, 1024 * 1024));
+            if (reservation > m_responseBuilder.length())
+                m_responseBuilder.reserveCapacity(reservation);
+        }
+    }
+#endif
 
     if (buffer.isEmpty())
         return;
