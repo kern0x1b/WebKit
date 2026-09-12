@@ -1633,6 +1633,9 @@ macro prologue(osrSlowPath, traceSlowPath)
         elsif ARM64E
             # untagReturnAddress will be performed in Gate::entryOSREntry.
             pop lr, cfr
+        elsif ARMv7
+            pop cfr
+            pop lr
         else
             pop cfr
         end
