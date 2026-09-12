@@ -214,8 +214,9 @@ bool GraphicsContextGLCocoa::platformInitializeContext()
 #endif
 
     m_displayObj = initializeEGLDisplay(attributes);
-    if (!m_displayObj)
+    if (!m_displayObj) {
         return false;
+    }
 
     EGLint configAttributes[] = {
         EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
@@ -306,7 +307,7 @@ bool GraphicsContextGLCocoa::platformInitializeExtensions()
 #endif
     // For flip blit.
     if (!m_isForWebGL2 && !enableExtensionsImpl({ "GL_NV_framebuffer_blit"_s }))
-        return false;
+        enableExtensionsImpl({ "GL_ANGLE_framebuffer_blit"_s });
 #if ENABLE(WEBXR)
     auto attributes = contextAttributes();
     if (attributes.xrCompatible && !enableRequiredWebXRExtensionsImpl())
@@ -388,8 +389,15 @@ bool GraphicsContextGLCocoa::reshapeDrawingBuffer()
     return bindNextDrawingBuffer();
 }
 
+bool GraphicsContextGLCocoa::supportsFlipBlit() const
+{
+    return m_isForWebGL2 || isExtensionEnabledImpl("GL_NV_framebuffer_blit"_s) || isExtensionEnabledImpl("GL_ANGLE_framebuffer_blit"_s);
+}
+
 RetainPtr<IOSurfaceRef> GraphicsContextGLCocoa::copySurfaceBuffer(SurfaceBuffer bufferType)
 {
+    if (!supportsFlipBlit())
+        return nullptr;
     auto size = getInternalFramebufferSize();
     auto& source = surfaceBuffer(bufferType);
     if (!source || source.size() != size)
@@ -922,6 +930,8 @@ static CGImageAlphaInfo alphaInfoForSurfaceBufferContents(const GraphicsContextG
 
 RefPtr<NativeImage> GraphicsContextGLCocoa::copyNativeImage(SurfaceBuffer buffer)
 {
+    if (!supportsFlipBlit())
+        return GraphicsContextGLANGLE::copyNativeImage(buffer);
     if (!makeContextCurrent())
         return nullptr;
     if (buffer == SurfaceBuffer::DrawingBuffer)

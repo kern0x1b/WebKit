@@ -146,6 +146,7 @@ protected:
 #endif
     void* createMetalSharedEventEGLSync(id, uint64_t);
     RetainPtr<IOSurfaceRef> copySurfaceBuffer(SurfaceBuffer);
+    bool supportsFlipBlit() const;
 
     ProcessIdentity m_resourceOwner;
     ColorSpace m_drawingBufferColorSpace;
