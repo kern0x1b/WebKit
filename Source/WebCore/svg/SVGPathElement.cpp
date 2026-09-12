@@ -36,8 +36,7 @@
 #include "SVGPoint.h"
 #include "Settings.h"
 #include "StyleComputedStyle+GettersInlines.h"
-#include <algorithm>
-#include <cstdlib>
+#include "StylePropertiesInlines.h"
 #include <wtf/TZoneMallocInlines.h>
 #include <wtf/text/MakeString.h>
 
@@ -45,34 +44,7 @@ namespace WebCore {
 
 WTF_MAKE_TZONE_ALLOCATED_IMPL(SVGPathElement);
 
-static uint64_t svgPathSegListCacheMaxSizeInBytes()
-{
-    static const uint64_t maxSize = [] -> uint64_t {
-        if (const char* override = getenv("WEBKIT_IOS6_SVG_PATH_CACHE_KB")) {
-            int parsed = atoi(override);
-            if (parsed > 0)
-                return static_cast<uint64_t>(parsed) * 1024;
-        }
-        return 150 * 1024;
-    }();
-    return maxSize;
-}
-
-static uint64_t svgPathSegListCacheMaxItemSizeInBytes()
-{
-    static const uint64_t maxItemSize = [] -> uint64_t {
-        uint64_t requested = 5 * 1024;
-        if (const char* override = getenv("WEBKIT_IOS6_SVG_PATH_CACHE_ITEM_KB")) {
-            int parsed = atoi(override);
-            if (parsed > 0)
-                requested = static_cast<uint64_t>(parsed) * 1024;
-        }
-        return std::min(requested, svgPathSegListCacheMaxSizeInBytes());
-    }();
-    return maxItemSize;
-}
-
-class PathSegListCache {
+class PathCache {
 public:
     static PathCache& NODELETE singleton();
 
@@ -86,6 +58,8 @@ private:
 
     HashMap<AtomString, DataRef<SVGPathByteStream::Data>> m_cache;
     uint64_t m_sizeInBytes { 0 };
+    static constexpr uint64_t maxItemSizeInBytes = 5 * 1024; // 5 Kb.
+    static constexpr uint64_t maxCacheSizeInBytes = 150 * 1024; // 150 Kb.
 };
 
 PathCache& PathCache::singleton()
@@ -102,11 +76,11 @@ std::optional<DataRef<SVGPathByteStream::Data>> PathCache::get(const AtomString&
 void PathCache::add(const AtomString& attributeValue, DataRef<SVGPathByteStream::Data> data)
 {
     size_t newDataSize = data->size();
-    if (newDataSize > svgPathSegListCacheMaxItemSizeInBytes()) [[unlikely]]
+    if (newDataSize > maxItemSizeInBytes) [[unlikely]]
         return;
 
     m_sizeInBytes += newDataSize;
-    while (m_sizeInBytes > svgPathSegListCacheMaxSizeInBytes()) {
+    while (m_sizeInBytes > maxCacheSizeInBytes) {
         ASSERT(!m_cache.isEmpty());
         auto iteratorToRemove = m_cache.random();
         ASSERT(iteratorToRemove != m_cache.end());
@@ -143,18 +117,15 @@ Ref<SVGPathElement> SVGPathElement::create(const QualifiedName& tagName, Documen
 void SVGPathElement::attributeChanged(const QualifiedName& name, const AtomString& oldValue, const AtomString& newValue, AttributeModificationReason attributeModificationReason)
 {
     if (name == SVGNames::dAttr) {
-        Ref pathSegList { m_pathSegList };
+        auto& cache = PathCache::singleton();
         if (newValue.isEmpty())
-            pathSegList->baseVal()->clearByteStreamData();
-        else {
-            auto& cache = PathSegListCache::singleton();
-            if (auto data = cache.get(newValue))
-                pathSegList->baseVal()->updateByteStreamData(WTF::move(data.value()));
-            else if (pathSegList->baseVal()->parse(newValue))
-                cache.add(newValue, pathSegList->baseVal()->existingPathByteStream().data());
-            else
-                protect(protect(document())->svgExtensions())->reportError(makeString("Problem parsing d=\""_s, newValue, "\""_s));
-        }
+            protect(m_path)->baseVal()->clearByteStreamData();
+        else if (auto data = cache.get(newValue))
+            protect(m_path)->baseVal()->updateByteStreamData(WTF::move(data.value()));
+        else if (protect(m_path)->baseVal()->parse(newValue))
+            cache.add(newValue, protect(m_path)->baseVal()->existingPathByteStream().data());
+        else
+            protect(protect(document())->svgExtensions())->reportError(makeString("Problem parsing d=\""_s, newValue, "\""_s));
     }
 
     SVGGeometryElement::attributeChanged(name, oldValue, newValue, attributeModificationReason);
@@ -167,13 +138,15 @@ void SVGPathElement::clearCache()
 
 void SVGPathElement::svgAttributeChanged(const QualifiedName& attrName)
 {
-    if (attrName.matches(SVGNames::dAttr)) {
+    if (PropertyRegistry::isKnownAttribute(attrName)) {
+        ASSERT(attrName == SVGNames::dAttr);
         InstanceInvalidationGuard guard(*this);
         invalidateMPathDependencies();
 
-        if (auto* path = dynamicDowncast<LegacyRenderSVGPath>(renderer()))
+        if (auto* path = dynamicDowncast<RenderSVGPath>(renderer()))
             path->setNeedsShapeUpdate();
-        else if (auto* path = dynamicDowncast<RenderSVGPath>(renderer()))
+
+        if (auto* path = dynamicDowncast<LegacyRenderSVGPath>(renderer()))
             path->setNeedsShapeUpdate();
 
         updateSVGRendererForElementChange();

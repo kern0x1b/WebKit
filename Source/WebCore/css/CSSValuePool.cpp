@@ -48,10 +48,9 @@ StaticCSSValuePool::StaticCSSValuePool()
         new (m_identifierValues[std::to_underlying(keyword)].get()) CSSKeywordValue { CSSValue::StaticCSSValue, CSS::Keyword { keyword } };
 
     for (unsigned i = 0; i <= maximumCacheableIntegerValue; ++i) {
-        new (m_pixelValues[i].get()) CSSPrimitiveValue(CSSValue::StaticCSSValue, i, CSSUnitType::CSS_PX);
-        new (m_percentageValues[i].get()) CSSPrimitiveValue(CSSValue::StaticCSSValue, i, CSSUnitType::CSS_PERCENTAGE);
-        new (m_numberValues[i].get()) CSSPrimitiveValue(CSSValue::StaticCSSValue, i, CSSUnitType::CSS_NUMBER);
-        new (m_integerValues[i].get()) CSSPrimitiveValue(CSSValue::StaticCSSValue, i, CSSUnitType::CSS_INTEGER);
+        new (m_pixelValues[i].get()) CSSPrimitiveValue(CSSValue::StaticCSSValue, i, CSSUnitType::Px);
+        new (m_percentageValues[i].get()) CSSPrimitiveValue(CSSValue::StaticCSSValue, i, CSSUnitType::Percentage);
+        new (m_numberValues[i].get()) CSSPrimitiveValue(CSSValue::StaticCSSValue, i, CSSUnitType::Number);
     }
 }
 
@@ -84,10 +83,8 @@ Ref<CSSColorValue> CSSValuePool::createColorValue(const WebCore::Color& color)
     if (color == WebCore::Color::black)
         return staticCSSValuePool->m_blackColor;
 
-    auto it = m_colorValueCache.find(color);
-    if (it != m_colorValueCache.end()) [[likely]]
-        return it->value;
-
+    // Remove one entry at random if the cache grows too large.
+    // FIXME: Use TinyLRUCache instead?
     const int maximumColorCacheSize = 512;
     if (m_colorValueCache.size() >= maximumColorCacheSize)
         m_colorValueCache.remove(m_colorValueCache.random());
@@ -99,10 +96,8 @@ Ref<CSSColorValue> CSSValuePool::createColorValue(const WebCore::Color& color)
 
 Ref<CSSValue> CSSValuePool::createFontFamilyNameValue(const AtomString& familyName)
 {
-    auto it = m_fontFamilyNameValueCache.find(familyName);
-    if (it != m_fontFamilyNameValueCache.end()) [[likely]]
-        return it->value;
-
+    // Remove one entry at random if the cache grows too large.
+    // FIXME: Use TinyLRUCache instead?
     const int maximumFontFamilyCacheSize = 128;
     if (m_fontFamilyNameValueCache.size() >= maximumFontFamilyCacheSize)
         m_fontFamilyNameValueCache.remove(m_fontFamilyNameValueCache.random());
@@ -114,10 +109,8 @@ Ref<CSSValue> CSSValuePool::createFontFamilyNameValue(const AtomString& familyNa
 
 RefPtr<CSSValueList> CSSValuePool::createFontFaceValue(const AtomString& string)
 {
-    auto it = m_fontFaceValueCache.find(string);
-    if (it != m_fontFaceValueCache.end()) [[likely]]
-        return it->value;
-
+    // Remove one entry at random if the cache grows too large.
+    // FIXME: Use TinyLRUCache instead?
     const int maximumFontFaceCacheSize = 128;
     if (m_fontFaceValueCache.size() >= maximumFontFaceCacheSize)
         m_fontFaceValueCache.remove(m_fontFaceValueCache.random());

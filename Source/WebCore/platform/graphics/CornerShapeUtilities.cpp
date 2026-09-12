@@ -151,8 +151,8 @@ static double normalizedSuperellipseHalfCorner(double superellipseParameter)
 
     double magnitude = std::abs(superellipseParameter);
 
-    static thread_local double lastMagnitude = std::numeric_limits<double>::quiet_NaN();
-    static thread_local double lastConvexHalfCorner = 0.0;
+    static double lastMagnitude = std::numeric_limits<double>::quiet_NaN();
+    static double lastConvexHalfCorner = 0.0;
     if (magnitude != lastMagnitude) {
         double exponent = std::pow(0.5, magnitude);
         lastConvexHalfCorner = std::pow(0.5, exponent);
@@ -302,8 +302,8 @@ struct SuperellipseBezierHandles {
 };
 static SuperellipseBezierHandles superellipseBezierHandles(double parameter)
 {
-    static thread_local double lastParameter = std::numeric_limits<double>::quiet_NaN();
-    static thread_local SuperellipseBezierHandles lastResult { };
+    static double lastParameter = std::numeric_limits<double>::quiet_NaN();
+    static SuperellipseBezierHandles lastResult { };
     if (parameter == lastParameter)
         return lastResult;
 

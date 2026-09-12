@@ -25,7 +25,6 @@
 
 #include "config.h"
 #include "PixelBufferConversion.h"
-#include "ColorTransferFunctions.h"
 
 #include "AlphaPremultiplication.h"
 #include "ColorSpace.h"
@@ -477,64 +476,39 @@ static bool NODELETE convertImagePixelsUnacceleratedFunction(const ConstPixelBuf
 template <bool swapComponentOrder>
 static bool convertImagePixelsUnacceleratedSelectAlphaFormats(AlphaFormat sourceAlphaFormat, AlphaFormat destinationAlphaFormat, const ConstPixelBufferConversionView& source, const PixelBufferConversionView& destination, const IntSize& destinationSize)
 {
-    // FIXME: Float16-to-Float16 color-space conversion is unimplemented; fall through and copy
-    // verbatim. Do not early-return on a color-space mismatch: the destination is allocated
-    // uninitialized, so skipping the write would leak heap bytes through getPixelBuffer().
+    using enum AlphaFormat;
 
-    struct Pixel16 {
-        Float16 r;
-        Float16 g;
-        Float16 b;
-        Float16 a;
-    };
-    static_assert(sizeof(Float16) == 2);
-    static_assert(sizeof(Pixel16) == 4 * sizeof(Float16));
-
-    // FIXME: This lambda should be moved to separate functions and the caller passes a pointer to one of them.
-    auto convertSinglePixel16 = [](const auto& sourceSpan, auto sourceAlphaFormat, auto& destinationSpan, auto destinationAlphaFormat) {
-        ASSERT(sourceSpan.size_bytes() == sizeof(Pixel16));
-        ASSERT(destinationSpan.size_bytes() == sizeof(Pixel16));
-
-        if (sourceAlphaFormat == destinationAlphaFormat) {
-            memcpySpan(destinationSpan, sourceSpan);
-            return;
+    switch (sourceAlphaFormat) {
+    case Opaque:
+        switch (destinationAlphaFormat) {
+        case Opaque:
+            return convertImagePixelsUnacceleratedFunction<Opaque, Opaque, swapComponentOrder>(source, destination, destinationSize);
+        case Unpremultiplied:
+            return convertImagePixelsUnacceleratedFunction<Opaque, Unpremultiplied, swapComponentOrder>(source, destination, destinationSize);
+        case Premultiplied:
+            return convertImagePixelsUnacceleratedFunction<Opaque, Premultiplied, swapComponentOrder>(source, destination, destinationSize);
         }
-
-        const auto& sourcePixel16 = reinterpretCastSpanStartTo<Pixel16>(sourceSpan);
-        auto& destinationPixel16 = reinterpretCastSpanStartTo<Pixel16>(destinationSpan);
-
-        if (destinationAlphaFormat == AlphaPremultiplication::Premultiplied) {
-            auto fa = float(sourcePixel16.a);
-            destinationPixel16.r = Float16(float(sourcePixel16.r) * fa);
-            destinationPixel16.g = Float16(float(sourcePixel16.g) * fa);
-            destinationPixel16.b = Float16(float(sourcePixel16.b) * fa);
-            destinationPixel16.a = Float16(fa);
-            return;
+        break;
+    case Unpremultiplied:
+        switch (destinationAlphaFormat) {
+        case Opaque:
+            return convertImagePixelsUnacceleratedFunction<Unpremultiplied, Opaque, swapComponentOrder>(source, destination, destinationSize);
+        case Unpremultiplied:
+            return convertImagePixelsUnacceleratedFunction<Unpremultiplied, Unpremultiplied, swapComponentOrder>(source, destination, destinationSize);
+        case Premultiplied:
+            return convertImagePixelsUnacceleratedFunction<Unpremultiplied, Premultiplied, swapComponentOrder>(source, destination, destinationSize);
         }
-
-        if (auto fa = float(sourcePixel16.a)) {
-            destinationPixel16.r = Float16(float(sourcePixel16.r) / fa);
-            destinationPixel16.g = Float16(float(sourcePixel16.g) / fa);
-            destinationPixel16.b = Float16(float(sourcePixel16.b) / fa);
-            destinationPixel16.a = Float16(fa);
-            return;
+        break;
+    case Premultiplied:
+        switch (destinationAlphaFormat) {
+        case Opaque:
+            return convertImagePixelsUnacceleratedFunction<Premultiplied, Opaque, swapComponentOrder>(source, destination, destinationSize);
+        case Unpremultiplied:
+            return convertImagePixelsUnacceleratedFunction<Premultiplied, Unpremultiplied, swapComponentOrder>(source, destination, destinationSize);
+        case Premultiplied:
+            return convertImagePixelsUnacceleratedFunction<Premultiplied, Premultiplied, swapComponentOrder>(source, destination, destinationSize);
         }
-
-        memcpySpan(destinationSpan, sourceSpan);
-    };
-
-    size_t sourceRowStart = 0;
-    size_t destinationRowStart = 0;
-    size_t bytesPerRow = destinationSize.width() * sizeof(Pixel16);
-
-    for (int y = 0; y < destinationSize.height(); ++y) {
-        for (size_t x = 0; x < bytesPerRow; x += sizeof(Pixel16)) {
-            const auto sourceSpan = source.rows.subspan(sourceRowStart + x, sizeof(Pixel16));
-            auto destinationSpan = destination.rows.subspan(destinationRowStart + x, sizeof(Pixel16));
-            convertSinglePixel16(sourceSpan, source.format.alphaFormat, destinationSpan, destination.format.alphaFormat);
-        }
-        sourceRowStart += source.bytesPerRow;
-        destinationRowStart += destination.bytesPerRow;
+        break;
     }
 
     ASSERT_NOT_REACHED();
@@ -578,116 +552,12 @@ static bool NODELETE hasEnoughBytesForConversion(const View& view, const IntSize
     return !requiredBytes.hasOverflowed() && view.rows.size_bytes() >= requiredBytes.value();
 }
 
-#if defined(WEBKIT_IOS6)
-static const std::array<uint8_t, 256>& transferTable(bool toLinear)
+static void zeroImagePixels(const PixelBufferConversionView& destination, const IntSize& destinationSize)
 {
-    using Transfer = SRGBTransferFunction<float, TransferFunctionMode::Clamped>;
-
-    static NeverDestroyed<std::array<uint8_t, 256>> toLinearTable = [] {
-        std::array<uint8_t, 256> table;
-        for (unsigned i = 0; i < 256; ++i) {
-            float linear = Transfer::toLinear(i / 255.0f);
-            table[i] = static_cast<uint8_t>(linear * 255.0f + 0.5f);
-        }
-        return table;
-    }();
-
-    static NeverDestroyed<std::array<uint8_t, 256>> toGammaTable = [] {
-        std::array<uint8_t, 256> table;
-        for (unsigned i = 0; i < 256; ++i) {
-            float encoded = Transfer::toGammaEncoded(i / 255.0f);
-            table[i] = static_cast<uint8_t>(encoded * 255.0f + 0.5f);
-        }
-        return table;
-    }();
-
-    return toLinear ? toLinearTable.get() : toGammaTable.get();
+    size_t rowFillBytes = static_cast<size_t>(destinationSize.width()) * PixelBuffer::bytesPerPixel(destination.format.pixelFormat);
+    for (int y = 0; y < destinationSize.height(); ++y)
+        zeroSpan(destination.rows.subspan(static_cast<size_t>(y) * destination.bytesPerRow, rowFillBytes));
 }
-
-static bool isEightBitFormat(PixelFormat format)
-{
-    return format == PixelFormat::RGBA8 || format == PixelFormat::BGRA8 || format == PixelFormat::BGRX8;
-}
-
-static bool convertImagePixelsAcrossSRGBAndLinearSRGB(const ConstPixelBufferConversionView& source, const PixelBufferConversionView& destination, const IntSize& destinationSize)
-{
-    bool toLinear = source.format.colorSpace == DestinationColorSpace::SRGB() && destination.format.colorSpace == DestinationColorSpace::LinearSRGB();
-    bool toGammaEncoded = source.format.colorSpace == DestinationColorSpace::LinearSRGB() && destination.format.colorSpace == DestinationColorSpace::SRGB();
-    if (!toLinear && !toGammaEncoded)
-        return false;
-    if (!isEightBitFormat(source.format.pixelFormat) || !isEightBitFormat(destination.format.pixelFormat))
-        return false;
-
-    auto sameColorSpaceSource = source;
-    sameColorSpaceSource.format.colorSpace = destination.format.colorSpace;
-    convertImagePixels(sameColorSpaceSource, destination, destinationSize);
-
-    auto& table = transferTable(toLinear);
-    bool premultiplied = destination.format.alphaFormat == AlphaPremultiplication::Premultiplied;
-    bool hasAlpha = destination.format.pixelFormat != PixelFormat::BGRX8;
-
-    size_t rowOffset = 0;
-    for (int y = 0; y < destinationSize.height(); ++y) {
-        for (int x = 0; x < destinationSize.width(); ++x) {
-            size_t pixel = rowOffset + static_cast<size_t>(x) * 4;
-            uint8_t alpha = hasAlpha ? destination.rows[pixel + 3] : 255;
-
-            for (size_t channel = 0; channel < 3; ++channel) {
-                unsigned value = destination.rows[pixel + channel];
-                if (premultiplied && hasAlpha) {
-                    if (!alpha) {
-                        destination.rows[pixel + channel] = 0;
-                        continue;
-                    }
-                    value = std::min<unsigned>(255, (value * 255 + alpha / 2) / alpha);
-                }
-
-                value = table[value];
-
-                if (premultiplied && hasAlpha)
-                    value = (value * alpha + 127) / 255;
-
-                destination.rows[pixel + channel] = static_cast<uint8_t>(value);
-            }
-        }
-        rowOffset += destination.bytesPerRow;
-    }
-
-    return true;
-}
-#endif
-
-void convertImagePixels(const ConstPixelBufferConversionView& source, const PixelBufferConversionView& destination, const IntSize& destinationSize)
-{
-#if defined(WEBKIT_IOS6)
-    if (!(source.format.colorSpace == destination.format.colorSpace)) {
-        if (convertImagePixelsAcrossSRGBAndLinearSRGB(source, destination, destinationSize))
-            return;
-    }
-#endif
-
-#if ENABLE(PIXEL_FORMAT_RGBA16F)
-    auto isSourceFloat = source.format.pixelFormat == PixelFormat::RGBA16F;
-    if (isSourceFloat && destinationSize.height() > 0 && destinationSize.width() > 0) {
-        RELEASE_ASSERT((source.rows.size_bytes() - destinationSize.width() * (4 * sizeof(Float16))) / source.bytesPerRow >= size_t(destinationSize.height() - 1), "Expected source size_bytes >= (height-1) * bytesPerRow + width*4*sizeof(Float16)");
-        RELEASE_ASSERT(source.rows.size_bytes() / (4 * sizeof(Float16)) / destinationSize.width() >= size_t(destinationSize.height()), "Expected source size_bytes >= width * height * 4*sizeof(Float16)");
-    }
-    auto isDestinationFloat = destination.format.pixelFormat == PixelFormat::RGBA16F;
-    if (isDestinationFloat && destinationSize.height() > 0 && destinationSize.width() > 0) {
-        RELEASE_ASSERT((destination.rows.size_bytes() - destinationSize.width() * (4 * sizeof(Float16))) / destination.bytesPerRow >= size_t(destinationSize.height() - 1), "Expected destination size_bytes >= (height-1) * bytesPerRow + width*4*sizeof(Float16)");
-        RELEASE_ASSERT(destination.rows.size_bytes() / (4 * sizeof(Float16)) / destinationSize.width() >= size_t(destinationSize.height()), "Expected destination size_bytes >= width * height * 4*sizeof(Float16)");
-    }
-    if (isSourceFloat && isDestinationFloat)
-        return convertImagePixelsFromFloat16ToFloat16(source, destination, destinationSize);
-    if (isSourceFloat)
-        return convertImagePixelsFromFloat16(source, destination, destinationSize);
-    if (isDestinationFloat)
-        return convertImagePixelsToFloat16(source, destination, destinationSize);
-#endif // ENABLE(PIXEL_FORMAT_RGBA16F)
-
-    // We currently only support converting between RGBA8, BGRA8, and BGRX8; and on some platforms RGBA16F (see above).
-    ASSERT(source.format.pixelFormat == PixelFormat::RGBA8 || source.format.pixelFormat == PixelFormat::BGRA8 || source.format.pixelFormat == PixelFormat::BGRX8);
-    ASSERT(destination.format.pixelFormat == PixelFormat::RGBA8 || destination.format.pixelFormat == PixelFormat::BGRA8 || destination.format.pixelFormat == PixelFormat::BGRX8);
 
 // Whether the contents can be copied verbatim, i.e. the two formats store the same components at
 // the same offsets, and the components already relate to the alpha the way the destination

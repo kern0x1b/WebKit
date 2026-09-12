@@ -45,8 +45,6 @@
 #include "Timer.h"
 #include <pal/spi/cg/CoreGraphicsSPI.h>
 #include <pal/spi/cg/ImageIOSPI.h>
-#include <array>
-#include <optional>
 #include <wtf/MathExtras.h>
 #include <wtf/RetainPtr.h>
 #include <wtf/TZoneMallocInlines.h>
@@ -60,41 +58,9 @@ namespace WebCore {
 
 WTF_MAKE_TZONE_ALLOCATED_IMPL(GraphicsContextCG);
 
-#if defined(WEBKIT_IOS6)
-static std::optional<std::array<CGFloat, 4>> NODELETE ios6DeviceRGBComponents(const Color& color)
+static void setCGFillColor(CGContextRef context, const Color& color, const ColorSpace& colorSpace)
 {
-    auto bytes = color.tryGetAsSRGBABytes();
-    if (!bytes)
-        return std::nullopt;
-    auto components = asColorComponents(bytes->resolved());
-    return std::array<CGFloat, 4> {
-        static_cast<CGFloat>(components[0] / 255.0),
-        static_cast<CGFloat>(components[1] / 255.0),
-        static_cast<CGFloat>(components[2] / 255.0),
-        static_cast<CGFloat>(components[3] / 255.0) };
-}
-#endif
-
-static void setCGFillColor(CGContextRef context, const Color& color, const DestinationColorSpace& colorSpace)
-{
-#if defined(WEBKIT_IOS6)
-    if (auto components = ios6DeviceRGBComponents(color)) {
-        CGContextSetRGBFillColor(context, (*components)[0], (*components)[1], (*components)[2], (*components)[3]);
-        return;
-    }
-#endif
     CGContextSetFillColorWithColor(context, cachedCGColorInDestinationStandardRange(color, colorSpace).get());
-}
-
-static void NODELETE setCGStrokeColor(CGContextRef context, const Color& color, const DestinationColorSpace& colorSpace)
-{
-#if defined(WEBKIT_IOS6)
-    if (auto components = ios6DeviceRGBComponents(color)) {
-        CGContextSetRGBStrokeColor(context, (*components)[0], (*components)[1], (*components)[2], (*components)[3]);
-        return;
-    }
-#endif
-    CGContextSetStrokeColorWithColor(context, cachedCGColorInDestinationStandardRange(color, colorSpace).get());
 }
 
 CGAffineTransform getUserToBaseCTM(CGContextRef context)
@@ -228,9 +194,7 @@ static void setCGContextPath(CGContextRef context, const Path& path)
 
 static void drawPathWithCGContext(CGContextRef context, CGPathDrawingMode drawingMode, const Path& path)
 {
-    CGContextBeginPath(context);
-    CGContextAddPath(context, path.platformPath());
-    CGContextDrawPath(context, drawingMode);
+    CGContextDrawPathDirect(context, drawingMode, path.platformPath(), nullptr);
 }
 
 static RenderingMode renderingModeForCGContext(CGContextRef cgContext, GraphicsContextCG::CGContextSource source)
@@ -288,12 +252,9 @@ const ColorSpace& GraphicsContextCG::colorSpace() const
 
     // FIXME: Need to handle kCGContextTypePDF.
     auto contextType = CGContextGetType(context);
-#if HAVE(IOSURFACE)
     if (contextType == kCGContextTypeIOSurface)
         colorSpace = CGIOSurfaceContextGetColorSpace(context);
-    else
-#endif
-    if (contextType == kCGContextTypeBitmap)
+    else if (contextType == kCGContextTypeBitmap)
         colorSpace = CGBitmapContextGetColorSpace(context);
     else
         colorSpace = CGContextGetColorSpace(context);
@@ -321,7 +282,7 @@ void GraphicsContextCG::restore(GraphicsContextState::Purpose purpose)
 
 void GraphicsContextCG::drawNativeImage(const NativeImage& nativeImage, const FloatRect& destRect, const FloatRect& srcRect, ImagePaintingOptions options)
 {
-    auto& image = nativeImage.platformImage();
+    auto image = nativeImage.platformImage();
     if (!image)
         return;
     auto imageSize = nativeImage.size();
@@ -388,8 +349,10 @@ void GraphicsContextCG::drawNativeImage(const NativeImage& nativeImage, const Fl
     CGContextStateSaver stateSaver(context, false);
     auto transform = CGContextGetCTM(context);
 
-    RetainPtr<CGImageRef> retainedSubImage;
-    auto subImage = image.get();
+    auto oldInterpolationQuality = imageInterpolationQuality();
+    auto interpolationQuality = imageInterpolationQualityForOptions(options);
+
+    auto subImage = image;
 
     auto adjustedDestRect = normalizedDestRect;
 
@@ -403,8 +366,7 @@ void GraphicsContextCG::drawNativeImage(const NativeImage& nativeImage, const Fl
             // containing only the portion we want to display. We need to do this because high-quality
             // interpolation smoothes sharp edges, causing pixels from outside the source rect to bleed
             // into the destination rect. See <rdar://problem/6112909>.
-            retainedSubImage = getSubimage(subImage, imageSize, subimageRect, options);
-            subImage = retainedSubImage.get();
+            subImage = getSubimage(subImage.get(), imageSize, subimageRect, options);
 
             auto subPixelPadding = normalizedSrcRect.location() - subimageRect.location();
             adjustedDestRect = { adjustedDestRect.location() - subPixelPadding * scale, subimageRect.size() * scale };
@@ -423,8 +385,7 @@ void GraphicsContextCG::drawNativeImage(const NativeImage& nativeImage, const Fl
 #if PLATFORM(IOS_FAMILY)
     bool wasAntialiased = CGContextGetShouldAntialias(context);
     // Anti-aliasing is on by default on the iPhone. Need to turn it off when drawing images.
-    if (wasAntialiased)
-        CGContextSetShouldAntialias(context, false);
+    CGContextSetShouldAntialias(context, false);
 
     // Align to pixel boundaries
     adjustedDestRect = roundToDevicePixels(adjustedDestRect);
@@ -432,9 +393,7 @@ void GraphicsContextCG::drawNativeImage(const NativeImage& nativeImage, const Fl
 
     auto oldCompositeOperator = compositeOperation();
     auto oldBlendMode = blendMode();
-    bool blendModeChanged = oldCompositeOperator != options.compositeOperator() || oldBlendMode != options.blendMode();
-    if (blendModeChanged)
-        setCGBlendMode(context, options.compositeOperator(), options.blendMode());
+    setCGBlendMode(context, options.compositeOperator(), options.blendMode());
 
     if (interpolationQuality != oldInterpolationQuality)
         CGContextSetInterpolationQuality(context, toCGInterpolationQuality(interpolationQuality));
@@ -455,7 +414,7 @@ void GraphicsContextCG::drawNativeImage(const NativeImage& nativeImage, const Fl
     }
 
     if (options.dynamicRangeLimit() == PlatformDynamicRangeLimit::standard() && options.drawsHDRContent() == DrawsHDRContent::Yes)
-        setCGDynamicRangeLimitForImage(context, subImage, options.dynamicRangeLimit().value());
+        setCGDynamicRangeLimitForImage(context, subImage.get(), options.dynamicRangeLimit().value());
 #endif
 
     // Make the origin be at adjustedDestRect.location()
@@ -476,16 +435,16 @@ void GraphicsContextCG::drawNativeImage(const NativeImage& nativeImage, const Fl
     CGContextScaleCTM(context, 1, -1);
 
     // Draw the image.
-    CGContextDrawImage(context, adjustedDestRect, subImage);
+    CGContextDrawImage(context, adjustedDestRect, subImage.get());
 
     if (!stateSaver.didSave()) {
         CGContextSetCTM(context, transform);
 #if PLATFORM(IOS_FAMILY)
-        if (wasAntialiased)
-            CGContextSetShouldAntialias(context, true);
+        CGContextSetShouldAntialias(context, wasAntialiased);
 #endif
-        if (blendModeChanged)
-            setCGBlendMode(context, oldCompositeOperator, oldBlendMode);
+        setCGBlendMode(context, oldCompositeOperator, oldBlendMode);
+        if (interpolationQuality != oldInterpolationQuality)
+            CGContextSetInterpolationQuality(context, toCGInterpolationQuality(oldInterpolationQuality));
 #if HAVE(SUPPORT_HDR_DISPLAY_APIS)
         CGContextSetContentToneMappingInfo(context, oldToneMappingInfo);
         CGContextSetEDRTargetHeadroom(context, oldHeadroom);
@@ -951,17 +910,6 @@ void GraphicsContextCG::fillRect(const FloatRect& rect, Gradient& gradient, cons
 void GraphicsContextCG::fillRect(const FloatRect& rect, const Color& color)
 {
     CGContextRef context = platformContext();
-#if defined(WEBKIT_IOS6)
-    if (([]() { static const bool logPaintOnce = getenv("WEBKIT_IOS6_LOG_PAINT") != nullptr; return logPaintOnce; }())) {
-        static unsigned logged;
-        if (logged++ < 25) {
-            auto [r, g, b, a] = color.toColorTypeLossy<SRGBA<uint8_t>>().resolved();
-            fprintf(stderr, "[ios6 fill] %g,%g %gx%g rgba %d,%d,%d,%d\n",
-                rect.x(), rect.y(), rect.width(), rect.height(), r, g, b, a);
-            fflush(stderr);
-        }
-    }
-#endif
     Color oldFillColor = fillColor();
 
     if (oldFillColor != color)
@@ -1108,14 +1056,6 @@ void GraphicsContextCG::clipPath(const Path& path, WindRule clipRule)
     if (path.isEmpty())
         CGContextClipToRect(context, CGRectZero);
     else {
-#if defined(WEBKIT_IOS6)
-        if (auto* segment = path.singleSegmentIfExists()) {
-            if (auto* rectSegment = std::get_if<PathRect>(&segment->data())) {
-                CGContextClipToRect(context, rectSegment->rect);
-                return;
-            }
-        }
-#endif
         setCGContextPath(context, path);
         if (clipRule == WindRule::EvenOdd)
             CGContextEOClip(context);
@@ -1201,22 +1141,13 @@ void GraphicsContextCG::setCGDropShadow(const std::optional<GraphicsDropShadow>&
 
     CGContextSetAlpha(context, shadow->opacity);
 
-#if defined(WEBKIT_IOS6)
-    CGContextSetShadowWithColor(context, offset, blurRadius,
-        cachedCGColorInDestinationStandardRange(shadow->color, colorSpace()).get());
-#else
     auto style = adoptCF(CGStyleCreateShadow2(offset, blurRadius, cachedCGColorInDestinationStandardRange(shadow->color, colorSpace()).get()));
     CGContextSetStyle(context, style.get());
-#endif
 }
 
 void GraphicsContextCG::clearCGDropShadow()
 {
-#if defined(WEBKIT_IOS6)
-    CGContextSetShadowWithColor(platformContext(), CGSizeZero, 0, nullptr);
-#else
     CGContextSetStyle(platformContext(), nullptr);
-#endif
 }
 
 #if HAVE(CGSTYLE_COLORMATRIX_BLUR)
@@ -1251,11 +1182,7 @@ void GraphicsContextCG::setCGStyle(const std::optional<GraphicsStyle>& style, bo
     auto context = platformContext();
 
     if (!style) {
-#if defined(WEBKIT_IOS6)
-        CGContextSetShadowWithColor(context, CGSizeZero, 0, nullptr);
-#else
         CGContextSetStyle(context, nullptr);
-#endif
         return;
     }
 
@@ -1309,7 +1236,8 @@ void GraphicsContextCG::didUpdateState(GraphicsContextState& state)
             break;
 
         case GraphicsContextState::Change::StrokeBrush:
-            setCGStrokeColor(context, state.strokeBrush().color(), colorSpace());
+            if (!state.strokeBrush().hasPatternOrGradient())
+                CGContextSetStrokeColorWithColor(context, cachedCGColorInDestinationStandardRange(state.strokeBrush().color(), colorSpace()).get());
             break;
 
         case GraphicsContextState::Change::CompositeMode:
@@ -1551,26 +1479,6 @@ FloatRect GraphicsContextCG::roundToDevicePixels(const FloatRect& rect) const
     }
     if (m_userToDeviceTransformKnownToBeIdentity)
         return roundedIntRect(rect);
-
-    if (!deviceMatrix.b && !deviceMatrix.c) {
-        CGFloat deviceScaleX = std::abs(deviceMatrix.a);
-        CGFloat deviceScaleY = std::abs(deviceMatrix.d);
-
-        CGFloat left = std::round(rect.x() * deviceScaleX);
-        CGFloat top = std::round(rect.y() * deviceScaleY);
-        CGFloat right = std::round((rect.x() + rect.width()) * deviceScaleX);
-        CGFloat bottom = std::round((rect.y() + rect.height()) * deviceScaleY);
-
-        if (top == bottom && rect.height())
-            bottom += 1;
-        if (left == right && rect.width())
-            right += 1;
-
-        FloatPoint roundedOrigin { static_cast<float>(left / deviceScaleX), static_cast<float>(top / deviceScaleY) };
-        FloatPoint roundedLowerRight { static_cast<float>(right / deviceScaleX), static_cast<float>(bottom / deviceScaleY) };
-        return FloatRect(roundedOrigin, roundedLowerRight - roundedOrigin);
-    }
-
     return cgRoundToDevicePixelsNonIdentity(deviceMatrix, rect);
 }
 
@@ -1611,10 +1519,8 @@ bool GraphicsContextCG::knownToHaveFloatBasedBacking() const
 {
     auto context = platformContext();
 
-#if HAVE(IOSURFACE)
     if (CGContextGetType(context) == kCGContextTypeIOSurface)
         return CGIOSurfaceContextGetBitmapInfo(context) & kCGBitmapFloatComponents;
-#endif
     if (CGContextGetType(context) == kCGContextTypeBitmap)
         return CGBitmapContextGetBitmapInfo(context) & kCGBitmapFloatComponents;
     return false;

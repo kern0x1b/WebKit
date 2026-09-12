@@ -410,79 +410,6 @@ public:
     virtual LayoutUnit adjustContentBoxLogicalHeightForBoxSizing(std::optional<LayoutUnit> height) const;
     virtual LayoutUnit adjustIntrinsicLogicalHeightForBoxSizing(LayoutUnit height) const;
 
-    // Grid item's containing block is not the grid container, but the grid area, for which we don't have a renderer.
-    using GridAreaSize = std::optional<LayoutUnit>;
-
-#if defined(WEBKIT_IOS6)
-    std::optional<LayoutUnit> NODELETE overridingBorderBoxLogicalWidth() const
-    {
-        if (!(m_ios6SizeOverrideFlags & Ios6HasOverridingLogicalWidth))
-            return { };
-        return m_ios6OverridingBorderBoxLogicalWidth;
-    }
-    std::optional<LayoutUnit> NODELETE overridingBorderBoxLogicalHeight() const
-    {
-        if (!(m_ios6SizeOverrideFlags & Ios6HasOverridingLogicalHeight))
-            return { };
-        return m_ios6OverridingBorderBoxLogicalHeight;
-    }
-    void setOverridingBorderBoxLogicalHeight(LayoutUnit height)
-    {
-        m_ios6OverridingBorderBoxLogicalHeight = height;
-        m_ios6SizeOverrideFlags |= Ios6HasOverridingLogicalHeight;
-    }
-    void setOverridingBorderBoxLogicalWidth(LayoutUnit width)
-    {
-        m_ios6OverridingBorderBoxLogicalWidth = width;
-        m_ios6SizeOverrideFlags |= Ios6HasOverridingLogicalWidth;
-    }
-    void clearOverridingBorderBoxLogicalHeight() { m_ios6SizeOverrideFlags &= ~Ios6HasOverridingLogicalHeight; }
-    void clearOverridingBorderBoxLogicalWidth() { m_ios6SizeOverrideFlags &= ~Ios6HasOverridingLogicalWidth; }
-    void clearOverridingSize() { m_ios6SizeOverrideFlags &= ~(Ios6HasOverridingLogicalHeight | Ios6HasOverridingLogicalWidth); }
-
-    std::optional<GridAreaSize> NODELETE gridAreaContentWidth(WritingMode) const;
-    std::optional<GridAreaSize> NODELETE gridAreaContentHeight(WritingMode) const;
-    std::optional<GridAreaSize> NODELETE gridAreaContentLogicalWidth() const
-    {
-        if (!(m_ios6SizeOverrideFlags & Ios6HasGridAreaLogicalWidth))
-            return { };
-        if (!(m_ios6SizeOverrideFlags & Ios6GridAreaLogicalWidthIsDefinite))
-            return GridAreaSize { };
-        return GridAreaSize { m_ios6GridAreaContentLogicalWidth };
-    }
-    std::optional<GridAreaSize> NODELETE gridAreaContentLogicalHeight() const
-    {
-        if (!(m_ios6SizeOverrideFlags & Ios6HasGridAreaLogicalHeight))
-            return { };
-        if (!(m_ios6SizeOverrideFlags & Ios6GridAreaLogicalHeightIsDefinite))
-            return GridAreaSize { };
-        return GridAreaSize { m_ios6GridAreaContentLogicalHeight };
-    }
-    void setGridAreaContentLogicalWidth(GridAreaSize logicalWidth)
-    {
-        m_ios6SizeOverrideFlags |= Ios6HasGridAreaLogicalWidth;
-        if (logicalWidth) {
-            m_ios6SizeOverrideFlags |= Ios6GridAreaLogicalWidthIsDefinite;
-            m_ios6GridAreaContentLogicalWidth = *logicalWidth;
-        } else
-            m_ios6SizeOverrideFlags &= ~Ios6GridAreaLogicalWidthIsDefinite;
-    }
-    void setGridAreaContentLogicalHeight(GridAreaSize logicalHeight)
-    {
-        m_ios6SizeOverrideFlags |= Ios6HasGridAreaLogicalHeight;
-        if (logicalHeight) {
-            m_ios6SizeOverrideFlags |= Ios6GridAreaLogicalHeightIsDefinite;
-            m_ios6GridAreaContentLogicalHeight = *logicalHeight;
-        } else
-            m_ios6SizeOverrideFlags &= ~Ios6GridAreaLogicalHeightIsDefinite;
-    }
-    void clearGridAreaContentLogicalHeight() { m_ios6SizeOverrideFlags &= ~(Ios6HasGridAreaLogicalHeight | Ios6GridAreaLogicalHeightIsDefinite); }
-    void clearGridAreaContentSize()
-    {
-        m_ios6SizeOverrideFlags &= ~(Ios6HasGridAreaLogicalWidth | Ios6GridAreaLogicalWidthIsDefinite);
-        clearGridAreaContentLogicalHeight();
-    }
-#else
     std::optional<LayoutUnit> NODELETE overridingBorderBoxLogicalWidth() const;
     std::optional<LayoutUnit> NODELETE overridingBorderBoxLogicalHeight() const;
     void setOverridingBorderBoxLogicalHeight(LayoutUnit);
@@ -491,6 +418,8 @@ public:
     void clearOverridingBorderBoxLogicalWidth();
     void clearOverridingSize();
 
+    // Grid item's containing block is not the grid container, but the grid area, for which we don't have a renderer.
+    using GridAreaSize = std::optional<LayoutUnit>;
     std::optional<GridAreaSize> NODELETE gridAreaContentWidth(WritingMode) const;
     std::optional<GridAreaSize> NODELETE gridAreaContentHeight(WritingMode) const;
     std::optional<GridAreaSize> NODELETE gridAreaContentLogicalWidth() const;
@@ -499,7 +428,6 @@ public:
     void setGridAreaContentLogicalHeight(GridAreaSize);
     void clearGridAreaContentSize();
     void clearGridAreaContentLogicalHeight();
-#endif
 
     // These are currently only used by Flexbox code. In some cases we must layout flex items with a different main size
     // (the size in the main direction) than the one specified by the item in order to compute the value of flex basis, i.e.,
@@ -816,25 +744,6 @@ protected:
 private:
     // Used to store state between styleWillChange and styleDidChange
     static bool s_hadNonVisibleOverflow;
-
-#if defined(WEBKIT_IOS6)
-    enum Ios6SizeOverrideFlag : uint8_t {
-        Ios6HasOverridingLogicalWidth = 1 << 0,
-        Ios6HasOverridingLogicalHeight = 1 << 1,
-        Ios6HasGridAreaLogicalWidth = 1 << 2,
-        Ios6GridAreaLogicalWidthIsDefinite = 1 << 3,
-        Ios6HasGridAreaLogicalHeight = 1 << 4,
-        Ios6GridAreaLogicalHeightIsDefinite = 1 << 5,
-        Ios6HasFlexBasisLogicalWidth = 1 << 6,
-        Ios6HasFlexBasisLogicalHeight = 1 << 7,
-    };
-
-    LayoutUnit m_ios6OverridingBorderBoxLogicalWidth;
-    LayoutUnit m_ios6OverridingBorderBoxLogicalHeight;
-    LayoutUnit m_ios6GridAreaContentLogicalWidth;
-    LayoutUnit m_ios6GridAreaContentLogicalHeight;
-    uint8_t m_ios6SizeOverrideFlags { 0 };
-#endif
 };
 
 inline bool isSkippedContentRoot(const RenderBox&);
@@ -850,8 +759,8 @@ inline RenderBox* RenderBox::parentBox() const
 
 inline RenderBox* RenderBox::firstChildBox() const
 {
-    if (SUPPRESS_UNCHECKED_LOCAL auto* box = dynamicDowncast<RenderBox>(firstChild()))
-        return box;
+    if (CheckedPtr box = dynamicDowncast<RenderBox>(firstChild()))
+        return box.unsafeGet();
 
     ASSERT(!firstChild());
     return nullptr;
@@ -864,8 +773,8 @@ inline RenderBox* RenderBox::firstInFlowChildBox() const
 
 inline RenderBox* RenderBox::lastChildBox() const
 {
-    if (SUPPRESS_UNCHECKED_LOCAL auto* box = dynamicDowncast<RenderBox>(lastChild()))
-        return box;
+    if (CheckedPtr box = dynamicDowncast<RenderBox>(lastChild()))
+        return box.unsafeGet();
 
     ASSERT(!lastChild());
     return nullptr;
@@ -878,8 +787,8 @@ inline RenderBox* RenderBox::lastInFlowChildBox() const
 
 inline RenderBox* RenderBox::previousSiblingBox() const
 {
-    if (SUPPRESS_UNCHECKED_LOCAL auto* box = dynamicDowncast<RenderBox>(previousSibling()))
-        return box;
+    if (CheckedPtr box = dynamicDowncast<RenderBox>(previousSibling()))
+        return box.unsafeGet();
 
     ASSERT(!previousSibling());
     return nullptr;
@@ -887,17 +796,17 @@ inline RenderBox* RenderBox::previousSiblingBox() const
 
 inline RenderBox* RenderBox::previousInFlowSiblingBox() const
 {
-    for (SUPPRESS_UNCHECKED_LOCAL auto* curr = previousSiblingBox(); curr; curr = curr->previousSiblingBox()) {
+    for (CheckedPtr curr = previousSiblingBox(); curr; curr = curr->previousSiblingBox()) {
         if (!curr->isFloatingOrOutOfFlowPositioned())
-            return curr;
+            return curr.unsafeGet();
     }
     return nullptr;
 }
 
 inline RenderBox* RenderBox::nextSiblingBox() const
 {
-    if (SUPPRESS_UNCHECKED_LOCAL auto* box = dynamicDowncast<RenderBox>(nextSibling()))
-        return box;
+    if (CheckedPtr box = dynamicDowncast<RenderBox>(nextSibling()))
+        return box.unsafeGet();
 
     ASSERT(!nextSibling());
     return nullptr;
@@ -905,9 +814,9 @@ inline RenderBox* RenderBox::nextSiblingBox() const
 
 inline RenderBox* RenderBox::nextInFlowSiblingBox() const
 {
-    for (SUPPRESS_UNCHECKED_LOCAL auto* curr = nextSiblingBox(); curr; curr = curr->nextSiblingBox()) {
+    for (CheckedPtr curr = nextSiblingBox(); curr; curr = curr->nextSiblingBox()) {
         if (!curr->isFloatingOrOutOfFlowPositioned())
-            return curr;
+            return curr.unsafeGet();
     }
     return nullptr;
 }

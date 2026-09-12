@@ -120,10 +120,6 @@ public:
 
     const GlyphPage* glyphPage(unsigned pageNumber) const;
 
-#if USE(CORE_TEXT) && defined(WEBKIT_IOS6) && !ENABLE(OPENTYPE_VERTICAL)
-    void prewarmGlyphAdvances(const GlyphPage&) const;
-#endif
-
     void determinePitch();
     PitchType pitch() const { return m_treatAsFixedPitch ? PitchType::Fixed : PitchType::Variable; }
     bool canTakeFixedPitchFastContentMeasuring() const { return m_canTakeFixedPitchFastContentMeasuring; }
@@ -139,11 +135,6 @@ public:
     WEBCORE_EXPORT static std::optional<Ref<Font>> fromIPCData(IPCFontData&&);
     WEBCORE_EXPORT IPCFontData toSerializableFont() const;
     WEBCORE_EXPORT std::optional<InstalledFont> toSerializableInstalledFont() const;
-
-    // The Core Text string attributes for shaping with this font. They depend only on the
-    // font, the kerning switch and the locale, so the dictionary is built once per font
-    // rather than once per complex text run.
-    RetainPtr<CFDictionaryRef> cfStringAttributes(bool enableKerning, const AtomString& locale) const;
 #endif
 #if PLATFORM(WIN)
     SCRIPT_CACHE* scriptCache() const LIFETIME_BOUND { return &m_scriptCache; }
@@ -183,52 +174,6 @@ private:
     float platformWidthForGlyph(Glyph) const;
     Path platformPathForGlyph(Glyph) const;
 
-#if PLATFORM(COCOA)
-    class ComplexColorFormatGlyphs {
-    public:
-        static ComplexColorFormatGlyphs createWithNoRelevantTables();
-        static ComplexColorFormatGlyphs createWithRelevantTablesAndGlyphCount(unsigned glyphCount);
-
-        bool hasValueFor(Glyph) const;
-        bool get(Glyph) const;
-        void set(Glyph, bool value);
-
-        bool hasRelevantTables() const { return m_hasRelevantTables; }
-
-    private:
-        static constexpr size_t bitForInitialized(Glyph glyphID) { return static_cast<size_t>(glyphID) * 2; }
-        static constexpr size_t bitForValue(Glyph glyphID) { return static_cast<size_t>(glyphID) * 2 + 1; }
-        static constexpr size_t bitsRequiredForGlyphCount(unsigned glyphCount) { return glyphCount * 2; }
-
-        ComplexColorFormatGlyphs(bool hasRelevantTables, unsigned glyphCount)
-            : m_hasRelevantTables(hasRelevantTables)
-            , m_bits(bitsRequiredForGlyphCount(glyphCount))
-        { }
-
-        bool m_hasRelevantTables;
-        BitVector m_bits; // pairs of (initialized, value) bits
-    };
-
-    const PAL::OTSVGTable& otSVGTable() const;
-    bool glyphHasComplexColorFormat(Glyph) const;
-    bool hasComplexColorFormatTables() const;
-    ComplexColorFormatGlyphs& glyphsWithComplexColorFormat() const;
-#endif
-
-    FontMetrics m_fontMetrics;
-    float m_maxCharWidth { -1 };
-    float m_avgCharWidth { -1 };
-
-    const FontPlatformData m_platformData;
-
-    // Code points 0-255 live in the first few pages and are hit once per character measured
-    // or painted. Their page pointers are kept in a direct-mapped side table so the common
-    // case is an array index instead of a hash probe. Entries in m_glyphPages are never
-    // removed, so a raw pointer stays valid for the lifetime of the Font.
-    static constexpr unsigned directMappedGlyphPageCount = 16;
-    mutable std::array<const GlyphPage*, directMappedGlyphPageCount> m_directMappedGlyphPages { };
-    mutable uint16_t m_directMappedGlyphPagesFilled { 0 };
-
     mutable HashMap<unsigned, RefPtr<GlyphPage>, IntHash<unsigned>, WTF::UnsignedWithZeroKeyHashTraits<unsigned>> m_glyphPages;
     mutable GlyphMetricsMap<float> m_glyphToWidthMap;
     mutable std::unique_ptr<GlyphMetricsMap<FloatRect>> m_glyphToBoundsMap;
@@ -251,42 +196,6 @@ private:
     };
 
     mutable std::unique_ptr<DerivedFonts> m_derivedFontData;
-
-    struct NoEmojiGlyphs { };
-#if USE(SKIA) || defined(WEBKIT_IOS6)
-    struct AllEmojiGlyphs { };
-#endif
-    struct SomeEmojiGlyphs {
-        BitVector colorGlyphs;
-    };
-#if USE(SKIA) || defined(WEBKIT_IOS6)
-    using EmojiType = Variant<NoEmojiGlyphs, AllEmojiGlyphs, SomeEmojiGlyphs>;
-#else
-    using EmojiType = Variant<NoEmojiGlyphs, SomeEmojiGlyphs>;
-#endif
-    EmojiType m_emojiType { NoEmojiGlyphs { } };
-
-#if PLATFORM(COCOA)
-    mutable std::optional<PAL::OTSVGTable> m_otSVGTable;
-    mutable std::optional<ComplexColorFormatGlyphs> m_glyphsWithComplexColorFormat; // SVG and sbix
-
-    enum class SupportsFeature : uint8_t {
-        No,
-        Yes,
-        Unknown
-    };
-    mutable SupportsFeature m_supportsSmallCaps { SupportsFeature::Unknown };
-    mutable SupportsFeature m_supportsAllSmallCaps { SupportsFeature::Unknown };
-    mutable SupportsFeature m_supportsPetiteCaps { SupportsFeature::Unknown };
-    mutable SupportsFeature m_supportsAllPetiteCaps { SupportsFeature::Unknown };
-    mutable SupportsFeature m_supportsOpenTypeAlternateHalfWidths { SupportsFeature::Unknown };
-#endif
-
-#if USE(CORE_TEXT)
-    mutable RetainPtr<CFDictionaryRef> m_cachedStringAttributes;
-    mutable AtomString m_cachedStringAttributesLocale;
-    mutable bool m_cachedStringAttributesEnableKerning { false };
-#endif
 
 #if PLATFORM(WIN)
     mutable SCRIPT_CACHE m_scriptCache { 0 };
