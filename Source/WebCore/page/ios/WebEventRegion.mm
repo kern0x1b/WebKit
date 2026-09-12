@@ -26,7 +26,7 @@
 #import "config.h"
 #import "WebEventRegion.h"
  
-#if ENABLE(IOS_TOUCH_EVENTS)
+#if ENABLE(IOS_TOUCH_EVENTS) || defined(WEBKIT_IOS6)
 
 #import "FloatQuad.h"
 
@@ -105,4 +105,4 @@ using namespace WebCore;
 
 @end
 
-#endif // ENABLE(IOS_TOUCH_EVENTS)
+#endif // ENABLE(IOS_TOUCH_EVENTS) || defined(WEBKIT_IOS6)

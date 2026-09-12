@@ -960,6 +960,9 @@ macro preserveCalleeSavesUsedByLLInt()
     subp CalleeSaveSpaceStackAligned, sp
     if C_LOOP
         storep metadataTable, -PtrSize[cfr]
+    elsif ARMv7
+        storep PB, -4[cfr]
+        storep metadataTable, -8[cfr]
     elsif ARM64 or ARM64E
         storepairq csr8, csr9, -16[cfr]
         storepairq csr6, csr7, -32[cfr]
@@ -979,6 +982,9 @@ end
 macro restoreCalleeSavesUsedByLLInt()
     if C_LOOP
         loadp -PtrSize[cfr], metadataTable
+    elsif ARMv7
+        loadp -4[cfr], PB
+        loadp -8[cfr], metadataTable
     elsif ARM64 or ARM64E
         loadpairq -32[cfr], csr6, csr7
         loadpairq -16[cfr], csr8, csr9

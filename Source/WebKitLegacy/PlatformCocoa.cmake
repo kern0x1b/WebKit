@@ -129,6 +129,9 @@ list(APPEND WebKitLegacy_SOURCES
     ios/Misc/WebNSStringExtrasIOS.m
     ios/Misc/WebUIKitSupport.mm
 
+    mac/Misc/WebNSStringExtrasIOS6.mm
+    mac/WebView/WebLegacyCompatibilityAPI.mm
+
     ios/WebCoreSupport/PopupMenuIOS.mm
     ios/WebCoreSupport/SearchPopupMenuIOS.cpp
     ios/WebCoreSupport/WebChromeClientIOS.mm
