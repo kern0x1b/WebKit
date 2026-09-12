@@ -325,6 +325,20 @@ void ComputedStyleBase::setZoomFromAnimation(Zoom value)
         m_nonInheritedData.access().rareData.access().zoom = value;
 }
 
+#if defined(WEBKIT_IOS6)
+
+ZoomFactor ComputedStyleBase::usedZoomForLengthWhenZoomed() const
+{
+    ASSERT(inheritedFlags().isZoomed);
+
+    if (useSVGZoomRulesForLength())
+        return ZoomFactor(1.0f);
+
+    return ZoomFactor(usedZoom());
+}
+
+#endif
+
 void ComputedStyleBase::synchronizeLetterSpacingWithFontCascade()
 {
     auto& fontCascade = mutableFontCascadeWithoutUpdate();

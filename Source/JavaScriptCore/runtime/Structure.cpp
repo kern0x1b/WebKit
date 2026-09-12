@@ -311,7 +311,7 @@ void Structure::logCacheableDictionaryTransitionForAdd(PropertyName propertyName
         fprintf(file, "dictionary-transition #%llu context=%s property=%s\n",
             static_cast<unsigned long long>(total),
             context == PutPropertySlot::PutById ? "PutById" : "other",
-            uid ? uid->utf8().data() : "<null>");
+            uid ? uid->utf8().legacyCStringPointer() : "<null>");
         fclose(file);
     }
 }

@@ -5505,3 +5505,5 @@ JSXRWebGLBinding.cpp
 JSXRWebGLLayerInit.cpp
 JSXRWebGLSubImage.cpp
 JSXSLTProcessor.cpp
+platform/graphics/DestinationColorSpace.cpp
+platform/graphics/avfoundation/FormatDescriptionUtilities.cpp

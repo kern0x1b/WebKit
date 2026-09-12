@@ -34,6 +34,7 @@
 #include "ImageBuffer.h"
 #include "ImageRotationSessionVT.h"
 #include "ImageUtilities.h"
+#include "Logging.h"
 #include "PixelBuffer.h"
 #include <limits>
 #include <pal/spi/cg/CoreGraphicsSPI.h>
@@ -78,6 +79,8 @@ RefPtr<NativeImage> NativeImage::createTransient(PlatformImagePtr&& image)
     CGImageSetCachingFlags(transientImage.get(), kCGImageCachingTransient);
     return create(WTF::move(transientImage));
 }
+
+#if !defined(WEBKIT_IOS6)
 
 static void releaseImageBlock(void* info, CGImageBlockRef)
 {
@@ -189,6 +192,114 @@ RefPtr<NativeImage> NativeImage::create(RetainPtr<CVPixelBufferRef> pixelBuffer,
     return NativeImage::create(WTF::move(image));
 }
 
+#else
+
+namespace {
+
+class CVPixelBufferDataProviderInfo {
+    WTF_MAKE_NONCOPYABLE(CVPixelBufferDataProviderInfo);
+public:
+    static RetainPtr<CGDataProviderRef> createDataProvider(RetainPtr<CVPixelBufferRef>&&);
+
+private:
+    CVPixelBufferDataProviderInfo(RetainPtr<CVPixelBufferRef>&& pixelBuffer)
+        : m_pixelBuffer(WTF::move(pixelBuffer))
+    {
+    }
+    ~CVPixelBufferDataProviderInfo();
+    const void* getBytePointer();
+    void releaseBytePointer();
+
+    static const void* getBytePointerCallback(void* info) { RELEASE_ASSERT(info); return static_cast<CVPixelBufferDataProviderInfo*>(info)->getBytePointer(); }
+    static void releaseBytePointerCallback(void* info, const void*) { RELEASE_ASSERT(info); static_cast<CVPixelBufferDataProviderInfo*>(info)->releaseBytePointer(); }
+    static void releaseInfoCallback(void* info) { RELEASE_ASSERT(info); delete static_cast<CVPixelBufferDataProviderInfo*>(info); }
+
+    const RetainPtr<CVPixelBufferRef> m_pixelBuffer;
+    unsigned m_lockCount { 0 };
+};
+
+RetainPtr<CGDataProviderRef> CVPixelBufferDataProviderInfo::createDataProvider(RetainPtr<CVPixelBufferRef>&& pixelBuffer)
+{
+    if (CVPixelBufferGetPixelFormatType(pixelBuffer.get()) != kCVPixelFormatType_32BGRA)
+        return nullptr;
+    auto dataSize = CVPixelBufferGetDataSize(pixelBuffer.get());
+    if (!dataSize)
+        return nullptr;
+    CVPixelBufferDataProviderInfo* info = new CVPixelBufferDataProviderInfo(WTF::move(pixelBuffer));
+    CGDataProviderDirectCallbacks providerCallbacks = { 0, getBytePointerCallback, releaseBytePointerCallback, 0, releaseInfoCallback };
+    return adoptCF(CGDataProviderCreateDirect(info, dataSize, &providerCallbacks));
+}
+
+CVPixelBufferDataProviderInfo::~CVPixelBufferDataProviderInfo()
+{
+    if (!m_lockCount)
+        return;
+    RELEASE_LOG_ERROR(Media, "lockCount != 0: %d", m_lockCount);
+    ASSERT_NOT_REACHED();
+    // To avoid UAF, we do not unlock the pixel buffer.
+}
+
+const void* CVPixelBufferDataProviderInfo::getBytePointer()
+{
+    auto result = CVPixelBufferLockBaseAddress(m_pixelBuffer.get(), kCVPixelBufferLock_ReadOnly);
+    if (result != kCVReturnSuccess) {
+        RELEASE_LOG_ERROR(Media, "CVPixelBufferLockBaseAddress() error: %d", result);
+        ASSERT_NOT_REACHED();
+        return nullptr;
+    }
+    ++m_lockCount;
+    auto bytes = CVPixelBufferGetSpan(m_pixelBuffer.get());
+    if (!bytes.data()) {
+        RELEASE_LOG_ERROR(Media, "CVPixelBufferGetSpan() null");
+        return nullptr;
+    }
+    verifyImageBufferIsBigEnough(bytes);
+    return bytes.data();
+}
+
+void CVPixelBufferDataProviderInfo::releaseBytePointer()
+{
+    auto result = CVPixelBufferUnlockBaseAddress(m_pixelBuffer.get(), kCVPixelBufferLock_ReadOnly);
+    if (result != kCVReturnSuccess) {
+        RELEASE_LOG_ERROR(Media, "CVPixelBufferUnlockBaseAddress() error: %d", result);
+        ASSERT_NOT_REACHED();
+        return;
+    }
+    if (!m_lockCount) {
+        RELEASE_LOG_ERROR(Media, "invalid releaseBytePointer()");
+        ASSERT_NOT_REACHED();
+        return;
+    }
+    --m_lockCount;
+}
+
+}
+
+RefPtr<NativeImage> NativeImage::create(RetainPtr<CVPixelBufferRef> pixelBuffer, CGImageAlphaInfo alphaInfo, RetainPtr<CGColorSpaceRef> colorSpace)
+{
+    if (!pixelBuffer || !colorSpace)
+        return nullptr;
+
+    IntSize size { static_cast<int>(CVPixelBufferGetWidth(pixelBuffer.get())), static_cast<int>(CVPixelBufferGetHeight(pixelBuffer.get())) };
+    if (size.isEmpty())
+        return nullptr;
+
+    auto bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer.get());
+    RetainPtr provider = CVPixelBufferDataProviderInfo::createDataProvider(WTF::move(pixelBuffer));
+    if (!provider)
+        return nullptr;
+
+    auto bitmapInfo = static_cast<CGBitmapInfo>(alphaInfo) | static_cast<CGBitmapInfo>(kCGBitmapByteOrder32Little);
+    RetainPtr<CGImageRef> image = adoptCF(CGImageCreate(size.width(), size.height(), 8, 32, bytesPerRow, colorSpace.get(), bitmapInfo, provider.get(), nullptr, false, kCGRenderingIntentDefault));
+    if (!image)
+        return nullptr;
+
+    CGImageSetProperty(image.get(), CFSTR("CA_IOSURFACE_IMAGE"), kCFBooleanTrue);
+    return NativeImage::create(WTF::move(image));
+}
+
+#endif
+
 static CGImageAlphaInfo alphaInfoForAlphaLast(bool isPremultiplied)
 {
     return isPremultiplied ? kCGImageAlphaPremultipliedLast : kCGImageAlphaLast;
@@ -257,10 +368,15 @@ RefPtr<NativeImage> NativeImage::create(Ref<PixelBuffer>&& pixelBuffer)
     return NativeImage::create(adoptCF(CGImageCreate(imageSize.width(), imageSize.height(), bitsPerComponent, bytesPerPixel * 8, bytesPerPixel * imageSize.width(), colorSpace.get(), bitmapInfo, dataProvider.get(), 0, false, kCGRenderingIntentDefault)));
 }
 
+void NativeImage::cacheSize() const
+{
+    m_cachedWidth = static_cast<int>(CGImageGetWidth(m_platformImage.get()));
+    m_cachedHeight = static_cast<int>(CGImageGetHeight(m_platformImage.get()));
+}
+
 IntSize NativeImage::size() const
 {
-    Locker locker { m_lock };
-    return IntSize(CGImageGetWidth(m_platformImage.get()), CGImageGetHeight(m_platformImage.get()));
+    return IntSize(m_cachedWidth, m_cachedHeight);
 }
 
 bool NativeImage::hasAlpha() const

@@ -275,7 +275,7 @@ String codecFromFormatDescription(CMFormatDescriptionRef formatDescription)
             return "hvc1"_s;
         return createHEVCCodecParametersString(*parameters);
     }
-    case kCMVideoCodecType_DolbyVisionHEVC:
+    case 'dvh1':
     case 'cdh1': {
         RetainPtr sampleExtensionsDict = dynamic_cf_cast<CFDictionaryRef>(PAL::CMFormatDescriptionGetExtension(formatDescription, PAL::kCMFormatDescriptionExtension_SampleDescriptionExtensionAtoms));
         if (!sampleExtensionsDict)

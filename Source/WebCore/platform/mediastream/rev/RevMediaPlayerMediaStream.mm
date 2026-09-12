@@ -174,7 +174,7 @@ private:
         context.drawNativeImage(*m_currentImage, destRect, imageRect);
     }
 
-    DestinationColorSpace colorSpace() final { return DestinationColorSpace::SRGB(); }
+    ColorSpace colorSpace() final { return ColorSpace::SRGB(); }
 
     MediaPlayer::MovieLoadType movieLoadType() const final { return MediaPlayer::MovieLoadType::LiveStream; }
 

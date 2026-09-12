@@ -27,7 +27,7 @@
 
 #include <JavaScriptCore/JSBase.h>
 
-#ifdef __APPLE__
+#if defined(__APPLE__) && __has_include(<bmalloc/pas_report_crash_pgm_report.h>)
 #include <bmalloc/pas_report_crash_pgm_report.h>
 
 #ifdef __cplusplus

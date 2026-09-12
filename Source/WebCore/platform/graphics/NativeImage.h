@@ -124,7 +124,10 @@ protected:
 #endif
 
     void computeHeadroom() const WTF_REQUIRES_LOCK(m_lock);
+    void cacheSize() const WTF_REQUIRES_LOCK(m_lock);
 
+    mutable int m_cachedWidth { 0 };
+    mutable int m_cachedHeight { 0 };
     mutable Lock m_lock;
     mutable PlatformImagePtr m_platformImage WTF_GUARDED_BY_LOCK(m_lock);
     mutable std::optional<GainMap> m_gainMap;

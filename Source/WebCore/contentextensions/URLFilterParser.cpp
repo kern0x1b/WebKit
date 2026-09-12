@@ -408,7 +408,7 @@ URLFilterParser::ParseStatus URLFilterParser::addPattern(StringView pattern, boo
 
     ParseStatus status = Ok;
     PatternParser patternParser(patternIsCaseSensitive);
-    if (!JSC::Yarr::hasError(JSC::Yarr::parse(patternParser, pattern, JSC::Yarr::CompileMode::Legacy, 0, false, false)))
+    if (!JSC::Yarr::hasError(JSC::Yarr::parse(patternParser, pattern, JSC::Yarr::CompileMode::Legacy, 0, false)))
         patternParser.finalize(patternId, m_combinedURLFilters);
     else
         status = YarrError;

@@ -207,7 +207,13 @@ if (WEBKIT_SDK_IS_IOS_FAMILY)
 
     # BrowserEngineCore provides the inline-JIT-permissions API (be_memory_*)
     # that threadSelfRestrict uses; weak-linked (iOS 17.4+).
-    target_link_options(JavaScriptCore PRIVATE "LINKER:-weak_framework,BrowserEngineCore")
+    find_library(BROWSERENGINECORE_LIBRARY BrowserEngineCore
+        PATHS "${CMAKE_OSX_SYSROOT}/System/Library/Frameworks"
+        NO_DEFAULT_PATH
+    )
+    if (BROWSERENGINECORE_LIBRARY)
+        target_link_options(JavaScriptCore PRIVATE "LINKER:-weak_framework,BrowserEngineCore")
+    endif ()
 
     target_compile_definitions(JavaScriptCore PRIVATE PAS_BMALLOC_HIDDEN=1)
     target_compile_options(JavaScriptCore PRIVATE

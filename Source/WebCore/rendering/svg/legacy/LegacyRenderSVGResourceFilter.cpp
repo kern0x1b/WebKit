@@ -23,8 +23,6 @@
  */
 
 #include "config.h"
-
-#include "DestinationColorSpace.h"
 #include "LegacyRenderSVGResourceFilter.h"
 #include "LegacyRenderSVGModelObjectInlines.h"
 
@@ -145,8 +143,8 @@ auto LegacyRenderSVGResourceFilter::applyResource(RenderElement& renderer, const
 
     filterData->filter->clampFilterRegionIfNeeded();
 
-#if USE(CAIRO) || defined(WEBKIT_IOS6)
-    auto colorSpace = DestinationColorSpace::SRGB();
+#if USE(CAIRO)
+    auto colorSpace = ColorSpace::SRGB();
 #else
     auto colorSpace = ColorSpace::LinearSRGB();
 #endif

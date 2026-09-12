@@ -27,7 +27,6 @@
 
 #include "AbstractLineBuilder.h"
 #include "FloatingContext.h"
-#include <wtf/UniqueRef.h>
 
 namespace WebCore {
 namespace Layout {
@@ -39,7 +38,7 @@ class LineBuilder final : public AbstractLineBuilder {
     WTF_DEPRECATED_MAKE_FAST_ALLOCATED(LineBuilder);
 public:
     LineBuilder(InlineFormattingContext&, HorizontalConstraints rootHorizontalConstraints, const InlineItemList&, TextSpacingContext = { });
-    virtual ~LineBuilder();
+    virtual ~LineBuilder() { };
     LineLayoutResult layoutInlineContent(const LineInput&, const std::optional<PreviousLine>&, bool isFirstFormattedLineCandidate) final;
 
 private:
@@ -110,12 +109,6 @@ private:
     OptionSet<UsedFloat> m_lineIsConstrainedByFloat { };
     std::optional<InlineLayoutUnit> m_initialLetterClearGap;
     TextSpacingContext m_textSpacingContext { };
-    UniqueRef<LineCandidate> m_lineCandidate;
-    struct ComputedLineHeightCache {
-        const Style::ComputedStyle* style { nullptr };
-        InlineLayoutUnit computedLineHeight { 0.f };
-    };
-    mutable ComputedLineHeightCache m_computedLineHeightCache { };
 };
 
 }

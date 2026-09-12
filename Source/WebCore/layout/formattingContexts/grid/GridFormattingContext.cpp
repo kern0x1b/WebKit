@@ -257,11 +257,11 @@ PlacedGridItems GridFormattingContext::constructPlacedGridItems(const GridAreas&
 {
     PlacedGridItems placedGridItems;
     placedGridItems.reserveInitialCapacity(gridAreas.size());
-    CheckedRef gridContainerStyle = this->gridContainerStyle();
+    CheckedRef formattingContextStyle = root().style();
     for (auto [ unplacedGridItem, gridAreaLines ] : gridAreas) {
         CheckedRef gridItem = unplacedGridItem.m_layoutBox;
-        auto& boxGeometry = geometryForGridItem(gridItem);
-        placedGridItems.constructAndAppend(gridItem, gridAreaLines, boxGeometry, gridContainerStyle);
+        CheckedRef gridContainerStyle = this->gridContainerStyle();
+        placedGridItems.constructAndAppend(gridItem, gridAreaLines, gridContainerStyle);
     }
     return placedGridItems;
 }

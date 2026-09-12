@@ -1335,11 +1335,9 @@ void Document::invalidateQuerySelectorAllResults(Node& startingNode)
 {
     if (m_querySelectorAllResults.isEmptyIgnoringNullReferences())
         return;
-    RefPtr<Node> protectedNode;
-    for (SUPPRESS_UNCOUNTED_LOCAL Node* currentNode = &startingNode; currentNode; currentNode = currentNode->parentNode()) {
-        if (!currentNode->hasValidQuerySelectorAllResults()) [[likely]]
+    for (RefPtr currentNode = startingNode; currentNode; currentNode = currentNode->parentNode()) {
+        if (!currentNode->hasValidQuerySelectorAllResults())
             continue;
-        protectedNode = currentNode;
         m_querySelectorAllResults.remove(*currentNode);
         currentNode->setHasValidQuerySelectorAllResults(false);
     }
@@ -1349,11 +1347,9 @@ void Document::invalidateQuerySelectorAllResultsForClassAttributeChange(Node& st
 {
     if (m_querySelectorAllResults.isEmptyIgnoringNullReferences())
         return;
-    RefPtr<Node> protectedNode;
-    for (SUPPRESS_UNCOUNTED_LOCAL Node* currentNode = &startingNode; currentNode; currentNode = currentNode->parentNode()) {
-        if (!currentNode->hasValidQuerySelectorAllResults()) [[likely]]
+    for (RefPtr currentNode = startingNode; currentNode; currentNode = currentNode->parentNode()) {
+        if (!currentNode->hasValidQuerySelectorAllResults())
             continue;
-        protectedNode = currentNode;
         auto it = m_querySelectorAllResults.find(*currentNode);
         ASSERT(it != m_querySelectorAllResults.end());
         if (it == m_querySelectorAllResults.end())
@@ -1548,20 +1544,6 @@ static ALWAYS_INLINE Ref<HTMLElement> createUpgradeCandidateElement(Document& do
     return createUpgradeCandidateElement(document, registry, QualifiedName { nullAtom(), localName, xhtmlNamespaceURI });
 }
 
-static ALWAYS_INLINE bool isAlreadyASCIILowercase(const AtomString& name)
-{
-    auto* impl = name.impl();
-    if (!impl)
-        return true;
-    if (!impl->is8Bit()) [[unlikely]]
-        return false;
-    for (auto character : impl->span8()) {
-        if (isASCIIUpper(character)) [[unlikely]]
-            return false;
-    }
-    return true;
-}
-
 template<typename NameType>
 static ExceptionOr<Ref<Element>> createHTMLElementWithNameValidation(Document& document, const NameType& name, CustomElementRegistry* registry)
 {
@@ -1599,13 +1581,8 @@ ExceptionOr<Ref<Element>> Document::createElementForBindings(const AtomString& n
     }
 
     auto result = [&]() -> ExceptionOr<Ref<Element>> {
-        if (document->isHTMLDocument()) {
-            // convertToASCIILowercase() is an out-of-line WTF call that returns a new AtomString even
-            // when it changes nothing, which is the case for every createElement('div') a page makes.
-            if (isAlreadyASCIILowercase(name)) [[likely]]
-                return createHTMLElementWithNameValidation(document, name, registry.get());
+        if (document->isHTMLDocument())
             return createHTMLElementWithNameValidation(document, name.convertToASCIILowercase(), registry.get());
-        }
 
         if (document->isXHTMLDocument())
             return createHTMLElementWithNameValidation(document, name, registry.get());
@@ -2833,12 +2810,6 @@ void Document::updateRenderTree(std::unique_ptr<Style::Update> styleUpdate)
 
 void Document::resolveStyle(ResolveStyleType type)
 {
-#if defined(WEBKIT_IOS6)
-    if (g_webkitIOS6LayoutCounters) [[unlikely]] {
-        extern unsigned g_webkitIOS6StyleResolves;
-        ++g_webkitIOS6StyleResolves;
-    }
-#endif
     ScriptDisallowedScope::InMainThread scriptDisallowedScope;
 
     ASSERT(!view() || !view()->isPainting());
@@ -4502,7 +4473,7 @@ bool Document::shouldScheduleLayout() const
         return true;
     if (!bodyOrFrameset())
         return false;
-    if (styleScope().blocksRenderingBeforeBody())
+    if (styleScope().hasPendingSheetsBeforeBody())
         return false;
     if (view() && !view()->isVisuallyNonEmpty())
         return false;
@@ -5636,15 +5607,11 @@ void Document::metaElementColorSchemeChanged()
 
 void Document::processFormatDetection(const String& features)
 {
-#if ENABLE(TELEPHONE_NUMBER_DETECTION)
     // FIXME: Find a better place for this function.
     processFeaturesString(features, FeatureMode::Viewport, [this](StringView key, StringView value) {
         if (equalLettersIgnoringASCIICase(key, "telephone"_s) && equalLettersIgnoringASCIICase(value, "no"_s))
             m_isTelephoneNumberParsingAllowed = false;
     });
-#else
-    UNUSED_PARAM(features);
-#endif
 }
 
 void Document::processWebAppOrientations()
@@ -6965,7 +6932,7 @@ void Document::moveNodeIteratorsToNewDocument(Node& node, Document& newDocument)
 void Document::updateRangesAfterChildrenChanged(ContainerNode& container)
 {
     for (auto& range : m_ranges)
-        range.get().nodeChildrenChanged(container);
+        Ref { range.get() }->nodeChildrenChanged(container);
 }
 
 void Document::nodeChildrenWillBeRemoved(ContainerNode& container)
@@ -7008,7 +6975,7 @@ void Document::nodeWillBeRemoved(Node& node)
         nodeIterator->nodeWillBeRemoved(node);
 
     for (auto& range : m_ranges)
-        range.get().nodeWillBeRemoved(node);
+        Ref { range.get() }->nodeWillBeRemoved(node);
 
     if (RefPtr frame = this->frame()) {
         frame->eventHandler().nodeWillBeRemoved(node);
@@ -7068,8 +7035,8 @@ void Document::adjustFocusNavigationNodeOnNodeRemoval(Node& node, NodeRemoval no
 
 void Document::textInserted(Node& text, unsigned offset, unsigned length)
 {
-    for (auto& range : m_ranges)
-        range.get().textInserted(text, offset, length);
+    for (Ref range : m_ranges)
+        range->textInserted(text, offset, length);
 
     if (!m_markers)
         return;
@@ -7085,8 +7052,8 @@ void Document::textInserted(Node& text, unsigned offset, unsigned length)
 
 void Document::textRemoved(Node& text, unsigned offset, unsigned length)
 {
-    for (auto& range : m_ranges)
-        range.get().textRemoved(text, offset, length);
+    for (Ref range : m_ranges)
+        range->textRemoved(text, offset, length);
 
     if (!m_markers)
         return;
@@ -9568,6 +9535,21 @@ void Document::didRemoveTouchEventHandler(Node& handler, EventHandlerRemoval rem
 #endif
 }
 
+void Document::didRemoveEventTargetNode(Node& handler)
+{
+#if ENABLE(TOUCH_EVENTS) || ENABLE(TOUCH_EVENT_REGIONS)
+    if (m_touchEventTargets.removeAll(handler)) {
+        if ((&handler == this || m_touchEventTargets.isEmptyIgnoringNullReferences()) && parentDocument())
+            protect(parentDocument())->didRemoveEventTargetNode(*this);
+    }
+#endif
+
+    if (m_wheelEventTargets.removeAll(handler)) {
+        if ((&handler == this || m_wheelEventTargets.isEmptyIgnoringNullReferences()) && parentDocument())
+            protect(parentDocument())->didRemoveEventTargetNode(*this);
+    }
+}
+
 #if ENABLE(TOUCH_EVENTS) && PLATFORM(IOS_FAMILY)
 void Document::addTouchEventListener(Node& node)
 {
@@ -9584,21 +9566,6 @@ void Document::removeTouchEventHandler(Node& node, EventHandlerRemoval removalMo
     removeHandlerFromSet(m_touchEventHandlerCounts, node, removalMode);
 }
 #endif
-
-void Document::didRemoveEventTargetNode(Node& handler)
-{
-#if ENABLE(TOUCH_EVENTS) || ENABLE(TOUCH_EVENT_REGIONS)
-    if (m_touchEventTargets.removeAll(handler)) {
-        if ((&handler == this || m_touchEventTargets.isEmptyIgnoringNullReferences()) && parentDocument())
-            protect(parentDocument())->didRemoveEventTargetNode(*this);
-    }
-#endif
-
-    if (m_wheelEventTargets.removeAll(handler)) {
-        if ((&handler == this || m_wheelEventTargets.isEmptyIgnoringNullReferences()) && parentDocument())
-            protect(parentDocument())->didRemoveEventTargetNode(*this);
-    }
-}
 
 unsigned Document::touchEventHandlerCount() const
 {

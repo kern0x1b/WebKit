@@ -37,7 +37,7 @@ WTF_IGNORE_WARNINGS_IN_THIRD_PARTY_CODE_BEGIN
 
 WTF_IGNORE_WARNINGS_IN_THIRD_PARTY_CODE_END
 
-#ifdef __APPLE__
+#if defined(__APPLE__) && __has_include(<bmalloc/pas_report_crash_pgm_report.h>)
 
 kern_return_t PASReportCrashExtractResults(vm_address_t fault_address, mach_vm_address_t pas_dead_root, unsigned version, task_t task, pas_report_crash_pgm_report *report, crash_reporter_memory_reader_t crm_reader)
 {

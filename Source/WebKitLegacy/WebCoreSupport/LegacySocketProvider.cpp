@@ -35,6 +35,7 @@
 // was absent from Sources.txt, while the socket handle beside it was already
 // listed.
 #import "WebSocketChannel.h"
+#import <WebCore/EmptyClients.h>
 #import <WebCore/WebTransportSession.h>
 #import <wtf/CompletionHandler.h>
 
@@ -43,7 +44,7 @@ RefPtr<WebCore::ThreadableWebSocketChannel> LegacySocketProvider::createWebSocke
     return WebCore::WebSocketChannel::create(document, client, *this);
 }
 
-std::pair<RefPtr<WebCore::WebTransportSession>, Ref<WebCore::WebTransportSessionPromise>> LegacySocketProvider::initializeWebTransportSession(WebCore::ScriptExecutionContext&, WebCore::WebTransportSessionClient&, const URL&, const WebCore::WebTransportOptions&)
+Ref<WebCore::WebTransportSession> LegacySocketProvider::createWebTransportSession(WebCore::ScriptExecutionContext& context, WebCore::WebTransportSessionClient& client)
 {
-    return { nullptr, WebCore::WebTransportSessionPromise::createAndReject() };
+    return WebCore::emptySocketProvider()->createWebTransportSession(context, client);
 }

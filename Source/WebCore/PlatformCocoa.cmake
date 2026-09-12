@@ -43,7 +43,6 @@ find_library(BROWSERENGINEKIT_LIBRARY BrowserEngineKit
 if (BROWSERENGINEKIT_LIBRARY)
     target_link_options(WebCore PRIVATE -weak_framework BrowserEngineKit)
 endif ()
-target_link_options(WebCore PRIVATE "LINKER:-weak_framework,BrowserEngineKit")
 
 target_link_options(WebCore PRIVATE
     "LINKER:-unexported_symbols_list,${WEBCORE_DIR}/Configurations/WebCore.unexp"
