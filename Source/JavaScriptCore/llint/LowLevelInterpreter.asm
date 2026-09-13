@@ -848,22 +848,26 @@ if X86_64 or ARM64 or ARM64E or ARMv7
         push t4, t5
         push t6, t7
         push ws0, ws1
-        if ARM64 or ARM64E or ARMv7
+        if ARM64 or ARM64E
             push csr0, csr1
             push csr2, csr3
             push csr4, csr5
             push csr6, csr7
             push csr8, csr9
+        elsif ARMv7
+            push csr0, csr1
         end
 
         action()
 
         # restore all the registers we saved previously.
-        if ARM64 or ARM64E or ARMv7
+        if ARM64 or ARM64E
             pop csr9, csr8
             pop csr7, csr6
             pop csr5, csr4
             pop csr3, csr2
+            pop csr1, csr0
+        elsif ARMv7
             pop csr1, csr0
         end
         pop ws1, ws0
@@ -889,7 +893,13 @@ macro checkStackPointerAlignment(tempReg, location)
             # C_LOOP does not need the alignment, and can use a little perf
             # improvement from avoiding useless work.
         else
-            andp sp, StackAlignmentMask, tempReg
+            if ARMv7
+                # ARM can't do logical ops with the sp as a source
+                move sp, tempReg
+                andp StackAlignmentMask, tempReg
+            else
+                andp sp, StackAlignmentMask, tempReg
+            end
             btpz tempReg, .stackPointerOkay
             move location, tempReg
             break
@@ -1640,9 +1650,19 @@ macro prologue(osrSlowPath, traceSlowPath)
     if not C_LOOP
         loadp CodeBlock::m_unlinkedCode[t1], t0
         baddis 5, (UnlinkedCodeBlock::m_llintExecuteCounter + BaselineExecutionCounter::m_counter)[t0], .continue
-        move cfr, a0
-        move PC, a1
-        cCall2(osrSlowPath)
+        if JSVALUE64
+            move cfr, a0
+            move PC, a1
+            cCall2(osrSlowPath)
+        else
+            # We are after the function prologue, but before we have set up sp from the CodeBlock.
+            # Temporarily align stack pointer for this call.
+            subp 8, sp
+            move cfr, a0
+            move PC, a1
+            cCall2(osrSlowPath)
+            addp 8, sp
+        end
         btpz r0, .recover
         move cfr, sp # restore the previous sp
         # pop the callerFrame since we will jump to a function that wants to save it
@@ -3035,10 +3055,20 @@ op(checkpoint_osr_exit_from_inlined_call_trampoline, macro ()
         restoreStackPointerAfterCall()
 
         # Make sure we move r0 to a1 first since r0 might be the same as a0, for instance, on arm.
-        move r0, a1
-        move cfr, a0
-        # We don't call saveStateForCCall() because we are going to use the bytecodeIndex from our side state.
-        cCall2(_llint_slow_path_checkpoint_osr_exit_from_inlined_call)
+        if ARMv7
+            # The second parameter is an EncodedJSValue, which the ARM ABI passes
+            # in an even-aligned register pair, leaving a1 unused.
+            move r1, a3
+            move r0, a2
+            move cfr, a0
+            # We don't call saveStateForCCall() because we are going to use the bytecodeIndex from our side state.
+            cCall4(_llint_slow_path_checkpoint_osr_exit_from_inlined_call)
+        else
+            move r0, a1
+            move cfr, a0
+            # We don't call saveStateForCCall() because we are going to use the bytecodeIndex from our side state.
+            cCall2(_llint_slow_path_checkpoint_osr_exit_from_inlined_call)
+        end
 
         setupReturnToBaselineAfterCheckpointExitIfNeeded()
         restoreStateAfterCCall()
@@ -3089,7 +3119,11 @@ op(array_sort_comparator_return_trampoline, macro ()
         restoreStackPointerAfterCall()
 
         move cfr, a0
-        cCall2(_llint_slow_path_array_sort_comparator_return)
+        if ARMv7
+            cCall4(_llint_slow_path_array_sort_comparator_return)
+        else
+            cCall2(_llint_slow_path_array_sort_comparator_return)
+        end
 
         setupReturnToBaselineAfterCheckpointExitIfNeeded()
         restoreStateAfterCCall()
