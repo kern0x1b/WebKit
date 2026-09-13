@@ -588,6 +588,10 @@ static void overrideDefaults()
 #endif
     }
 
+#if USE(JSVALUE32_64)
+    Options::maximumVarargsForInlining() = 0;
+#endif
+
 #if OS(DARWIN) && CPU(ARM64)
     {
         // Example topologies.

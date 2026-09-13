@@ -5683,6 +5683,11 @@ JSC_DEFINE_JIT_OPERATION(operationLoadVarargs, void, (JSGlobalObject* globalObje
     JITOperationPrologueCallFrameTracer tracer(vm, callFrame);
     auto scope = DECLARE_THROW_SCOPE(vm);
     JSValue arguments = JSValue::decode(encodedArguments);
+    {
+        static unsigned revCount = 0;
+        if (revCount++ < 8)
+            dataLogLn("REVDBG loadVarargs dest=", firstElementDest, " args=", RawPointer(std::bit_cast<void*>(static_cast<uintptr_t>(encodedArguments & 0xffffffff))), ":", RawPointer(std::bit_cast<void*>(static_cast<uintptr_t>(encodedArguments >> 32))), " offset=", offset, " len=", lengthIncludingThis, " min=", mandatoryMinimum, " isCell=", arguments.isCell());
+    }
     
     loadVarargs(globalObject, std::bit_cast<JSValue*>(&callFrame->r(firstElement)), arguments, offset, lengthIncludingThis - 1);
     
