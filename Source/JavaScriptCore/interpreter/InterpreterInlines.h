@@ -83,7 +83,10 @@ inline OpcodeID Interpreter::getOpcodeID(JSC::Opcode opcode)
     // The OpcodeID is embedded in the int32_t word preceding the location of
     // the LLInt code for the opcode (see the EMBED_OPCODE_ID_IF_NEEDED macro
     // in LowLevelInterpreter.cpp).
-    const void* opcodeAddress = removeCodePtrTag(std::bit_cast<const void*>(opcode));
+    uintptr_t opcodeAddress = std::bit_cast<uintptr_t>(removeCodePtrTag(std::bit_cast<const void*>(opcode)));
+#if CPU(ARM_THUMB2)
+    opcodeAddress &= ~static_cast<uintptr_t>(1);
+#endif
     const int32_t* opcodeIDAddress = std::bit_cast<int32_t*>(opcodeAddress) - 1;
     OpcodeID opcodeID = static_cast<OpcodeID>(WTF::unalignedLoad<int32_t>(opcodeIDAddress));
     ASSERT(opcodeID < NUMBER_OF_BYTECODE_IDS);

@@ -5435,10 +5435,11 @@ void SpeculativeJIT::compilePutPrivateNameById(Node* node)
 
 void SpeculativeJIT::compileCheckPrivateBrand(Node* node)
 {
-    JSValueOperand base(this, node->child1());
+    ASSERT(node->child1().useKind() == CellUse);
+    SpeculateCellOperand base(this, node->child1());
     SpeculateCellOperand brandValue(this, node->child2());
 
-    JSValueRegs baseRegs = base.jsValueRegs();
+    GPRReg baseGPR = base.gpr();
     GPRReg brandGPR = brandValue.gpr();
 
     speculateSymbol(node->child2(), brandGPR);
@@ -5448,13 +5449,10 @@ void SpeculativeJIT::compileCheckPrivateBrand(Node* node)
     RegisterSet usedRegisters = this->usedRegisters();
 
     JumpList slowCases;
-    if (needsTypeCheck(node->child1(), SpecCell))
-        slowCases.append(branchIfNotCell(baseRegs));
-
     auto [ propertyCache, propertyCacheConstant ] = addPropertyInlineCache();
     JITPrivateBrandAccessGenerator gen(
         codeBlock(), propertyCache, JITType::DFGJIT, codeOrigin, callSite, AccessType::CheckPrivateBrand, usedRegisters,
-        baseRegs, JSValueRegs::payloadOnly(brandGPR), InvalidGPRReg);
+        JSValueRegs::payloadOnly(baseGPR), JSValueRegs::payloadOnly(brandGPR), InvalidGPRReg);
 
     WTF::visit([&](auto* propertyCache) {
         propertyCache->propertyIsSymbol = true;
@@ -5464,7 +5462,7 @@ void SpeculativeJIT::compileCheckPrivateBrand(Node* node)
     slowCases.append(gen.slowPathJump());
     auto slowPath = slowPathCall(
         slowCases, this, operationCheckPrivateBrandOptimize, NoResult,
-        baseRegs, CellValue(brandGPR), TrustedImmPtr(gen.propertyCache()));
+        CellValue(baseGPR), CellValue(brandGPR), TrustedImmPtr(gen.propertyCache()));
 
     addPrivateBrandAccess(gen, slowPath.get());
     addSlowPathGenerator(WTF::move(slowPath));
