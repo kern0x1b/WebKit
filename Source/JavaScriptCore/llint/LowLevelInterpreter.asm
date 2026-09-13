@@ -1057,6 +1057,15 @@ macro copyCalleeSavesToBuffer(buffer)
         storeq csr2, 16[buffer]
         storeq csr3, 24[buffer]
         storeq csr4, 32[buffer]
+    elsif ARMv7
+        storep csr0, [buffer]
+        storep csr1, 4[buffer]
+        stored csfr0, 8[buffer]
+        stored csfr1, 16[buffer]
+        stored csfr2, 24[buffer]
+        stored csfr3, 32[buffer]
+        stored csfr4, 40[buffer]
+        stored csfr5, 48[buffer]
     elsif RISCV64
         storep csr0, [buffer]
         storep csr1, 8[buffer]
@@ -1116,6 +1125,15 @@ macro restoreCalleeSavesFromBuffer(buffer)
         loadq 16[buffer], csr2
         loadq 24[buffer], csr3
         loadq 32[buffer], csr4
+    elsif ARMv7
+        loadp [buffer], csr0
+        loadp 4[buffer], csr1
+        loadd 8[buffer], csfr0
+        loadd 16[buffer], csfr1
+        loadd 24[buffer], csfr2
+        loadd 32[buffer], csfr3
+        loadd 40[buffer], csfr4
+        loadd 48[buffer], csfr5
     elsif RISCV64
         loadq [buffer], csr0
         loadq 8[buffer], csr1
