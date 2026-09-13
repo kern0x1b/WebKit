@@ -68,13 +68,59 @@ class State;
 struct OSRExitDescriptorImpl;
 struct OSRExitHandle;
 
+class JITCode;
+
+// Stores one ExitValue per operand of the exit (arguments, then locals, then tmps) as
+// a byte stream: a tag byte followed by an optional payload.
+//
+//   0x00-0x3F  (tag + 1) consecutive dead values
+//   0x40-0x43  InJSStack / AsInt32 / AsInt52 / AsDouble, flushed to the operand's own virtual register
+//   0x44-0x47  the same, flushed to another virtual register: SLEB128 register offset follows
+//   0x48       Constant: LEB128 index into JITCode::osrExitConstants follows
+//   0x49       MaterializeNewObject: LEB128 index into OSRExitDescriptor::m_materializations follows
+//   0x4A       Argument: DataFormat byte and LEB128 stackmap index follow
+//
+// Virtual registers are stored before the localsOffset adjustment; decode() applies it.
+class OSRExitValues {
+    WTF_MAKE_NONCOPYABLE(OSRExitValues);
+public:
+    OSRExitValues() = default;
+
+    void encode(const Operands<ExitValue>&, const Bag<ExitTimeObjectMaterialization>&, JITCode&);
+    FixedOperands<ExitValue> decode(const JITCode&, const Bag<ExitTimeObjectMaterialization>&) const;
+
+private:
+    FixedVector<uint8_t> m_bytes;
+    unsigned m_numberOfArguments { 0 };
+    unsigned m_numberOfLocals { 0 };
+    unsigned m_numberOfTmps { 0 };
+};
+
+// Stores where B3 placed the exit arguments of every exit of a JITCode as one byte stream. An
+// exit's entry is a LEB128 argument count followed by one B3::ValueRep per argument, which is a
+// B3::ValueRep::Kind byte and then:
+//
+//   Register   the Reg index byte
+//   Stack      the SLEB128 offset from the frame pointer
+//   Constant   the SLEB128 value
+class OSRExitValueReps {
+    WTF_MAKE_NONCOPYABLE(OSRExitValueReps);
+public:
+    OSRExitValueReps() = default;
+
+    unsigned append(std::span<const B3::ValueRep>);
+    FixedVector<B3::ValueRep> decode(unsigned offset) const;
+    void shrinkToFit() { m_bytes.shrinkToFit(); }
+
+private:
+    Vector<uint8_t> m_bytes;
+};
+
 struct OSRExitDescriptor {
 private:
     WTF_MAKE_NONCOPYABLE(OSRExitDescriptor);
 public:
-    OSRExitDescriptor(
-        DataFormat profileDataFormat, MethodOfGettingAValueProfile,
-        unsigned numberOfArguments, unsigned numberOfLocals, unsigned numberOfTmps);
+    OSRExitDescriptor(DataFormat profileDataFormat, MethodOfGettingAValueProfile);
 
     // The first argument to the exit call may be a value we wish to profile.
     // If that's the case, the format will be not Invalid and we'll have a
@@ -83,9 +129,11 @@ public:
     // correct them.
     DataFormat m_profileDataFormat;
     MethodOfGettingAValueProfile m_valueProfile;
-    
-    FixedOperands<ExitValue> m_values;
+
+    OSRExitValues m_values;
     Bag<ExitTimeObjectMaterialization> m_materializations;
+
+    FixedOperands<ExitValue> values(const JITCode& jitCode) const { return m_values.decode(jitCode, m_materializations); }
 
     void validateReferences(const TrackedReferences&);
 
@@ -121,13 +169,14 @@ private:
 };
 
 struct OSRExit : public DFG::OSRExitBase {
-    OSRExit(OSRExitDescriptor*, ExitKind, CodeOrigin, CodeOrigin codeOriginForExitProfile, bool wasHoisted, uint32_t dfgNodeIndex, FixedVector<B3::ValueRep>&&);
+    OSRExit(OSRExitDescriptor*, ExitKind, CodeOrigin, CodeOrigin codeOriginForExitProfile, bool wasHoisted, uint32_t dfgNodeIndex, unsigned valueRepsOffset);
 
+    FixedVector<B3::ValueRep> valueReps(const JITCode&) const;
+
+    unsigned m_valueRepsOffset;
     OSRExitDescriptor* m_descriptor;
-    MacroAssemblerCodeRef<OSRExitPtrTag> m_code;
     // This tells us where to place a jump.
     CodeLocationJump<JSInternalPtrTag> m_patchableJump;
-    FixedVector<B3::ValueRep> m_valueReps;
 
     CodeLocationJump<JSInternalPtrTag> NODELETE codeLocationForRepatch(CodeBlock* ftlCodeBlock) const;
     void considerAddingAsFrequentExitSite(CodeBlock* profiledCodeBlock)
