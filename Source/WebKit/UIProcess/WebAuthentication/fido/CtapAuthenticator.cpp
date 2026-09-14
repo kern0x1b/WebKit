@@ -47,6 +47,7 @@
 #include <pal/crypto/CryptoDigest.h>
 #include <wtf/EnumTraits.h>
 #include <wtf/RunLoop.h>
+#include <wtf/UUID.h>
 #include <wtf/text/Base64.h>
 #include <wtf/text/MakeString.h>
 
@@ -747,9 +748,26 @@ Vector<AuthenticatorTransport> CtapAuthenticator::transports() const
     return Vector { driver().transport() };
 }
 
+// An AAGUID is 16 arbitrary vendor bytes, commonly all-zero, so it is not a UUID and cannot be held
+// in one. It is only formatted like one, by WTF::UUIDCanonicalForm.
+static String aaguidToString(std::span<const std::byte, aaguidLength> aaguid)
+{
+    auto readBigEndian = [](std::span<const std::byte, 8> bytes) {
+        uint64_t value = 0;
+        for (auto byte : bytes)
+            value = (value << 8) | std::to_integer<uint8_t>(byte);
+        return value;
+    };
+
+    return makeString(WTF::UUIDCanonicalForm { readBigEndian(aaguid.first<8>()), readBigEndian(aaguid.last<8>()) });
+}
+
 String CtapAuthenticator::aaguidForDebugging() const
 {
-    return WTF::UUID { std::span<const uint8_t, 16> { m_info.aaguid() } }.toString();
+    auto aaguid = m_info.aaguid().span();
+    if (aaguid.size() != aaguidLength)
+        return { };
+    return aaguidToString(std::as_bytes(aaguid.first<aaguidLength>()));
 }
 
 bool CtapAuthenticator::isUVSetup() const

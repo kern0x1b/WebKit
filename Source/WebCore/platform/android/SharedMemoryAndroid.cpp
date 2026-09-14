@@ -84,12 +84,12 @@ RefPtr<SharedMemory> SharedMemory::allocate(size_t size)
 {
     auto fileDescriptor = createSharedMemory(size);
     if (!fileDescriptor) {
-        WTFLogAlways("Failed to create shared memory: %s", safeStrerror(errno).data());
+        SAFE_WTFLOGALWAYS("Failed to create shared memory: %s", safeStrerror(errno));
         return nullptr;
     }
 
     if (ASharedMemory_setProt(fileDescriptor.value(), PROT_READ | PROT_WRITE) == -1) {
-        WTFLogAlways("Failed to set ASharedMemory protection: %s", safeStrerror(errno).data());
+        SAFE_WTFLOGALWAYS("Failed to set ASharedMemory protection: %s", safeStrerror(errno));
         return nullptr;
     }
 

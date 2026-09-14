@@ -47,7 +47,7 @@ void installBreakpadExceptionHandler()
         return;
 
     if (FileSystem::fileType(breakpadMinidumpDir) != FileSystem::FileType::Directory) {
-        WTFLogAlways("Breakpad dir \"%s\" is not a directory, not installing handler", breakpadMinidumpDir.utf8().legacyCStringPointer());
+        SAFE_WTFLOGALWAYS("Breakpad dir \"%s\" is not a directory, not installing handler", breakpadMinidumpDir.utf8());
         return;
     }
 

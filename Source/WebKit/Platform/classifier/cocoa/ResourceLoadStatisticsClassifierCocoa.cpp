@@ -113,7 +113,7 @@ const struct svm_model* ResourceLoadStatisticsClassifierCocoa::singletonPredicti
     if (corePredictionModel && corePredictionModel.value())
         return corePredictionModel.value();
 
-    WTFLogAlways("ResourceLoadStatisticsClassifierCocoa::singletonPredictionModel(): Couldn't load model file at path %s.", storagePath().utf8().legacyCStringPointer());
+    SAFE_WTFLOGALWAYS("ResourceLoadStatisticsClassifierCocoa::singletonPredictionModel(): Couldn't load model file at path %s.", storagePath().utf8());
     m_useCorePrediction = false;
     return nullptr;
 }

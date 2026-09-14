@@ -4203,7 +4203,7 @@ bool RenderBlockFlow::layoutSimpleBlockContentInInline(MarginInfo& marginInfo)
                 auto isContentfulInline = [&] {
                     if (CheckedPtr text = dynamicDowncast<RenderText>(renderer.get()))
                         return text->hasRenderedText();
-                    return !is<RenderInline>(renderer.get()) && !renderer->isFloatingOrOutOfFlowPositioned();
+                    return !renderer->isInlineBox() && !renderer->isFloatingOrOutOfFlowPositioned();
                 };
                 if (isContentfulInline()) {
                     marginInfo.setMargin({ }, { });
@@ -4898,12 +4898,12 @@ RenderObject* InlineMinMaxIterator::next()
     m_isEndOfInline = false;
     do {
 
-        if (!oldEndOfInline && is<RenderInline>(m_current))
+        if (!oldEndOfInline && m_current && m_current->isInlineBox())
             candidate = m_current->firstChildSlow();
 
         if (!candidate) {
             // We hit the end of our inline. (It was empty, e.g., <span></span>.)
-            if (!oldEndOfInline && m_current && m_current->isRenderInline()) {
+            if (!oldEndOfInline && m_current && m_current->isInlineBox()) {
                 candidate = m_current;
                 m_isEndOfInline = true;
                 break;
@@ -4914,7 +4914,7 @@ RenderObject* InlineMinMaxIterator::next()
                 if (candidate)
                     break;
                 m_current = m_current->parent();
-                if (m_current && m_current != &m_blockContainer && m_current->isRenderInline()) {
+                if (m_current && m_current != &m_blockContainer && m_current->isInlineBox()) {
                     candidate = m_current;
                     m_isEndOfInline = true;
                     break;
@@ -4931,7 +4931,7 @@ RenderObject* InlineMinMaxIterator::next()
             continue;
         }
 
-        if (is<RenderInline>(*candidate) || candidate->isRenderTextOrLineBreak() || candidate->isFloating() || candidate->isBlockLevelReplacedOrAtomicInline())
+        if (candidate->isInlineBox() || candidate->isRenderTextOrLineBreak() || candidate->isFloating() || candidate->isBlockLevelReplacedOrAtomicInline())
             break;
 
         if (candidate->style().display().isBlockType()) {
@@ -4999,7 +4999,7 @@ static inline std::optional<std::pair<const RenderText&, const RenderText&>> tra
     auto shouldSkip = [&](auto& renderer) {
         if (is<RenderText>(renderer))
             return false;
-        if (is<RenderInline>(renderer))
+        if (renderer.isInlineBox())
             return true;
         auto& renderBox = downcast<RenderBoxModelObject>(renderer);
         return !renderBox.isInFlow() || renderBox.style().display() == Style::DisplayType::RubyText;
@@ -5280,7 +5280,7 @@ std::pair<LayoutUnit, LayoutUnit> RenderBlockFlow::computeInlineIntrinsicLogical
             }
         }
 
-        if (!is<RenderInline>(*child) && !is<RenderText>(*child)) {
+        if (!child->isInlineBox() && !is<RenderText>(*child)) {
             // Case (2). Inline replaced boxes and floats.
             // Terminate the current line as far as minwidth is concerned.
             LayoutUnit childMinContentInParentInlineAxis;
@@ -5482,7 +5482,7 @@ std::pair<LayoutUnit, LayoutUnit> RenderBlockFlow::computeInlineIntrinsicLogical
         if (child->isRenderListOutsideMarker())
             stripFrontSpaces = true;
 
-        isPrevChildInlineFlow = !child->isRenderText() && child->isRenderInline();
+        isPrevChildInlineFlow = !child->isRenderText() && child->isInlineBox();
         oldAutoWrap = autoWrap;
     }
 

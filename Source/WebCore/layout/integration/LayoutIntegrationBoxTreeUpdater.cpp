@@ -175,26 +175,6 @@ void BoxTreeUpdater::tearDown()
         rootLayoutBox().destroyChildren();
 }
 
-void BoxTreeUpdater::adjustStyleIfNeeded(const RenderElement& renderer, Style::ComputedStyle& style, Style::ComputedStyle* firstLineStyle)
-{
-    auto adjustStyle = [&](auto& styleToAdjust) {
-        if (is<RenderBlock>(renderer)) {
-            if (renderer.isAnonymousBlock()) {
-                CheckedRef anonBlockParentStyle = renderer.parent()->style();
-                // overflow and text-overflow property values don't get forwarded to anonymous block boxes.
-                // e.g. <div style="overflow: hidden; text-overflow: ellipsis; width: 100px; white-space: pre;">this text should have ellipsis<div></div></div>
-                styleToAdjust.setTextOverflow(Style::TextOverflow { anonBlockParentStyle->textOverflow() });
-                styleToAdjust.setOverflowX(anonBlockParentStyle->overflowX());
-                styleToAdjust.setOverflowY(anonBlockParentStyle->overflowY());
-            }
-            return;
-        }
-    };
-    adjustStyle(style);
-    if (firstLineStyle)
-        adjustStyle(*firstLineStyle);
-}
-
 static Layout::ElementBox::IsListMarkerImage isListMarkerImage(const RenderListOutsideMarker& listMarkerRenderer)
 {
     return listMarkerRenderer.isImage() ? Layout::ElementBox::IsListMarkerImage::Yes : Layout::ElementBox::IsListMarkerImage::No;
@@ -265,7 +245,6 @@ UniqueRef<Layout::Box> BoxTreeUpdater::createLayoutBox(RenderObject& renderer)
     auto& renderElement = downcast<RenderElement>(renderer);
 
     auto style = Style::ComputedStyle::clone(renderElement.style());
-    adjustStyleIfNeeded(renderElement, style, firstLineStyle.get());
 
     if (CheckedPtr listMarkerRenderer = dynamicDowncast<RenderListOutsideMarker>(renderElement))
         return makeUniqueRef<Layout::ElementBox>(elementAttributes(renderElement), isListMarkerImage(*listMarkerRenderer), WTF::move(style), WTF::move(firstLineStyle));
@@ -369,7 +348,6 @@ void BoxTreeUpdater::updateStyle(const RenderObject& renderer)
 
     auto firstLineNewStyle = firstLineStyleFor(renderer);
     auto newStyle = Style::ComputedStyle::clone(downcast<RenderElement>(renderer).style());
-    adjustStyleIfNeeded(downcast<RenderElement>(renderer), newStyle, firstLineNewStyle.get());
     layoutBox->updateStyle(WTF::move(newStyle), WTF::move(firstLineNewStyle));
     if (auto* listMarkerRenderer = dynamicDowncast<RenderListOutsideMarker>(renderer)) {
         if (auto* elementBox = dynamicDowncast<Layout::ElementBox>(*layoutBox))

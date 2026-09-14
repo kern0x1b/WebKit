@@ -51,12 +51,6 @@
 #include "LCMSUniquePtr.h"
 #endif
 
-#if defined(PNG_LIBPNG_VER_MAJOR) && defined(PNG_LIBPNG_VER_MINOR) && (PNG_LIBPNG_VER_MAJOR > 1 || (PNG_LIBPNG_VER_MAJOR == 1 && PNG_LIBPNG_VER_MINOR >= 4))
-#define JMPBUF(png_ptr) png_jmpbuf(png_ptr)
-#else
-#define JMPBUF(png_ptr) png_ptr->jmpbuf
-#endif
-
 WTF_ALLOW_UNSAFE_BUFFER_USAGE_BEGIN // non-Apple ports
 
 namespace WebCore {
@@ -79,7 +73,7 @@ static constexpr size_t cMaxDecodedPixels = cMaxPNGSize * cMaxPNGSize;
 // Called if the decoding of the image fails.
 static void PNGAPI decodingFailed(png_structp png, png_const_charp)
 {
-    longjmp(JMPBUF(png), 1);
+    longjmp(png_jmpbuf(png), 1);
 }
 
 // Callbacks given to the read struct.  The first is for warnings (we want to
@@ -176,7 +170,7 @@ public:
         PNGImageDecoder* decoder = static_cast<PNGImageDecoder*>(png_get_progressive_ptr(m_png));
 
         // We need to do the setjmp here. Otherwise bad things will happen.
-        if (setjmp(JMPBUF(m_png)))
+        if (setjmp(png_jmpbuf(m_png)))
             return decoder->setFailed();
 
         auto bytesToSkip = m_readOffset;
@@ -316,7 +310,7 @@ void PNGImageDecoder::headerAvailable()
     // Protect against large images.
     const auto pixelCount = checkedSum<size_t>(checkedProduct<size_t>(width, height), m_decodedPixelCount);
     if (pixelCount.hasOverflowed() || pixelCount > cMaxDecodedPixels) {
-        longjmp(JMPBUF(png), 1);
+        longjmp(png_jmpbuf(png), 1);
         return;
     }
     m_decodedPixelCount = pixelCount;
@@ -330,7 +324,7 @@ void PNGImageDecoder::headerAvailable()
     bool result = setSize(IntSize(width, height));
     m_doNothingOnFailure = false;
     if (!result) {
-        longjmp(JMPBUF(png), 1);
+        longjmp(png_jmpbuf(png), 1);
         return;
     }
 
@@ -441,13 +435,8 @@ void PNGImageDecoder::headerAvailable()
 
     if (m_reader->decodingSizeOnly()) {
         // If we only needed the size, halt the reader.
-#if defined(PNG_LIBPNG_VER_MAJOR) && defined(PNG_LIBPNG_VER_MINOR) && (PNG_LIBPNG_VER_MAJOR > 1 || (PNG_LIBPNG_VER_MAJOR == 1 && PNG_LIBPNG_VER_MINOR >= 5))
         // '0' argument to png_process_data_pause means: Do not cache unprocessed data.
         m_reader->setReadOffset(m_reader->currentBufferSize() - png_process_data_pause(png, 0));
-#else
-        m_reader->setReadOffset(m_reader->currentBufferSize() - png->buffer_size);
-        png->buffer_size = 0;
-#endif
     }
 }
 
@@ -464,7 +453,7 @@ ScalableImageDecoderFrame* PNGImageDecoder::currentFrameBuffer()
     auto& buffer = m_frameBufferCache[m_currentFrame];
     if (buffer.isInvalid()) {
         if (!buffer.initialize(size(), m_premultiplyAlpha)) {
-            longjmp(JMPBUF(m_reader->pngPtr()), 1);
+            longjmp(png_jmpbuf(m_reader->pngPtr()), 1);
             return nullptr;
         }
 
@@ -485,7 +474,7 @@ void PNGImageDecoder::ensureInterlaceBuffer()
     unsigned colorChannels = m_reader->hasAlpha() ? 4 : 3;
     m_reader->createInterlaceBuffer(colorChannels * size().width() * size().height());
     if (!m_reader->interlaceBuffer())
-        longjmp(JMPBUF(m_reader->pngPtr()), 1);
+        longjmp(png_jmpbuf(m_reader->pngPtr()), 1);
 }
 
 void PNGImageDecoder::rowAvailable(unsigned char* rowBuffer, unsigned rowIndex, int)
@@ -733,7 +722,7 @@ void PNGImageDecoder::readChunks(png_unknown_chunkp chunk)
             return;
         }
 
-        if (setjmp(JMPBUF(m_png))) {
+        if (setjmp(png_jmpbuf(m_png))) {
             fallbackNotAnimated();
             return;
         }
@@ -869,12 +858,12 @@ void PNGImageDecoder::initFrameBuffer(size_t frameIndex)
     png_structp png = m_reader->pngPtr();
 
     if (!prevBuffer->backingStore())
-        longjmp(JMPBUF(png), 1);
+        longjmp(png_jmpbuf(png), 1);
 
     if (prevMethod == ScalableImageDecoderFrame::DisposalMethod::DoNotDispose) {
         // Preserve the last frame as the starting state for this frame.
         if (!buffer.initialize(*prevBuffer->backingStore()))
-            longjmp(JMPBUF(png), 1);
+            longjmp(png_jmpbuf(png), 1);
     } else {
         // We want to clear the previous frame to transparent, without
         // affecting pixels in the image outside of the frame.
@@ -887,7 +876,7 @@ void PNGImageDecoder::initFrameBuffer(size_t frameIndex)
         } else {
             // Copy the whole previous buffer, then clear just its frame.
             if (!buffer.initialize(*prevBuffer->backingStore())) {
-                longjmp(JMPBUF(png), 1);
+                longjmp(png_jmpbuf(png), 1);
                 return;
             }
             buffer.backingStore()->clearRect(prevRect);
@@ -1000,7 +989,7 @@ int PNGImageDecoder::processingStart(png_unknown_chunkp chunk)
 
     m_png = png_create_read_struct(PNG_LIBPNG_VER_STRING, 0, decodingFailed, 0);
     m_info = png_create_info_struct(m_png);
-    if (setjmp(JMPBUF(m_png)))
+    if (setjmp(png_jmpbuf(m_png)))
         return 1;
 
     png_set_crc_action(m_png, PNG_CRC_QUIET_USE, PNG_CRC_QUIET_USE);
@@ -1029,7 +1018,7 @@ int PNGImageDecoder::processingFinish()
         return 0;
 
     if (m_totalFrames) {
-        if (setjmp(JMPBUF(m_png)))
+        if (setjmp(png_jmpbuf(m_png)))
             return 1;
 
         png_process_data(m_png, m_info, dataIEND, 12);

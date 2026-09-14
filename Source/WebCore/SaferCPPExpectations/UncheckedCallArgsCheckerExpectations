@@ -243,7 +243,6 @@ page/ResizeObserver.cpp
 page/SettingsBase.cpp
 page/SpatialNavigation.cpp
 [ iOS ] page/cocoa/ContentChangeObserver.cpp
-page/cocoa/PageCocoa.mm
 [ iOS ] page/ios/FrameIOS.mm
 [ Mac ] page/mac/ServicesOverlayController.mm
 page/scrolling/AsyncScrollingCoordinator.cpp

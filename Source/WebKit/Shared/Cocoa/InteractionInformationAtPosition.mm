@@ -46,6 +46,7 @@ InteractionInformationAtPosition::InteractionInformationAtPosition(
     bool isColorInput,
     bool isRangeInput,
     bool isARIASlider,
+    bool hasDirectionalResizeCursor,
     bool isNearMarkedText,
 #if PLATFORM(IOS_FAMILY)
     bool touchCalloutEnabled,
@@ -64,6 +65,7 @@ InteractionInformationAtPosition::InteractionInformationAtPosition(
     bool isPausedVideo,
     bool isElement,
     bool isContentEditable,
+    bool isOverEditableContent,
     Markable<WebCore::ScrollingNodeID>&& containerScrollingNodeID,
 #if ENABLE(DATA_DETECTION)
     bool isDataDetectorLink,
@@ -116,6 +118,7 @@ InteractionInformationAtPosition::InteractionInformationAtPosition(
     , isColorInput(isColorInput)
     , isRangeInput(isRangeInput)
     , isARIASlider(isARIASlider)
+    , hasDirectionalResizeCursor(hasDirectionalResizeCursor)
     , isNearMarkedText(isNearMarkedText)
 #if PLATFORM(IOS_FAMILY)
     , touchCalloutEnabled(touchCalloutEnabled)
@@ -134,6 +137,7 @@ InteractionInformationAtPosition::InteractionInformationAtPosition(
     , isPausedVideo(isPausedVideo)
     , isElement(isElement)
     , isContentEditable(isContentEditable)
+    , isOverEditableContent(isOverEditableContent)
     , containerScrollingNodeID(WTF::move(containerScrollingNodeID))
 #if ENABLE(DATA_DETECTION)
     , isDataDetectorLink(isDataDetectorLink)

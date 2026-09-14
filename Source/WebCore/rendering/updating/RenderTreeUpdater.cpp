@@ -169,7 +169,7 @@ void RenderTreeUpdater::updateRebuildRoots()
             return false;
         };
         auto isBlockInInline = [&] {
-            if (!is<RenderInline>(renderingAncestor->renderer()))
+            if (!renderingAncestor->renderer()->isInlineBox())
                 return false;
             return rootRenderer && rootRenderer->isInFlow() && !rootRenderer->isInline();
         };
@@ -579,7 +579,7 @@ bool RenderTreeUpdater::textRendererIsNeeded(const Text& textNode)
     if (previousRenderer && previousRenderer->isBR()) // <span><br/> <br/></span>
         return false;
 
-    if (parentRenderer.isRenderInline()) {
+    if (parentRenderer.isInlineBox()) {
         // <span><div/> <div/></span>
         if (previousRenderer && !previousRenderer->isInline() && !previousRenderer->isOutOfFlowPositioned())
             return false;
@@ -837,7 +837,7 @@ static std::optional<DidRepaintAndMarkContainingBlock> repaintAndMarkContainingB
             if (!destroyRoot.hasLayer() || !destroyRoot.isOutOfFlowPositioned())
                 return false;
             CheckedPtr container = destroyRoot.container();
-            if (!container || !container->isInFlowPositioned() || !is<RenderInline>(*container))
+            if (!container || !container->isInFlowPositioned() || !container->isInlineBox())
                 return false;
             CheckedPtr layer = downcast<RenderLayerModelObject>(destroyRoot).layer();
             auto cachedRepaintRect = layer->cachedClippedOverflowRect();

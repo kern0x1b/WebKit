@@ -189,7 +189,7 @@ private:
 
     bool NODELETE haveBufferedCharacterToken() const;
 
-    static bool isNullCharacterSkippingState(State);
+    bool NODELETE shouldSkipNullCharacters(State) const;
 
     State m_state { DataState };
     bool m_forceNullCharacterReplacement { false };
@@ -348,9 +348,9 @@ inline void HTMLTokenizer::setScriptDataState()
     m_state = ScriptDataState;
 }
 
-inline bool HTMLTokenizer::isNullCharacterSkippingState(State state)
+inline bool HTMLTokenizer::shouldSkipNullCharacters(State state) const
 {
-    return state == DataState || state == RCDATAState || state == RAWTEXTState;
+    return state == DataState && !m_forceNullCharacterReplacement;
 }
 
 } // namespace WebCore

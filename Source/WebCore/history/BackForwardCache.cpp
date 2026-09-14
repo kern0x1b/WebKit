@@ -374,7 +374,7 @@ void BackForwardCache::dump() const
     for (auto& item : m_cachedPageMap) {
         if (auto* cachedPage = std::get_if<UniqueRef<CachedPage>>(&item.value)) {
             RefPtr document = (*cachedPage)->document();
-            WTFLogAlways("  Page %p, document %p %s", protect((*cachedPage)->page()).ptr(), document.get(), document ? document->url().string().utf8().legacyCStringPointer() : "");
+            SAFE_WTFLOGALWAYS("  Page %p, document %p %s", protect((*cachedPage)->page()).ptr(), document.get(), document ? document->url().string().utf8() : ""_s);
         }
     }
 }

@@ -400,6 +400,7 @@ static void selectionPositionInformation(WebPage& page, const InteractionInforma
         return InteractionInformationAtPosition::Selectability::Selectable;
     })();
     info.isSelected = result.isSelected();
+    info.isOverEditableContent = hitNode->isContentEditable();
 
     info.isOverSelectableText = info.isSelectable() && renderer->isRenderText() && hitNode->canStartSelection();
 
@@ -442,6 +443,17 @@ static void selectionPositionInformation(WebPage& page, const InteractionInforma
 
         if (info.prefersDraggingOverTextSelection || info.isDHTMLDraggable || info.isColorInput || info.isRangeInput)
             break;
+    }
+
+    switch (renderer->style().cursorType()) {
+    case WebCore::CursorType::EWResize:
+    case WebCore::CursorType::NSResize:
+    case WebCore::CursorType::ColumnResize:
+    case WebCore::CursorType::RowResize:
+        info.hasDirectionalResizeCursor = true;
+        break;
+    default:
+        break;
     }
 
 #if HAVE(APPKIT_GESTURES_SUPPORT)

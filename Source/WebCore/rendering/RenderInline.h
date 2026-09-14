@@ -103,8 +103,7 @@ private:
     LayoutUnit offsetHeight() const final { return linesBoundingBox().height(); }
 
 protected:
-    LayoutRect clippedOverflowRect(const RenderLayerModelObject* repaintContainer, const VisibleRectContext&) const override;
-    RepaintRects rectsForRepaintingAfterLayout(const RenderLayerModelObject* repaintContainer, RepaintOutlineBounds) const override;
+    RepaintRects localRectsForRepaint(RepaintOutlineBounds) const override;
     LayoutRect rectWithOutlineForRepaint(const RenderLayerModelObject* repaintContainer, LayoutUnit outlineWidth) const final;
 
     std::optional<RepaintRects> computeVisibleRectsInContainer(const RepaintRects&, const RenderLayerModelObject* container, const VisibleRectContext&, VisibleRectState) const final;
@@ -126,4 +125,4 @@ RenderObject* firstContentfulChild(RenderInline&);
 
 } // namespace WebCore
 
-SPECIALIZE_TYPE_TRAITS_RENDER_OBJECT(RenderInline, isRenderInline())
+SPECIALIZE_TYPE_TRAITS_RENDER_OBJECT(RenderInline, isInlineBox())

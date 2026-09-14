@@ -853,9 +853,9 @@ LayoutRect TransformationMatrix::clampedBoundsOfProjectedQuad(const FloatQuad& q
 void TransformationMatrix::map4ComponentPoint(double& x, double& y, double& z, double& w) const
 {
     if (isIdentityOrTranslation()) {
-        x += m_matrix[3][0];
-        y += m_matrix[3][1];
-        z += m_matrix[3][2];
+        x += w * m_matrix[3][0];
+        y += w * m_matrix[3][1];
+        z += w * m_matrix[3][2];
         return;
     }
 

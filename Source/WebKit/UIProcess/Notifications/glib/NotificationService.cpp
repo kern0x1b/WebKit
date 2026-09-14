@@ -239,7 +239,7 @@ public:
                     [](const CString& path) {
                         if (!path.isNull()) {
                             if (unlink(path.data()) == -1)
-                                WTFLogAlways("Failed to remove cached notification icon %s: %s", path.data(), safeStrerror(errno).data());
+                                SAFE_WTFLOGALWAYS("Failed to remove cached notification icon %s: %s", path, safeStrerror(errno));
                         }
                     },
                     [](const GRefPtr<GBytes>&) {

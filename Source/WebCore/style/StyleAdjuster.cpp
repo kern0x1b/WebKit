@@ -69,6 +69,7 @@
 #include "ShadowRoot.h"
 #include "StyleableInlines.h"
 #include "StyleContainmentCheckerInlines.h"
+#include "StyleColorResolver.h"
 #include "StyleComputedStyle+GettersInlines.h"
 #include "StyleComputedStyle+InitialInlines.h"
 #include "StyleComputedStyle+SettersInlines.h"
@@ -695,7 +696,7 @@ void Adjuster::adjust(Style::ComputedStyle& style) const
         if (m_element->invokedPopover())
             style.setIsPopoverInvoker();
 
-        if (m_document->settings().detailsAutoExpandEnabled() && m_element->isInUserAgentShadowTree() && m_element->userAgentPart() == UserAgentParts::detailsContent())
+        if (m_element->isInUserAgentShadowTree() && m_element->userAgentPart() == UserAgentParts::detailsContent())
             style.setAutoRevealsWhenFound();
 
         if (RefPtr htmlElement = dynamicDowncast<HTMLElement>(element); htmlElement && htmlElement->isHiddenUntilFound())
@@ -794,6 +795,13 @@ void Adjuster::adjust(Style::ComputedStyle& style) const
             forceToFlat |= styleable.capturedInViewTransition();
         }
         style.setTransformStyleForcedToFlat(forceToFlat);
+    }
+
+    auto backgroundColor = style.backgroundColor();
+    if (style.backgroundColor() != ComputedStyle::initialBackgroundColor()
+        && style.display() != DisplayType::Contents) {
+        style.setCurrentBackgroundColor(Style::ColorResolver { style }.colorResolvingCurrentColor(backgroundColor));
+        style.setDisallowsFastPathInheritance();
     }
 
     style.setIsEffectivelyTransparent(style.opacity().isTransparent() || m_parentStyle.isEffectivelyTransparent());

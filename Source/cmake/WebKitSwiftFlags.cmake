@@ -92,10 +92,13 @@ set(WEBKIT_SWIFT_MEMORY_SAFETY_ERROR_FLAGS
 
 set(WEBKIT_SWIFT_FATAL_DIAGNOSTIC_FLAGS
     "-Werror ExistentialAny"
-    "-Werror NoUsage"
-    "-Werror NoUseUnstructuredThrowingTask"
     ${WEBKIT_SWIFT_MEMORY_SAFETY_ERROR_FLAGS}
 )
+
+if (CMAKE_Swift_LANGUAGE_VERSION VERSION_GREATER_EQUAL 6.4)
+    list(APPEND WEBKIT_SWIFT_FATAL_DIAGNOSTIC_FLAGS "-Werror NoUsage")
+    list(APPEND WEBKIT_SWIFT_FATAL_DIAGNOSTIC_FLAGS "-Werror NoUseUnstructuredThrowingTask")
+endif ()
 
 set(WEBKIT_SWIFT_CLANG_IMPORTER_FLAGS
     "-Xcc -fvisibility=hidden"

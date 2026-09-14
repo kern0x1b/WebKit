@@ -482,6 +482,7 @@ imported/w3c/web-platform-tests/html/editing/editing-0/spelling-and-grammar-chec
 # Drag-and-drop testdriver automation is not supported on GTK/WPE.
 webkit.org/b/66547 imported/w3c/web-platform-tests/html/editing/dnd/events/dragenter-dragleave-related-target.html [ Skip ]
 webkit.org/b/66547 fast/events/drag-relatedTarget.html [ Skip ]
+imported/w3c/web-platform-tests/html/editing/dnd/datastore/datatransferitemlist-clear-read-only.html [ Skip ]
 
 imported/w3c/web-platform-tests/html/dom/elements/global-attributes/dir_auto-pre-N-between-Rs.html [ Pass ]
 imported/w3c/web-platform-tests/html/dom/elements/global-attributes/dir_auto-textarea-N-between-Rs.html [ Pass ]
@@ -2900,6 +2901,8 @@ fast/mediastream/get-user-media-constraints.html [ Failure ]
 fast/mediastream/get-user-media-ideal-constraints.html [ Failure ]
 fast/mediastream/image-capture-grabFrame.html [ Failure ]
 
+webkit.org/b/324108 webrtc/disable-encryption.html [ Pass Crash ]
+
 # No AudioSession category handling in WPE/GTK ports.
 fast/mediastream/microphone-interruption-and-audio-session.html [ Skip ]
 http/tests/webrtc/audioSessionInFrames.html [ Failure ]
@@ -3895,6 +3898,12 @@ webkit.org/b/160243 fast/text/complex-small-caps-non-bmp-capitalize.html [ Image
 webkit.org/b/160246 fast/text/multiple-feature-properties.html [ ImageOnlyFailure ]
 webkit.org/b/160248 fast/text/combining-mark-paint.html [ ImageOnlyFailure ]
 webkit.org/b/160248 fast/text/synthetic-bold-transformed.html [ ImageOnlyFailure ]
+
+# Skia's outline emboldening paints a GPOS-anchored mark about one font unit above the same bar
+# drawn by a precomposed glyph. The horizontal placement is correct, so this is a sub-pixel
+# vertical offset in the port, not the mark displacement these tests were written for.
+imported/w3c/web-platform-tests/css/css-fonts/synthetic-bold-combining-mark-001.html [ ImageOnlyFailure ]
+imported/w3c/web-platform-tests/css/css-fonts/synthetic-bold-combining-mark-002.html [ ImageOnlyFailure ]
 webkit.org/b/160249 fast/shrink-wrap/rect-shrink-wrap.html [ ImageOnlyFailure ]
 webkit.org/b/161583 accessibility/auto-fill-types.html [ Failure ]
 webkit.org/b/162815 fast/text/variations/font-face-clamp.html [ ImageOnlyFailure ]
@@ -5308,8 +5317,6 @@ webkit.org/b/322815 imported/w3c/web-platform-tests/mediacapture-record/MediaRec
 webkit.org/b/322816 imported/w3c/web-platform-tests/resource-timing/initiator-type/style.html [ Failure Pass ]
 
 webkit.org/b/323002 [ Debug ] fast/events/tabindex-focus-blur-all.html [ Crash Pass ]
-webkit.org/b/323003 [ Release ] imported/w3c/web-platform-tests/webrtc-stats/hardware-capability-stats.https.html [ Crash Pass ]
-webkit.org/b/323003 [ Release ] imported/w3c/web-platform-tests/webrtc/RTCPeerConnection-connectionState.https.html [ Crash Pass ]
 webkit.org/b/314218 imported/w3c/web-platform-tests/html/semantics/embedded-content/media-elements/track/track-element/track-cues-enter-seeking.html [ Failure Pass ]
 
 webkit.org/b/323308 http/tests/web-locks/web-lock-in-third-party-serviceworker.html [ Failure Pass ]
@@ -5318,9 +5325,13 @@ webkit.org/b/323309 ipc/getpixelbuffer-layerbacking-heap-disclosure.html [ Pass 
 # Gardening 2026-09-09
 webkit.org/b/323776 http/wpt/webcodecs/configure-encoder-big-frame-size.html [ Failure Pass ]
 
+webkit.org/b/324046 imported/w3c/web-platform-tests/css/selectors/old-tests/css3-modsel-20.xml [ Failure ]
+
 # These now pass on the GLib ports; the generic expectations in LayoutTests/TestExpectations still apply elsewhere.
 webkit.org/b/249918 imported/w3c/web-platform-tests/css/css-lists/list-marker-symbol-bidi.html [ Pass ]
 imported/w3c/web-platform-tests/css/filter-effects/filter-function/filter-function-001.html [ Pass ]
+
+webkit.org/b/324147 imported/w3c/web-platform-tests/dom/nodes/moveBefore/focus-preserve.html [ Pass Failure ]
 
 # End: Common failures between GTK and WPE.
 

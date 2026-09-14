@@ -1449,6 +1449,12 @@ if (ENABLE_BACK_FORWARD_LIST_SWIFT)
     )
 endif ()
 
+if (ENABLE_BACK_FORWARD_LIST_SWIFT OR ENABLE_IPC_TESTING_SWIFT)
+    list(APPEND WebKit_SOURCES
+        ${WEBKIT_DIR}/Platform/IPC/MessageCheck.swift
+    )
+endif ()
+
 if (ENABLE_IPC_TESTING_SWIFT)
     list(APPEND WebKit_SOURCES
         ${WEBKIT_DIR}/Shared/IPCTesterReceiver.swift
@@ -1503,6 +1509,12 @@ if (USE_APPLE_INTERNAL_SDK)
     WEBKIT_TARGET_USE_PGO(WebKit PROFILE WebKit)
 endif ()
 WEBKIT_ADD_PREFIX_HEADER(WebKit WebKitPrefix.h PREFIX_LANGUAGES CXX OBJCXX)
+
+if (APPLE AND USE_LIBWEBRTC)
+    target_link_options(WebKit PRIVATE
+        "LINKER:-weak_library,$<TARGET_FILE:webrtc>")
+    add_dependencies(WebKit webrtc)
+endif ()
 
 if (SWIFT_REQUIRED AND WEBKIT_SDK_IS_MACOS)
     WEBKIT_ADD_SWIFT_PREWARM(WebKit SwiftPrewarmMac.swift)

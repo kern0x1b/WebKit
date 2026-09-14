@@ -381,26 +381,13 @@ void HTMLTreeBuilder::updateTokenizerForAdjustedCurrentNode()
     //   replace U+0000 NULL with U+FFFD), which treats integration points as HTML content and thus
     //   excludes them.
     //   https://html.spec.whatwg.org/multipage/parsing.html#tree-construction
-    bool adjustedCurrentNodeIsForeign = false;
-    bool inForeignContent = false;
-    if (!m_tree.isEmpty()) {
-        HTMLStackItem& adjustedCurrentNode = adjustedCurrentStackItem();
-        adjustedCurrentNodeIsForeign = !isInHTMLNamespace(adjustedCurrentNode);
-        inForeignContent = adjustedCurrentNodeIsForeign
-            && !HTMLElementStack::isHTMLIntegrationPoint(adjustedCurrentNode)
-            && !HTMLElementStack::isMathMLTextIntegrationPoint(adjustedCurrentNode);
-    }
+    bool adjustedCurrentNodeIsForeign = !m_tree.isEmpty() && !isInHTMLNamespace(adjustedCurrentStackItem());
+    bool inForeignContent = adjustedCurrentNodeIsForeign
+        && !HTMLElementStack::isHTMLIntegrationPoint(adjustedCurrentStackItem())
+        && !HTMLElementStack::isMathMLTextIntegrationPoint(adjustedCurrentStackItem());
 
-    auto& tokenizer = m_parser->tokenizer();
-    tokenizer.setForceNullCharacterReplacement(m_insertionMode == InsertionMode::Text || inForeignContent);
-    tokenizer.setShouldAllowCDATA(adjustedCurrentNodeIsForeign);
-
-#if ASSERT_ENABLED
-    m_destructionProhibited = false;
-#endif
-
-    m_tree.executeQueuedTasks();
-    // The tree builder might have been destroyed as an indirect result of executing the queued tasks.
+    m_parser->tokenizer().setForceNullCharacterReplacement(inForeignContent);
+    m_parser->tokenizer().setShouldAllowCDATA(adjustedCurrentNodeIsForeign);
 }
 
 void HTMLTreeBuilder::processToken(AtomHTMLToken&& token)

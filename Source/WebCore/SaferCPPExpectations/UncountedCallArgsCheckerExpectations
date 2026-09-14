@@ -238,7 +238,6 @@ page/PrintContext.cpp
 page/ResizeObserver.cpp
 page/WheelEventTestMonitor.h
 [ iOS ] page/cocoa/ContentChangeObserver.cpp
-page/cocoa/PageCocoa.mm
 page/cocoa/ResourceUsageOverlayCocoa.mm
 page/cocoa/WebTextIndicatorLayer.mm
 [ iOS ] page/ios/EventHandlerIOS.mm

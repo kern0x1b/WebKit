@@ -91,7 +91,9 @@ private:
             break;
         }
 
-        case StringCharCodeAt: {
+        case StringAt:
+        case StringCharCodeAt:
+        case StringCodePointAt: {
             lowerStringBoundsCheck(m_graph.child(m_node, 0), m_graph.child(m_node, 1), m_graph.child(m_node, 2));
             break;
         }

@@ -210,7 +210,7 @@ void PerfLog::flush(const AbstractLocker&)
     m_file.flush();
 }
 
-void PerfLog::log(const CString& name, MacroAssemblerCodeRef<LinkBufferPtrTag> code, std::unique_ptr<IRDumpDebugInfo>&& irDebugInfo, std::unique_ptr<SourceCodeDumpDebugInfo>&& sourceCodeDebugInfo)
+void PerfLog::log(const UTF8CString& name, MacroAssemblerCodeRef<LinkBufferPtrTag> code, std::unique_ptr<IRDumpDebugInfo>&& irDebugInfo, std::unique_ptr<SourceCodeDumpDebugInfo>&& sourceCodeDebugInfo)
 {
     auto timestamp = ProfilerSupport::generateTimestamp();
     auto tid = ProfilerSupport::getCurrentThreadID();
@@ -253,9 +253,9 @@ void PerfLog::log(const CString& name, MacroAssemblerCodeRef<LinkBufferPtrTag> c
                 for (auto& irLine : irDebugInfo->irLines) {
                     CString line;
                     if (irLine.opName)
-                        line = toCString("  ", irLine.opName, "\n");
+                        line = toUTF8CString("  ", irLine.opName, "\n");
                     else
-                        line = toCString("BB#", irLine.blockIndex, "\n");
+                        line = toUTF8CString("BB#", irLine.blockIndex, "\n");
                     handle.write(WTF::asByteSpan(line.span()));
                 }
                 handle.flush();
@@ -335,7 +335,7 @@ void PerfLog::log(const CString& name, MacroAssemblerCodeRef<LinkBufferPtrTag> c
         record.codeIndex = logger.m_codeIndex++;
 
         logger.write(locker, unsafeMakeSpan(std::bit_cast<char*>(&record), sizeof(JITDump::CodeLoadRecord)));
-        logger.write(locker, name.spanIncludingNullTerminator());
+        logger.write(locker, byteCast<uint8_t>(name.spanIncludingNullTerminator()));
         logger.write(locker, unsafeMakeSpan(executableAddress, size));
         logger.flush(locker);
 

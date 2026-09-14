@@ -119,7 +119,7 @@ public:
 
     enum class SignpostDetail { None, Canceled };
 
-    CString signpostMessage();
+    UTF8CString signpostMessage();
 
     void beginSignpost()
     {
@@ -159,7 +159,7 @@ protected:
     CodeBlock* m_codeBlock;
     CheckedPtr<JITWorklistThread> m_thread;
     Vector<Ref<SharedTask<void()>>> m_mainThreadFinalizationTasks;
-    CString m_signpostMessage; // Non-null iff Options::useCompilerSignpost()
+    UTF8CString m_signpostMessage; // Non-null iff Options::useCompilerSignpost()
 };
 
 } // namespace JSC

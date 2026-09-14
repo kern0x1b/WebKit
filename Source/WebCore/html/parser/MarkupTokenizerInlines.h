@@ -68,7 +68,7 @@ inline bool isTokenizerWhitespace(char16_t character)
 // We use this macro when the HTML spec says "consume the next input character ... and switch to the <mumble> state."
 #define ADVANCE_TO(newState)                                    \
     do {                                                        \
-        if (!m_preprocessor.advance(source, isNullCharacterSkippingState(newState) && !m_forceNullCharacterReplacement)) { \
+        if (!m_preprocessor.advance(source, shouldSkipNullCharacters(newState))) { \
             m_state = newState;                                 \
             return haveBufferedCharacterToken();                \
         }                                                       \
@@ -77,7 +77,7 @@ inline bool isTokenizerWhitespace(char16_t character)
     } while (false)
 #define ADVANCE_PAST_NON_NEWLINE_TO(newState)                   \
     do {                                                        \
-        if (!m_preprocessor.advancePastNonNewline(source, isNullCharacterSkippingState(newState) && !m_forceNullCharacterReplacement)) { \
+        if (!m_preprocessor.advancePastNonNewline(source, shouldSkipNullCharacters(newState))) { \
             m_state = newState;                                 \
             return haveBufferedCharacterToken();                \
         }                                                       \
@@ -88,7 +88,7 @@ inline bool isTokenizerWhitespace(char16_t character)
 // For more complex cases, caller consumes the characters first and then uses this macro.
 #define SWITCH_TO(newState)                                     \
     do {                                                        \
-        if (!m_preprocessor.peek(source, isNullCharacterSkippingState(newState) && !m_forceNullCharacterReplacement)) { \
+        if (!m_preprocessor.peek(source, shouldSkipNullCharacters(newState))) { \
             m_state = newState;                                 \
             return haveBufferedCharacterToken();                \
         }                                                       \

@@ -352,7 +352,7 @@ void LayoutContext::verifyAndOutputMismatchingLayoutTree(const LayoutState& layo
     showRenderTree(&rootRenderer);
     showLayoutTree(downcast<InitialContainingBlock>(layoutRoot), &layoutState);
 #endif
-    WTFLogAlways("%s", stream.release().utf8().legacyCStringPointer());
+    SAFE_WTFLOGALWAYS("%s", stream.release().utf8());
     ASSERT_NOT_REACHED();
 }
 

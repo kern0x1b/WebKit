@@ -276,7 +276,7 @@ void UIScriptControllerGtk::sendEventStream(JSStringRef eventsJSON, JSValueRef c
 
         auto eventTypeString = eventObject->getString("type"_s);
         if (!eventTypeString) {
-            WTFLogAlways("Failed to find type key in %s", eventTypeString.utf8().legacyCStringPointer());
+            SAFE_WTFLOGALWAYS("Failed to find type key in %s", eventTypeString.utf8());
             break;
         }
 
@@ -292,7 +292,7 @@ void UIScriptControllerGtk::sendEventStream(JSStringRef eventsJSON, JSValueRef c
             if (!momentumPhaseString.isNull()) {
                 momentumPhase = wheelEventPhaseFromString(momentumPhaseString);
                 if (momentumPhase == WheelEventPhase::Cancelled || momentumPhase == WheelEventPhase::MayBegin) {
-                    WTFLogAlways("Invalid value %s for momentumPhase", momentumPhaseString.utf8().legacyCStringPointer());
+                    SAFE_WTFLOGALWAYS("Invalid value %s for momentumPhase", momentumPhaseString.utf8());
                     break;
                 }
             }

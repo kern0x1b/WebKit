@@ -518,28 +518,7 @@ inline void CachedImage::clearImage()
 #if defined(WEBKIT_IOS6)
     m_intrinsicSizeIsAvailable = false;
 #endif
-
-#if ENABLE(AX_CUSTOM_COLOR_MODE)
-    m_axCustomColorModeShouldAdjust = std::nullopt;
-    m_axCustomColorModeAdjustedTile = nullptr;
-    m_axCustomColorModeAdjustedTileSize = { };
-#endif
 }
-
-#if ENABLE(AX_CUSTOM_COLOR_MODE)
-NativeImage* CachedImage::axCustomColorModeAdjustedTile(const FloatSize& forSize) const
-{
-    if (!m_axCustomColorModeAdjustedTile || m_axCustomColorModeAdjustedTileSize != forSize)
-        return nullptr;
-    return m_axCustomColorModeAdjustedTile.get();
-}
-
-void CachedImage::setAXCustomColorModeAdjustedTile(RefPtr<NativeImage>&& tile, const FloatSize& size)
-{
-    m_axCustomColorModeAdjustedTile = WTF::move(tile);
-    m_axCustomColorModeAdjustedTileSize = size;
-}
-#endif
 
 void CachedImage::updateBufferInternal(const FragmentedSharedBuffer& data)
 {

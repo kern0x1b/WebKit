@@ -746,7 +746,7 @@ RenderBlock* RenderObject::containingBlockForPositionType(PositionType positionT
 
     if (positionType == PositionType::Absolute) {
         auto containingBlockForAbsolutePosition = [&] {
-            if (CheckedPtr renderInline = dynamicDowncast<RenderInline>(renderer); renderInline && renderInline->style().position() == PositionType::Relative) {
+            if (renderer.isInlineBox() && renderer.style().position() == PositionType::Relative) {
                 // A relatively positioned RenderInline forwards its absolute positioned descendants to
                 // its nearest non-anonymous containing block (to avoid having positioned objects list in RenderInlines).
                 return nearestNonAnonymousContainingBlockIncludingSelf(renderer.parent());
@@ -1212,7 +1212,7 @@ void RenderObject::showRenderTreeForThis() const
     TextStream stream(TextStream::LineMode::MultipleLine, TextStream::Formatting::SVGStyleRect);
     outputRenderTreeLegend(stream);
     root->outputRenderSubTreeAndMark(stream, this, 1);
-    WTFLogAlways("%s", stream.release().utf8().legacyCStringPointer());
+    SAFE_WTFLOGALWAYS("%s", stream.release().utf8());
 }
 
 void RenderObject::showSubtreeForThis() const
@@ -1220,7 +1220,7 @@ void RenderObject::showSubtreeForThis() const
     TextStream stream(TextStream::LineMode::MultipleLine, TextStream::Formatting::SVGStyleRect);
     outputRenderTreeLegend(stream);
     outputRenderSubTreeAndMark(stream, this, 1);
-    WTFLogAlways("%s", stream.release().utf8().legacyCStringPointer());
+    SAFE_WTFLOGALWAYS("%s", stream.release().utf8());
 }
 
 void RenderObject::showLineTreeForThis() const
@@ -1232,7 +1232,7 @@ void RenderObject::showLineTreeForThis() const
     outputRenderTreeLegend(stream);
     outputRenderObject(stream, false, 1);
     blockFlow->outputLineTreeAndMark(stream, nullptr, 2);
-    WTFLogAlways("%s", stream.release().utf8().legacyCStringPointer());
+    SAFE_WTFLOGALWAYS("%s", stream.release().utf8());
 }
 
 static const RenderFragmentedFlow* enclosingFragmentedFlowFromRenderer(const RenderObject* renderer)
@@ -3168,7 +3168,7 @@ void printPaintOrderTreeForLiveDocuments()
             continue;
         if (document->frame() && document->frame()->isRootFrame())
             WTFLogAlways("----------------------root frame--------------------------\n");
-        WTFLogAlways("%s", document->url().string().utf8().legacyCStringPointer());
+        SAFE_WTFLOGALWAYS("%s", document->url().string().utf8());
         showPaintOrderTree(document->renderView());
     }
 }
@@ -3180,7 +3180,7 @@ void printRenderTreeForLiveDocuments()
             continue;
         if (document->frame() && document->frame()->isRootFrame())
             WTFLogAlways("----------------------root frame--------------------------\n");
-        WTFLogAlways("%s", document->url().string().utf8().legacyCStringPointer());
+        SAFE_WTFLOGALWAYS("%s", document->url().string().utf8());
         showRenderTree(document->renderView());
     }
 }
@@ -3192,7 +3192,7 @@ void printLayerTreeForLiveDocuments()
             continue;
         if (document->frame() && document->frame()->isRootFrame())
             WTFLogAlways("----------------------root frame--------------------------\n");
-        WTFLogAlways("%s", document->url().string().utf8().legacyCStringPointer());
+        SAFE_WTFLOGALWAYS("%s", document->url().string().utf8());
         showLayerTree(document->renderView());
     }
 }
@@ -3215,9 +3215,9 @@ void printAccessibilityTreeForLiveDocuments()
             continue;
         if (document->frame()) {
             if (document->frame()->isRootFrame())
-                WTFLogAlways("\nPID %d: Accessibility tree for root document %p %s", getpid(), document.ptr(), document->url().string().utf8().legacyCStringPointer());
+                SAFE_WTFLOGALWAYS("\nPID %d: Accessibility tree for root document %p %s", getpid(), document.ptr(), document->url().string().utf8());
             else
-                WTFLogAlways("\nPID %d: Accessibility tree for non-root document %p %s", getpid(), document.ptr(), document->url().string().utf8().legacyCStringPointer());
+                SAFE_WTFLOGALWAYS("\nPID %d: Accessibility tree for non-root document %p %s", getpid(), document.ptr(), document->url().string().utf8());
             dumpAccessibilityTreeToStderr(document.get());
         }
     }
@@ -3229,7 +3229,7 @@ void printGraphicsLayerTreeForLiveDocuments()
         if (!document->renderView())
             continue;
         if (document->frame() && document->frame()->isRootFrame()) {
-            WTFLogAlways("Graphics layer tree for root document %p %s", document.ptr(), document->url().string().utf8().legacyCStringPointer());
+            SAFE_WTFLOGALWAYS("Graphics layer tree for root document %p %s", document.ptr(), document->url().string().utf8());
             showGraphicsLayerTreeForCompositor(protect(document->renderView())->compositor());
         }
     }

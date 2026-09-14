@@ -909,7 +909,7 @@ void MemoryCache::dumpLRULists(bool includeLive) const
         WTFLogAlways("\nList %d:\n", i);
         for (Ref resource : *m_allResources[i]) {
             if (includeLive || !resource->hasClients())
-                WTFLogAlways("  %p %.255s %.1fK, %.1fK, accesses: %u, clients: %d\n", resource.ptr(), resource->url().string().utf8().legacyCStringPointer(), resource->decodedSize() / 1024.0f, (resource->encodedSize() + resource->overheadSize()) / 1024.0f, resource->accessCount(), resource->numberOfClients());
+                SAFE_WTFLOGALWAYS("  %p %.255s %.1fK, %.1fK, accesses: %u, clients: %d\n", resource.ptr(), resource->url().string().utf8(), resource->decodedSize() / 1024.0f, (resource->encodedSize() + resource->overheadSize()) / 1024.0f, resource->accessCount(), resource->numberOfClients());
         }
     }
 }

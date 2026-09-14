@@ -667,14 +667,14 @@ void WTFInitializeLogChannelStatesFromString(WTFLogChannel* channels[], size_t c
             else if (equalLettersIgnoringASCIICase(level, "debug"_s))
                 logChannelLevel = WTFLogLevel::Debug;
             else
-                WTFLogAlways("Unknown logging level: %s", level.utf8().legacyCStringPointer());
+                SAFE_WTFLOGALWAYS("Unknown logging level: %s", level.utf8());
         }
 
         if (WTFLogChannel* channel = WTFLogChannelByName(channels, count, component.utf8().legacyCStringPointer())) {
             channel->state = logChannelState;
             channel->level = logChannelLevel;
         } else
-            WTFLogAlways("Unknown logging channel: %s", component.utf8().legacyCStringPointer());
+            SAFE_WTFLOGALWAYS("Unknown logging channel: %s", component.utf8());
     }
 }
 

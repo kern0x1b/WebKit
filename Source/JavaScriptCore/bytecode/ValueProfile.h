@@ -95,13 +95,13 @@ struct ValueProfileBase {
 
     bool isSampledBefore() const { return m_prediction != SpecNone; }
     
-    CString briefDescription(const ConcurrentJSLocker& locker)
+    UTF8CString briefDescription(const ConcurrentJSLocker& locker)
     {
         SpeculatedType prediction = computeUpdatedPrediction(locker);
         
         StringPrintStream out;
         out.print("predicting ", SpeculationDump(prediction));
-        return out.toCString();
+        return out.toUTF8CString();
     }
     
     void dump(PrintStream& out)
