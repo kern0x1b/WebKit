@@ -8742,7 +8742,7 @@ AccessGenerationResult InlineCacheCompiler::compileOneAccessCaseHandler(const Ve
 
     auto keys = FixedVector<Ref<AccessCase>> { Ref { accessCase } };
 
-    MacroAssemblerCodeRef<JITStubRoutinePtrTag> code = FINALIZE_CODE_FOR(codeBlock, linkBuffer, JITStubRoutinePtrTag, categoryName(m_propertyCache.accessType), "%s", toCString("Access stub handler for ", *codeBlock, " ", m_propertyCache.codeOrigin, ": ", listDump(keys)).data());
+    MacroAssemblerCodeRef<JITStubRoutinePtrTag> code = FINALIZE_CODE_FOR(codeBlock, linkBuffer, JITStubRoutinePtrTag, categoryName(m_propertyCache.accessType), "%s", toUTF8CString("Access stub handler for ", *codeBlock, " ", m_propertyCache.codeOrigin, ": ", listDump(keys)).legacyCStringPointer());
 
     if (statelessType) {
         auto stub = createPreCompiledICJITStubRoutine(WTF::move(code), vm, codeBlock);

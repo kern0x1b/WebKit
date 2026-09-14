@@ -49,7 +49,7 @@ set(EGL_LIBRARY_TYPE STATIC)
 # attribute the Khronos headers put on the entry points, leaving them unexported.
 set(_angle_prototypes ${no_gl_prototypes})
 set(_angle_egl_api_definition EGLAPI=)
-if (APPLE)
+if (APPLE AND NOT WEBKIT_IOS6)
     set(ANGLE_LIBRARY_TYPE OBJECT)
     set(GLESv2_LIBRARY_TYPE OBJECT)
     set(EGL_LIBRARY_TYPE OBJECT)
@@ -212,7 +212,7 @@ if (USE_ANGLE_EGL OR ENABLE_WEBGL)
         add_library(ANGLE::EGL ALIAS EGLFramework)
     endif ()
 
-    if (APPLE)
+    if (APPLE AND NOT WEBKIT_IOS6)
         # OptionsCocoa.cmake applies -fvisibility=hidden only to C and CXX, so the
         # ObjC++ Metal backend would export all of rx::*Mtl from the dylib.
         foreach (_angle_object_target IN ITEMS ANGLE GLESv2 EGL)

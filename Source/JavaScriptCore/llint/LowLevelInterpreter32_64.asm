@@ -169,9 +169,13 @@ macro prepareStateForCCall()
     addp PB, PC
 end
 
-macro restoreStateAfterCCall()
+macro restoreStateAfterCCallWithoutExceptionCheck()
     move r0, PC
     subp PB, PC
+end
+
+macro restoreStateAfterCCall()
+    restoreStateAfterCCallWithoutExceptionCheck()
 end
 
 macro callSlowPath(slowPath)
