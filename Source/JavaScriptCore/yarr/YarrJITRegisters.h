@@ -48,6 +48,9 @@ public:
     static constexpr GPRReg length = ARMRegisters::r2;
     static constexpr GPRReg output = ARMRegisters::r3;
 
+    static constexpr GPRReg matchingContext = InvalidGPRReg;
+    static constexpr GPRReg freelistRegister = InvalidGPRReg;
+
     static constexpr GPRReg regT0 = ARMRegisters::r4;
     static constexpr GPRReg regT1 = ARMRegisters::r5;
     // r6 is reserved for MacroAssemblerARMv7,
@@ -55,6 +58,12 @@ public:
     static constexpr GPRReg regT2 = ARMRegisters::r8;
     // r9 is sb in EABI.
     static constexpr GPRReg regT3 = ARMRegisters::r10; // r10 is SL, but no longer a special register.
+
+    static constexpr GPRReg remainingMatchCount = InvalidGPRReg;
+    static constexpr GPRReg regUnicodeInputAndTrail = InvalidGPRReg;
+    static constexpr GPRReg unicodeAndSubpatternIdTemp = InvalidGPRReg;
+    static constexpr GPRReg firstCharacterAdditionalReadSize = InvalidGPRReg;
+    static constexpr GPRReg endOfStringAddress = InvalidGPRReg;
 
     static constexpr GPRReg returnRegister = ARMRegisters::r0;
     static constexpr GPRReg returnRegister2 = ARMRegisters::r1;
@@ -162,7 +171,6 @@ public:
 #endif
 };
 
-#if ENABLE(YARR_JIT_REGEXP_TEST_INLINE)
 class YarrJITRegisters {
 public:
     YarrJITRegisters() = default;
@@ -228,8 +236,6 @@ public:
     static constexpr FPRReg vectorScratch2 = InvalidFPRReg;
     static constexpr FPRReg vectorScratch3 = InvalidFPRReg;
 };
-#endif
-
 
 } } // namespace JSC::Yarr
 
