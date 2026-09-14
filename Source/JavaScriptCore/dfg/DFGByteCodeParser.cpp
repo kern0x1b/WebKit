@@ -491,7 +491,7 @@ private:
         ASSERT(node->origin.semantic.bytecodeIndex() == m_currentIndex);
         ConcurrentJSLocker locker(m_inlineStackTop->m_profiledBlock->m_lock);
         LazyOperandValueProfileKey key(m_currentIndex, node->operand());
-        SpeculatedType prediction = m_inlineStackTop->m_lazyOperands.prediction(locker, key);
+        SpeculatedType prediction = m_inlineStackTop->m_lazyOperands.prediction(key);
         node->variableAccessData()->predict(prediction);
         return node;
     }
@@ -998,8 +998,7 @@ private:
             SpeculatedType prediction;
             {
                 JSValue* specFailValue = inlineStackEntry->m_specFailValueProfileBuckets.get(bytecodeIndex);
-                ConcurrentJSLocker locker(codeBlock->valueProfileLock());
-                prediction = codeBlock->valueProfilePredictionForBytecodeIndex(locker, codeOrigin.bytecodeIndex(), specFailValue);
+                prediction = codeBlock->valueProfilePredictionForBytecodeIndex(codeOrigin.bytecodeIndex(), specFailValue);
             }
             auto* fuzzerAgent = m_vm->fuzzerAgent();
             if (fuzzerAgent) [[unlikely]]
@@ -1078,34 +1077,27 @@ private:
     ArrayMode getArrayMode(Array::Action action)
     {
         CodeBlock* codeBlock = m_inlineStackTop->m_profiledBlock;
-        ConcurrentJSLocker locker(codeBlock->m_lock);
-        ArrayProfile* profile = codeBlock->getArrayProfile(locker, codeBlock->bytecodeIndex(m_currentInstruction));
+        ArrayProfile* profile = codeBlock->getArrayProfile(codeBlock->bytecodeIndex(m_currentInstruction));
         if (!profile)
             return { };
-        return getArrayMode(locker, *profile, action);
+        return getArrayMode(*profile, action);
     }
 
     ArrayMode getArrayMode(ArrayProfile& profile, Array::Action action)
     {
-        ConcurrentJSLocker locker(m_inlineStackTop->m_profiledBlock->m_lock);
-        return getArrayMode(locker, profile, action);
-    }
-
-    ArrayMode getArrayMode(const ConcurrentJSLocker& locker, ArrayProfile& profile, Array::Action action)
-    {
         profile.computeUpdatedPrediction(m_inlineStackTop->m_profiledBlock);
-        bool makeSafe = profile.outOfBounds(locker);
-        return ArrayMode::fromObserved(locker, &profile, action, makeSafe);
+        bool makeSafe = profile.outOfBounds();
+        return ArrayMode::fromObserved(&profile, action, makeSafe);
     }
 
     bool profiledArrayMayBeRegExpMatchesArray()
     {
         CodeBlock* codeBlock = m_inlineStackTop->m_profiledBlock;
         ConcurrentJSLocker locker(codeBlock->m_lock);
-        ArrayProfile* profile = codeBlock->getArrayProfile(locker, codeBlock->bytecodeIndex(m_currentInstruction));
+        ArrayProfile* profile = codeBlock->getArrayProfile(codeBlock->bytecodeIndex(m_currentInstruction));
         if (!profile)
             return false;
-        return profile->mayBeRegExpMatchesArray(locker);
+        return profile->mayBeRegExpMatchesArray();
     }
 
     Node* makeSafe(Node* node)
@@ -2285,9 +2277,8 @@ bool ByteCodeParser::handleVarargsInlining(Node* callTargetNode, Operand result,
             // arguments received inside the callee. But that probably won't matter for most
             // calls.
             if (codeBlock && argument < static_cast<unsigned>(codeBlock->numParameters())) {
-                ConcurrentJSLocker locker(codeBlock->valueProfileLock());
                 ArgumentValueProfile& profile = codeBlock->valueProfileForArgument(argument);
-                variable->predict(profile.computeUpdatedPrediction(locker));
+                variable->predict(profile.computeUpdatedPrediction());
             }
             
             Node* setArgument = addToGraph(numSetArguments >= mandatoryMinimum ? SetArgumentMaybe : SetArgumentDefinitely, OpInfo(variable));
@@ -9860,11 +9851,9 @@ void ByteCodeParser::parseBlock(unsigned limit)
             UncheckedKeyHashSet<unsigned, WTF::IntHash<unsigned>, WTF::UnsignedWithZeroKeyHashTraits<unsigned>> seenArguments;
 
             {
-                ConcurrentJSLocker locker(m_inlineStackTop->m_profiledBlock->valueProfileLock());
-
                 buffer->forEach([&](ValueProfileAndVirtualRegister& profile) {
                     VirtualRegister operand(profile.m_operand);
-                    SpeculatedType prediction = profile.computeUpdatedPrediction(locker);
+                    SpeculatedType prediction = profile.computeUpdatedPrediction();
                     if (operand.isLocal())
                         localPredictions.append(prediction);
                     else {

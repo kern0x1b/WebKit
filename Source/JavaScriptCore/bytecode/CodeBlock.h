@@ -437,7 +437,7 @@ public:
 
     ValueProfile* NODELETE tryGetValueProfileForBytecodeIndex(BytecodeIndex);
     ValueProfile& NODELETE valueProfileForBytecodeIndex(BytecodeIndex);
-    SpeculatedType valueProfilePredictionForBytecodeIndex(const ConcurrentJSLocker&, BytecodeIndex, JSValue* specFailValue = nullptr);
+    SpeculatedType valueProfilePredictionForBytecodeIndex(BytecodeIndex, JSValue* specFailValue = nullptr);
 
     template<typename Functor> void forEachValueProfile(const Functor&);
     template<typename Functor> void forEachArrayAllocationProfile(const Functor&);
@@ -451,7 +451,7 @@ public:
 
     bool NODELETE couldTakeSpecialArithFastCase(BytecodeIndex bytecodeOffset);
 
-    ArrayProfile* NODELETE getArrayProfile(const ConcurrentJSLocker&, BytecodeIndex);
+    ArrayProfile* NODELETE getArrayProfile(BytecodeIndex);
 
     // Exception handling support
 
@@ -754,8 +754,8 @@ public:
 #endif
 
     bool shouldOptimizeNowFromBaseline();
-    void updateAllNonLazyValueProfilePredictions(const ConcurrentJSLocker&);
-    void updateAllLazyValueProfilePredictions(const ConcurrentJSLocker&);
+    void updateAllNonLazyValueProfilePredictions();
+    void updateAllLazyValueProfilePredictions();
     void updateAllArrayProfilePredictions();
     void updateAllArrayAllocationProfilePredictions();
     void updateAllPredictions();
@@ -810,13 +810,6 @@ public:
     mutable ConcurrentJSLock m_lock;
 
     bool m_shouldAlwaysBeInlined { true }; // Not a bitfield because the JIT wants to store to it.
-
-#if USE(JSVALUE64)
-    // 64bit environment does not need a lock for ValueProfile operations.
-    NoLockingNecessaryTag valueProfileLock() { return NoLockingNecessary; }
-#else
-    ConcurrentJSLock& valueProfileLock() LIFETIME_BOUND { return m_lock; }
-#endif
 
     static constexpr ptrdiff_t offsetOfShouldAlwaysBeInlined() { return OBJECT_OFFSETOF(CodeBlock, m_shouldAlwaysBeInlined); }
 
@@ -918,7 +911,7 @@ private:
     
     void noticeIncomingCall(JSCell* caller);
 
-    void updateAllNonLazyValueProfilePredictionsAndCountLiveness(const ConcurrentJSLocker&, unsigned& numberOfLiveNonArgumentValueProfiles, unsigned& numberOfSamplesInProfiles);
+    void updateAllNonLazyValueProfilePredictionsAndCountLiveness(unsigned& numberOfLiveNonArgumentValueProfiles, unsigned& numberOfSamplesInProfiles);
 
     Vector<unsigned> setConstantRegisters(const FixedVector<WriteBarrier<Unknown>>& constants, const FixedVector<SourceCodeRepresentation>& constantsSourceCodeRepresentation);
     void initializeTemplateObjects(ScriptExecutable* topLevelExecutable, const Vector<unsigned>& templateObjectIndices);

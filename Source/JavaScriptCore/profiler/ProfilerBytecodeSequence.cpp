@@ -39,9 +39,8 @@ BytecodeSequence::BytecodeSequence(CodeBlock* codeBlock)
 
     {
         unsigned index = 0;
-        ConcurrentJSLocker locker(codeBlock->valueProfileLock());
         for (auto& profile : codeBlock->argumentValueProfiles()) {
-            auto description = profile.briefDescription(locker);
+            auto description = profile.briefDescription();
             if (!description.length())
                 continue;
             out.reset();
