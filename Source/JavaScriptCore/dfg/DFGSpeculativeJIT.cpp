@@ -15057,10 +15057,15 @@ void SpeculativeJIT::compileMapIterationNext(Node* node)
     flushRegisters();
     JSValueRegsFlushedCallResult result(this);
     JSValueRegs resultRegs = result.regs();
+    auto exhausted = branchLinkableConstant(Equal, mapStorageGPR, LinkableConstant(*this, vm().orderedHashTableSentinel()));
     if (node->bucketOwnerType() == BucketOwnerType::Map)
-        callOperation(operationMapIterationNext, resultRegs, LinkableConstant::globalObject(*this, node), mapStorageGPR, entryGPR);
+        callOperation(operationMapIterationNext, resultRegs, TrustedImmPtr(&vm()), mapStorageGPR, entryGPR);
     else
-        callOperation(operationSetIterationNext, resultRegs, LinkableConstant::globalObject(*this, node), mapStorageGPR, entryGPR);
+        callOperation(operationSetIterationNext, resultRegs, TrustedImmPtr(&vm()), mapStorageGPR, entryGPR);
+    auto done = jump();
+    exhausted.link(this);
+    loadLinkableConstant(LinkableConstant(*this, vm().orderedHashTableSentinel()), resultRegs.payloadGPR());
+    done.link(this);
     cellResult(resultRegs.payloadGPR(), node);
 }
 
