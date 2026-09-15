@@ -1336,9 +1336,11 @@ void Document::invalidateQuerySelectorAllResults(Node& startingNode)
 {
     if (m_querySelectorAllResults.isEmptyIgnoringNullReferences())
         return;
-    for (RefPtr currentNode = startingNode; currentNode; currentNode = currentNode->parentNode()) {
-        if (!currentNode->hasValidQuerySelectorAllResults())
+    RefPtr<Node> protectedNode;
+    for (SUPPRESS_UNCOUNTED_LOCAL Node* currentNode = &startingNode; currentNode; currentNode = currentNode->parentNode()) {
+        if (!currentNode->hasValidQuerySelectorAllResults()) [[likely]]
             continue;
+        protectedNode = currentNode;
         m_querySelectorAllResults.remove(*currentNode);
         currentNode->setHasValidQuerySelectorAllResults(false);
     }
@@ -1348,9 +1350,11 @@ void Document::invalidateQuerySelectorAllResultsForClassAttributeChange(Node& st
 {
     if (m_querySelectorAllResults.isEmptyIgnoringNullReferences())
         return;
-    for (RefPtr currentNode = startingNode; currentNode; currentNode = currentNode->parentNode()) {
-        if (!currentNode->hasValidQuerySelectorAllResults())
+    RefPtr<Node> protectedNode;
+    for (SUPPRESS_UNCOUNTED_LOCAL Node* currentNode = &startingNode; currentNode; currentNode = currentNode->parentNode()) {
+        if (!currentNode->hasValidQuerySelectorAllResults()) [[likely]]
             continue;
+        protectedNode = currentNode;
         auto it = m_querySelectorAllResults.find(*currentNode);
         ASSERT(it != m_querySelectorAllResults.end());
         if (it == m_querySelectorAllResults.end())
@@ -6939,7 +6943,7 @@ void Document::moveNodeIteratorsToNewDocument(Node& node, Document& newDocument)
 void Document::updateRangesAfterChildrenChanged(ContainerNode& container)
 {
     for (auto& range : m_ranges)
-        Ref { range.get() }->nodeChildrenChanged(container);
+        range.get().nodeChildrenChanged(container);
 }
 
 void Document::nodeChildrenWillBeRemoved(ContainerNode& container)
@@ -6982,7 +6986,7 @@ void Document::nodeWillBeRemoved(Node& node)
         nodeIterator->nodeWillBeRemoved(node);
 
     for (auto& range : m_ranges)
-        Ref { range.get() }->nodeWillBeRemoved(node);
+        range.get().nodeWillBeRemoved(node);
 
     if (RefPtr frame = this->frame()) {
         frame->eventHandler().nodeWillBeRemoved(node);

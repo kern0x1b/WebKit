@@ -64,7 +64,7 @@ private:
     GPRReg m_storageGPR;
     int m_size;
     RegisteredStructure m_structure;
-    Vector<SilentRegisterSavePlan, 2> m_plans;
+    Vector<SilentRegisterSavePlan, silentRegisterSavePlanInlineCapacity> m_plans;
 };
 
 class CallArrayAllocatorWithVariableSizeSlowPathGenerator final : public JumpingSlowPathGenerator<MacroAssembler::JumpList> {
@@ -119,7 +119,7 @@ private:
     JITCompiler::LinkableConstant m_globalObject;
     GPRReg m_sizeGPR;
     GPRReg m_storageGPR;
-    Vector<SilentRegisterSavePlan, 2> m_plans;
+    Vector<SilentRegisterSavePlan, silentRegisterSavePlanInlineCapacity> m_plans;
 };
 
 class CallArrayAllocatorWithVariableStructureVariableSizeSlowPathGenerator final : public JumpingSlowPathGenerator<MacroAssembler::JumpList> {
@@ -153,7 +153,7 @@ private:
     GPRReg m_structureGPR;
     GPRReg m_sizeGPR;
     GPRReg m_storageGPR;
-    Vector<SilentRegisterSavePlan, 2> m_plans;
+    Vector<SilentRegisterSavePlan, silentRegisterSavePlanInlineCapacity> m_plans;
 };
 
 } } // namespace JSC::DFG

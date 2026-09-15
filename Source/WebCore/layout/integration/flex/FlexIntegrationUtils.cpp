@@ -140,7 +140,11 @@ void FlexIntegrationUtils::layoutFlexItemWithMainSize(FlexLayoutItem& flexLayout
         // correctly, because its descendants are not sized correctly yet. Our
         // previous layout of the child was done without an override height set.
         // So, redo it here.
+#if defined(WEBKIT_IOS6)
+        return flexItemHasPercentHeightDescendants(flexItem) && flexLayoutState().hasFlexItemCompletedLayout(flexItem);
+#else
         return flexItemHasPercentHeightDescendants(flexItem);
+#endif
     };
 
     if (shouldMarkFlexItemForLayout())
