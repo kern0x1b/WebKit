@@ -152,7 +152,9 @@ private:
             player->networkStateChanged();
     }
 
+#if ENABLE(MEDIA_STREAM)
     void load(MediaStreamPrivate&) final { }
+#endif
 
     void cancelLoad() final { tearDown(); }
 

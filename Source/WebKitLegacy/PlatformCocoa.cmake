@@ -254,8 +254,11 @@ set_target_properties(WebKitLegacy PROPERTIES
     INSTALL_NAME_DIR "${WebKitLegacy_INSTALL_NAME_DIR}"
 )
 
+if (NOT WEBKIT_IOS6_EXPORTS)
+    set(WEBKIT_IOS6_EXPORTS "${WEBKITLEGACY_DIR}/WebKitLegacy-iOS.exp")
+endif ()
 target_link_options(WebKitLegacy PRIVATE
-    -exported_symbols_list ${WEBKITLEGACY_DIR}/WebKitLegacy-iOS.exp
+    -exported_symbols_list ${WEBKIT_IOS6_EXPORTS}
 )
 
 # FIXME: Generate this list dynamically (from `tapi reexport` against the
