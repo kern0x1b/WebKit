@@ -77,6 +77,7 @@ unsigned g_webkitIOS6StyleResolves;
 unsigned g_webkitIOS6DirtyOnEntry;
 unsigned g_webkitIOS6BlocksViaChild;
 extern "C" { double g_webkitIOS6LayoutMsTotal; unsigned g_webkitIOS6LayoutCount; }
+extern "C" int g_webkitIOS6PendingDrawWork;
 unsigned g_webkitIOS6GridStretchHeight;
 unsigned g_webkitIOS6GridStretchRequirement;
 unsigned g_webkitIOS6GridStretchPercent;
@@ -830,6 +831,9 @@ void LocalFrameViewLayoutContext::disableSetNeedsLayout()
 
 void LocalFrameViewLayoutContext::scheduleLayout()
 {
+#if defined(WEBKIT_IOS6)
+    g_webkitIOS6PendingDrawWork = 1;
+#endif
     // FIXME: We should assert the page is not in the back/forward cache, but that is causing
     // too many false assertions. See <rdar://problem/7218118>.
     ASSERT(frame().view() == &view());
@@ -877,6 +881,9 @@ void LocalFrameViewLayoutContext::unscheduleLayout()
 
 void LocalFrameViewLayoutContext::scheduleSubtreeLayout(RenderElement& layoutRoot)
 {
+#if defined(WEBKIT_IOS6)
+    g_webkitIOS6PendingDrawWork = 1;
+#endif
     ASSERT(renderView());
     CheckedRef renderView = *this->renderView();
 

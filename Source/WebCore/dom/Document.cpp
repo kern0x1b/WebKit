@@ -4480,7 +4480,7 @@ bool Document::shouldScheduleLayout() const
         return true;
     if (!bodyOrFrameset())
         return false;
-    if (styleScope().hasPendingSheetsBeforeBody())
+    if (styleScope().blocksRenderingBeforeBody())
         return false;
     if (view() && !view()->isVisuallyNonEmpty())
         return false;

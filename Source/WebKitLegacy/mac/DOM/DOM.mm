@@ -663,7 +663,19 @@ id<DOMEventTarget> kit(WebCore::EventTarget* target)
     auto* renderer = core(self)->renderer();
     if (!renderer)
         return nil;
-    return renderer->style().primaryFont().ctFont();
+    CTFontRef font = renderer->style().primaryFont().ctFont();
+#if PLATFORM(IOS_FAMILY)
+    Class fontClass = NSClassFromString(@"UIFont");
+    if (font && fontClass) {
+        RetainPtr<CFStringRef> postScriptName = adoptCF(CTFontCopyPostScriptName(font));
+        CGFloat size = CTFontGetSize(font);
+        id uiFont = postScriptName ? [fontClass fontWithName:(NSString *)postScriptName.get() size:size] : nil;
+        if (!uiFont)
+            uiFont = [fontClass systemFontOfSize:size];
+        return (CTFontRef)uiFont;
+    }
+#endif
+    return font;
 }
 
 #if PLATFORM(MAC)
