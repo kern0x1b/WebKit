@@ -132,20 +132,20 @@ public:
     FixedVector<JumpReplacement> m_jumpReplacements;
     FixedVector<std::unique_ptr<BoyerMooreHorspoolTable<uint8_t>>> m_stringSearchTable8;
     FixedVector<std::unique_ptr<ConcatKeyAtomStringCache>> m_concatKeyAtomStringCaches;
+
+#if USE(JSVALUE32_64)
+    Bag<double> doubleConstants;
+#endif
     // FIXME: These seem like they should be FixedVectors.
     Bag<HandlerPropertyInlineCache> m_handlerPropertyInlineCaches;
     Bag<RepatchingPropertyInlineCache> m_repatchingPropertyInlineCaches;
     Bag<OptimizingCallLinkInfo> m_callLinkInfos;
     Bag<DirectCallLinkInfo> m_directCallLinkInfos;
     Yarr::YarrBoyerMooreData m_boyerMooreData;
-    
+
     ScratchBuffer* catchOSREntryBuffer;
     RefPtr<Profiler::Compilation> compilation;
-    
-#if USE(JSVALUE32_64)
-    Bag<double> doubleConstants;
-#endif
-    
+
     unsigned frameRegisterCount { std::numeric_limits<unsigned>::max() };
     unsigned requiredRegisterCountForExit { std::numeric_limits<unsigned>::max() };
 
