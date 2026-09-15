@@ -154,6 +154,10 @@ if (WOFF2_DEC_LIBRARY AND NOT TARGET WOFF2::dec)
         INTERFACE_COMPILE_OPTIONS "${WOFF2_COMPILE_OPTIONS}"
         INTERFACE_INCLUDE_DIRECTORIES "${WOFF2_DEC_INCLUDE_DIR}"
     )
+    if (TARGET WOFF2::common)
+        set_target_properties(WOFF2::dec PROPERTIES
+            INTERFACE_LINK_LIBRARIES WOFF2::common)
+    endif ()
 endif ()
 
 mark_as_advanced(

@@ -388,7 +388,13 @@ endif ()
 # exists on armv7 devices but is absent from this SDK's stub library.
 if (WEBKIT_IOS6_COMPAT_LIB)
     link_libraries(${WEBKIT_IOS6_COMPAT_LIB})
-    add_link_options("/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/clang/21/lib/darwin/libclang_rt.ios.a" "SHELL:-Wl,-U,_objc_msgSend_stret" "SHELL:-Wl,-not_for_dyld_shared_cache")
+    execute_process(COMMAND ${CMAKE_C_COMPILER} -print-runtime-dir
+        OUTPUT_VARIABLE WEBKIT_IOS6_RUNTIME_DIR OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+    set(WEBKIT_IOS6_BUILTINS "${WEBKIT_IOS6_RUNTIME_DIR}/libclang_rt.ios.a")
+    if (NOT EXISTS "${WEBKIT_IOS6_BUILTINS}")
+        message(FATAL_ERROR "libclang_rt.ios.a not found in ${WEBKIT_IOS6_RUNTIME_DIR}")
+    endif ()
+    add_link_options("${WEBKIT_IOS6_BUILTINS}" "SHELL:-Wl,-U,_objc_msgSend_stret" "SHELL:-Wl,-not_for_dyld_shared_cache")
     # ios6/armv7: the modern linker refuses -U/-undefined dynamic_lookup on a dylib it
     # considers shared-cache eligible ("Shared cache eligible dylibs cannot use
     # '-undefined dynamic_lookup' or '-U'"). Nothing we build ever goes into a dyld
