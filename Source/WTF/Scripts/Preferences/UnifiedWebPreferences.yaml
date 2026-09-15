@@ -2926,11 +2926,7 @@ IndexedDBSQLiteMemoryBackingStoreEnabled:
 InlineMediaPlaybackRequiresPlaysInlineAttribute:
   type: bool
   status: embedder
-  defaultValue:
-    default: false
-    WebKitLegacy:
-      "PLATFORM(IOS_FAMILY)": WebKit::defaultInlineMediaPlaybackRequiresPlaysInlineAttribute()
-      default: false
+  defaultValue: false
 
 InputMethodUsesCorrectKeyEventOrder:
   type: bool
