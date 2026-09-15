@@ -93,6 +93,7 @@ SocketStreamHandleImpl::SocketStreamHandleImpl(const URL& url, SocketStreamHandl
     URL httpsURL { makeString("https://"_s, m_url.host()) };
     m_httpsURL = httpsURL.createCFURL();
 
+#if !defined(WEBKIT_IOS6)
     // Don't check for HSTS violation for ephemeral sessions since
     // HSTS state should not transfer between regular and private browsing.
     if (url.protocolIs("ws"_s)
@@ -104,6 +105,9 @@ SocketStreamHandleImpl::SocketStreamHandleImpl(const URL& url, SocketStreamHandl
         });
         return;
     }
+#else
+    UNUSED_PARAM(sessionID);
+#endif
 
     createStreams();
     ASSERT(!m_readStream == !m_writeStream);
