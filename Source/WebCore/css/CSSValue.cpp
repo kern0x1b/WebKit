@@ -337,15 +337,21 @@ void CSSValue::collectComputedStyleDependencies(ComputedStyleDependencies& depen
 {
     // FIXME: Unclear why it's OK that we do not cover CSSValuePair, CSSBorderImageSliceValue, CSSBorderImageWidthValue, and others here. Probably should use visitDerived unless they don't allow the primitive values that can have dependencies. May want to base this on a traverseValues or forEachValue function instead.
     // FIXME: Consider a non-recursive algorithm for walking this tree of dependencies.
-    if (auto* asList = dynamicDowncast<CSSValueContainingVector>(*this)) {
-        for (auto& listValue : *asList)
+    if (containsVector()) {
+        for (auto& listValue : uncheckedDowncast<CSSValueContainingVector>(*this))
             listValue.collectComputedStyleDependencies(dependencies);
         return;
     }
-    if (auto* asPrimitiveValue = dynamicDowncast<CSSPrimitiveValue>(*this))
-        asPrimitiveValue->collectComputedStyleDependencies(dependencies);
-    if (auto* asCalcSizeValue = dynamicDowncast<CSSCalcSizeValue>(*this))
-        asCalcSizeValue->collectComputedStyleDependencies(dependencies);
+    switch (classType()) {
+    case ClassType::Primitive:
+        uncheckedDowncast<CSSPrimitiveValue>(*this).collectComputedStyleDependencies(dependencies);
+        break;
+    case ClassType::CalcSize:
+        uncheckedDowncast<CSSCalcSizeValue>(*this).collectComputedStyleDependencies(dependencies);
+        break;
+    default:
+        break;
+    }
 }
 
 bool CSSValue::equals(const CSSValue& other) const
@@ -410,6 +416,23 @@ ASCIILiteral CSSValue::separatorCSSText(ValueSeparator separator)
 
 void CSSValue::operator delete(CSSValue* value, std::destroying_delete_t)
 {
+    switch (value->classType()) {
+    case ClassType::Primitive: {
+        auto& primitiveValue = uncheckedDowncast<CSSPrimitiveValue>(*value);
+        std::destroy_at(&primitiveValue);
+        CSSPrimitiveValue::freeAfterDestruction(&primitiveValue);
+        return;
+    }
+    case ClassType::Keyword: {
+        auto& keywordValue = uncheckedDowncast<CSSKeywordValue>(*value);
+        std::destroy_at(&keywordValue);
+        CSSKeywordValue::freeAfterDestruction(&keywordValue);
+        return;
+    }
+    default:
+        break;
+    }
+
     value->visitDerived([]<typename ValueType>(ValueType& value) {
         std::destroy_at(&value);
         ValueType::freeAfterDestruction(&value);
