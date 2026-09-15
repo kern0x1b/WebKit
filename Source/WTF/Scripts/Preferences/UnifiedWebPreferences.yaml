@@ -5794,7 +5794,9 @@ SpeculationRulesPrefetchEnabled:
   category: html
   humanReadableName: "SpeculationRules prefetch"
   humanReadableDescription: "SpeculationRules prefetch"
-  defaultValue: true
+  defaultValue:
+    default: false
+    WebKit: true
   disableInLockdownMode: true
   sharedPreferenceForWebProcess: true
   richJavaScript: true
