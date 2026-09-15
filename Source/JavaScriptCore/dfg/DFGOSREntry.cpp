@@ -425,8 +425,18 @@ void* prepareOSREntry(VM& vm, CallFrame* callFrame, CodeBlock* codeBlock, Byteco
             continue;
         RELEASE_ASSERT(currentEntry.reg().isGPR());
         RegisterAtOffset* calleeSavesEntry = allCalleeSaves->find(currentEntry.reg());
-        
-        *(std::bit_cast<intptr_t*>(pivot - 1) - currentEntry.offsetAsIndex()) = record->calleeSaveRegistersBuffer[calleeSavesEntry->offsetAsIndex()];
+
+        if constexpr (CallerFrameAndPC::sizeInRegisters == 2)
+            *(std::bit_cast<intptr_t*>(pivot - 1) - currentEntry.offsetAsIndex()) = record->calleeSaveRegistersBuffer[calleeSavesEntry->offsetAsIndex()];
+        else {
+            ASSERT(sizeof(intptr_t) == 4);
+            ASSERT(CallerFrameAndPC::sizeInRegisters == 1);
+            ASSERT(currentEntry.offsetAsIndex() < 0);
+
+            int offsetAsIndex = currentEntry.offsetAsIndex();
+            int properIndex = offsetAsIndex % 2 ? offsetAsIndex - 1 : offsetAsIndex + 1;
+            *(std::bit_cast<intptr_t*>(pivot - 1) + 1 - properIndex) = record->calleeSaveRegistersBuffer[calleeSavesEntry->offsetAsIndex()];
+        }
     }
 #endif
 
