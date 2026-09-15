@@ -124,10 +124,6 @@ find_library(VIDEOTOOLBOX_LIBRARY VideoToolbox)
 if (NOT VIDEOTOOLBOX_LIBRARY)  # ios6: allow missing frameworks
     set(VIDEOTOOLBOX_LIBRARY "")
 endif ()
-find_library(XML2_LIBRARY XML2)
-if (NOT XML2_LIBRARY)  # ios6: allow missing frameworks
-    set(XML2_LIBRARY "")
-endif ()
 find_library(APPLICATIONSERVICES_LIBRARY ApplicationServices)
 find_library(AUDIOUNIT_LIBRARY AudioUnit)
 find_library(CARBON_LIBRARY Carbon)
@@ -193,7 +189,6 @@ list(APPEND WebCore_LIBRARIES
     ${SYSTEMCONFIGURATION_LIBRARY}
     ${UNIFORMTYPEIDENTIFIERS_LIBRARY}
     ${VIDEOTOOLBOX_LIBRARY}
-    ${XML2_LIBRARY}
 )
 
 if (WEBKIT_SDK_IS_MACOS)
@@ -416,11 +411,6 @@ list(APPEND WebCore_PRIVATE_INCLUDE_DIRECTORIES
     "${WEBCORE_DIR}/rendering/ios"
 
     "${WebCore_PRIVATE_FRAMEWORK_HEADERS_DIR}"
-)
-
-list(APPEND WebCore_SYSTEM_INCLUDE_DIRECTORIES
-    "${CMAKE_OSX_SYSROOT}/usr/include/libxslt"
-    "${CMAKE_OSX_SYSROOT}/usr/include/libxml2"
 )
 
 list(APPEND WebCore_SOURCES
