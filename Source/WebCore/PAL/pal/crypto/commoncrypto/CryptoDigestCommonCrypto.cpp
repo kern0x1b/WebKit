@@ -12,6 +12,7 @@
 
 #include <CommonCrypto/CommonDigest.h>
 #include <wtf/StdLibExtras.h>
+#include <wtf/TZoneMallocInlines.h>
 
 namespace PAL::Crypto {
 

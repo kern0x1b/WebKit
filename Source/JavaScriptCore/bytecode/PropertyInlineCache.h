@@ -29,6 +29,7 @@
 #include "CodeBlock.h"
 #include "CodeOrigin.h"
 #include "InlineCacheCompiler.h"
+#include "InlineCacheHandler.h"
 #include "JITStubRoutine.h"
 #include "MacroAssembler.h"
 #include "Options.h"
@@ -692,6 +693,8 @@ public:
     RepatchingPropertyInlineCache(AccessType accessType, CodeOrigin codeOrigin)
         : PropertyInlineCache(PropertyInlineCacheType::Repatching, accessType, codeOrigin)
     { }
+
+    ~RepatchingPropertyInlineCache();
 
     // This is either the start of the inline IC for *byId caches, or the location of patchable jump for 'instanceof' caches.
     CodeLocationLabel<JITStubRoutinePtrTag> startLocation;

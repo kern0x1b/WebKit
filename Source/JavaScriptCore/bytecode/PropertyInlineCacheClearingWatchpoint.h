@@ -32,12 +32,13 @@
 #include "GCAwareJITStubRoutine.h"
 #include "ObjectPropertyCondition.h"
 #include "PackedCellPtr.h"
-#include "PropertyInlineCache.h"
 #include "Watchpoint.h"
 #include <wtf/Noncopyable.h>
 #include <wtf/TZoneMalloc.h>
 
 namespace JSC {
+
+class PropertyInlineCache;
 
 class CodeBlock;
 class PolymorphicAccessJITStubRoutine;
