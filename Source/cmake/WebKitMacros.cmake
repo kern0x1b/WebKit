@@ -841,6 +841,10 @@ macro(WEBKIT_FRAMEWORK _target)
 
     if (APPLE AND NOT PORT STREQUAL "GTK" AND ${${_target}_LIBRARY_TYPE} MATCHES SHARED)
         set_target_properties(${_target} PROPERTIES FRAMEWORK TRUE)
+        if (EXISTS "${CMAKE_CURRENT_BINARY_DIR}/${_target}-Info.plist")
+            set_target_properties(${_target} PROPERTIES
+                MACOSX_FRAMEWORK_INFO_PLIST "${CMAKE_CURRENT_BINARY_DIR}/${_target}-Info.plist")
+        endif ()
         target_compile_options(${_target} BEFORE PUBLIC -F${CMAKE_BINARY_DIR})
         install(TARGETS ${_target} FRAMEWORK DESTINATION ${LIB_INSTALL_DIR})
         _WEBKIT_CREATE_FRAMEWORK_BUNDLE_STRUCTURE(${_target})
