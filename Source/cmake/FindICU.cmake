@@ -4,6 +4,7 @@ if (APPLE)
         set(ICU_INCLUDE_DIRS ${CMAKE_OSX_SYSROOT}/usr/local/include)
     else ()
         set(ICU_INCLUDE_DIRS ${CMAKE_BINARY_DIR}/ICU/Headers)
+        file(COPY ${CMAKE_SOURCE_DIR}/Source/WTF/icu/unicode DESTINATION ${ICU_INCLUDE_DIRS})
     endif ()
     # Apple just has a single tbd/dylib for ICU.
     find_library(ICU_I18N_LIBRARY icucore)
